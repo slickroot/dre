@@ -1,9 +1,10 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .state import Node, State
 
-BOX_SIZE = 3
+BOX_HEIGHT = 3
+BORDERS_AND_CURSOR = 3
 
 
 @dataclass
@@ -13,16 +14,21 @@ class Placement:
     y: int
     width: int
     height: int
+    cursor: Optional[int] = None
 
 
 def layout(state: State, cols: int, rows: int) -> List[Placement]:
-    return [
-        Placement(
-            node,
-            x=(cols - BOX_SIZE) // 2,
-            y=(rows - BOX_SIZE) // 2,
-            width=BOX_SIZE,
-            height=BOX_SIZE,
+    placements = []
+    for node in state.nodes:
+        width = len(node.label) + BORDERS_AND_CURSOR
+        placements.append(
+            Placement(
+                node,
+                x=(cols - width) // 2,
+                y=(rows - BOX_HEIGHT) // 2,
+                width=width,
+                height=BOX_HEIGHT,
+                cursor=len(node.label) if state.mode == "insert" else None,
+            )
         )
-        for node in state.nodes
-    ]
+    return placements
