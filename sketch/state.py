@@ -27,7 +27,18 @@ def handle_command(state: State, key: str) -> State:
     return state
 
 
+def relabel_last(nodes: List[Node], label: str) -> List[Node]:
+    return nodes[:-1] + [Box(label)]
+
+
 def handle_insert(state: State, key: str) -> State:
+    if key == "\x1b":
+        return State(state.nodes, state.running, "command")
+    label = state.nodes[-1].label
+    if key == "\x7f":
+        return State(relabel_last(state.nodes, label[:-1]), state.running, state.mode)
+    if "\x20" <= key <= "\x7e":
+        return State(relabel_last(state.nodes, label + key), state.running, state.mode)
     return state
 
 
