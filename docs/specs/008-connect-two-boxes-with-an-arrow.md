@@ -288,12 +288,15 @@ The new box is still `len(nodes) - 1`, so 006's selection rule is unchanged, and
 ARROW_DOWN = "↓"
 ARROW_UP = "↑"
 
-def _draw_arrow(self, grid, placement):
+def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
     glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
-    self._put(grid, placement.x, placement.y, glyph)
+    self._put(grid, placement.x, placement.y, (glyph, PLAIN))
 ```
 
-One cell, through the same `_put` chokepoint that clips everything else. The
+One cell, through the same `_put` chokepoint that clips everything else. It is
+written as a `Cell` — 007 made every grid entry a `(character, colour)` pair, so
+a glyph cannot land without a colour. `PLAIN` is right here: these criteria say
+nothing about arrow colour, and an arrow is not a box's border. The
 `forward`/`backward` to `↓`/`↑` mapping is the *only* place the vertical axis is
 assumed, which is what makes a later horizontal layout a change to one function.
 
@@ -329,12 +332,22 @@ blank row that was already there. `source` returns to `-1`.
 
 ### Interaction with 007
 
-007 is designed but not yet in `sketch/`, and the two stories touch the same
-files. If 007 lands first: `_draw_arrow` must pass a colour to `_put`, which
-becomes a required parameter — `PLAIN` is right, since these criteria say
-nothing about arrow colour. 007's claim that "`layout.py` is untouched by this
-story" remains true of 007 and false of 008. `edit()` becoming
-`replace(nodes[index], label=label)` under 007 is unaffected by anything here.
+007 is merged, and this design builds on the code as it actually shipped rather
+than as 007 described it. The difference matters in one place: 007's design
+proposed *two parallel grids*, characters and colours, with `colour` as a second
+required parameter to `_put`. What landed is a **single** grid of
+`(character, colour)` pairs, with `Cell` and `Grid` aliases and `_put` taking a
+whole cell. `_draw_arrow` follows the shipped shape, as above.
+
+Everything else 007 touched is compatible. `edit()` is already
+`replace(nodes[index], label=label)`, so it preserves `colour` and will preserve
+any field a later story adds. `handle_command`'s `c` branch reads
+`state.nodes[state.selected]` and is safe under this design, because `selected`
+can only ever land on a `Box`.
+
+007's claim that "`layout.py` is untouched by this story" was true of 007 —
+`layout.py` on `main` is still the 006 version quoted above, `GAP` and all — and
+is emphatically false of 008, which rewrites its stacking.
 
 ### Tests
 
