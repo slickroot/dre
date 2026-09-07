@@ -31,6 +31,10 @@ def handle_command(state: State, key: str) -> State:
         return State(nodes, state.running, "insert", len(nodes) - 1)
     if key == "q":
         return State(state.nodes, False, state.mode, state.selected)
+    if key == "i":
+        if not state.nodes:
+            return state
+        return State(state.nodes, state.running, "insert", state.selected)
     if key in ("j", "k"):
         if not state.nodes:
             return state

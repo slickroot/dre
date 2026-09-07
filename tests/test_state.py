@@ -244,5 +244,24 @@ class HandleInsertTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "\x7f").nodes, [Box("a"), Box("cd")])
 
 
+class EnterInsertModeTest(unittest.TestCase):
+    def test_i_enters_insert_mode(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "i").mode, "insert")
+
+    def test_i_leaves_the_selection_alone(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "i").selected, 0)
+
+    def test_i_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "i"), state)
+
+    def test_i_types_into_the_selected_box(self):
+        state = State([Box("a"), Box("b"), Box("c")], selected=1)
+        typed = handle_key(handle_key(state, "i"), "z")
+        self.assertEqual(typed.nodes, [Box("a"), Box("bz"), Box("c")])
+
+
 if __name__ == "__main__":
     unittest.main()
