@@ -106,6 +106,58 @@ class HandleKeyTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "q").selected, 0)
 
 
+class MoveSelectionTest(unittest.TestCase):
+    def test_j_moves_the_selection_down(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "j").selected, 1)
+
+    def test_k_moves_the_selection_up(self):
+        state = State([Box("a"), Box("b")], selected=1)
+        self.assertEqual(handle_key(state, "k").selected, 0)
+
+    def test_j_on_the_bottom_box_keeps_the_selection(self):
+        state = State([Box("a"), Box("b")], selected=1)
+        self.assertEqual(handle_key(state, "j").selected, 1)
+
+    def test_k_on_the_top_box_keeps_the_selection(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "k").selected, 0)
+
+    def test_j_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "j"), state)
+
+    def test_k_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "k"), state)
+
+    def test_j_preserves_the_mode_the_running_flag_and_the_nodes(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        moved = handle_key(state, "j")
+        self.assertEqual(
+            (moved.mode, moved.running, moved.nodes),
+            (state.mode, state.running, state.nodes),
+        )
+
+    def test_k_preserves_the_mode_the_running_flag_and_the_nodes(self):
+        state = State([Box("a"), Box("b")], selected=1)
+        moved = handle_key(state, "k")
+        self.assertEqual(
+            (moved.mode, moved.running, moved.nodes),
+            (state.mode, state.running, state.nodes),
+        )
+
+    def test_j_does_not_mutate_the_given_state(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        handle_key(state, "j")
+        self.assertEqual(state.selected, 0)
+
+    def test_k_does_not_mutate_the_given_state(self):
+        state = State([Box("a"), Box("b")], selected=1)
+        handle_key(state, "k")
+        self.assertEqual(state.selected, 1)
+
+
 class HandleInsertTest(unittest.TestCase):
     def test_a_printable_character_appends_to_the_last_box_label(self):
         state = handle_key(State([]), "b")
