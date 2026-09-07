@@ -124,6 +124,24 @@ class HandleInsertTest(unittest.TestCase):
         state = State([Box("a"), Box("b")], mode="insert")
         self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
 
+    def test_esc_then_i_resumes_the_existing_label(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "h")
+        state = handle_key(state, "i")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
+        self.assertEqual(handle_key(state, "!").nodes, [Box("hi!")])
+
+    def test_esc_then_i_resumes_the_last_of_several_boxes(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "a")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
+        self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
+
     def test_typing_does_not_mutate_the_given_state(self):
         state = State([Box("h")], mode="insert")
         handle_key(state, "i")
