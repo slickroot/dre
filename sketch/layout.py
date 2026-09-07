@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
-from .state import Node, State
+from .state import Cursor, Node, State
 
 BOX_HEIGHT = 3
-BORDERS_AND_CURSOR = 3
+BORDERS = 2
 
 
 @dataclass
@@ -14,13 +14,13 @@ class Placement:
     y: int
     width: int
     height: int
-    cursor: Optional[int] = None
 
 
 def layout(state: State, cols: int, rows: int) -> List[Placement]:
     placements = []
-    for node in state.nodes:
-        width = len(node.label) + BORDERS_AND_CURSOR
+    for index, node in enumerate(state.nodes):
+        focused = index == len(state.nodes) - 1 and state.mode == "insert"
+        width = len(node.label) + BORDERS + (1 if focused else 0)
         placements.append(
             Placement(
                 node,
@@ -28,7 +28,17 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
                 y=(rows - BOX_HEIGHT) // 2,
                 width=width,
                 height=BOX_HEIGHT,
-                cursor=len(node.label) if state.mode == "insert" else None,
+            )
+        )
+    if placements and state.mode == "insert":
+        box = placements[-1]
+        placements.append(
+            Placement(
+                Cursor(),
+                x=box.x + 1 + len(box.node.label),
+                y=box.y + 1,
+                width=1,
+                height=1,
             )
         )
     return placements
