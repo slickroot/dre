@@ -48,13 +48,12 @@ def run(stream: TextIO, stdin: TextIO) -> None:
     renderer = TerminalRenderer()
     state = State([])
     with terminal_session(stream, stdin):
-        frame(state, renderer, stream)
-        while True:
+        while state.running:
+            frame(state, renderer, stream)
             key = stdin.read(1)
             if key == INTERRUPT:
                 return
             state = handle_key(state, key)
-            frame(state, renderer, stream)
 
 
 def main() -> None:
