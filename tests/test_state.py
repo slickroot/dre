@@ -1,11 +1,16 @@
 import unittest
 
-from sketch.state import Box, State, edit, handle_key
+from sketch.state import PLAIN, Box, State, edit, handle_key
 
 
 class BoxTest(unittest.TestCase):
     def test_boxes_are_equal(self):
         self.assertEqual(Box(), Box())
+
+
+class BoxColourTest(unittest.TestCase):
+    def test_boxes_default_to_the_plain_colour(self):
+        self.assertEqual(Box().colour, PLAIN)
 
 
 class BoxLabelTest(unittest.TestCase):
@@ -251,6 +256,10 @@ class HandleInsertTest(unittest.TestCase):
     def test_a_non_ascii_character_returns_the_state_unchanged(self):
         state = State([Box("hi")], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\u00e9"), state)
+
+    def test_typing_leaves_the_boxs_colour_unchanged(self):
+        state = State([Box("a", colour=0)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "z").nodes, [Box("az", colour=0)])
 
 
     def test_typing_edits_the_selected_box(self):

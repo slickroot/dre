@@ -1,10 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Literal, Union
+
+PLAIN = -1
+CYCLE = 9
 
 
 @dataclass(frozen=True)
 class Box:
     label: str = ""
+    colour: int = PLAIN
 
 
 @dataclass(frozen=True)
@@ -45,7 +49,7 @@ def handle_command(state: State, key: str) -> State:
 
 
 def edit(nodes: List[Node], index: int, label: str) -> List[Node]:
-    return nodes[:index] + [Box(label)] + nodes[index + 1 :]
+    return nodes[:index] + [replace(nodes[index], label=label)] + nodes[index + 1 :]
 
 
 def handle_insert(state: State, key: str) -> State:
