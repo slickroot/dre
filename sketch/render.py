@@ -10,6 +10,7 @@ BOTTOM_RIGHT = "┘"
 HORIZONTAL = "─"
 VERTICAL = "│"
 BLANK = " "
+CURSOR = "\u2588"
 
 
 class Renderer(Protocol):
@@ -42,6 +43,15 @@ class TerminalRenderer:
                     y,
                     self._box_character(x, y, left, right, top, bottom),
                 )
+        self._draw_label(grid, placement)
+
+    def _draw_label(self, grid: List[List[str]], placement: Placement) -> None:
+        for offset, character in enumerate(placement.node.label):
+            self._put(grid, placement.x + 1 + offset, placement.y + 1, character)
+        if placement.cursor is not None:
+            self._put(
+                grid, placement.x + 1 + placement.cursor, placement.y + 1, CURSOR
+            )
 
     def _box_character(
         self, x: int, y: int, left: int, right: int, top: int, bottom: int

@@ -44,6 +44,23 @@ class TerminalRendererTest(unittest.TestCase):
         grid = self.renderer.render([Placement(Box(), 3, 1, 3, 3)], 4, 2)
         self.assertEqual(grid, ["    ", "   \u250c"])
 
+    def test_label_is_drawn_inside_the_box(self):
+        grid = self.renderer.render([Placement(Box("hi"), 0, 0, 5, 3)], 5, 3)
+        self.assertEqual(grid[1], "\u2502hi \u2502")
+
+    def test_cursor_is_drawn_after_the_label(self):
+        grid = self.renderer.render(
+            [Placement(Box("hi"), 0, 0, 5, 3, cursor=2)], 5, 3
+        )
+        self.assertEqual(grid[1], "\u2502hi\u2588\u2502")
+
+    def test_label_and_cursor_past_the_edge_are_clipped(self):
+        grid = self.renderer.render(
+            [Placement(Box("hi"), 0, 0, 5, 3, cursor=2)], 3, 3
+        )
+        self.assertEqual(grid[1], "\u2502hi")
+
+
     def test_each_placement_is_drawn(self):
         grid = self.renderer.render(
             [Placement(Box(), 0, 0, 3, 3), Placement(Box(), 4, 0, 3, 3)], 11, 3
