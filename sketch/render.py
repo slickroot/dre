@@ -1,4 +1,4 @@
-from typing import List, Protocol
+from typing import List, Protocol, Tuple
 
 from .layout import Placement
 from .state import PLAIN, Box, Cursor
@@ -13,6 +13,11 @@ BLANK = " "
 CURSOR = "\u2588"
 RESET = "\x1b[0m"
 
+Cell = Tuple[str, int]
+Grid = List[List[Cell]]
+
+BLANK_CELL = (BLANK, PLAIN)
+
 
 class Renderer(Protocol):
     def render(
@@ -25,61 +30,36 @@ class TerminalRenderer:
     def render(
         self, placements: List[Placement], cols: int, rows: int
     ) -> List[str]:
-        chars = [[BLANK] * cols for _ in range(rows)]
-        colours = [[PLAIN] * cols for _ in range(rows)]
+        grid = [[BLANK_CELL] * cols for _ in range(rows)]
         for placement in placements:
             if isinstance(placement.node, Box):
-                self._draw_box(chars, colours, placement)
+                self._draw_box(grid, placement)
             elif isinstance(placement.node, Cursor):
-                self._draw_cursor(chars, colours, placement)
-        return [
-            "".join(
-                _cell(character, colour)
-                for character, colour in zip(row, colour_row)
-            )
-            for row, colour_row in zip(chars, colours)
-        ]
+                self._draw_cursor(grid, placement)
+        return ["".join(_cell(*cell) for cell in row) for row in grid]
 
-    def _draw_box(
-        self,
-        chars: List[List[str]],
-        colours: List[List[int]],
-        placement: Placement,
-    ) -> None:
+    def _draw_box(self, grid: Grid, placement: Placement) -> None:
         left = placement.x
         right = placement.x + placement.width - 1
         top = placement.y
         bottom = placement.y + placement.height - 1
-        box_colour = placement.node.colour
+        colour = placement.node.colour
         for y in range(top, bottom + 1):
             for x in range(left, right + 1):
                 character = self._box_character(x, y, left, right, top, bottom)
-                colour = box_colour if character != BLANK else PLAIN
-                self._put(chars, colours, x, y, character, colour)
-        self._draw_label(chars, colours, placement)
+                if character == BLANK:
+                    self._put(grid, x, y, BLANK_CELL)
+                else:
+                    self._put(grid, x, y, (character, colour))
+        self._draw_label(grid, placement)
 
-    def _draw_cursor(
-        self,
-        chars: List[List[str]],
-        colours: List[List[int]],
-        placement: Placement,
-    ) -> None:
-        self._put(chars, colours, placement.x, placement.y, CURSOR, PLAIN)
+    def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
+        self._put(grid, placement.x, placement.y, (CURSOR, PLAIN))
 
-    def _draw_label(
-        self,
-        chars: List[List[str]],
-        colours: List[List[int]],
-        placement: Placement,
-    ) -> None:
+    def _draw_label(self, grid: Grid, placement: Placement) -> None:
         for offset, character in enumerate(placement.node.label):
             self._put(
-                chars,
-                colours,
-                placement.x + 1 + offset,
-                placement.y + 1,
-                character,
-                PLAIN,
+                grid, placement.x + 1 + offset, placement.y + 1, (character, PLAIN)
             )
 
     def _box_character(
@@ -101,18 +81,9 @@ class TerminalRenderer:
             return VERTICAL
         return BLANK
 
-    def _put(
-        self,
-        chars: List[List[str]],
-        colours: List[List[int]],
-        x: int,
-        y: int,
-        character: str,
-        colour: int,
-    ) -> None:
-        if 0 <= y < len(chars) and 0 <= x < len(chars[y]):
-            chars[y][x] = character
-            colours[y][x] = colour
+    def _put(self, grid: Grid, x: int, y: int, cell: Cell) -> None:
+        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
+            grid[y][x] = cell
 
 
 def _cell(character: str, colour: int) -> str:
