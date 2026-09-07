@@ -18,6 +18,10 @@ class Cursor:
 
 Node = Union[Box, Cursor]
 
+
+def next_colour(colour: int) -> int:
+    return (colour + 2) % CYCLE - 1
+
 Mode = Literal["command", "insert"]
 
 
@@ -45,6 +49,16 @@ def handle_command(state: State, key: str) -> State:
         step = 1 if key == "j" else -1
         selected = min(max(state.selected + step, 0), len(state.nodes) - 1)
         return State(state.nodes, state.running, state.mode, selected)
+    if key == "c":
+        if not state.nodes:
+            return state
+        box = state.nodes[state.selected]
+        nodes = (
+            state.nodes[: state.selected]
+            + [replace(box, colour=next_colour(box.colour))]
+            + state.nodes[state.selected + 1 :]
+        )
+        return State(nodes, state.running, state.mode, state.selected)
     return state
 
 

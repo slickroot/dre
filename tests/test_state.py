@@ -1,6 +1,6 @@
 import unittest
 
-from sketch.state import PLAIN, Box, State, edit, handle_key
+from sketch.state import CYCLE, PLAIN, Box, State, edit, handle_key, next_colour
 
 
 class BoxTest(unittest.TestCase):
@@ -269,6 +269,69 @@ class HandleInsertTest(unittest.TestCase):
     def test_backspace_edits_the_selected_box(self):
         state = State([Box("ab"), Box("cd")], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x7f").nodes, [Box("a"), Box("cd")])
+
+
+class CycleColourTest(unittest.TestCase):
+    def test_c_advances_the_selected_box_from_plain(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "c").nodes, [Box("a", colour=next_colour(PLAIN))])
+
+    def test_c_advances_the_selected_box_through_the_cycle(self):
+        state = State([Box("a")], selected=0)
+        for _ in range(CYCLE - 1):
+            state = handle_key(state, "c")
+        self.assertNotEqual(state.nodes[0].colour, PLAIN)
+        state = handle_key(state, "c")
+        self.assertEqual(state.nodes[0].colour, PLAIN)
+
+    def test_c_changes_only_the_selected_box(self):
+        state = State([Box("a"), Box("b")], selected=1)
+        self.assertEqual(
+            handle_key(state, "c").nodes,
+            [Box("a"), Box("b", colour=next_colour(PLAIN))],
+        )
+
+    def test_c_preserves_the_label(self):
+        state = State([Box("hi")], selected=0)
+        self.assertEqual(handle_key(state, "c").nodes[0].label, "hi")
+
+    def test_c_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "c"), state)
+
+    def test_c_does_not_mutate_the_given_state(self):
+        state = State([Box("a")], selected=0)
+        handle_key(state, "c")
+        self.assertEqual(state.nodes, [Box("a")])
+
+    def test_j_leaves_colours_unchanged(self):
+        state = State([Box("a", colour=0), Box("b", colour=1)], selected=0)
+        self.assertEqual(
+            handle_key(state, "j").nodes,
+            [Box("a", colour=0), Box("b", colour=1)],
+        )
+
+    def test_k_leaves_colours_unchanged(self):
+        state = State([Box("a", colour=0), Box("b", colour=1)], selected=1)
+        self.assertEqual(
+            handle_key(state, "k").nodes,
+            [Box("a", colour=0), Box("b", colour=1)],
+        )
+
+    def test_b_leaves_existing_colours_unchanged(self):
+        state = State([Box("a", colour=0)], selected=0)
+        self.assertEqual(
+            handle_key(state, "b").nodes,
+            [Box("a", colour=0), Box("")],
+        )
+
+    def test_b_adds_a_box_with_the_plain_colour(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "b").nodes, [Box(colour=PLAIN)])
+
+    def test_c_in_insert_mode_types_the_letter_c(self):
+        state = State([Box("a")], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "c").nodes, [Box("ac")])
 
 
 class EnterInsertModeTest(unittest.TestCase):
