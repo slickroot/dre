@@ -5,6 +5,7 @@ from .state import Cursor, Node, State
 
 BOX_HEIGHT = 3
 BORDERS = 2
+GAP = 1
 
 
 @dataclass
@@ -18,6 +19,8 @@ class Placement:
 
 def layout(state: State, cols: int, rows: int) -> List[Placement]:
     placements = []
+    total = len(state.nodes) * BOX_HEIGHT + (len(state.nodes) - 1) * GAP
+    top = (rows - total) // 2
     for index, node in enumerate(state.nodes):
         focused = index == len(state.nodes) - 1 and state.mode == "insert"
         width = len(node.label) + BORDERS + (1 if focused else 0)
@@ -25,7 +28,7 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
             Placement(
                 node,
                 x=(cols - width) // 2,
-                y=(rows - BOX_HEIGHT) // 2,
+                y=top + index * (BOX_HEIGHT + GAP),
                 width=width,
                 height=BOX_HEIGHT,
             )
