@@ -1,7 +1,7 @@
 from typing import List, Protocol
 
 from .layout import Placement
-from .state import Box
+from .state import Box, Cursor
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -28,6 +28,8 @@ class TerminalRenderer:
         for placement in placements:
             if isinstance(placement.node, Box):
                 self._draw_box(grid, placement)
+            elif isinstance(placement.node, Cursor):
+                self._draw_cursor(grid, placement)
         return ["".join(line) for line in grid]
 
     def _draw_box(self, grid: List[List[str]], placement: Placement) -> None:
@@ -45,13 +47,12 @@ class TerminalRenderer:
                 )
         self._draw_label(grid, placement)
 
+    def _draw_cursor(self, grid: List[List[str]], placement: Placement) -> None:
+        self._put(grid, placement.x, placement.y, CURSOR)
+
     def _draw_label(self, grid: List[List[str]], placement: Placement) -> None:
         for offset, character in enumerate(placement.node.label):
             self._put(grid, placement.x + 1 + offset, placement.y + 1, character)
-        if placement.cursor is not None:
-            self._put(
-                grid, placement.x + 1 + placement.cursor, placement.y + 1, CURSOR
-            )
 
     def _box_character(
         self, x: int, y: int, left: int, right: int, top: int, bottom: int

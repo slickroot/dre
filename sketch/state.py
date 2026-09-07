@@ -7,7 +7,12 @@ class Box:
     label: str = ""
 
 
-Node = Union[Box]
+@dataclass(frozen=True)
+class Cursor:
+    pass
+
+
+Node = Union[Box, Cursor]
 
 Mode = Literal["command", "insert"]
 
