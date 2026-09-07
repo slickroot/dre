@@ -183,6 +183,24 @@ class HandleInsertTest(unittest.TestCase):
         state = State([Box("a"), Box("b")], mode="insert", selected=1)
         self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
 
+    def test_esc_then_i_resumes_the_existing_label(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "h")
+        state = handle_key(state, "i")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
+        self.assertEqual(handle_key(state, "!").nodes, [Box("hi!")])
+
+    def test_esc_then_i_resumes_the_last_of_several_boxes(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "a")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
+        self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
+
     def test_typing_does_not_mutate_the_given_state(self):
         state = State([Box("h")], mode="insert", selected=0)
         handle_key(state, "i")
@@ -261,6 +279,22 @@ class EnterInsertModeTest(unittest.TestCase):
         state = State([Box("a"), Box("b"), Box("c")], selected=1)
         typed = handle_key(handle_key(state, "i"), "z")
         self.assertEqual(typed.nodes, [Box("a"), Box("bz"), Box("c")])
+
+    def test_i_preserves_the_nodes(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "i").nodes, [Box("a"), Box("b")])
+
+    def test_i_keeps_the_state_running(self):
+        state = State([Box("hi")], selected=0)
+        self.assertIs(handle_key(state, "i").running, True)
+
+    def test_i_does_not_mutate_the_given_state(self):
+        state = State([Box("hi")], selected=0)
+        handle_key(state, "i")
+        self.assertEqual(state.mode, "command")
+
+    def test_i_on_an_empty_canvas_leaves_the_mode_as_command(self):
+        self.assertEqual(handle_key(State([]), "i").mode, "command")
 
 
 if __name__ == "__main__":
