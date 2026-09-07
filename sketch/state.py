@@ -1,10 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Literal, Union
+
+PLAIN = -1
+CYCLE = 9
 
 
 @dataclass(frozen=True)
 class Box:
     label: str = ""
+    colour: int = PLAIN
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,10 @@ class State:
     selected: int = -1
 
 
+def next_colour(colour: int) -> int:
+    return (colour + 2) % CYCLE - 1
+
+
 def handle_command(state: State, key: str) -> State:
     if key == "b":
         nodes = state.nodes + [Box("")]
@@ -41,11 +49,21 @@ def handle_command(state: State, key: str) -> State:
         step = 1 if key == "j" else -1
         selected = min(max(state.selected + step, 0), len(state.nodes) - 1)
         return State(state.nodes, state.running, state.mode, selected)
+    if key == "c":
+        if not state.nodes:
+            return state
+        box = state.nodes[state.selected]
+        nodes = (
+            state.nodes[: state.selected]
+            + [replace(box, colour=next_colour(box.colour))]
+            + state.nodes[state.selected + 1 :]
+        )
+        return State(nodes, state.running, state.mode, state.selected)
     return state
 
 
 def edit(nodes: List[Node], index: int, label: str) -> List[Node]:
-    return nodes[:index] + [Box(label)] + nodes[index + 1 :]
+    return nodes[:index] + [replace(nodes[index], label=label)] + nodes[index + 1 :]
 
 
 def handle_insert(state: State, key: str) -> State:

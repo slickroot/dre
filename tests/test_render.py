@@ -1,8 +1,8 @@
 import unittest
 
 from sketch.layout import Placement
-from sketch.render import CURSOR, TerminalRenderer
-from sketch.state import Box, Cursor
+from sketch.render import CURSOR, TerminalRenderer, _cell
+from sketch.state import PLAIN, Box, Cursor
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -81,6 +81,71 @@ class TerminalRendererTest(unittest.TestCase):
             [Placement(Box(), 0, 0, 3, 3), Placement(Box(), 4, 0, 3, 3)], 11, 3
         )
         self.assertEqual(grid[0], "┌─┐ ┌─┐    ")
+
+    def test_a_plain_box_emits_no_escapes(self):
+        grid = self.renderer.render(
+            [Placement(Box("hi"), 0, 0, 5, 3), Placement(Cursor(), 3, 1, 1, 1)],
+            5,
+            3,
+        )
+        self.assertNotIn("\x1b", "".join(grid))
+
+    def test_a_coloured_box_border_carries_the_colour(self):
+        colour = 2
+        grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
+        self.assertTrue(grid[0].startswith(_cell("┌", colour)))
+
+    def test_a_coloured_box_bottom_right_corner_carries_the_colour(self):
+        colour = 4
+        grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
+        self.assertTrue(grid[2].endswith(_cell("┘", colour)))
+
+    def test_a_coloured_box_interior_is_plain(self):
+        colour = 3
+        grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
+        middle = grid[1][len(_cell("│", colour)) : -len(_cell("│", colour))]
+        self.assertEqual(middle, "   ")
+
+    def test_a_label_inside_a_coloured_box_is_plain(self):
+        colour = 5
+        grid = self.renderer.render(
+            [Placement(Box("hi", colour=colour), 0, 0, 5, 3)], 5, 3
+        )
+        middle = grid[1][len(_cell("│", colour)) : -len(_cell("│", colour))]
+        self.assertEqual(middle, "hi ")
+
+    def test_the_cursor_is_plain(self):
+        grid = self.renderer.render(
+            [Placement(Box(colour=1), 0, 0, 5, 3), Placement(Cursor(), 1, 1, 1, 1)],
+            5,
+            3,
+        )
+        after_left_border = grid[1][len(_cell("│", 1)) :]
+        self.assertTrue(after_left_border.startswith(CURSOR))
+
+    def test_two_boxes_render_their_own_colours(self):
+        first_colour, second_colour = 0, 6
+        grid = self.renderer.render(
+            [
+                Placement(Box(colour=first_colour), 0, 0, 3, 3),
+                Placement(Box(colour=second_colour), 4, 0, 3, 3),
+            ],
+            11,
+            3,
+        )
+        self.assertTrue(grid[0].startswith(_cell("┌", first_colour)))
+        gap = grid[0][len(_cell("┌", first_colour)) :]
+        self.assertTrue(gap.startswith(_cell("─", first_colour)))
+        gap = gap[len(_cell("─", first_colour)) :]
+        self.assertTrue(gap.startswith(_cell("┐", first_colour)))
+        gap = gap[len(_cell("┐", first_colour)) :]
+        self.assertTrue(gap.startswith(" "))
+        gap = gap[1:]
+        self.assertTrue(gap.startswith(_cell("┌", second_colour)))
+
+    def test_plain_box_is_still_byte_identical(self):
+        grid = self.renderer.render([Placement(Box(colour=PLAIN), 0, 0, 5, 4)], 5, 4)
+        self.assertEqual(grid, ["┌───┐", "│   │", "│   │", "└───┘"])
 
 
 if __name__ == "__main__":
