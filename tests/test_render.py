@@ -1,14 +1,8 @@
 import unittest
 
 from sketch.layout import Placement
-from sketch.render import CURSOR, RESET, TerminalRenderer
+from sketch.render import CURSOR, TerminalRenderer, _cell
 from sketch.state import PLAIN, Box, Cursor
-
-
-def _cell(character: str, colour: int) -> str:
-    if colour == PLAIN:
-        return character
-    return f"\x1b[{30 + colour}m{character}{RESET}"
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -99,12 +93,12 @@ class TerminalRendererTest(unittest.TestCase):
     def test_a_coloured_box_border_carries_the_colour(self):
         colour = 2
         grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
-        self.assertEqual(grid[0].startswith(_cell("┌", colour)), True)
+        self.assertTrue(grid[0].startswith(_cell("┌", colour)))
 
     def test_a_coloured_box_bottom_right_corner_carries_the_colour(self):
         colour = 4
         grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
-        self.assertEqual(grid[2].endswith(_cell("┘", colour)), True)
+        self.assertTrue(grid[2].endswith(_cell("┘", colour)))
 
     def test_a_coloured_box_interior_is_plain(self):
         colour = 3
@@ -127,7 +121,7 @@ class TerminalRendererTest(unittest.TestCase):
             3,
         )
         after_left_border = grid[1][len(_cell("│", 1)) :]
-        self.assertEqual(after_left_border.startswith(CURSOR), True)
+        self.assertTrue(after_left_border.startswith(CURSOR))
 
     def test_two_boxes_render_their_own_colours(self):
         first_colour, second_colour = 0, 6
@@ -139,15 +133,15 @@ class TerminalRendererTest(unittest.TestCase):
             11,
             3,
         )
-        self.assertEqual(grid[0].startswith(_cell("┌", first_colour)), True)
+        self.assertTrue(grid[0].startswith(_cell("┌", first_colour)))
         gap = grid[0][len(_cell("┌", first_colour)) :]
-        self.assertEqual(gap.startswith(_cell("─", first_colour)), True)
+        self.assertTrue(gap.startswith(_cell("─", first_colour)))
         gap = gap[len(_cell("─", first_colour)) :]
-        self.assertEqual(gap.startswith(_cell("┐", first_colour)), True)
+        self.assertTrue(gap.startswith(_cell("┐", first_colour)))
         gap = gap[len(_cell("┐", first_colour)) :]
-        self.assertEqual(gap.startswith(" "), True)
+        self.assertTrue(gap.startswith(" "))
         gap = gap[1:]
-        self.assertEqual(gap.startswith(_cell("┌", second_colour)), True)
+        self.assertTrue(gap.startswith(_cell("┌", second_colour)))
 
     def test_plain_box_is_still_byte_identical(self):
         grid = self.renderer.render([Placement(Box(colour=PLAIN), 0, 0, 5, 4)], 5, 4)

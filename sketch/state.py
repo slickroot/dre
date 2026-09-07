@@ -18,10 +18,6 @@ class Cursor:
 
 Node = Union[Box, Cursor]
 
-
-def next_colour(colour: int) -> int:
-    return (colour + 2) % CYCLE - 1
-
 Mode = Literal["command", "insert"]
 
 
@@ -31,6 +27,10 @@ class State:
     running: bool = True
     mode: Mode = "command"
     selected: int = -1
+
+
+def next_colour(colour: int) -> int:
+    return (colour + 2) % CYCLE - 1
 
 
 def handle_command(state: State, key: str) -> State:

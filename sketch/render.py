@@ -10,7 +10,7 @@ BOTTOM_RIGHT = "┘"
 HORIZONTAL = "─"
 VERTICAL = "│"
 BLANK = " "
-CURSOR = "█"
+CURSOR = "\u2588"
 RESET = "\x1b[0m"
 
 
