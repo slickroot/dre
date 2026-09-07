@@ -1,8 +1,8 @@
 import unittest
 
 from sketch.layout import Placement
-from sketch.render import TerminalRenderer
-from sketch.state import Box
+from sketch.render import CURSOR, TerminalRenderer
+from sketch.state import Box, Cursor
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -60,6 +60,13 @@ class TerminalRendererTest(unittest.TestCase):
         )
         self.assertEqual(grid[1], "\u2502hi")
 
+    def test_cursor_placement_is_drawn_at_its_own_position(self):
+        grid = self.renderer.render([Placement(Cursor(), 2, 1, 1, 1)], 4, 3)
+        self.assertEqual(grid, ["    ", "  " + CURSOR + " ", "    "])
+
+    def test_a_cursor_outside_the_grid_is_clipped(self):
+        grid = self.renderer.render([Placement(Cursor(), 9, 9, 1, 1)], 4, 3)
+        self.assertEqual(grid, ["    "] * 3)
 
     def test_each_placement_is_drawn(self):
         grid = self.renderer.render(
