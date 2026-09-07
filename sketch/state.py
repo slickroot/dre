@@ -27,6 +27,8 @@ class State:
 def handle_command(state: State, key: str) -> State:
     if key == "b":
         return State(state.nodes + [Box("")], state.running, "insert")
+    if key == "i" and state.nodes:
+        return State(state.nodes, state.running, "insert")
     if key == "q":
         return State(state.nodes, False, state.mode)
     return state

@@ -76,6 +76,28 @@ class HandleKeyTest(unittest.TestCase):
         handle_key(state, "q")
         self.assertIs(state.running, True)
 
+    def test_i_enters_insert_mode(self):
+        self.assertEqual(handle_key(State([Box("hi")]), "i").mode, "insert")
+
+    def test_i_preserves_the_nodes(self):
+        state = State([Box("a"), Box("b")])
+        self.assertEqual(handle_key(state, "i").nodes, [Box("a"), Box("b")])
+
+    def test_i_keeps_the_state_running(self):
+        self.assertIs(handle_key(State([Box("hi")]), "i").running, True)
+
+    def test_i_does_not_mutate_the_given_state(self):
+        state = State([Box("hi")])
+        handle_key(state, "i")
+        self.assertEqual(state.mode, "command")
+
+    def test_i_on_an_empty_canvas_leaves_the_mode_as_command(self):
+        self.assertEqual(handle_key(State([]), "i").mode, "command")
+
+    def test_i_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "i"), state)
+
 
 class HandleInsertTest(unittest.TestCase):
     def test_a_printable_character_appends_to_the_last_box_label(self):
@@ -100,6 +122,24 @@ class HandleInsertTest(unittest.TestCase):
 
     def test_typing_edits_only_the_last_box(self):
         state = State([Box("a"), Box("b")], mode="insert")
+        self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
+
+    def test_esc_then_i_resumes_the_existing_label(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "h")
+        state = handle_key(state, "i")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
+        self.assertEqual(handle_key(state, "!").nodes, [Box("hi!")])
+
+    def test_esc_then_i_resumes_the_last_of_several_boxes(self):
+        state = handle_key(State([]), "b")
+        state = handle_key(state, "a")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "b")
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "i")
         self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
 
     def test_typing_does_not_mutate_the_given_state(self):
