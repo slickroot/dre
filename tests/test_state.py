@@ -23,6 +23,9 @@ class StateTest(unittest.TestCase):
     def test_state_starts_in_command_mode(self):
         self.assertEqual(State([]).mode, "command")
 
+    def test_an_empty_state_has_no_selection(self):
+        self.assertEqual(State([]).selected, -1)
+
 
 class HandleKeyTest(unittest.TestCase):
     def test_b_appends_a_box(self):
@@ -75,6 +78,21 @@ class HandleKeyTest(unittest.TestCase):
         state = State([Box()])
         handle_key(state, "q")
         self.assertIs(state.running, True)
+
+    def test_b_selects_the_new_box_on_an_empty_canvas(self):
+        self.assertEqual(handle_key(State([]), "b").selected, 0)
+
+    def test_b_selects_the_new_last_box(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "b").selected, 1)
+
+    def test_b_selects_the_new_box_when_the_selection_was_not_last(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "b").selected, 2)
+
+    def test_q_preserves_the_selection(self):
+        state = State([Box("a"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "q").selected, 0)
 
 
 class HandleInsertTest(unittest.TestCase):
@@ -135,6 +153,10 @@ class HandleInsertTest(unittest.TestCase):
     def test_esc_preserves_the_nodes(self):
         state = State([Box("hi")], mode="insert")
         self.assertEqual(handle_key(state, "\x1b").nodes, [Box("hi")])
+
+    def test_esc_preserves_the_selection(self):
+        state = State([Box("a"), Box("b")], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "\x1b").selected, 0)
 
     def test_esc_does_not_mutate_the_given_state(self):
         state = State([Box("")], mode="insert")
