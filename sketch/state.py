@@ -9,6 +9,7 @@ CYCLE = 9
 class Box:
     label: str = ""
     colour: int = PLAIN
+    fill: int = PLAIN
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,22 @@ def handle_command(state: State, key: str) -> State:
         nodes = (
             state.nodes[: state.selected]
             + [replace(box, colour=next_colour(box.colour))]
+            + state.nodes[state.selected + 1 :]
+        )
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
+        )
+    if key == "f":
+        if not state.nodes:
+            return state
+        box = state.nodes[state.selected]
+        nodes = (
+            state.nodes[: state.selected]
+            + [replace(box, fill=next_colour(box.fill))]
             + state.nodes[state.selected + 1 :]
         )
         return State(

@@ -15,10 +15,10 @@ ARROW_DOWN = "\u2193"
 ARROW_UP = "\u2191"
 RESET = "\x1b[0m"
 
-Cell = Tuple[str, int]
+Cell = Tuple[str, int, int]
 Grid = List[List[Cell]]
 
-BLANK_CELL = (BLANK, PLAIN)
+BLANK_CELL = (BLANK, PLAIN, PLAIN)
 
 
 class Renderer(Protocol):
@@ -48,26 +48,31 @@ class TerminalRenderer:
         top = placement.y
         bottom = placement.y + placement.height - 1
         colour = placement.node.colour
+        fill = placement.node.fill
         for y in range(top, bottom + 1):
             for x in range(left, right + 1):
                 character = self._box_character(x, y, left, right, top, bottom)
                 if character == BLANK:
-                    self._put(grid, x, y, BLANK_CELL)
+                    self._put(grid, x, y, (BLANK, PLAIN, fill))
                 else:
-                    self._put(grid, x, y, (character, colour))
+                    self._put(grid, x, y, (character, colour, PLAIN))
         self._draw_label(grid, placement)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
-        self._put(grid, placement.x, placement.y, (CURSOR, PLAIN))
+        self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
 
     def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
         glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
-        self._put(grid, placement.x, placement.y, (glyph, PLAIN))
+        self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
+        fill = placement.node.fill
         for offset, character in enumerate(placement.node.label):
             self._put(
-                grid, placement.x + 1 + offset, placement.y + 1, (character, PLAIN)
+                grid,
+                placement.x + 1 + offset,
+                placement.y + 1,
+                (character, PLAIN, fill),
             )
 
     def _box_character(
@@ -94,7 +99,12 @@ class TerminalRenderer:
             grid[y][x] = cell
 
 
-def _cell(character: str, colour: int) -> str:
-    if colour == PLAIN:
+def _cell(character: str, colour: int, fill: int) -> str:
+    codes = []
+    if colour != PLAIN:
+        codes.append(30 + colour)
+    if fill != PLAIN:
+        codes.append(40 + fill)
+    if not codes:
         return character
-    return f"\x1b[{30 + colour}m{character}{RESET}"
+    return f"\x1b[{';'.join(str(code) for code in codes)}m{character}{RESET}"
