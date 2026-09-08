@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
@@ -20,12 +21,100 @@ Grid = List[List[Cell]]
 
 BLANK_CELL = (BLANK, PLAIN, PLAIN)
 
+OPAQUE = 255
+TRANSPARENT = (0, 0, 0, 0)
+PLAIN_COLOUR = (128, 128, 128)
+ANSI_COLOURS = (
+    (0, 0, 0),
+    (255, 0, 0),
+    (0, 255, 0),
+    (255, 255, 0),
+    (0, 0, 255),
+    (255, 0, 255),
+    (0, 255, 255),
+    (255, 255, 255),
+)
+
+
+@dataclass(frozen=True)
+class Sprite:
+    pixels: bytes
+    width: int
+    height: int
+    col: int
+    row: int
+
 
 class Renderer(Protocol):
     def render(
         self, placements: List[Placement], cols: int, rows: int
     ) -> List[str]:
         ...
+
+
+class GraphicsProtocol(Protocol):
+    def draw(self, sprites: List[Sprite]) -> str:
+        ...
+
+
+class GraphicsRenderer:
+    def __init__(
+        self,
+        text: Renderer,
+        graphics: GraphicsProtocol,
+        cell_width: int,
+        cell_height: int,
+    ) -> None:
+        self.text = text
+        self.graphics = graphics
+        self.cell_width = cell_width
+        self.cell_height = cell_height
+
+    def render(
+        self, placements: List[Placement], cols: int, rows: int
+    ) -> List[str]:
+        lines = self.text.render(placements, cols, rows)
+        payload = self.graphics.draw(self._sprites(placements, cols, rows))
+        return lines[:-1] + [lines[-1] + payload]
+
+    def _sprites(
+        self, placements: List[Placement], cols: int, rows: int
+    ) -> List[Sprite]:
+        sprites = []
+        for placement in placements:
+            if not isinstance(placement.node, Box):
+                continue
+            left = max(placement.x, 0)
+            top = max(placement.y, 0)
+            right = min(placement.x + placement.width, cols)
+            bottom = min(placement.y + placement.height, rows)
+            if left >= right or top >= bottom:
+                continue
+            sprites.append(self._sprite(placement, left, top, right, bottom))
+        return sprites
+
+    def _sprite(
+        self, placement: Placement, left: int, top: int, right: int, bottom: int
+    ) -> Sprite:
+        width = placement.width * self.cell_width
+        height = placement.height * self.cell_height
+        edge = _colour(placement.node.colour) + (OPAQUE,)
+        first_x = (left - placement.x) * self.cell_width
+        last_x = (right - placement.x) * self.cell_width
+        first_y = (top - placement.y) * self.cell_height
+        last_y = (bottom - placement.y) * self.cell_height
+        pixels = bytearray()
+        for y in range(first_y, last_y):
+            for x in range(first_x, last_x):
+                on_edge = x in (0, width - 1) or y in (0, height - 1)
+                pixels.extend(edge if on_edge else TRANSPARENT)
+        return Sprite(
+            pixels=bytes(pixels),
+            width=last_x - first_x,
+            height=last_y - first_y,
+            col=left,
+            row=top,
+        )
 
 
 class TerminalRenderer:
@@ -43,19 +132,10 @@ class TerminalRenderer:
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
-        left = placement.x
-        right = placement.x + placement.width - 1
-        top = placement.y
-        bottom = placement.y + placement.height - 1
-        colour = placement.node.colour
         fill = placement.node.fill
-        for y in range(top, bottom + 1):
-            for x in range(left, right + 1):
-                character = self._box_character(x, y, left, right, top, bottom)
-                if character == BLANK:
-                    self._put(grid, x, y, (BLANK, PLAIN, fill))
-                else:
-                    self._put(grid, x, y, (character, colour, PLAIN))
+        for y in range(placement.y, placement.y + placement.height):
+            for x in range(placement.x, placement.x + placement.width):
+                self._put(grid, x, y, (BLANK, PLAIN, fill))
         self._draw_label(grid, placement)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
@@ -97,6 +177,12 @@ class TerminalRenderer:
     def _put(self, grid: Grid, x: int, y: int, cell: Cell) -> None:
         if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
             grid[y][x] = cell
+
+
+def _colour(colour: int) -> Tuple[int, int, int]:
+    if colour == PLAIN:
+        return PLAIN_COLOUR
+    return ANSI_COLOURS[colour]
 
 
 def _cell(character: str, colour: int, fill: int) -> str:
