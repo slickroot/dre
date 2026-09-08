@@ -1,7 +1,14 @@
 import unittest
 
 from sketch.layout import Placement
-from sketch.render import ARROW_DOWN, ARROW_UP, CURSOR, TerminalRenderer, _cell
+from sketch.render import (
+    ARROW_DOWN,
+    ARROW_UP,
+    CURSOR,
+    Cell,
+    TerminalRenderer,
+    _cell,
+)
 from sketch.state import PLAIN, Arrow, Box, Cursor
 
 
@@ -93,17 +100,17 @@ class TerminalRendererTest(unittest.TestCase):
     def test_a_coloured_box_border_carries_the_colour(self):
         colour = 2
         grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
-        self.assertTrue(grid[0].startswith(_cell("┌", colour, PLAIN)))
+        self.assertTrue(grid[0].startswith(_cell(Cell("┌", colour))))
 
     def test_a_coloured_box_bottom_right_corner_carries_the_colour(self):
         colour = 4
         grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
-        self.assertTrue(grid[2].endswith(_cell("┘", colour, PLAIN)))
+        self.assertTrue(grid[2].endswith(_cell(Cell("┘", colour))))
 
     def test_a_coloured_box_interior_is_plain(self):
         colour = 3
         grid = self.renderer.render([Placement(Box(colour=colour), 0, 0, 5, 3)], 5, 3)
-        middle = grid[1][len(_cell("│", colour, PLAIN)) : -len(_cell("│", colour, PLAIN))]
+        middle = grid[1][len(_cell(Cell("│", colour))) : -len(_cell(Cell("│", colour)))]
         self.assertEqual(middle, "   ")
 
     def test_a_label_inside_a_coloured_box_is_plain(self):
@@ -111,7 +118,7 @@ class TerminalRendererTest(unittest.TestCase):
         grid = self.renderer.render(
             [Placement(Box("hi", colour=colour), 0, 0, 5, 3)], 5, 3
         )
-        middle = grid[1][len(_cell("│", colour, PLAIN)) : -len(_cell("│", colour, PLAIN))]
+        middle = grid[1][len(_cell(Cell("│", colour))) : -len(_cell(Cell("│", colour)))]
         self.assertEqual(middle, "hi ")
 
     def test_the_cursor_is_plain(self):
@@ -120,7 +127,7 @@ class TerminalRendererTest(unittest.TestCase):
             5,
             3,
         )
-        after_left_border = grid[1][len(_cell("│", 1, PLAIN)) :]
+        after_left_border = grid[1][len(_cell(Cell("│", 1))) :]
         self.assertTrue(after_left_border.startswith(CURSOR))
 
     def test_two_boxes_render_their_own_colours(self):
@@ -133,15 +140,15 @@ class TerminalRendererTest(unittest.TestCase):
             11,
             3,
         )
-        self.assertTrue(grid[0].startswith(_cell("┌", first_colour, PLAIN)))
-        gap = grid[0][len(_cell("┌", first_colour, PLAIN)) :]
-        self.assertTrue(gap.startswith(_cell("─", first_colour, PLAIN)))
-        gap = gap[len(_cell("─", first_colour, PLAIN)) :]
-        self.assertTrue(gap.startswith(_cell("┐", first_colour, PLAIN)))
-        gap = gap[len(_cell("┐", first_colour, PLAIN)) :]
+        self.assertTrue(grid[0].startswith(_cell(Cell("┌", first_colour))))
+        gap = grid[0][len(_cell(Cell("┌", first_colour))) :]
+        self.assertTrue(gap.startswith(_cell(Cell("─", first_colour))))
+        gap = gap[len(_cell(Cell("─", first_colour))) :]
+        self.assertTrue(gap.startswith(_cell(Cell("┐", first_colour))))
+        gap = gap[len(_cell(Cell("┐", first_colour))) :]
         self.assertTrue(gap.startswith(" "))
         gap = gap[1:]
-        self.assertTrue(gap.startswith(_cell("┌", second_colour, PLAIN)))
+        self.assertTrue(gap.startswith(_cell(Cell("┌", second_colour))))
 
     def test_a_forward_arrow_is_drawn(self):
         grid = self.renderer.render(
@@ -171,39 +178,39 @@ class TerminalRendererTest(unittest.TestCase):
         fill = 2
         grid = self.renderer.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
         for row in grid[1:3]:
-            rest = row[len(_cell("│", PLAIN, PLAIN)) :]
+            rest = row[len(_cell(Cell("│"))) :]
             for _ in range(3):
-                self.assertTrue(rest.startswith(_cell(" ", PLAIN, fill)))
-                rest = rest[len(_cell(" ", PLAIN, fill)) :]
-            self.assertTrue(rest.startswith(_cell("│", PLAIN, PLAIN)))
+                self.assertTrue(rest.startswith(_cell(Cell(" ", fill=fill))))
+                rest = rest[len(_cell(Cell(" ", fill=fill))) :]
+            self.assertTrue(rest.startswith(_cell(Cell("│"))))
 
     def test_a_filled_box_border_is_not_painted(self):
         fill = 6
         grid = self.renderer.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
-        self.assertTrue(grid[0].startswith(_cell("┌", PLAIN, PLAIN)))
-        self.assertTrue(grid[3].startswith(_cell("└", PLAIN, PLAIN)))
-        self.assertTrue(grid[1].startswith(_cell("│", PLAIN, PLAIN)))
+        self.assertTrue(grid[0].startswith(_cell(Cell("┌"))))
+        self.assertTrue(grid[3].startswith(_cell(Cell("└"))))
+        self.assertTrue(grid[1].startswith(_cell(Cell("│"))))
 
     def test_a_box_with_border_colour_and_fill_keeps_them_separate(self):
         colour, fill = 1, 4
         grid = self.renderer.render(
             [Placement(Box(colour=colour, fill=fill), 0, 0, 5, 4)], 5, 4
         )
-        self.assertTrue(grid[0].startswith(_cell("┌", colour, PLAIN)))
-        rest = grid[1][len(_cell("│", colour, PLAIN)) :]
-        self.assertTrue(rest.startswith(_cell(" ", PLAIN, fill)))
+        self.assertTrue(grid[0].startswith(_cell(Cell("┌", colour))))
+        rest = grid[1][len(_cell(Cell("│", colour))) :]
+        self.assertTrue(rest.startswith(_cell(Cell(" ", fill=fill))))
 
     def test_a_label_sits_on_top_of_the_fill(self):
         fill = 3
         grid = self.renderer.render(
             [Placement(Box("hi", fill=fill), 0, 0, 5, 3)], 5, 3
         )
-        rest = grid[1][len(_cell("│", PLAIN, PLAIN)) :]
-        self.assertTrue(rest.startswith(_cell("h", PLAIN, fill)))
-        rest = rest[len(_cell("h", PLAIN, fill)) :]
-        self.assertTrue(rest.startswith(_cell("i", PLAIN, fill)))
-        rest = rest[len(_cell("i", PLAIN, fill)) :]
-        self.assertTrue(rest.startswith(_cell(" ", PLAIN, fill)))
+        rest = grid[1][len(_cell(Cell("│"))) :]
+        self.assertTrue(rest.startswith(_cell(Cell("h", fill=fill))))
+        rest = rest[len(_cell(Cell("h", fill=fill))) :]
+        self.assertTrue(rest.startswith(_cell(Cell("i", fill=fill))))
+        rest = rest[len(_cell(Cell("i", fill=fill))) :]
+        self.assertTrue(rest.startswith(_cell(Cell(" ", fill=fill))))
 
     def test_the_cursor_is_plain_over_a_filled_box(self):
         grid = self.renderer.render(
@@ -214,8 +221,8 @@ class TerminalRendererTest(unittest.TestCase):
             5,
             3,
         )
-        rest = grid[1][len(_cell("│", PLAIN, PLAIN)) :]
-        self.assertTrue(rest.startswith(_cell(CURSOR, PLAIN, PLAIN)))
+        rest = grid[1][len(_cell(Cell("│"))) :]
+        self.assertTrue(rest.startswith(_cell(Cell(CURSOR))))
 
     def test_empty_canvas_with_no_boxes_emits_no_escapes(self):
         grid = self.renderer.render([], cols=11, rows=5)

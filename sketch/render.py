@@ -1,4 +1,5 @@
-from typing import List, Protocol, Tuple
+from dataclasses import dataclass
+from typing import List, Protocol
 
 from .layout import Placement
 from .state import PLAIN, Arrow, Box, Cursor
@@ -15,10 +16,16 @@ ARROW_DOWN = "\u2193"
 ARROW_UP = "\u2191"
 RESET = "\x1b[0m"
 
-Cell = Tuple[str, int, int]
+@dataclass(frozen=True)
+class Cell:
+    character: str = BLANK
+    colour: int = PLAIN
+    fill: int = PLAIN
+
+
 Grid = List[List[Cell]]
 
-BLANK_CELL = (BLANK, PLAIN, PLAIN)
+BLANK_CELL = Cell()
 
 
 class Renderer(Protocol):
@@ -40,7 +47,7 @@ class TerminalRenderer:
                 self._draw_cursor(grid, placement)
             elif isinstance(placement.node, Arrow):
                 self._draw_arrow(grid, placement)
-        return ["".join(_cell(*cell) for cell in row) for row in grid]
+        return ["".join(_cell(cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
         left = placement.x
@@ -53,17 +60,17 @@ class TerminalRenderer:
             for x in range(left, right + 1):
                 character = self._box_character(x, y, left, right, top, bottom)
                 if character == BLANK:
-                    self._put(grid, x, y, (BLANK, PLAIN, fill))
+                    self._put(grid, x, y, Cell(BLANK, fill=fill))
                 else:
-                    self._put(grid, x, y, (character, colour, PLAIN))
+                    self._put(grid, x, y, Cell(character, colour))
         self._draw_label(grid, placement)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
-        self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
+        self._put(grid, placement.x, placement.y, Cell(CURSOR))
 
     def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
         glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
-        self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
+        self._put(grid, placement.x, placement.y, Cell(glyph))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
         fill = placement.node.fill
@@ -72,7 +79,7 @@ class TerminalRenderer:
                 grid,
                 placement.x + 1 + offset,
                 placement.y + 1,
-                (character, PLAIN, fill),
+                Cell(character, fill=fill),
             )
 
     def _box_character(
@@ -99,12 +106,12 @@ class TerminalRenderer:
             grid[y][x] = cell
 
 
-def _cell(character: str, colour: int, fill: int) -> str:
+def _cell(cell: Cell) -> str:
     codes = []
-    if colour != PLAIN:
-        codes.append(30 + colour)
-    if fill != PLAIN:
-        codes.append(40 + fill)
+    if cell.colour != PLAIN:
+        codes.append(30 + cell.colour)
+    if cell.fill != PLAIN:
+        codes.append(40 + cell.fill)
     if not codes:
-        return character
-    return f"\x1b[{';'.join(str(code) for code in codes)}m{character}{RESET}"
+        return cell.character
+    return f"\x1b[{';'.join(str(code) for code in codes)}m{cell.character}{RESET}"
