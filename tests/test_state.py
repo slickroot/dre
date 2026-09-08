@@ -31,6 +31,9 @@ class StateTest(unittest.TestCase):
     def test_an_empty_state_has_no_selection(self):
         self.assertEqual(State([]).selected, -1)
 
+    def test_an_empty_state_has_no_source(self):
+        self.assertEqual(State([]).source, -1)
+
 
 class EditTest(unittest.TestCase):
     def test_edit_replaces_the_box_at_the_given_index(self):
@@ -123,6 +126,10 @@ class HandleKeyTest(unittest.TestCase):
         state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "q").selected, 0)
 
+    def test_b_clears_source(self):
+        state = State([Box("a")], selected=0, source=0)
+        self.assertEqual(handle_key(state, "b").source, -1)
+
 
 class MoveSelectionTest(unittest.TestCase):
     def test_j_skips_a_space_and_lands_on_the_next_box(self):
@@ -174,6 +181,14 @@ class MoveSelectionTest(unittest.TestCase):
         state = State([Box("a"), Space(), Box("b")], selected=2)
         handle_key(state, "k")
         self.assertEqual(state.selected, 2)
+
+    def test_j_preserves_source(self):
+        state = State([Box("a"), Space(), Box("b")], selected=0, source=0)
+        self.assertEqual(handle_key(state, "j").source, 0)
+
+    def test_k_preserves_source(self):
+        state = State([Box("a"), Space(), Box("b")], selected=2, source=2)
+        self.assertEqual(handle_key(state, "k").source, 2)
 
 
 class SpaceTest(unittest.TestCase):
@@ -396,6 +411,33 @@ class EnterInsertModeTest(unittest.TestCase):
 
     def test_i_on_an_empty_canvas_leaves_the_mode_as_command(self):
         self.assertEqual(handle_key(State([]), "i").mode, "command")
+
+    def test_i_clears_source(self):
+        state = State([Box("a")], selected=0, source=0)
+        self.assertEqual(handle_key(state, "i").source, -1)
+
+
+class PressATest(unittest.TestCase):
+    def test_a_on_the_selected_box_sets_source(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "a").source, 0)
+
+    def test_a_changes_nothing_else(self):
+        state = State([Box("a"), Space(), Box("b")], selected=2)
+        pressed = handle_key(state, "a")
+        self.assertEqual(
+            (pressed.nodes, pressed.selected, pressed.mode, pressed.running),
+            (state.nodes, state.selected, state.mode, state.running),
+        )
+
+    def test_a_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "a"), state)
+
+    def test_a_does_not_mutate_the_given_state(self):
+        state = State([Box("a")], selected=0)
+        handle_key(state, "a")
+        self.assertEqual(state.source, -1)
 
 
 if __name__ == "__main__":
