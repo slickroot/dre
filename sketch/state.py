@@ -38,6 +38,15 @@ def next_colour(colour: int) -> int:
     return (colour + 2) % CYCLE - 1
 
 
+def move(nodes: List[Node], selected: int, step: int) -> int:
+    index = selected + step
+    while 0 <= index < len(nodes):
+        if isinstance(nodes[index], Box):
+            return index
+        index += step
+    return selected
+
+
 def handle_command(state: State, key: str) -> State:
     if key == "b":
         nodes = state.nodes + ([Space(), Box("")] if state.nodes else [Box("")])
@@ -52,7 +61,7 @@ def handle_command(state: State, key: str) -> State:
         if not state.nodes:
             return state
         step = 1 if key == "j" else -1
-        selected = min(max(state.selected + step, 0), len(state.nodes) - 1)
+        selected = move(state.nodes, state.selected, step)
         return State(state.nodes, state.running, state.mode, selected)
     if key == "c":
         if not state.nodes:

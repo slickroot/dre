@@ -125,13 +125,13 @@ class HandleKeyTest(unittest.TestCase):
 
 
 class MoveSelectionTest(unittest.TestCase):
-    def test_j_moves_the_selection_down_a_node(self):
-        state = State([Box("a"), Space(), Box("b")], selected=0)
-        self.assertEqual(handle_key(state, "j").selected, 1)
+    def test_j_skips_a_space_and_lands_on_the_next_box(self):
+        state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=0)
+        self.assertEqual(handle_key(state, "j").selected, 2)
 
-    def test_k_moves_the_selection_up_a_node(self):
-        state = State([Box("a"), Space(), Box("b")], selected=2)
-        self.assertEqual(handle_key(state, "k").selected, 1)
+    def test_k_skips_a_space_and_lands_on_the_previous_box(self):
+        state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=4)
+        self.assertEqual(handle_key(state, "k").selected, 2)
 
     def test_j_on_the_bottom_box_keeps_the_selection(self):
         state = State([Box("a"), Space(), Box("b")], selected=2)
