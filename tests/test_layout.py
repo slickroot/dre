@@ -1,7 +1,7 @@
 import unittest
 
 from sketch.layout import BORDERS, BOX_HEIGHT, Placement, height, layout, width
-from sketch.state import Box, Cursor, Space, State
+from sketch.state import Arrow, Box, Cursor, Space, State
 
 
 def boxes(placements):
@@ -192,6 +192,28 @@ class SelectedNodeCursorTest(unittest.TestCase):
         self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
 
 
+class ArrowLayoutTest(unittest.TestCase):
+    def test_an_arrow_is_placed_in_the_slots_row_at_the_centre_column(self):
+        nodes = [Box("a"), Arrow("forward"), Box("bb")]
+        placements = layout(State(nodes), cols=11, rows=11)
+        arrow = placements[1]
+        box = layout(State([Box()]), cols=11, rows=11)[0]
+        self.assertEqual(arrow.width, 1)
+        self.assertEqual(arrow.height, 1)
+        self.assertEqual(arrow.y, placements[0].y + placements[0].height)
+        self.assertEqual(arrow.x, (11 - 1) // 2)
+        self.assertEqual(arrow.x + arrow.width // 2, box.x + box.width // 2)
+
+    def test_an_arrow_does_not_move_the_box_below_it(self):
+        with_space = layout(
+            State([Box("a"), Space(), Box("bb")]), cols=11, rows=11
+        )
+        with_arrow = layout(
+            State([Box("a"), Arrow("forward"), Box("bb")]), cols=11, rows=11
+        )
+        self.assertEqual(boxes(with_space), boxes(with_arrow))
+
+
 class HeightTest(unittest.TestCase):
     def test_a_box_is_as_tall_as_a_box(self):
         self.assertEqual(height(Box("hi")), BOX_HEIGHT)
@@ -214,6 +236,9 @@ class WidthTest(unittest.TestCase):
 
     def test_a_space_has_no_width(self):
         self.assertEqual(width(Space(), editing=False), 0)
+
+    def test_an_arrow_is_one_column_wide(self):
+        self.assertEqual(width(Arrow(), editing=False), 1)
 
 
 class PlacementTest(unittest.TestCase):

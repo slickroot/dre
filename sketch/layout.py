@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List
 
-from .state import Box, Cursor, Node, State
+from .state import Arrow, Box, Cursor, Node, State
 
 BOX_HEIGHT = 3
 BORDERS = 2
@@ -31,6 +31,8 @@ def height(node: Node) -> int:
 def width(node: Node, editing: bool) -> int:
     if isinstance(node, Box):
         return interior(node.label, editing) + BORDERS
+    if isinstance(node, Arrow):
+        return 1
     return 0
 
 
