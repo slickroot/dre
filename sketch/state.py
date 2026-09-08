@@ -13,11 +13,24 @@ class Box:
 
 
 @dataclass(frozen=True)
+class Space:
+    pass
+
+
+@dataclass(frozen=True)
 class Cursor:
     pass
 
 
-Node = Union[Box, Cursor]
+Direction = Literal["forward", "backward"]
+
+
+@dataclass(frozen=True)
+class Arrow:
+    direction: Direction = "forward"
+
+
+Node = Union[Box, Space, Arrow, Cursor]
 
 Mode = Literal["command", "insert"]
 
@@ -28,28 +41,62 @@ class State:
     running: bool = True
     mode: Mode = "command"
     selected: int = -1
+    source: int = -1
 
 
 def next_colour(colour: int) -> int:
     return (colour + 2) % CYCLE - 1
 
 
+def move(nodes: List[Node], selected: int, step: int) -> int:
+    index = selected + step
+    while 0 <= index < len(nodes):
+        if isinstance(nodes[index], Box):
+            return index
+        index += step
+    return selected
+
+
 def handle_command(state: State, key: str) -> State:
     if key == "b":
-        nodes = state.nodes + [Box("")]
-        return State(nodes, state.running, "insert", len(nodes) - 1)
+        nodes = state.nodes + ([Space(), Box("")] if state.nodes else [Box("")])
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode="insert",
+            selected=len(nodes) - 1,
+            source=-1,
+        )
     if key == "q":
-        return State(state.nodes, False, state.mode, state.selected)
+        return State(
+            nodes=state.nodes,
+            running=False,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
+        )
     if key == "i":
         if not state.nodes:
             return state
-        return State(state.nodes, state.running, "insert", state.selected)
+        return State(
+            nodes=state.nodes,
+            running=state.running,
+            mode="insert",
+            selected=state.selected,
+            source=-1,
+        )
     if key in ("j", "k"):
         if not state.nodes:
             return state
         step = 1 if key == "j" else -1
-        selected = min(max(state.selected + step, 0), len(state.nodes) - 1)
-        return State(state.nodes, state.running, state.mode, selected)
+        selected = move(state.nodes, state.selected, step)
+        return State(
+            nodes=state.nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=selected,
+            source=state.source,
+        )
     if key == "c":
         if not state.nodes:
             return state
@@ -59,7 +106,13 @@ def handle_command(state: State, key: str) -> State:
             + [replace(box, colour=next_colour(box.colour))]
             + state.nodes[state.selected + 1 :]
         )
-        return State(nodes, state.running, state.mode, state.selected)
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
+        )
     if key == "f":
         if not state.nodes:
             return state
@@ -69,7 +122,36 @@ def handle_command(state: State, key: str) -> State:
             + [replace(box, fill=next_colour(box.fill))]
             + state.nodes[state.selected + 1 :]
         )
-        return State(nodes, state.running, state.mode, state.selected)
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
+        )
+    if key == "a":
+        if state.selected < 0:
+            return state
+        if state.source < 0:
+            return State(
+                nodes=state.nodes,
+                running=state.running,
+                mode=state.mode,
+                selected=state.selected,
+                source=state.selected,
+            )
+        if abs(state.selected - state.source) != 2:
+            return state
+        slot = (state.source + state.selected) // 2
+        direction = "forward" if state.selected > state.source else "backward"
+        nodes = state.nodes[:slot] + [Arrow(direction)] + state.nodes[slot + 1 :]
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=-1,
+        )
     return state
 
 
@@ -79,21 +161,29 @@ def edit(nodes: List[Node], index: int, label: str) -> List[Node]:
 
 def handle_insert(state: State, key: str) -> State:
     if key == "\x1b":
-        return State(state.nodes, state.running, "command", state.selected)
+        return State(
+            nodes=state.nodes,
+            running=state.running,
+            mode="command",
+            selected=state.selected,
+            source=state.source,
+        )
     label = state.nodes[state.selected].label
     if key == "\x7f":
         return State(
-            edit(state.nodes, state.selected, label[:-1]),
-            state.running,
-            state.mode,
-            state.selected,
+            nodes=edit(state.nodes, state.selected, label[:-1]),
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
         )
     if "\x20" <= key <= "\x7e":
         return State(
-            edit(state.nodes, state.selected, label + key),
-            state.running,
-            state.mode,
-            state.selected,
+            nodes=edit(state.nodes, state.selected, label + key),
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=state.source,
         )
     return state
 

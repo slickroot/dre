@@ -1,7 +1,7 @@
 import unittest
 
-from sketch.layout import BORDERS, BOX_HEIGHT, GAP, Placement, layout
-from sketch.state import Box, Cursor, State
+from sketch.layout import BORDERS, BOX_HEIGHT, Placement, height, layout, width
+from sketch.state import Arrow, Box, Cursor, Space, State
 
 
 def boxes(placements):
@@ -36,7 +36,25 @@ class LayoutTest(unittest.TestCase):
         self.assertLessEqual(abs(25 - 2 * placement.y - placement.height), 1)
 
     def test_every_node_gets_a_placement(self):
-        self.assertEqual(len(boxes(layout(State([Box(), Box()]), cols=11, rows=11))), 2)
+        placements = layout(State([Box(), Space(), Box()]), cols=11, rows=11)
+        self.assertEqual(len(boxes(placements)), 2)
+
+    def test_placement_indices_correspond_to_node_indices(self):
+        nodes = [Box("a"), Space(), Box("bb")]
+        placements = layout(State(nodes), cols=11, rows=11)
+        self.assertEqual([p.node for p in placements], nodes)
+
+    def test_a_space_is_placed_one_row_high(self):
+        first, space, second = layout(State([Box(), Space(), Box()]), 11, 11)
+        self.assertEqual(space.height, height(Space()))
+        self.assertEqual(space.y, first.y + first.height)
+        self.assertEqual(second.y, space.y + space.height)
+
+    def test_the_stack_is_centered_on_the_total_height_of_its_nodes(self):
+        nodes = [Box(), Space(), Box()]
+        total = sum(height(node) for node in nodes)
+        first = layout(State(nodes), cols=11, rows=11)[0]
+        self.assertEqual(first.y, (11 - total) // 2)
 
     def test_box_widens_to_fit_the_label(self):
         placements = layout(
@@ -81,7 +99,11 @@ class LayoutTest(unittest.TestCase):
 
     def test_the_cursor_follows_the_selection_not_the_last_box(self):
         placements = layout(
-            State([Box("a"), Box("bb"), Box("c")], selected=0), cols=11, rows=11
+            State(
+                [Box("a"), Space(), Box("bb"), Space(), Box("c")], selected=0
+            ),
+            cols=11,
+            rows=11,
         )
         first = boxes(placements)[0]
         cursor = cursors(placements)[0]
@@ -105,27 +127,30 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(focused.width, unfocused.width + 1)
 
     def test_boxes_are_unaffected_by_which_one_is_selected(self):
-        nodes = [Box("a"), Box("bb"), Box("c")]
+        nodes = [Box("a"), Space(), Box("bb"), Space(), Box("c")]
 
         def placed(selected):
             return boxes(layout(State(nodes, selected=selected), cols=11, rows=11))
 
-        self.assertEqual(placed(0), placed(2))
+        self.assertEqual(placed(0), placed(4))
 
     def test_a_second_box_sits_below_the_first(self):
-        first, second = layout(State([Box(), Box()]), cols=11, rows=11)
-        self.assertEqual(second.y - first.y, BOX_HEIGHT + GAP)
+        first, _, second = layout(State([Box(), Space(), Box()]), cols=11, rows=11)
+        self.assertEqual(second.y - first.y, BOX_HEIGHT + height(Space()))
 
     def test_stacked_boxes_are_separated_by_blank_rows(self):
-        first, second = layout(State([Box(), Box()]), cols=11, rows=11)
+        first, _, second = layout(State([Box(), Space(), Box()]), cols=11, rows=11)
         occupied = set(range(first.y, first.y + first.height))
         occupied |= set(range(second.y, second.y + second.height))
         between = set(range(first.y + first.height, second.y))
-        self.assertEqual(len(between - occupied), GAP)
+        self.assertEqual(len(between - occupied), height(Space()))
 
     def test_the_stack_stays_vertically_centered_as_boxes_are_added(self):
         def middle(count):
-            placements = boxes(layout(State([Box()] * count), cols=11, rows=11))
+            nodes = [Box()]
+            for _ in range(count - 1):
+                nodes += [Space(), Box()]
+            placements = boxes(layout(State(nodes), cols=11, rows=11))
             top = placements[0].y
             bottom = placements[-1].y + placements[-1].height
             return (top + bottom) / 2
@@ -134,9 +159,11 @@ class LayoutTest(unittest.TestCase):
 
     def test_each_box_is_centered_on_its_own_width(self):
         cols = 11
-        unfocused, focused = layout(
-            State([Box("a"), Box("a")], mode="insert", selected=1), cols=cols, rows=11
-        )[:2]
+        unfocused, _, focused = layout(
+            State([Box("a"), Space(), Box("a")], mode="insert", selected=2),
+            cols=cols,
+            rows=11,
+        )[:3]
         self.assertNotEqual(unfocused.x, focused.x)
         for box in (unfocused, focused):
             left = box.x
@@ -144,12 +171,74 @@ class LayoutTest(unittest.TestCase):
             self.assertLessEqual(abs(left - right), 1)
 
     def test_only_the_focused_box_gets_a_cursor(self):
-        first, second, cursor = layout(
-            State([Box("hi"), Box("hi")], mode="insert", selected=1), cols=11, rows=11
+        first, _, second, cursor = layout(
+            State([Box("hi"), Space(), Box("hi")], mode="insert", selected=2),
+            cols=11,
+            rows=11,
         )
         self.assertIsInstance(cursor.node, Cursor)
         self.assertTrue(second.y < cursor.y < second.y + second.height)
         self.assertTrue(second.x < cursor.x < second.x + second.width)
+
+
+class SelectedNodeCursorTest(unittest.TestCase):
+    def test_a_selected_box_below_a_space_still_gets_its_cursor(self):
+        placements = layout(
+            State([Box("a"), Space(), Box("hi")], selected=2), cols=11, rows=11
+        )
+        box = placements[2]
+        cursor = cursors(placements)[0]
+        self.assertEqual(cursor.x, box.x + BORDERS // 2 + len(box.node.label) - 1)
+        self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
+
+
+class ArrowLayoutTest(unittest.TestCase):
+    def test_an_arrow_is_placed_in_the_slots_row_at_the_centre_column(self):
+        nodes = [Box("a"), Arrow("forward"), Box("bb")]
+        placements = layout(State(nodes), cols=11, rows=11)
+        arrow = placements[1]
+        box = layout(State([Box()]), cols=11, rows=11)[0]
+        self.assertEqual(arrow.width, 1)
+        self.assertEqual(arrow.height, 1)
+        self.assertEqual(arrow.y, placements[0].y + placements[0].height)
+        self.assertEqual(arrow.x, (11 - 1) // 2)
+        self.assertEqual(arrow.x + arrow.width // 2, box.x + box.width // 2)
+
+    def test_an_arrow_does_not_move_the_box_below_it(self):
+        with_space = layout(
+            State([Box("a"), Space(), Box("bb")]), cols=11, rows=11
+        )
+        with_arrow = layout(
+            State([Box("a"), Arrow("forward"), Box("bb")]), cols=11, rows=11
+        )
+        self.assertEqual(boxes(with_space), boxes(with_arrow))
+
+
+class HeightTest(unittest.TestCase):
+    def test_a_box_is_as_tall_as_a_box(self):
+        self.assertEqual(height(Box("hi")), BOX_HEIGHT)
+
+    def test_a_space_is_one_row_tall(self):
+        self.assertEqual(height(Space()), 1)
+
+    def test_a_cursor_is_one_row_tall(self):
+        self.assertEqual(height(Cursor()), 1)
+
+
+class WidthTest(unittest.TestCase):
+    def test_a_box_is_as_wide_as_its_interior_and_borders(self):
+        self.assertEqual(width(Box("hi"), editing=False), len("hi") + BORDERS)
+
+    def test_an_edited_box_makes_room_for_the_cursor(self):
+        self.assertEqual(
+            width(Box("hi"), editing=True), width(Box("hi"), editing=False) + 1
+        )
+
+    def test_a_space_has_no_width(self):
+        self.assertEqual(width(Space(), editing=False), 0)
+
+    def test_an_arrow_is_one_column_wide(self):
+        self.assertEqual(width(Arrow(), editing=False), 1)
 
 
 class PlacementTest(unittest.TestCase):

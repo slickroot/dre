@@ -1,7 +1,7 @@
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
-from .state import PLAIN, Box, Cursor
+from .state import PLAIN, Arrow, Box, Cursor
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -11,6 +11,8 @@ HORIZONTAL = "─"
 VERTICAL = "│"
 BLANK = " "
 CURSOR = "\u2588"
+ARROW_DOWN = "\u2193"
+ARROW_UP = "\u2191"
 RESET = "\x1b[0m"
 
 Cell = Tuple[str, int, int]
@@ -36,6 +38,8 @@ class TerminalRenderer:
                 self._draw_box(grid, placement)
             elif isinstance(placement.node, Cursor):
                 self._draw_cursor(grid, placement)
+            elif isinstance(placement.node, Arrow):
+                self._draw_arrow(grid, placement)
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
@@ -56,6 +60,10 @@ class TerminalRenderer:
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
         self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
+
+    def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
+        glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
+        self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
         fill = placement.node.fill
