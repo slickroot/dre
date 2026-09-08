@@ -1,8 +1,8 @@
 import unittest
 
 from sketch.layout import Placement
-from sketch.render import CURSOR, TerminalRenderer, _cell
-from sketch.state import PLAIN, Box, Cursor
+from sketch.render import ARROW_DOWN, ARROW_UP, CURSOR, TerminalRenderer, _cell
+from sketch.state import PLAIN, Arrow, Box, Cursor
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -142,6 +142,22 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertTrue(gap.startswith(" "))
         gap = gap[1:]
         self.assertTrue(gap.startswith(_cell("┌", second_colour)))
+
+    def test_a_forward_arrow_is_drawn(self):
+        grid = self.renderer.render(
+            [Placement(Arrow("forward"), 2, 1, 1, 1)], 4, 3
+        )
+        self.assertEqual(grid, ["    ", "  " + ARROW_DOWN + " ", "    "])
+
+    def test_a_backward_arrow_is_drawn(self):
+        grid = self.renderer.render(
+            [Placement(Arrow("backward"), 2, 1, 1, 1)], 4, 3
+        )
+        self.assertEqual(grid, ["    ", "  " + ARROW_UP + " ", "    "])
+
+    def test_an_arrow_outside_the_grid_is_clipped(self):
+        grid = self.renderer.render([Placement(Arrow("forward"), 9, 9, 1, 1)], 4, 3)
+        self.assertEqual(grid, ["    "] * 3)
 
     def test_plain_box_is_still_byte_identical(self):
         grid = self.renderer.render([Placement(Box(colour=PLAIN), 0, 0, 5, 4)], 5, 4)
