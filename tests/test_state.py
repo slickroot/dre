@@ -13,6 +13,11 @@ class BoxColourTest(unittest.TestCase):
         self.assertEqual(Box().colour, PLAIN)
 
 
+class BoxFillTest(unittest.TestCase):
+    def test_boxes_default_to_the_plain_fill(self):
+        self.assertEqual(Box().fill, PLAIN)
+
+
 class BoxLabelTest(unittest.TestCase):
     def test_boxes_default_to_an_empty_label(self):
         self.assertEqual(Box(), Box(""))

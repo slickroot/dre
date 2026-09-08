@@ -9,6 +9,7 @@ CYCLE = 9
 class Box:
     label: str = ""
     colour: int = PLAIN
+    fill: int = PLAIN
 
 
 @dataclass(frozen=True)
