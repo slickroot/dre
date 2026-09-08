@@ -21,7 +21,15 @@ class Cursor:
     pass
 
 
-Node = Union[Box, Space, Cursor]
+Direction = Literal["forward", "backward"]
+
+
+@dataclass(frozen=True)
+class Arrow:
+    direction: Direction = "forward"
+
+
+Node = Union[Box, Space, Arrow, Cursor]
 
 Mode = Literal["command", "insert"]
 
@@ -115,7 +123,18 @@ def handle_command(state: State, key: str) -> State:
                 selected=state.selected,
                 source=state.selected,
             )
-        return state
+        if abs(state.selected - state.source) != 2:
+            return state
+        slot = (state.source + state.selected) // 2
+        direction = "forward" if state.selected > state.source else "backward"
+        nodes = state.nodes[:slot] + [Arrow(direction)] + state.nodes[slot + 1 :]
+        return State(
+            nodes=nodes,
+            running=state.running,
+            mode=state.mode,
+            selected=state.selected,
+            source=-1,
+        )
     return state
 
 

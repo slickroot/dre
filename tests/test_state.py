@@ -1,6 +1,16 @@
 import unittest
 
-from sketch.state import CYCLE, PLAIN, Box, Space, State, edit, handle_key, next_colour
+from sketch.state import (
+    CYCLE,
+    PLAIN,
+    Arrow,
+    Box,
+    Space,
+    State,
+    edit,
+    handle_key,
+    next_colour,
+)
 
 
 class BoxTest(unittest.TestCase):
@@ -438,6 +448,66 @@ class PressATest(unittest.TestCase):
         state = State([Box("a")], selected=0)
         handle_key(state, "a")
         self.assertEqual(state.source, -1)
+
+    def test_a_on_the_box_below_the_source_draws_a_forward_arrow(self):
+        state = State([Box("a"), Space(), Box("b")], selected=2, source=0)
+        connected = handle_key(state, "a")
+        self.assertEqual(
+            connected.nodes, [Box("a"), Arrow("forward"), Box("b")]
+        )
+
+    def test_a_on_the_box_above_the_source_draws_a_backward_arrow(self):
+        state = State([Box("a"), Space(), Box("b")], selected=0, source=2)
+        connected = handle_key(state, "a")
+        self.assertEqual(
+            connected.nodes, [Box("a"), Arrow("backward"), Box("b")]
+        )
+
+    def test_drawing_an_arrow_leaves_the_length_and_other_indices_unchanged(self):
+        nodes = [Box("a"), Space(), Box("b"), Space(), Box("c")]
+        state = State(nodes, selected=2, source=0)
+        connected = handle_key(state, "a")
+        self.assertEqual(len(connected.nodes), len(nodes))
+        self.assertEqual(connected.nodes[0], nodes[0])
+        self.assertEqual(connected.nodes[2], nodes[2])
+        self.assertEqual(connected.nodes[3], nodes[3])
+        self.assertEqual(connected.nodes[4], nodes[4])
+
+    def test_drawing_an_arrow_clears_source(self):
+        state = State([Box("a"), Space(), Box("b")], selected=2, source=0)
+        self.assertEqual(handle_key(state, "a").source, -1)
+
+    def test_a_two_boxes_from_the_source_does_nothing(self):
+        nodes = [
+            Box("a"),
+            Space(),
+            Box("b"),
+            Space(),
+            Box("c"),
+            Space(),
+            Box("d"),
+        ]
+        state = State(nodes, selected=4, source=0)
+        connected = handle_key(state, "a")
+        self.assertEqual(connected.nodes, nodes)
+        self.assertEqual(connected.source, 0)
+
+    def test_a_on_the_source_box_itself_does_nothing(self):
+        state = State([Box("a")], selected=0, source=0)
+        connected = handle_key(state, "a")
+        self.assertEqual(connected.nodes, [Box("a")])
+        self.assertEqual(connected.source, 0)
+
+    def test_a_over_an_existing_arrow_replaces_it_flipping_direction(self):
+        state = State([Box("a"), Space(), Box("b")], selected=0, source=-1)
+        state = handle_key(state, "a")
+        state = handle_key(state, "j")
+        state = handle_key(state, "a")
+        self.assertEqual(state.nodes, [Box("a"), Arrow("forward"), Box("b")])
+        state = handle_key(state, "a")
+        state = handle_key(state, "k")
+        state = handle_key(state, "a")
+        self.assertEqual(state.nodes, [Box("a"), Arrow("backward"), Box("b")])
 
 
 if __name__ == "__main__":
