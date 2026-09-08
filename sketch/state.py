@@ -12,11 +12,16 @@ class Box:
 
 
 @dataclass(frozen=True)
+class Space:
+    pass
+
+
+@dataclass(frozen=True)
 class Cursor:
     pass
 
 
-Node = Union[Box, Cursor]
+Node = Union[Box, Space, Cursor]
 
 Mode = Literal["command", "insert"]
 
@@ -35,7 +40,7 @@ def next_colour(colour: int) -> int:
 
 def handle_command(state: State, key: str) -> State:
     if key == "b":
-        nodes = state.nodes + [Box("")]
+        nodes = state.nodes + ([Space(), Box("")] if state.nodes else [Box("")])
         return State(nodes, state.running, "insert", len(nodes) - 1)
     if key == "q":
         return State(state.nodes, False, state.mode, state.selected)

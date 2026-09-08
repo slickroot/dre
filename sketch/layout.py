@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 from typing import List
 
-from .state import Cursor, Node, State
+from .state import Box, Cursor, Node, State
 
 BOX_HEIGHT = 3
 BORDERS = 2
-GAP = 1
 
 
 @dataclass
@@ -23,23 +22,36 @@ def interior(label: str, editing: bool) -> int:
     return max(len(label), 1)
 
 
+def height(node: Node) -> int:
+    if isinstance(node, Box):
+        return BOX_HEIGHT
+    return 1
+
+
+def width(node: Node, editing: bool) -> int:
+    if isinstance(node, Box):
+        return interior(node.label, editing) + BORDERS
+    return 0
+
+
 def layout(state: State, cols: int, rows: int) -> List[Placement]:
     placements = []
-    total = len(state.nodes) * BOX_HEIGHT + (len(state.nodes) - 1) * GAP
-    top = (rows - total) // 2
+    total = sum(height(node) for node in state.nodes)
+    y = (rows - total) // 2
     for index, node in enumerate(state.nodes):
         editing = index == state.selected and state.mode == "insert"
-        width = interior(node.label, editing) + BORDERS
+        node_width = width(node, editing)
         placements.append(
             Placement(
                 node,
-                x=(cols - width) // 2,
-                y=top + index * (BOX_HEIGHT + GAP),
-                width=width,
-                height=BOX_HEIGHT,
+                x=(cols - node_width) // 2,
+                y=y,
+                width=node_width,
+                height=height(node),
             )
         )
-    if state.selected >= 0:
+        y += height(node)
+    if state.selected >= 0 and isinstance(state.nodes[state.selected], Box):
         box = placements[state.selected]
         label = box.node.label
         if state.mode == "insert":

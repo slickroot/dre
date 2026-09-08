@@ -1,6 +1,6 @@
 import unittest
 
-from sketch.state import CYCLE, PLAIN, Box, State, edit, handle_key, next_colour
+from sketch.state import CYCLE, PLAIN, Box, Space, State, edit, handle_key, next_colour
 
 
 class BoxTest(unittest.TestCase):
@@ -34,13 +34,15 @@ class StateTest(unittest.TestCase):
 
 class EditTest(unittest.TestCase):
     def test_edit_replaces_the_box_at_the_given_index(self):
-        nodes = [Box("a"), Box("b"), Box("c")]
-        self.assertEqual(edit(nodes, 1, "z"), [Box("a"), Box("z"), Box("c")])
+        nodes = [Box("a"), Space(), Box("b"), Space(), Box("c")]
+        self.assertEqual(
+            edit(nodes, 2, "z"), [Box("a"), Space(), Box("z"), Space(), Box("c")]
+        )
 
     def test_edit_does_not_mutate_the_given_nodes(self):
-        nodes = [Box("a"), Box("b")]
+        nodes = [Box("a"), Space(), Box("b")]
         edit(nodes, 0, "z")
-        self.assertEqual(nodes, [Box("a"), Box("b")])
+        self.assertEqual(nodes, [Box("a"), Space(), Box("b")])
 
 
 class HandleKeyTest(unittest.TestCase):
@@ -66,7 +68,18 @@ class HandleKeyTest(unittest.TestCase):
         self.assertIs(handle_key(state, "q").running, True)
 
     def test_b_appends_to_existing_nodes(self):
-        self.assertEqual(handle_key(State([Box()]), "b").nodes, [Box(), Box()])
+        self.assertEqual(
+            handle_key(State([Box()]), "b").nodes, [Box(), Space(), Box()]
+        )
+
+    def test_b_on_an_empty_canvas_appends_only_a_box(self):
+        self.assertEqual(handle_key(State([]), "b").nodes, [Box("")])
+
+    def test_b_separates_the_new_box_from_the_last_one_with_a_space(self):
+        state = State([Box("a")], selected=0)
+        appended = handle_key(state, "b")
+        self.assertEqual(appended.nodes, [Box("a"), Space(), Box("")])
+        self.assertEqual(appended.selected, len(appended.nodes) - 1)
 
     def test_b_does_not_mutate_the_given_state(self):
         state = State([])
@@ -100,32 +113,32 @@ class HandleKeyTest(unittest.TestCase):
 
     def test_b_selects_the_new_last_box(self):
         state = State([Box("a")], selected=0)
-        self.assertEqual(handle_key(state, "b").selected, 1)
-
-    def test_b_selects_the_new_box_when_the_selection_was_not_last(self):
-        state = State([Box("a"), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "b").selected, 2)
 
+    def test_b_selects_the_new_box_when_the_selection_was_not_last(self):
+        state = State([Box("a"), Space(), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "b").selected, 4)
+
     def test_q_preserves_the_selection(self):
-        state = State([Box("a"), Box("b")], selected=0)
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "q").selected, 0)
 
 
 class MoveSelectionTest(unittest.TestCase):
-    def test_j_moves_the_selection_down(self):
-        state = State([Box("a"), Box("b")], selected=0)
+    def test_j_moves_the_selection_down_a_node(self):
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "j").selected, 1)
 
-    def test_k_moves_the_selection_up(self):
-        state = State([Box("a"), Box("b")], selected=1)
-        self.assertEqual(handle_key(state, "k").selected, 0)
+    def test_k_moves_the_selection_up_a_node(self):
+        state = State([Box("a"), Space(), Box("b")], selected=2)
+        self.assertEqual(handle_key(state, "k").selected, 1)
 
     def test_j_on_the_bottom_box_keeps_the_selection(self):
-        state = State([Box("a"), Box("b")], selected=1)
-        self.assertEqual(handle_key(state, "j").selected, 1)
+        state = State([Box("a"), Space(), Box("b")], selected=2)
+        self.assertEqual(handle_key(state, "j").selected, 2)
 
     def test_k_on_the_top_box_keeps_the_selection(self):
-        state = State([Box("a"), Box("b")], selected=0)
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "k").selected, 0)
 
     def test_j_on_an_empty_canvas_returns_the_state_unchanged(self):
@@ -137,7 +150,7 @@ class MoveSelectionTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "k"), state)
 
     def test_j_preserves_the_mode_the_running_flag_and_the_nodes(self):
-        state = State([Box("a"), Box("b")], selected=0)
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         moved = handle_key(state, "j")
         self.assertEqual(
             (moved.mode, moved.running, moved.nodes),
@@ -145,7 +158,7 @@ class MoveSelectionTest(unittest.TestCase):
         )
 
     def test_k_preserves_the_mode_the_running_flag_and_the_nodes(self):
-        state = State([Box("a"), Box("b")], selected=1)
+        state = State([Box("a"), Space(), Box("b")], selected=2)
         moved = handle_key(state, "k")
         self.assertEqual(
             (moved.mode, moved.running, moved.nodes),
@@ -153,14 +166,22 @@ class MoveSelectionTest(unittest.TestCase):
         )
 
     def test_j_does_not_mutate_the_given_state(self):
-        state = State([Box("a"), Box("b")], selected=0)
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         handle_key(state, "j")
         self.assertEqual(state.selected, 0)
 
     def test_k_does_not_mutate_the_given_state(self):
-        state = State([Box("a"), Box("b")], selected=1)
+        state = State([Box("a"), Space(), Box("b")], selected=2)
         handle_key(state, "k")
-        self.assertEqual(state.selected, 1)
+        self.assertEqual(state.selected, 2)
+
+
+class SpaceTest(unittest.TestCase):
+    def test_spaces_are_equal(self):
+        self.assertEqual(Space(), Space())
+
+    def test_a_space_is_not_a_box(self):
+        self.assertNotEqual(Space(), Box())
 
 
 class HandleInsertTest(unittest.TestCase):
@@ -185,8 +206,10 @@ class HandleInsertTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "i").nodes, [Box("hi")])
 
     def test_typing_edits_only_the_last_box(self):
-        state = State([Box("a"), Box("b")], mode="insert", selected=1)
-        self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
+        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=2)
+        self.assertEqual(
+            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc")]
+        )
 
     def test_esc_then_i_resumes_the_existing_label(self):
         state = handle_key(State([]), "b")
@@ -204,7 +227,9 @@ class HandleInsertTest(unittest.TestCase):
         state = handle_key(state, "b")
         state = handle_key(state, "\x1b")
         state = handle_key(state, "i")
-        self.assertEqual(handle_key(state, "c").nodes, [Box("a"), Box("bc")])
+        self.assertEqual(
+            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc")]
+        )
 
     def test_typing_does_not_mutate_the_given_state(self):
         state = State([Box("h")], mode="insert", selected=0)
@@ -241,7 +266,7 @@ class HandleInsertTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "\x1b").nodes, [Box("hi")])
 
     def test_esc_preserves_the_selection(self):
-        state = State([Box("a"), Box("b")], mode="insert", selected=0)
+        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x1b").selected, 0)
 
     def test_esc_does_not_mutate_the_given_state(self):
@@ -263,12 +288,16 @@ class HandleInsertTest(unittest.TestCase):
 
 
     def test_typing_edits_the_selected_box(self):
-        state = State([Box("a"), Box("b")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "c").nodes, [Box("ac"), Box("b")])
+        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=0)
+        self.assertEqual(
+            handle_key(state, "c").nodes, [Box("ac"), Space(), Box("b")]
+        )
 
     def test_backspace_edits_the_selected_box(self):
-        state = State([Box("ab"), Box("cd")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "\x7f").nodes, [Box("a"), Box("cd")])
+        state = State([Box("ab"), Space(), Box("cd")], mode="insert", selected=0)
+        self.assertEqual(
+            handle_key(state, "\x7f").nodes, [Box("a"), Space(), Box("cd")]
+        )
 
 
 class CycleColourTest(unittest.TestCase):
@@ -285,10 +314,10 @@ class CycleColourTest(unittest.TestCase):
         self.assertEqual(state.nodes[0].colour, PLAIN)
 
     def test_c_changes_only_the_selected_box(self):
-        state = State([Box("a"), Box("b")], selected=1)
+        state = State([Box("a"), Space(), Box("b")], selected=2)
         self.assertEqual(
             handle_key(state, "c").nodes,
-            [Box("a"), Box("b", colour=next_colour(PLAIN))],
+            [Box("a"), Space(), Box("b", colour=next_colour(PLAIN))],
         )
 
     def test_c_preserves_the_label(self):
@@ -305,24 +334,20 @@ class CycleColourTest(unittest.TestCase):
         self.assertEqual(state.nodes, [Box("a")])
 
     def test_j_leaves_colours_unchanged(self):
-        state = State([Box("a", colour=0), Box("b", colour=1)], selected=0)
-        self.assertEqual(
-            handle_key(state, "j").nodes,
-            [Box("a", colour=0), Box("b", colour=1)],
-        )
+        nodes = [Box("a", colour=0), Space(), Box("b", colour=1)]
+        state = State(nodes, selected=0)
+        self.assertEqual(handle_key(state, "j").nodes, nodes)
 
     def test_k_leaves_colours_unchanged(self):
-        state = State([Box("a", colour=0), Box("b", colour=1)], selected=1)
-        self.assertEqual(
-            handle_key(state, "k").nodes,
-            [Box("a", colour=0), Box("b", colour=1)],
-        )
+        nodes = [Box("a", colour=0), Space(), Box("b", colour=1)]
+        state = State(nodes, selected=2)
+        self.assertEqual(handle_key(state, "k").nodes, nodes)
 
     def test_b_leaves_existing_colours_unchanged(self):
         state = State([Box("a", colour=0)], selected=0)
         self.assertEqual(
             handle_key(state, "b").nodes,
-            [Box("a", colour=0), Box("")],
+            [Box("a", colour=0), Space(), Box("")],
         )
 
     def test_b_adds_a_box_with_the_plain_colour(self):
@@ -340,7 +365,7 @@ class EnterInsertModeTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "i").mode, "insert")
 
     def test_i_leaves_the_selection_alone(self):
-        state = State([Box("a"), Box("b")], selected=0)
+        state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "i").selected, 0)
 
     def test_i_on_an_empty_canvas_returns_the_state_unchanged(self):
@@ -348,13 +373,17 @@ class EnterInsertModeTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "i"), state)
 
     def test_i_types_into_the_selected_box(self):
-        state = State([Box("a"), Box("b"), Box("c")], selected=1)
+        state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=2)
         typed = handle_key(handle_key(state, "i"), "z")
-        self.assertEqual(typed.nodes, [Box("a"), Box("bz"), Box("c")])
+        self.assertEqual(
+            typed.nodes, [Box("a"), Space(), Box("bz"), Space(), Box("c")]
+        )
 
     def test_i_preserves_the_nodes(self):
-        state = State([Box("a"), Box("b")], selected=0)
-        self.assertEqual(handle_key(state, "i").nodes, [Box("a"), Box("b")])
+        state = State([Box("a"), Space(), Box("b")], selected=0)
+        self.assertEqual(
+            handle_key(state, "i").nodes, [Box("a"), Space(), Box("b")]
+        )
 
     def test_i_keeps_the_state_running(self):
         state = State([Box("hi")], selected=0)
