@@ -43,19 +43,10 @@ class TerminalRenderer:
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
-        left = placement.x
-        right = placement.x + placement.width - 1
-        top = placement.y
-        bottom = placement.y + placement.height - 1
-        colour = placement.node.colour
         fill = placement.node.fill
-        for y in range(top, bottom + 1):
-            for x in range(left, right + 1):
-                character = self._box_character(x, y, left, right, top, bottom)
-                if character == BLANK:
-                    self._put(grid, x, y, (BLANK, PLAIN, fill))
-                else:
-                    self._put(grid, x, y, (character, colour, PLAIN))
+        for y in range(placement.y, placement.y + placement.height):
+            for x in range(placement.x, placement.x + placement.width):
+                self._put(grid, x, y, (BLANK, PLAIN, fill))
         self._draw_label(grid, placement)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
