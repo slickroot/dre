@@ -60,6 +60,16 @@ def handle_command(state: State, key: str) -> State:
             + state.nodes[state.selected + 1 :]
         )
         return State(nodes, state.running, state.mode, state.selected)
+    if key == "f":
+        if not state.nodes:
+            return state
+        box = state.nodes[state.selected]
+        nodes = (
+            state.nodes[: state.selected]
+            + [replace(box, fill=next_colour(box.fill))]
+            + state.nodes[state.selected + 1 :]
+        )
+        return State(nodes, state.running, state.mode, state.selected)
     return state
 
 
