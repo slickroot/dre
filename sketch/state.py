@@ -26,12 +26,18 @@ class Cursor:
     pass
 
 
-Direction = Literal["down", "up"]
+Direction = Literal["up", "down", "left", "right"]
+
+HORIZONTAL = ("left", "right")
 
 
 @dataclass(frozen=True)
 class Arrow:
     direction: Direction = "down"
+
+
+def axis(node: Union[Space, Arrow]) -> Literal["row", "col"]:
+    return "col" if node.direction in HORIZONTAL else "row"
 
 
 Node = Union[Box, Space, Arrow, Cursor]
@@ -180,7 +186,11 @@ def handle_command(state: State, key: str) -> State:
         if abs(state.selected - state.source) != 2:
             return state
         slot = (state.source + state.selected) // 2
-        direction = "down" if state.selected > state.source else "up"
+        forward = state.selected > state.source
+        if axis(state.nodes[slot]) == "col":
+            direction = "right" if forward else "left"
+        else:
+            direction = "down" if forward else "up"
         nodes = state.nodes[:slot] + [Arrow(direction)] + state.nodes[slot + 1 :]
         return State(
             nodes=nodes,
