@@ -66,12 +66,8 @@ def centre(track: Track, extent: int, available: int, total: int) -> int:
     return (available - total + 2 * track.offset + track.extent - extent) // 2
 
 
-def editing(state: State, index: int) -> bool:
-    return state.mode == "insert" and index == state.selected
-
-
-def interior(label: str, editing: bool) -> int:
-    return max(len(label) + int(editing), 1)
+def interior(label: str) -> int:
+    return max(len(label), 1)
 
 
 def height(node: Node) -> int:
@@ -80,9 +76,9 @@ def height(node: Node) -> int:
     return GAP_HEIGHT
 
 
-def width(node: Node, editing: bool) -> int:
+def width(node: Node) -> int:
     if isinstance(node, Box):
-        return interior(node.label, editing) + BORDERS
+        return interior(node.label) + BORDERS
     if isinstance(node, Arrow):
         return 4 if node_axis(node) == "col" else 1
     if isinstance(node, Space) and node.direction == "right":
@@ -94,8 +90,7 @@ def cursor(state: State, placements: List[Placement]) -> List[Placement]:
     if state.selected < 0 or not isinstance(state.nodes[state.selected], Box):
         return []
     box = placements[state.selected]
-    label = box.node.label
-    x = box.x + interior(label, editing(state, state.selected))
+    x = box.x + interior(box.node.label)
     return [Placement(Cursor(), x=x, y=box.y + 1, width=1, height=1)]
 
 
@@ -104,9 +99,7 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
         return []
 
     coordinates = walk(state.nodes)
-    widths = [
-        width(node, editing(state, index)) for index, node in enumerate(state.nodes)
-    ]
+    widths = [width(node) for node in state.nodes]
     heights = [height(node) for node in state.nodes]
 
     columns = tracks(widths, [c.col for c in coordinates])

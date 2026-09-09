@@ -2,6 +2,7 @@ import unittest
 
 from sketch.state import (
     CYCLE,
+    PAD,
     PALETTE_SIZE,
     PLAIN,
     Arrow,
@@ -71,10 +72,10 @@ def bj(state, key1="b", key2="j"):
 
 class HandleKeyTest(unittest.TestCase):
     def test_bj_appends_a_box(self):
-        self.assertEqual(bj(State([])).nodes, [Box()])
+        self.assertEqual(bj(State([])).nodes, [Box(PAD)])
 
     def test_bj_appends_a_box_with_an_empty_label(self):
-        self.assertEqual(bj(State([])).nodes, [Box("")])
+        self.assertEqual(bj(State([])).nodes, [Box(PAD)])
 
     def test_bj_enters_insert_mode(self):
         self.assertEqual(bj(State([])).mode, "insert")
@@ -88,21 +89,21 @@ class HandleKeyTest(unittest.TestCase):
         self.assertEqual(handle_key(State([]), "q").mode, "command")
 
     def test_insert_mode_is_dispatched_separately(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         self.assertIs(handle_key(state, "q").running, True)
 
     def test_bj_appends_to_existing_nodes(self):
         self.assertEqual(
-            bj(State([Box()])).nodes, [Box(), Space(), Box()]
+            bj(State([Box()])).nodes, [Box(), Space(), Box(PAD)]
         )
 
     def test_bj_on_an_empty_canvas_appends_only_a_box(self):
-        self.assertEqual(bj(State([])).nodes, [Box("")])
+        self.assertEqual(bj(State([])).nodes, [Box(PAD)])
 
     def test_bj_separates_the_new_box_from_the_last_one_with_a_space(self):
         state = State([Box("a")], selected=0)
         appended = bj(state)
-        self.assertEqual(appended.nodes, [Box("a"), Space(), Box("")])
+        self.assertEqual(appended.nodes, [Box("a"), Space(), Box(PAD)])
         self.assertEqual(appended.selected, len(appended.nodes) - 1)
 
     def test_bj_does_not_mutate_the_given_state(self):
@@ -175,7 +176,7 @@ class PendingCommandTest(unittest.TestCase):
     def test_bl_appends_a_space_directed_right_and_a_box(self):
         state = State([Box("a")], selected=0)
         result = handle_key(handle_key(state, "b"), "l")
-        self.assertEqual(result.nodes, [Box("a"), Space(direction="right"), Box("")])
+        self.assertEqual(result.nodes, [Box("a"), Space(direction="right"), Box(PAD)])
 
     def test_bl_selects_the_new_box(self):
         state = State([Box("a")], selected=0)
@@ -195,7 +196,7 @@ class PendingCommandTest(unittest.TestCase):
     def test_bj_appends_a_space_directed_down_and_a_box(self):
         state = State([Box("a")], selected=0)
         result = handle_key(handle_key(state, "b"), "j")
-        self.assertEqual(result.nodes, [Box("a"), Space(direction="down"), Box("")])
+        self.assertEqual(result.nodes, [Box("a"), Space(direction="down"), Box(PAD)])
 
     def test_bj_clears_pending(self):
         state = State([Box("a")], selected=0)
@@ -294,28 +295,28 @@ class SpaceTest(unittest.TestCase):
 class HandleInsertTest(unittest.TestCase):
     def test_a_printable_character_appends_to_the_last_box_label(self):
         state = bj(State([]))
-        self.assertEqual(handle_key(state, "h").nodes, [Box("h")])
+        self.assertEqual(handle_key(state, "h").nodes, [Box("h" + PAD)])
 
     def test_letters_bound_in_command_mode_are_ordinary_here(self):
-        state = State([Box("")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "b").nodes, [Box("b")])
+        state = State([Box(PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "b").nodes, [Box("b" + PAD)])
 
     def test_q_does_not_stop_the_state(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         self.assertIs(handle_key(state, "q").running, True)
 
     def test_typing_stays_in_insert_mode(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "h").mode, "insert")
 
     def test_typing_appends_to_an_existing_label(self):
-        state = State([Box("h")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "i").nodes, [Box("hi")])
+        state = State([Box("h" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "i").nodes, [Box("hi" + PAD)])
 
     def test_typing_edits_only_the_last_box(self):
-        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=2)
+        state = State([Box("a"), Space(), Box("b" + PAD)], mode="insert", selected=2)
         self.assertEqual(
-            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc")]
+            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc" + PAD)]
         )
 
     def test_esc_then_i_resumes_the_existing_label(self):
@@ -324,7 +325,7 @@ class HandleInsertTest(unittest.TestCase):
         state = handle_key(state, "i")
         state = handle_key(state, "\x1b")
         state = handle_key(state, "i")
-        self.assertEqual(handle_key(state, "!").nodes, [Box("hi!")])
+        self.assertEqual(handle_key(state, "!").nodes, [Box("hi!" + PAD)])
 
     def test_esc_then_i_resumes_the_last_of_several_bj_boxes(self):
         state = bj(State([]))
@@ -335,75 +336,75 @@ class HandleInsertTest(unittest.TestCase):
         state = handle_key(state, "\x1b")
         state = handle_key(state, "i")
         self.assertEqual(
-            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc")]
+            handle_key(state, "c").nodes, [Box("a"), Space(), Box("bc" + PAD)]
         )
 
     def test_typing_does_not_mutate_the_given_state(self):
-        state = State([Box("h")], mode="insert", selected=0)
+        state = State([Box("h" + PAD)], mode="insert", selected=0)
         handle_key(state, "i")
-        self.assertEqual(state.nodes, [Box("h")])
+        self.assertEqual(state.nodes, [Box("h" + PAD)])
 
     def test_space_is_printable(self):
-        state = State([Box("a")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, " ").nodes, [Box("a ")])
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, " ").nodes, [Box("a " + PAD)])
 
     def test_tilde_is_printable(self):
-        state = State([Box("")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "~").nodes, [Box("~")])
+        state = State([Box(PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "~").nodes, [Box("~" + PAD)])
 
     def test_backspace_drops_the_last_character(self):
-        state = State([Box("hi")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "\x7f").nodes, [Box("h")])
+        state = State([Box("hi" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "\x7f").nodes, [Box("h" + PAD)])
 
     def test_backspace_on_an_empty_label_is_a_no_op(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x7f"), state)
 
     def test_backspace_does_not_mutate_the_given_state(self):
-        state = State([Box("hi")], mode="insert", selected=0)
+        state = State([Box("hi" + PAD)], mode="insert", selected=0)
         handle_key(state, "\x7f")
-        self.assertEqual(state.nodes, [Box("hi")])
+        self.assertEqual(state.nodes, [Box("hi" + PAD)])
 
     def test_esc_returns_to_command_mode(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x1b").mode, "command")
 
     def test_esc_preserves_the_nodes(self):
-        state = State([Box("hi")], mode="insert", selected=0)
+        state = State([Box("hi" + PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x1b").nodes, [Box("hi")])
 
     def test_esc_preserves_the_selection(self):
-        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=0)
+        state = State([Box("a" + PAD), Space(), Box("b")], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x1b").selected, 0)
 
     def test_esc_does_not_mutate_the_given_state(self):
-        state = State([Box("")], mode="insert", selected=0)
+        state = State([Box(PAD)], mode="insert", selected=0)
         handle_key(state, "\x1b")
         self.assertEqual(state.mode, "insert")
 
     def test_a_control_character_returns_the_state_unchanged(self):
-        state = State([Box("hi")], mode="insert", selected=0)
+        state = State([Box("hi" + PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\x01"), state)
 
     def test_a_non_ascii_character_returns_the_state_unchanged(self):
-        state = State([Box("hi")], mode="insert", selected=0)
+        state = State([Box("hi" + PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "\u00e9"), state)
 
     def test_typing_leaves_the_boxs_colour_unchanged(self):
-        state = State([Box("a", colour=0)], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "z").nodes, [Box("az", colour=0)])
+        state = State([Box("a" + PAD, colour=0)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "z").nodes, [Box("az" + PAD, colour=0)])
 
 
     def test_typing_edits_the_selected_box(self):
-        state = State([Box("a"), Space(), Box("b")], mode="insert", selected=0)
+        state = State([Box("a" + PAD), Space(), Box("b")], mode="insert", selected=0)
         self.assertEqual(
-            handle_key(state, "c").nodes, [Box("ac"), Space(), Box("b")]
+            handle_key(state, "c").nodes, [Box("ac" + PAD), Space(), Box("b")]
         )
 
     def test_backspace_edits_the_selected_box(self):
-        state = State([Box("ab"), Space(), Box("cd")], mode="insert", selected=0)
+        state = State([Box("ab" + PAD), Space(), Box("cd")], mode="insert", selected=0)
         self.assertEqual(
-            handle_key(state, "\x7f").nodes, [Box("a"), Space(), Box("cd")]
+            handle_key(state, "\x7f").nodes, [Box("a" + PAD), Space(), Box("cd")]
         )
 
 
@@ -454,16 +455,16 @@ class CycleColourTest(unittest.TestCase):
         state = State([Box("a", colour=0)], selected=0)
         self.assertEqual(
             bj(state).nodes,
-            [Box("a", colour=0), Space(), Box("")],
+            [Box("a", colour=0), Space(), Box(PAD)],
         )
 
     def test_bj_adds_a_box_with_the_plain_colour(self):
         state = State([])
-        self.assertEqual(bj(state).nodes, [Box(colour=PLAIN)])
+        self.assertEqual(bj(state).nodes, [Box(PAD, colour=PLAIN)])
 
     def test_c_in_insert_mode_types_the_letter_c(self):
-        state = State([Box("a")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "c").nodes, [Box("ac")])
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "c").nodes, [Box("ac" + PAD)])
 
 
 class CycleFillTest(unittest.TestCase):
@@ -517,12 +518,12 @@ class CycleFillTest(unittest.TestCase):
         state = State([Box("a", fill=0)], selected=0)
         self.assertEqual(
             bj(state).nodes,
-            [Box("a", fill=0), Space(), Box("")],
+            [Box("a", fill=0), Space(), Box(PAD)],
         )
 
     def test_f_in_insert_mode_types_the_letter_f(self):
-        state = State([Box("a")], mode="insert", selected=0)
-        self.assertEqual(handle_key(state, "f").nodes, [Box("af")])
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "f").nodes, [Box("af" + PAD)])
 
     def test_c_does_not_change_fill(self):
         state = State([Box("a", fill=next_fill(PLAIN))], selected=0)
@@ -559,13 +560,13 @@ class EnterInsertModeTest(unittest.TestCase):
         state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=2)
         typed = handle_key(handle_key(state, "i"), "z")
         self.assertEqual(
-            typed.nodes, [Box("a"), Space(), Box("bz"), Space(), Box("c")]
+            typed.nodes, [Box("a"), Space(), Box("bz" + PAD), Space(), Box("c")]
         )
 
     def test_i_preserves_the_nodes(self):
         state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(
-            handle_key(state, "i").nodes, [Box("a"), Space(), Box("b")]
+            handle_key(state, "i").nodes, [Box("a" + PAD), Space(), Box("b")]
         )
 
     def test_i_keeps_the_state_running(self):

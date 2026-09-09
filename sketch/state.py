@@ -4,6 +4,7 @@ from typing import List, Literal, Union
 PLAIN = -1
 CYCLE = 9
 PALETTE_SIZE = 5
+PAD = " "
 
 
 @dataclass(frozen=True)
@@ -77,7 +78,7 @@ def handle_command(state: State, key: str) -> State:
         if key in ("j", "l"):
             direction: SpaceDirection = "down" if key == "j" else "right"
             nodes = state.nodes + (
-                [Space(direction=direction), Box("")] if state.nodes else [Box("")]
+                [Space(direction=direction), Box(PAD)] if state.nodes else [Box(PAD)]
             )
             return State(
                 nodes=nodes,
@@ -116,8 +117,10 @@ def handle_command(state: State, key: str) -> State:
     if key == "i":
         if not state.nodes:
             return state
+        box = state.nodes[state.selected]
+        nodes = edit(state.nodes, state.selected, box.label + PAD)
         return State(
-            nodes=state.nodes,
+            nodes=nodes,
             running=state.running,
             mode="insert",
             selected=state.selected,
@@ -208,19 +211,19 @@ def edit(nodes: List[Node], index: int, label: str) -> List[Node]:
 
 
 def handle_insert(state: State, key: str) -> State:
+    label = state.nodes[state.selected].label
     if key == "\x1b":
         return State(
-            nodes=state.nodes,
+            nodes=edit(state.nodes, state.selected, label[: -len(PAD)]),
             running=state.running,
             mode="command",
             selected=state.selected,
             source=state.source,
             pending=state.pending,
         )
-    label = state.nodes[state.selected].label
     if key == "\x7f":
         return State(
-            nodes=edit(state.nodes, state.selected, label[:-1]),
+            nodes=edit(state.nodes, state.selected, label[:-2] + PAD),
             running=state.running,
             mode=state.mode,
             selected=state.selected,
@@ -229,7 +232,7 @@ def handle_insert(state: State, key: str) -> State:
         )
     if "\x20" <= key <= "\x7e":
         return State(
-            nodes=edit(state.nodes, state.selected, label + key),
+            nodes=edit(state.nodes, state.selected, label[:-1] + key + PAD),
             running=state.running,
             mode=state.mode,
             selected=state.selected,

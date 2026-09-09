@@ -14,7 +14,7 @@ from sketch.layout import (
     walk,
     width,
 )
-from sketch.state import Arrow, Box, Cursor, Space, State
+from sketch.state import PAD, Arrow, Box, Cursor, Space, State
 
 
 def boxes(placements):
@@ -71,22 +71,22 @@ class LayoutTest(unittest.TestCase):
 
     def test_box_widens_to_fit_the_label(self):
         placements = layout(
-            State([Box("hi")], mode="insert", selected=0), cols=11, rows=11
+            State([Box("hi" + PAD)], mode="insert", selected=0), cols=11, rows=11
         )
         self.assertEqual(
             placements[0],
-            Placement(Box("hi"), x=3, y=4, width=5, height=3),
+            Placement(Box("hi" + PAD), x=3, y=4, width=5, height=3),
         )
 
     def test_box_stays_centered_as_it_grows(self):
         def x(label):
-            state = State([Box(label)], mode="insert", selected=0)
+            state = State([Box(label + PAD)], mode="insert", selected=0)
             return layout(state, 21, 11)[0].x
 
         self.assertEqual([x(""), x("ab"), x("abcd")], [9, 8, 7])
 
     def test_insert_mode_puts_a_cursor_inside_the_focused_box(self):
-        box, cursor = layout(State([Box("hi")], mode="insert", selected=0), 11, 11)
+        box, cursor = layout(State([Box("hi" + PAD)], mode="insert", selected=0), 11, 11)
         self.assertIsInstance(cursor.node, Cursor)
         self.assertTrue(box.x < cursor.x < box.x + box.width)
         self.assertTrue(box.y < cursor.y < box.y + box.height)
@@ -105,9 +105,9 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
 
     def test_the_insert_mode_cursor_sits_one_past_the_last_character(self):
-        box, cursor = layout(State([Box("hi")], mode="insert", selected=0), 11, 11)
+        box, cursor = layout(State([Box("hi" + PAD)], mode="insert", selected=0), 11, 11)
         interior = box.x + BORDERS // 2
-        self.assertEqual(cursor.x, interior + len(box.node.label))
+        self.assertEqual(cursor.x, interior + len("hi"))
         self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
 
     def test_the_cursor_follows_the_selection_not_the_last_box(self):
@@ -135,7 +135,7 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(cursor.x, box.x + BORDERS // 2)
 
     def test_the_cursor_widens_the_box_it_sits_in(self):
-        focused = layout(State([Box("hi")], mode="insert", selected=0), 11, 11)[0]
+        focused = layout(State([Box("hi" + PAD)], mode="insert", selected=0), 11, 11)[0]
         unfocused = layout(State([Box("hi")], selected=0), 11, 11)[0]
         self.assertEqual(focused.width, unfocused.width + 1)
 
@@ -174,7 +174,7 @@ class LayoutTest(unittest.TestCase):
     def test_each_box_is_centered_on_its_own_width(self):
         cols = 11
         unfocused, _, focused = layout(
-            State([Box("a"), Space(), Box("a")], mode="insert", selected=2),
+            State([Box("a"), Space(), Box("a" + PAD)], mode="insert", selected=2),
             cols=cols,
             rows=11,
         )[:3]
@@ -228,7 +228,7 @@ class LayoutTest(unittest.TestCase):
 
     def test_only_the_focused_box_gets_a_cursor(self):
         first, _, second, cursor = layout(
-            State([Box("hi"), Space(), Box("hi")], mode="insert", selected=2),
+            State([Box("hi"), Space(), Box("hi" + PAD)], mode="insert", selected=2),
             cols=11,
             rows=11,
         )
@@ -308,29 +308,24 @@ class HeightTest(unittest.TestCase):
 
 class WidthTest(unittest.TestCase):
     def test_a_box_is_as_wide_as_its_interior_and_borders(self):
-        self.assertEqual(width(Box("hi"), editing=False), len("hi") + BORDERS)
-
-    def test_an_edited_box_makes_room_for_the_cursor(self):
-        self.assertEqual(
-            width(Box("hi"), editing=True), width(Box("hi"), editing=False) + 1
-        )
+        self.assertEqual(width(Box("hi")), len("hi") + BORDERS)
 
     def test_a_space_has_no_width(self):
-        self.assertEqual(width(Space(), editing=False), 0)
+        self.assertEqual(width(Space()), 0)
 
     def test_a_rightward_space_is_four_columns_wide(self):
-        self.assertEqual(width(Space(direction="right"), editing=False), 4)
+        self.assertEqual(width(Space(direction="right")), 4)
 
     def test_an_arrow_is_one_column_wide(self):
-        self.assertEqual(width(Arrow(), editing=False), 1)
+        self.assertEqual(width(Arrow()), 1)
 
     def test_a_vertical_arrow_is_one_column_wide(self):
-        self.assertEqual(width(Arrow("up"), editing=False), 1)
-        self.assertEqual(width(Arrow("down"), editing=False), 1)
+        self.assertEqual(width(Arrow("up")), 1)
+        self.assertEqual(width(Arrow("down")), 1)
 
     def test_a_horizontal_arrow_is_four_columns_wide(self):
-        self.assertEqual(width(Arrow("right"), editing=False), 4)
-        self.assertEqual(width(Arrow("left"), editing=False), 4)
+        self.assertEqual(width(Arrow("right")), 4)
+        self.assertEqual(width(Arrow("left")), 4)
 
 
 class WalkTest(unittest.TestCase):
