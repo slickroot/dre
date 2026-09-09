@@ -217,6 +217,48 @@ class GraphicsRendererTest(unittest.TestCase):
         self.assertEqual(cy - top, bottom - cy)
         self.assertGreater(bottom, cy)
 
+    def test_arrowhead_shape_is_consistent_regardless_of_direction(self):
+        # cell_width != cell_height here, which used to make vertical and
+        # horizontal arrowheads different shapes.
+        vertical = self.only_sprite(
+            Placement(Arrow("down"), x=1, y=1, width=1, height=3), cell=(8, 4)
+        )
+        horizontal = self.only_sprite(
+            Placement(Arrow("right"), x=1, y=1, width=3, height=1), cell=(8, 4)
+        )
+
+        def spreads(sprite, vertical):
+            if vertical:
+                cx = sprite.width // 2
+                tip = sprite.height - 1
+                get = lambda d: [
+                    x
+                    for x in range(sprite.width)
+                    if x != cx
+                    and self.pixel(sprite, x, tip - d)[3] == OPAQUE
+                ]
+                centre = cx
+            else:
+                cy = sprite.height // 2
+                tip = sprite.width - 1
+                get = lambda d: [
+                    y
+                    for y in range(sprite.height)
+                    if y != cy
+                    and self.pixel(sprite, tip - d, y)[3] == OPAQUE
+                ]
+                centre = cy
+            result = []
+            for d in range(5):
+                opaque = get(d)
+                result.append(abs(opaque[0] - centre) if opaque else 0)
+            return result
+
+        vertical_spreads = spreads(vertical, vertical=True)
+        horizontal_spreads = spreads(horizontal, vertical=False)
+        self.assertEqual(vertical_spreads, horizontal_spreads)
+        self.assertEqual(vertical_spreads, [0, 1, 1, 2, 2])
+
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
             Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)

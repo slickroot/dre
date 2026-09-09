@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import cos, radians, tan
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
@@ -23,6 +24,8 @@ ARROW_GLYPHS = {
     "left": ARROW_LEFT,
     "right": ARROW_RIGHT,
 }
+ARROWHEAD_ANGLE_DEG = 30
+ARROWHEAD_EDGE_LENGTH = 5
 RESET = "\x1b[0m"
 
 Cell = Tuple[str, int, int]
@@ -136,15 +139,11 @@ class GraphicsRenderer:
         vertical = axis(placement.node) == "row"
         if vertical:
             length = height
-            thickness = self.cell_height
             centre = width // 2
-            reach = min(centre, width - 1 - centre)
             head_at_far_end = direction == "down"
         else:
             length = width
-            thickness = self.cell_width
             centre = height // 2
-            reach = min(centre, height - 1 - centre)
             head_at_far_end = direction == "right"
         ink = _colour(PLAIN) + (OPAQUE,)
         first_x = (left - placement.x) * self.cell_width
@@ -156,7 +155,7 @@ class GraphicsRenderer:
             for x in range(first_x, last_x):
                 along, across = (y, x) if vertical else (x, y)
                 on_arrow = self._on_arrow(
-                    along, across, length, centre, reach, head_at_far_end, thickness
+                    along, across, length, centre, head_at_far_end
                 )
                 pixels.extend(ink if on_arrow else TRANSPARENT)
         return Sprite(
@@ -173,21 +172,18 @@ class GraphicsRenderer:
         across: int,
         length: int,
         centre: int,
-        reach: int,
         head_at_far_end: bool,
-        thickness: int,
     ) -> bool:
         if across == centre:
             return True
         if head_at_far_end:
-            in_head = along >= length - thickness
             distance = (length - 1) - along
         else:
-            in_head = along < thickness
             distance = along
-        if not in_head or thickness <= 1:
+        depth = ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG))
+        if distance < 0 or distance >= depth:
             return False
-        spread = round(distance * reach / (thickness - 1))
+        spread = round(distance * tan(radians(ARROWHEAD_ANGLE_DEG)))
         return abs(across - centre) == spread
 
 
