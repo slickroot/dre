@@ -3,6 +3,7 @@ from typing import List, Literal, Union
 
 PLAIN = -1
 CYCLE = 9
+PALETTE_SIZE = 5
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,10 @@ class State:
 
 
 def next_colour(colour: int) -> int:
+    return (colour + 2) % (PALETTE_SIZE + 1) - 1
+
+
+def next_fill(colour: int) -> int:
     return (colour + 2) % CYCLE - 1
 
 
@@ -119,7 +124,7 @@ def handle_command(state: State, key: str) -> State:
         box = state.nodes[state.selected]
         nodes = (
             state.nodes[: state.selected]
-            + [replace(box, fill=next_colour(box.fill))]
+            + [replace(box, fill=next_fill(box.fill))]
             + state.nodes[state.selected + 1 :]
         )
         return State(
