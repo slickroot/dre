@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .state import Arrow, Box, Cursor, Node, Space, State
+from .state import axis as node_axis
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 2
@@ -33,7 +34,7 @@ def width(node: Node, editing: bool) -> int:
     if isinstance(node, Box):
         return interior(node.label, editing) + BORDERS
     if isinstance(node, Arrow):
-        return 1
+        return 4 if node_axis(node) == "col" else 1
     if isinstance(node, Space) and node.direction == "right":
         return 4
     return 0
@@ -56,11 +57,11 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
     # single-column flow layout did for a pure vertical stack.
     node_cells = [(0, 0)]
     row, col = 0, 0
-    axis = "row"
+    active = "row"
     for node in state.nodes[1:]:
-        if isinstance(node, Space):
-            axis = "col" if node.direction == "right" else "row"
-        if axis == "row":
+        if isinstance(node, (Space, Arrow)):
+            active = node_axis(node)
+        if active == "row":
             row += 1
         else:
             col += 1

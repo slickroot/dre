@@ -264,6 +264,28 @@ class ArrowLayoutTest(unittest.TestCase):
         )
         self.assertEqual(boxes(with_space), boxes(with_arrow))
 
+    def test_a_rightward_arrow_does_not_move_the_box_beside_it(self):
+        with_space = layout(
+            State([Box("a"), Space(direction="right"), Box("bb")]),
+            cols=21,
+            rows=11,
+        )
+        with_arrow = layout(
+            State([Box("a"), Arrow("right"), Box("bb")]), cols=21, rows=11
+        )
+        self.assertEqual(boxes(with_space), boxes(with_arrow))
+
+    def test_a_leftward_arrow_does_not_move_the_box_beside_it(self):
+        with_space = layout(
+            State([Box("a"), Space(direction="right"), Box("bb")]),
+            cols=21,
+            rows=11,
+        )
+        with_arrow = layout(
+            State([Box("a"), Arrow("left"), Box("bb")]), cols=21, rows=11
+        )
+        self.assertEqual(boxes(with_space), boxes(with_arrow))
+
 
 class HeightTest(unittest.TestCase):
     def test_a_box_is_as_tall_as_a_box(self):
@@ -296,6 +318,14 @@ class WidthTest(unittest.TestCase):
 
     def test_an_arrow_is_one_column_wide(self):
         self.assertEqual(width(Arrow(), editing=False), 1)
+
+    def test_a_vertical_arrow_is_one_column_wide(self):
+        self.assertEqual(width(Arrow("up"), editing=False), 1)
+        self.assertEqual(width(Arrow("down"), editing=False), 1)
+
+    def test_a_horizontal_arrow_is_four_columns_wide(self):
+        self.assertEqual(width(Arrow("right"), editing=False), 4)
+        self.assertEqual(width(Arrow("left"), editing=False), 4)
 
 
 class PlacementTest(unittest.TestCase):
