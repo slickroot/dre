@@ -4,6 +4,7 @@ from typing import List
 from .state import Arrow, Box, Cursor, Node, State
 
 BOX_HEIGHT = 3
+GAP_HEIGHT = 2
 BORDERS = 2
 
 
@@ -25,7 +26,7 @@ def interior(label: str, editing: bool) -> int:
 def height(node: Node) -> int:
     if isinstance(node, Box):
         return BOX_HEIGHT
-    return 1
+    return GAP_HEIGHT
 
 
 def width(node: Node, editing: bool) -> int:

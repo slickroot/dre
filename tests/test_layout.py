@@ -1,6 +1,14 @@
 import unittest
 
-from sketch.layout import BORDERS, BOX_HEIGHT, Placement, height, layout, width
+from sketch.layout import (
+    BORDERS,
+    BOX_HEIGHT,
+    GAP_HEIGHT,
+    Placement,
+    height,
+    layout,
+    width,
+)
 from sketch.state import Arrow, Box, Cursor, Space, State
 
 
@@ -155,7 +163,8 @@ class LayoutTest(unittest.TestCase):
             bottom = placements[-1].y + placements[-1].height
             return (top + bottom) / 2
 
-        self.assertEqual([middle(1), middle(2), middle(3)], [11 / 2] * 3)
+        for count in (1, 2, 3):
+            self.assertLessEqual(abs(middle(count) - 11 / 2), 0.5)
 
     def test_each_box_is_centered_on_its_own_width(self):
         cols = 11
@@ -199,7 +208,7 @@ class ArrowLayoutTest(unittest.TestCase):
         arrow = placements[1]
         box = layout(State([Box()]), cols=11, rows=11)[0]
         self.assertEqual(arrow.width, 1)
-        self.assertEqual(arrow.height, 1)
+        self.assertEqual(arrow.height, GAP_HEIGHT)
         self.assertEqual(arrow.y, placements[0].y + placements[0].height)
         self.assertEqual(arrow.x, (11 - 1) // 2)
         self.assertEqual(arrow.x + arrow.width // 2, box.x + box.width // 2)
@@ -218,11 +227,14 @@ class HeightTest(unittest.TestCase):
     def test_a_box_is_as_tall_as_a_box(self):
         self.assertEqual(height(Box("hi")), BOX_HEIGHT)
 
-    def test_a_space_is_one_row_tall(self):
-        self.assertEqual(height(Space()), 1)
+    def test_a_space_is_a_gap_tall(self):
+        self.assertEqual(height(Space()), GAP_HEIGHT)
 
-    def test_a_cursor_is_one_row_tall(self):
-        self.assertEqual(height(Cursor()), 1)
+    def test_an_arrow_is_a_gap_tall(self):
+        self.assertEqual(height(Arrow()), GAP_HEIGHT)
+
+    def test_a_cursor_is_a_gap_tall(self):
+        self.assertEqual(height(Cursor()), GAP_HEIGHT)
 
 
 class WidthTest(unittest.TestCase):
