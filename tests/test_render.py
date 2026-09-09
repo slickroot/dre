@@ -159,24 +159,20 @@ class TerminalRendererTest(unittest.TestCase):
         rest = rest[1:]
         self.assertTrue(rest.startswith(_cell(BLANK, PLAIN, second_fill)))
 
-    def test_a_forward_arrow_is_drawn(self):
+    def test_a_forward_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(Arrow("forward"), 2, 1, 1, 1)], 4, 3
+            [Placement(Arrow("forward"), 2, 1, 1, 2)], 4, 4
         )
-        self.assertEqual(
-            grid, [BLANK * 4, BLANK * 2 + ARROW_DOWN + BLANK, BLANK * 4]
-        )
+        self.assertEqual(grid, [BLANK * 4] * 4)
 
-    def test_a_backward_arrow_is_drawn(self):
+    def test_a_backward_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(Arrow("backward"), 2, 1, 1, 1)], 4, 3
+            [Placement(Arrow("backward"), 2, 1, 1, 2)], 4, 4
         )
-        self.assertEqual(
-            grid, [BLANK * 4, BLANK * 2 + ARROW_UP + BLANK, BLANK * 4]
-        )
+        self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_an_arrow_outside_the_grid_is_clipped(self):
-        grid = self.renderer.render([Placement(Arrow("forward"), 9, 9, 1, 1)], 4, 3)
+        grid = self.renderer.render([Placement(Arrow("forward"), 9, 9, 1, 2)], 4, 3)
         self.assertEqual(grid, [BLANK * 4] * 3)
 
     def test_an_unfilled_box_emits_no_escapes(self):
@@ -259,6 +255,21 @@ class BoxCharacterTest(unittest.TestCase):
 
     def test_the_interior_is_blank(self):
         self.assertEqual(self.character(2, 1), BLANK)
+
+
+class DrawArrowTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = TerminalRenderer()
+
+    def test_a_forward_arrow_draws_the_down_glyph(self):
+        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
+        self.renderer._draw_arrow(grid, Placement(Arrow("forward"), 2, 1, 1, 2))
+        self.assertEqual(grid[1][2], (ARROW_DOWN, PLAIN, PLAIN))
+
+    def test_a_backward_arrow_draws_the_up_glyph(self):
+        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
+        self.renderer._draw_arrow(grid, Placement(Arrow("backward"), 2, 1, 1, 2))
+        self.assertEqual(grid[1][2], (ARROW_UP, PLAIN, PLAIN))
 
 
 if __name__ == "__main__":

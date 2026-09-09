@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
-from .state import PLAIN, Arrow, Box, Cursor
+from .state import PLAIN, Box, Cursor
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -127,8 +127,6 @@ class TerminalRenderer:
                 self._draw_box(grid, placement)
             elif isinstance(placement.node, Cursor):
                 self._draw_cursor(grid, placement)
-            elif isinstance(placement.node, Arrow):
-                self._draw_arrow(grid, placement)
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
