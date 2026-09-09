@@ -179,6 +179,48 @@ class LayoutTest(unittest.TestCase):
             right = cols - (box.x + box.width)
             self.assertLessEqual(abs(left - right), 1)
 
+    def test_a_box_placed_via_space_right_sits_four_columns_to_the_right(self):
+        first, _, second = layout(
+            State([Box("a"), Space(direction="right"), Box("bb")]),
+            cols=21,
+            rows=11,
+        )
+        self.assertEqual(second.x - (first.x + first.width), 4)
+
+    def test_two_boxes_sharing_a_row_get_the_same_y(self):
+        first, _, second = layout(
+            State([Box("a"), Space(direction="right"), Box("bb")]),
+            cols=21,
+            rows=11,
+        )
+        self.assertEqual(first.y, second.y)
+
+    def test_a_pair_of_boxes_on_one_row_is_centered_as_a_unit(self):
+        cols = 21
+        first, _, second = layout(
+            State([Box("a"), Space(direction="right"), Box("bb")]),
+            cols=cols,
+            rows=11,
+        )
+        left = first.x
+        right = cols - (second.x + second.width)
+        self.assertLessEqual(abs(left - right), 1)
+
+    def test_a_box_below_the_last_box_in_column_one_stays_in_column_one(self):
+        nodes = [
+            Box("a"),
+            Space(direction="right"),
+            Box("b"),
+            Space(direction="down"),
+            Box("c"),
+        ]
+        placements = layout(State(nodes), cols=21, rows=21)
+        b = boxes(placements)[1]
+        c = boxes(placements)[2]
+        a = boxes(placements)[0]
+        self.assertEqual(c.x, b.x)
+        self.assertNotEqual(c.x, a.x)
+
     def test_only_the_focused_box_gets_a_cursor(self):
         first, _, second, cursor = layout(
             State([Box("hi"), Space(), Box("hi")], mode="insert", selected=2),
@@ -248,6 +290,9 @@ class WidthTest(unittest.TestCase):
 
     def test_a_space_has_no_width(self):
         self.assertEqual(width(Space(), editing=False), 0)
+
+    def test_a_rightward_space_is_four_columns_wide(self):
+        self.assertEqual(width(Space(direction="right"), editing=False), 4)
 
     def test_an_arrow_is_one_column_wide(self):
         self.assertEqual(width(Arrow(), editing=False), 1)
