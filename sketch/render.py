@@ -25,7 +25,7 @@ ARROW_GLYPHS = {
     "right": ARROW_RIGHT,
 }
 ARROWHEAD_ANGLE_DEG = 30
-ARROWHEAD_EDGE_LENGTH = 5
+ARROWHEAD_EDGE_LENGTH = 15
 RESET = "\x1b[0m"
 
 Cell = Tuple[str, int, int]
