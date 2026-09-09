@@ -3,6 +3,8 @@ import unittest
 from sketch.layout import Placement
 from sketch.render import (
     ARROW_DOWN,
+    ARROW_LEFT,
+    ARROW_RIGHT,
     ARROW_UP,
     BLANK,
     BOTTOM_LEFT,
@@ -270,6 +272,16 @@ class DrawArrowTest(unittest.TestCase):
         grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
         self.renderer._draw_arrow(grid, Placement(Arrow("up"), 2, 1, 1, 2))
         self.assertEqual(grid[1][2], (ARROW_UP, PLAIN, PLAIN))
+
+    def test_a_left_arrow_draws_the_left_glyph(self):
+        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
+        self.renderer._draw_arrow(grid, Placement(Arrow("left"), 2, 1, 1, 2))
+        self.assertEqual(grid[1][2], (ARROW_LEFT, PLAIN, PLAIN))
+
+    def test_a_right_arrow_draws_the_right_glyph(self):
+        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
+        self.renderer._draw_arrow(grid, Placement(Arrow("right"), 2, 1, 1, 2))
+        self.assertEqual(grid[1][2], (ARROW_RIGHT, PLAIN, PLAIN))
 
 
 if __name__ == "__main__":

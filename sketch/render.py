@@ -14,6 +14,15 @@ BLANK = " "
 CURSOR = "\u2588"
 ARROW_DOWN = "\u2193"
 ARROW_UP = "\u2191"
+ARROW_LEFT = "\u2190"
+ARROW_RIGHT = "\u2192"
+
+ARROW_GLYPHS = {
+    "down": ARROW_DOWN,
+    "up": ARROW_UP,
+    "left": ARROW_LEFT,
+    "right": ARROW_RIGHT,
+}
 RESET = "\x1b[0m"
 
 Cell = Tuple[str, int, int]
@@ -184,7 +193,7 @@ class TerminalRenderer:
         self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
 
     def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
-        glyph = ARROW_DOWN if placement.node.direction == "down" else ARROW_UP
+        glyph = ARROW_GLYPHS[placement.node.direction]
         self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
