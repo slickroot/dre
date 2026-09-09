@@ -6,8 +6,11 @@ from sketch.layout import (
     GAP_HEIGHT,
     Coordinate,
     Placement,
+    Track,
     height,
     layout,
+    span,
+    tracks,
     walk,
     width,
 )
@@ -397,6 +400,40 @@ class WalkTest(unittest.TestCase):
         coordinates = walk(nodes)
         self.assertEqual(min(c.row for c in coordinates), 0)
         self.assertEqual(min(c.col for c in coordinates), 0)
+
+
+class TracksTest(unittest.TestCase):
+    def test_a_lone_track_takes_the_extent_of_its_only_member(self):
+        self.assertEqual(tracks([5], [0]), [Track(offset=0, extent=5)])
+
+    def test_a_track_takes_the_extent_of_its_widest_member(self):
+        self.assertEqual(tracks([3, 5], [0, 0]), [Track(offset=0, extent=5)])
+
+    def test_offsets_are_the_running_sum_of_the_extents_before_them(self):
+        self.assertEqual(
+            tracks([3, 5, 2], [0, 1, 2]),
+            [
+                Track(offset=0, extent=3),
+                Track(offset=3, extent=5),
+                Track(offset=8, extent=2),
+            ],
+        )
+
+    def test_a_gap_between_indices_still_gets_a_zero_extent_track(self):
+        self.assertEqual(
+            tracks([4, 6], [0, 2]),
+            [
+                Track(offset=0, extent=4),
+                Track(offset=4, extent=0),
+                Track(offset=4, extent=6),
+            ],
+        )
+
+    def test_span_is_the_sum_of_every_tracks_extent(self):
+        self.assertEqual(span(tracks([3, 5, 2], [0, 1, 2])), 10)
+
+    def test_span_of_a_single_track_is_its_extent(self):
+        self.assertEqual(span(tracks([7], [0])), 7)
 
 
 class PlacementTest(unittest.TestCase):

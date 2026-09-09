@@ -46,6 +46,26 @@ def walk(nodes: List[Node]) -> List[Coordinate]:
     return [Coordinate(c.row - top, c.col - left) for c in coordinates]
 
 
+def tracks(extents: List[int], indices: List[int]) -> List[Track]:
+    sizes = [0] * (max(indices) + 1)
+    for extent, index in zip(extents, indices):
+        sizes[index] = max(sizes[index], extent)
+    offset = 0
+    laid = []
+    for size in sizes:
+        laid.append(Track(offset=offset, extent=size))
+        offset += size
+    return laid
+
+
+def span(laid: List[Track]) -> int:
+    return sum(track.extent for track in laid)
+
+
+def centre(track: Track, extent: int, available: int, total: int) -> int:
+    return (available - total + 2 * track.offset + track.extent - extent) // 2
+
+
 def interior(label: str, editing: bool) -> int:
     if editing:
         return len(label) + 1
