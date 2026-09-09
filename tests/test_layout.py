@@ -245,7 +245,7 @@ class SelectedNodeCursorTest(unittest.TestCase):
 
 class ArrowLayoutTest(unittest.TestCase):
     def test_an_arrow_is_placed_in_the_slots_row_at_the_centre_column(self):
-        nodes = [Box("a"), Arrow("forward"), Box("bb")]
+        nodes = [Box("a"), Arrow("down"), Box("bb")]
         placements = layout(State(nodes), cols=11, rows=11)
         arrow = placements[1]
         box = layout(State([Box()]), cols=11, rows=11)[0]
@@ -260,7 +260,7 @@ class ArrowLayoutTest(unittest.TestCase):
             State([Box("a"), Space(), Box("bb")]), cols=11, rows=11
         )
         with_arrow = layout(
-            State([Box("a"), Arrow("forward"), Box("bb")]), cols=11, rows=11
+            State([Box("a"), Arrow("down"), Box("bb")]), cols=11, rows=11
         )
         self.assertEqual(boxes(with_space), boxes(with_arrow))
 

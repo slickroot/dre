@@ -611,14 +611,14 @@ class PressATest(unittest.TestCase):
         state = State([Box("a"), Space(), Box("b")], selected=2, source=0)
         connected = handle_key(state, "a")
         self.assertEqual(
-            connected.nodes, [Box("a"), Arrow("forward"), Box("b")]
+            connected.nodes, [Box("a"), Arrow("down"), Box("b")]
         )
 
     def test_a_on_the_box_above_the_source_draws_a_backward_arrow(self):
         state = State([Box("a"), Space(), Box("b")], selected=0, source=2)
         connected = handle_key(state, "a")
         self.assertEqual(
-            connected.nodes, [Box("a"), Arrow("backward"), Box("b")]
+            connected.nodes, [Box("a"), Arrow("up"), Box("b")]
         )
 
     def test_drawing_an_arrow_leaves_the_length_and_other_indices_unchanged(self):
@@ -661,11 +661,11 @@ class PressATest(unittest.TestCase):
         state = handle_key(state, "a")
         state = handle_key(state, "j")
         state = handle_key(state, "a")
-        self.assertEqual(state.nodes, [Box("a"), Arrow("forward"), Box("b")])
+        self.assertEqual(state.nodes, [Box("a"), Arrow("down"), Box("b")])
         state = handle_key(state, "a")
         state = handle_key(state, "k")
         state = handle_key(state, "a")
-        self.assertEqual(state.nodes, [Box("a"), Arrow("backward"), Box("b")])
+        self.assertEqual(state.nodes, [Box("a"), Arrow("up"), Box("b")])
 
 
 if __name__ == "__main__":

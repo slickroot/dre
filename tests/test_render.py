@@ -161,18 +161,18 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_a_forward_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(Arrow("forward"), 2, 1, 1, 2)], 4, 4
+            [Placement(Arrow("down"), 2, 1, 1, 2)], 4, 4
         )
         self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_a_backward_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(Arrow("backward"), 2, 1, 1, 2)], 4, 4
+            [Placement(Arrow("up"), 2, 1, 1, 2)], 4, 4
         )
         self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_an_arrow_outside_the_grid_is_clipped(self):
-        grid = self.renderer.render([Placement(Arrow("forward"), 9, 9, 1, 2)], 4, 3)
+        grid = self.renderer.render([Placement(Arrow("down"), 9, 9, 1, 2)], 4, 3)
         self.assertEqual(grid, [BLANK * 4] * 3)
 
     def test_an_unfilled_box_emits_no_escapes(self):
@@ -263,12 +263,12 @@ class DrawArrowTest(unittest.TestCase):
 
     def test_a_forward_arrow_draws_the_down_glyph(self):
         grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("forward"), 2, 1, 1, 2))
+        self.renderer._draw_arrow(grid, Placement(Arrow("down"), 2, 1, 1, 2))
         self.assertEqual(grid[1][2], (ARROW_DOWN, PLAIN, PLAIN))
 
     def test_a_backward_arrow_draws_the_up_glyph(self):
         grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("backward"), 2, 1, 1, 2))
+        self.renderer._draw_arrow(grid, Placement(Arrow("up"), 2, 1, 1, 2))
         self.assertEqual(grid[1][2], (ARROW_UP, PLAIN, PLAIN))
 
 

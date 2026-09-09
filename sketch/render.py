@@ -149,7 +149,7 @@ class GraphicsRenderer:
     ) -> bool:
         if x == cx:
             return True
-        if direction == "forward":
+        if direction == "down":
             in_head = y >= height - self.cell_height
             distance = (height - 1) - y
         else:
@@ -184,7 +184,7 @@ class TerminalRenderer:
         self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
 
     def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
-        glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
+        glyph = ARROW_DOWN if placement.node.direction == "down" else ARROW_UP
         self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:

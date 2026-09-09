@@ -115,7 +115,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_forward_arrow_tip_is_a_single_pixel_at_the_bottom(self):
         sprite = self.only_sprite(
-            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
         )
         cx = sprite.width // 2
         tip = sprite.height - 1
@@ -125,7 +125,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_backward_arrow_tip_is_a_single_pixel_at_the_top(self):
         sprite = self.only_sprite(
-            Placement(Arrow("backward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow("up"), x=1, y=1, width=1, height=2), cell=(5, 4)
         )
         cx = sprite.width // 2
         for x in range(sprite.width):
@@ -134,7 +134,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_the_forward_head_diagonals_are_symmetric_about_the_shaft(self):
         sprite = self.only_sprite(
-            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
         )
         cx = sprite.width // 2
         # Base row of the head: furthest from the tip, widest spread.
@@ -151,7 +151,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_the_backward_head_diagonals_are_symmetric_about_the_shaft(self):
         sprite = self.only_sprite(
-            Placement(Arrow("backward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow("up"), x=1, y=1, width=1, height=2), cell=(5, 4)
         )
         cx = sprite.width // 2
         base = 3
@@ -167,7 +167,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
-            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
         )
         self.assertEqual(self.pixel(sprite, 0, 0), (0, 0, 0, 0))
 
