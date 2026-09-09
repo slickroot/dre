@@ -2,7 +2,7 @@ import unittest
 
 from sketch.layout import Placement
 from sketch.render import (
-    ANSI_COLOURS,
+    PALETTE,
     OPAQUE,
     PLAIN_COLOUR,
     GraphicsRenderer,
@@ -86,8 +86,8 @@ class GraphicsRendererTest(unittest.TestCase):
             for x in range(1, sprite.width - 1):
                 self.assertEqual(self.pixel(sprite, x, y), (0, 0, 0, 0))
 
-    def test_border_takes_the_colour_of_its_ansi_index(self):
-        for index, rgb in enumerate(ANSI_COLOURS):
+    def test_border_takes_the_colour_of_its_palette_index(self):
+        for index, rgb in enumerate(PALETTE):
             sprite = self.only_sprite(
                 Placement(Box("hi", colour=index), x=0, y=0, width=2, height=2)
             )

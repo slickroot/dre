@@ -24,15 +24,12 @@ BLANK_CELL = (BLANK, PLAIN, PLAIN)
 OPAQUE = 255
 TRANSPARENT = (0, 0, 0, 0)
 PLAIN_COLOUR = (128, 128, 128)
-ANSI_COLOURS = (
-    (0, 0, 0),
-    (255, 0, 0),
-    (0, 255, 0),
-    (255, 255, 0),
-    (0, 0, 255),
-    (255, 0, 255),
-    (0, 255, 255),
-    (255, 255, 255),
+PALETTE = (
+    (255, 190, 11),
+    (251, 86, 7),
+    (255, 0, 110),
+    (131, 56, 236),
+    (58, 134, 255),
 )
 
 
@@ -227,7 +224,7 @@ class TerminalRenderer:
 def _colour(colour: int) -> Tuple[int, int, int]:
     if colour == PLAIN:
         return PLAIN_COLOUR
-    return ANSI_COLOURS[colour]
+    return PALETTE[colour]
 
 
 def _cell(character: str, colour: int, fill: int) -> str:
