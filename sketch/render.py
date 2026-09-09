@@ -90,10 +90,10 @@ class GraphicsRenderer:
             bottom = min(placement.y + placement.height, rows)
             if left >= right or top >= bottom:
                 continue
-            sprites.append(self._sprite(placement, left, top, right, bottom))
+            sprites.append(self._outline_box(placement, left, top, right, bottom))
         return sprites
 
-    def _sprite(
+    def _outline_box(
         self, placement: Placement, left: int, top: int, right: int, bottom: int
     ) -> Sprite:
         width = placement.width * self.cell_width
