@@ -7,7 +7,7 @@ from sketch.render import (
     PLAIN_COLOUR,
     GraphicsRenderer,
 )
-from sketch.state import PLAIN, Arrow, Box, Cursor
+from sketch.state import PLAIN, Arrow, Box, Cursor, Space
 
 
 class FakeText:
@@ -99,9 +99,107 @@ class GraphicsRendererTest(unittest.TestCase):
         )
         self.assertEqual(self.pixel(sprite, 0, 0), PLAIN_COLOUR + (OPAQUE,))
 
-    def test_an_arrow_has_no_sprite(self):
+    def test_an_arrow_sprite_is_one_cell_wide_and_two_cells_tall(self):
+        sprite = self.only_sprite(
+            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        self.assertEqual((sprite.width, sprite.height), (5, 8))
+
+    def test_an_arrow_shaft_is_opaque_on_every_row(self):
+        sprite = self.only_sprite(
+            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        for y in range(sprite.height):
+            self.assertEqual(self.pixel(sprite, cx, y)[3], OPAQUE)
+
+    def test_a_forward_arrow_tip_is_a_single_pixel_at_the_bottom(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        tip = sprite.height - 1
+        for x in range(sprite.width):
+            expected = OPAQUE if x == cx else 0
+            self.assertEqual(self.pixel(sprite, x, tip)[3], expected)
+
+    def test_a_backward_arrow_tip_is_a_single_pixel_at_the_top(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("backward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        for x in range(sprite.width):
+            expected = OPAQUE if x == cx else 0
+            self.assertEqual(self.pixel(sprite, x, 0)[3], expected)
+
+    def test_the_forward_head_diagonals_are_symmetric_about_the_shaft(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        # Base row of the head: furthest from the tip, widest spread.
+        base = sprite.height - 4
+        opaque_xs = [
+            x
+            for x in range(sprite.width)
+            if x != cx and self.pixel(sprite, x, base)[3] == OPAQUE
+        ]
+        self.assertEqual(len(opaque_xs), 2)
+        left, right = opaque_xs
+        self.assertEqual(cx - left, right - cx)
+        self.assertGreater(right, cx)
+
+    def test_the_backward_head_diagonals_are_symmetric_about_the_shaft(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("backward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        base = 3
+        opaque_xs = [
+            x
+            for x in range(sprite.width)
+            if x != cx and self.pixel(sprite, x, base)[3] == OPAQUE
+        ]
+        self.assertEqual(len(opaque_xs), 2)
+        left, right = opaque_xs
+        self.assertEqual(cx - left, right - cx)
+        self.assertGreater(right, cx)
+
+    def test_arrow_off_shape_pixels_are_transparent(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("forward"), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        self.assertEqual(self.pixel(sprite, 0, 0), (0, 0, 0, 0))
+
+    def test_an_arrow_is_plain_grey(self):
+        sprite = self.only_sprite(
+            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+        )
+        cx = sprite.width // 2
+        self.assertEqual(self.pixel(sprite, cx, 0), PLAIN_COLOUR + (OPAQUE,))
+
+    def test_an_arrow_overhanging_the_top_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Arrow(), x=1, y=-1, width=1, height=2), cell=(5, 4)
+        )
+        self.assertEqual(sprite.row, 0)
+        self.assertEqual(sprite.height, 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+
+    def test_an_arrow_overhanging_the_bottom_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Arrow(), x=1, y=1, width=1, height=2),
+            cols=40,
+            rows=2,
+            cell=(5, 4),
+        )
+        self.assertEqual(sprite.row, 1)
+        self.assertEqual(sprite.height, 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+
+    def test_a_space_has_no_sprite(self):
         self.assertEqual(
-            self.sprites([Placement(Arrow(), x=1, y=1, width=1, height=1)]), []
+            self.sprites([Placement(Space(), x=1, y=1, width=0, height=2)]), []
         )
 
     def test_a_cursor_has_no_sprite(self):

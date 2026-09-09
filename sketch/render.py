@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
-from .state import PLAIN, Box, Cursor
+from .state import PLAIN, Arrow, Box, Cursor
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -82,7 +82,7 @@ class GraphicsRenderer:
     ) -> List[Sprite]:
         sprites = []
         for placement in placements:
-            if not isinstance(placement.node, Box):
+            if not isinstance(placement.node, (Box, Arrow)):
                 continue
             left = max(placement.x, 0)
             top = max(placement.y, 0)
@@ -90,7 +90,12 @@ class GraphicsRenderer:
             bottom = min(placement.y + placement.height, rows)
             if left >= right or top >= bottom:
                 continue
-            sprites.append(self._outline_box(placement, left, top, right, bottom))
+            if isinstance(placement.node, Box):
+                sprites.append(self._outline_box(placement, left, top, right, bottom))
+            elif isinstance(placement.node, Arrow):
+                sprites.append(
+                    self._outline_arrow(placement, left, top, right, bottom)
+                )
         return sprites
 
     def _outline_box(
@@ -115,6 +120,48 @@ class GraphicsRenderer:
             col=left,
             row=top,
         )
+
+    def _outline_arrow(
+        self, placement: Placement, left: int, top: int, right: int, bottom: int
+    ) -> Sprite:
+        width = placement.width * self.cell_width
+        height = placement.height * self.cell_height
+        cx = width // 2
+        reach = min(cx, width - 1 - cx)
+        direction = placement.node.direction
+        ink = _colour(PLAIN) + (OPAQUE,)
+        first_x = (left - placement.x) * self.cell_width
+        last_x = (right - placement.x) * self.cell_width
+        first_y = (top - placement.y) * self.cell_height
+        last_y = (bottom - placement.y) * self.cell_height
+        pixels = bytearray()
+        for y in range(first_y, last_y):
+            for x in range(first_x, last_x):
+                on_arrow = self._on_arrow(x, y, height, cx, reach, direction)
+                pixels.extend(ink if on_arrow else TRANSPARENT)
+        return Sprite(
+            pixels=bytes(pixels),
+            width=last_x - first_x,
+            height=last_y - first_y,
+            col=left,
+            row=top,
+        )
+
+    def _on_arrow(
+        self, x: int, y: int, height: int, cx: int, reach: int, direction: str
+    ) -> bool:
+        if x == cx:
+            return True
+        if direction == "forward":
+            in_head = y >= height - self.cell_height
+            distance = (height - 1) - y
+        else:
+            in_head = y < self.cell_height
+            distance = y
+        if not in_head or self.cell_height <= 1:
+            return False
+        spread = round(distance * reach / (self.cell_height - 1))
+        return abs(x - cx) == spread
 
 
 class TerminalRenderer:
