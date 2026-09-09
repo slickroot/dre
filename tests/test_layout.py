@@ -4,9 +4,11 @@ from sketch.layout import (
     BORDERS,
     BOX_HEIGHT,
     GAP_HEIGHT,
+    Coordinate,
     Placement,
     height,
     layout,
+    walk,
     width,
 )
 from sketch.state import Arrow, Box, Cursor, Space, State
@@ -326,6 +328,75 @@ class WidthTest(unittest.TestCase):
     def test_a_horizontal_arrow_is_four_columns_wide(self):
         self.assertEqual(width(Arrow("right"), editing=False), 4)
         self.assertEqual(width(Arrow("left"), editing=False), 4)
+
+
+class WalkTest(unittest.TestCase):
+    def test_a_lone_node_sits_at_the_origin(self):
+        self.assertEqual(walk([Box()]), [Coordinate(0, 0)])
+
+    def test_coordinates_are_index_aligned_with_the_nodes_including_separators(self):
+        nodes = [Box("a"), Space(direction="down"), Box("b")]
+        coordinates = walk(nodes)
+        self.assertEqual(len(coordinates), len(nodes))
+
+    def test_a_downward_space_and_the_box_after_it_each_take_their_own_row(self):
+        nodes = [Box("a"), Space(direction="down"), Box("b")]
+        self.assertEqual(
+            walk(nodes), [Coordinate(0, 0), Coordinate(1, 0), Coordinate(2, 0)]
+        )
+
+    def test_a_rightward_space_and_the_box_after_it_take_their_own_column_on_the_same_row(
+        self,
+    ):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(
+            walk(nodes), [Coordinate(0, 0), Coordinate(0, 1), Coordinate(0, 2)]
+        )
+
+    def test_turning_down_after_turning_right_keeps_the_column(self):
+        nodes = [
+            Box(),
+            Space(direction="right"),
+            Box(),
+            Space(direction="down"),
+            Box(),
+        ]
+        self.assertEqual(
+            walk(nodes),
+            [
+                Coordinate(0, 0),
+                Coordinate(0, 1),
+                Coordinate(0, 2),
+                Coordinate(1, 2),
+                Coordinate(2, 2),
+            ],
+        )
+
+    def test_an_arrow_moves_the_turtle_like_the_space_it_replaced_on_both_axes(self):
+        with_space_down = walk([Box(), Space(direction="down"), Box()])
+        with_arrow_down = walk([Box(), Arrow("down"), Box()])
+        self.assertEqual(with_space_down, with_arrow_down)
+
+        with_space_right = walk([Box(), Space(direction="right"), Box()])
+        with_arrow_right = walk([Box(), Arrow("right"), Box()])
+        self.assertEqual(with_space_right, with_arrow_right)
+
+    def test_a_leftward_arrow_advances_the_column_like_a_rightward_arrow(self):
+        with_arrow_right = walk([Box(), Arrow("right"), Box()])
+        with_arrow_left = walk([Box(), Arrow("left"), Box()])
+        self.assertEqual(with_arrow_right, with_arrow_left)
+
+    def test_the_minimum_row_and_column_are_both_zero(self):
+        nodes = [
+            Box(),
+            Space(direction="right"),
+            Box(),
+            Space(direction="down"),
+            Box(),
+        ]
+        coordinates = walk(nodes)
+        self.assertEqual(min(c.row for c in coordinates), 0)
+        self.assertEqual(min(c.col for c in coordinates), 0)
 
 
 class PlacementTest(unittest.TestCase):

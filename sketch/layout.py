@@ -18,6 +18,34 @@ class Placement:
     height: int
 
 
+@dataclass(frozen=True)
+class Coordinate:
+    row: int
+    col: int
+
+
+@dataclass(frozen=True)
+class Track:
+    offset: int
+    extent: int
+
+
+def walk(nodes: List[Node]) -> List[Coordinate]:
+    coordinates = [Coordinate(0, 0)]
+    row, col, active = 0, 0, "row"
+    for node in nodes[1:]:
+        if isinstance(node, (Space, Arrow)):
+            active = node_axis(node)
+        if active == "row":
+            row += 1
+        else:
+            col += 1
+        coordinates.append(Coordinate(row, col))
+    top = min(c.row for c in coordinates)
+    left = min(c.col for c in coordinates)
+    return [Coordinate(c.row - top, c.col - left) for c in coordinates]
+
+
 def interior(label: str, editing: bool) -> int:
     if editing:
         return len(label) + 1
