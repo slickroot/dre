@@ -165,6 +165,58 @@ class GraphicsRendererTest(unittest.TestCase):
         self.assertEqual(cx - left, right - cx)
         self.assertGreater(right, cx)
 
+    def test_a_right_arrow_tip_is_a_single_pixel_at_the_right_edge(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("right"), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        cy = sprite.height // 2
+        tip = sprite.width - 1
+        for y in range(sprite.height):
+            expected = OPAQUE if y == cy else 0
+            self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
+
+    def test_a_left_arrow_tip_is_a_single_pixel_at_the_left_edge(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("left"), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        cy = sprite.height // 2
+        for y in range(sprite.height):
+            expected = OPAQUE if y == cy else 0
+            self.assertEqual(self.pixel(sprite, 0, y)[3], expected)
+
+    def test_the_right_head_diagonals_are_symmetric_about_the_shaft(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("right"), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        cy = sprite.height // 2
+        # Base column of the head: furthest from the tip, widest spread.
+        base = sprite.width - 4
+        opaque_ys = [
+            y
+            for y in range(sprite.height)
+            if y != cy and self.pixel(sprite, base, y)[3] == OPAQUE
+        ]
+        self.assertEqual(len(opaque_ys), 2)
+        top, bottom = opaque_ys
+        self.assertEqual(cy - top, bottom - cy)
+        self.assertGreater(bottom, cy)
+
+    def test_the_left_head_diagonals_are_symmetric_about_the_shaft(self):
+        sprite = self.only_sprite(
+            Placement(Arrow("left"), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        cy = sprite.height // 2
+        base = 3
+        opaque_ys = [
+            y
+            for y in range(sprite.height)
+            if y != cy and self.pixel(sprite, base, y)[3] == OPAQUE
+        ]
+        self.assertEqual(len(opaque_ys), 2)
+        top, bottom = opaque_ys
+        self.assertEqual(cy - top, bottom - cy)
+        self.assertGreater(bottom, cy)
+
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
             Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
