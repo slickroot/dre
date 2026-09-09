@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Protocol, Tuple
 
 from .layout import Placement
-from .state import PLAIN, Arrow, Box, Cursor
+from .state import PLAIN, Arrow, Box, Cursor, axis
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -14,6 +14,15 @@ BLANK = " "
 CURSOR = "\u2588"
 ARROW_DOWN = "\u2193"
 ARROW_UP = "\u2191"
+ARROW_LEFT = "\u2190"
+ARROW_RIGHT = "\u2192"
+
+ARROW_GLYPHS = {
+    "down": ARROW_DOWN,
+    "up": ARROW_UP,
+    "left": ARROW_LEFT,
+    "right": ARROW_RIGHT,
+}
 RESET = "\x1b[0m"
 
 Cell = Tuple[str, int, int]
@@ -123,9 +132,20 @@ class GraphicsRenderer:
     ) -> Sprite:
         width = placement.width * self.cell_width
         height = placement.height * self.cell_height
-        cx = width // 2
-        reach = min(cx, width - 1 - cx)
         direction = placement.node.direction
+        vertical = axis(placement.node) == "row"
+        if vertical:
+            length = height
+            thickness = self.cell_height
+            centre = width // 2
+            reach = min(centre, width - 1 - centre)
+            head_at_far_end = direction == "down"
+        else:
+            length = width
+            thickness = self.cell_width
+            centre = height // 2
+            reach = min(centre, height - 1 - centre)
+            head_at_far_end = direction == "right"
         ink = _colour(PLAIN) + (OPAQUE,)
         first_x = (left - placement.x) * self.cell_width
         last_x = (right - placement.x) * self.cell_width
@@ -134,7 +154,10 @@ class GraphicsRenderer:
         pixels = bytearray()
         for y in range(first_y, last_y):
             for x in range(first_x, last_x):
-                on_arrow = self._on_arrow(x, y, height, cx, reach, direction)
+                along, across = (y, x) if vertical else (x, y)
+                on_arrow = self._on_arrow(
+                    along, across, length, centre, reach, head_at_far_end, thickness
+                )
                 pixels.extend(ink if on_arrow else TRANSPARENT)
         return Sprite(
             pixels=bytes(pixels),
@@ -145,20 +168,27 @@ class GraphicsRenderer:
         )
 
     def _on_arrow(
-        self, x: int, y: int, height: int, cx: int, reach: int, direction: str
+        self,
+        along: int,
+        across: int,
+        length: int,
+        centre: int,
+        reach: int,
+        head_at_far_end: bool,
+        thickness: int,
     ) -> bool:
-        if x == cx:
+        if across == centre:
             return True
-        if direction == "forward":
-            in_head = y >= height - self.cell_height
-            distance = (height - 1) - y
+        if head_at_far_end:
+            in_head = along >= length - thickness
+            distance = (length - 1) - along
         else:
-            in_head = y < self.cell_height
-            distance = y
-        if not in_head or self.cell_height <= 1:
+            in_head = along < thickness
+            distance = along
+        if not in_head or thickness <= 1:
             return False
-        spread = round(distance * reach / (self.cell_height - 1))
-        return abs(x - cx) == spread
+        spread = round(distance * reach / (thickness - 1))
+        return abs(across - centre) == spread
 
 
 class TerminalRenderer:
@@ -184,7 +214,7 @@ class TerminalRenderer:
         self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
 
     def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
-        glyph = ARROW_DOWN if placement.node.direction == "forward" else ARROW_UP
+        glyph = ARROW_GLYPHS[placement.node.direction]
         self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:

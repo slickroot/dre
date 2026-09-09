@@ -611,14 +611,14 @@ class PressATest(unittest.TestCase):
         state = State([Box("a"), Space(), Box("b")], selected=2, source=0)
         connected = handle_key(state, "a")
         self.assertEqual(
-            connected.nodes, [Box("a"), Arrow("forward"), Box("b")]
+            connected.nodes, [Box("a"), Arrow("down"), Box("b")]
         )
 
     def test_a_on_the_box_above_the_source_draws_a_backward_arrow(self):
         state = State([Box("a"), Space(), Box("b")], selected=0, source=2)
         connected = handle_key(state, "a")
         self.assertEqual(
-            connected.nodes, [Box("a"), Arrow("backward"), Box("b")]
+            connected.nodes, [Box("a"), Arrow("up"), Box("b")]
         )
 
     def test_drawing_an_arrow_leaves_the_length_and_other_indices_unchanged(self):
@@ -656,16 +656,45 @@ class PressATest(unittest.TestCase):
         self.assertEqual(connected.nodes, [Box("a")])
         self.assertEqual(connected.source, 0)
 
+    def test_a_on_the_box_to_the_right_of_the_source_draws_a_right_arrow(self):
+        state = State(
+            [Box("a"), Space("right"), Box("b")], selected=2, source=0
+        )
+        connected = handle_key(state, "a")
+        self.assertEqual(
+            connected.nodes, [Box("a"), Arrow("right"), Box("b")]
+        )
+
+    def test_a_on_the_box_to_the_left_of_the_source_draws_a_left_arrow(self):
+        state = State(
+            [Box("a"), Space("right"), Box("b")], selected=0, source=2
+        )
+        connected = handle_key(state, "a")
+        self.assertEqual(
+            connected.nodes, [Box("a"), Arrow("left"), Box("b")]
+        )
+
+    def test_a_over_an_existing_horizontal_arrow_flips_direction_keeping_axis(
+        self,
+    ):
+        state = State(
+            [Box("a"), Arrow("right"), Box("b")], selected=0, source=2
+        )
+        connected = handle_key(state, "a")
+        self.assertEqual(
+            connected.nodes, [Box("a"), Arrow("left"), Box("b")]
+        )
+
     def test_a_over_an_existing_arrow_replaces_it_flipping_direction(self):
         state = State([Box("a"), Space(), Box("b")], selected=0, source=-1)
         state = handle_key(state, "a")
         state = handle_key(state, "j")
         state = handle_key(state, "a")
-        self.assertEqual(state.nodes, [Box("a"), Arrow("forward"), Box("b")])
+        self.assertEqual(state.nodes, [Box("a"), Arrow("down"), Box("b")])
         state = handle_key(state, "a")
         state = handle_key(state, "k")
         state = handle_key(state, "a")
-        self.assertEqual(state.nodes, [Box("a"), Arrow("backward"), Box("b")])
+        self.assertEqual(state.nodes, [Box("a"), Arrow("up"), Box("b")])
 
 
 if __name__ == "__main__":
