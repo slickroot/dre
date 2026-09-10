@@ -1,5 +1,10 @@
 # Insert box at selection
 
+**Status: Not done.** Closed without merging — the branching (bracket)
+approach broke `h`/`j`/`k`/`l` movement once a box had two branches, and the
+implementation was rejected. Revisit with a different design if this is
+picked up again.
+
 As a user, when I have a box selected that isn't the last one on the canvas, I want `bj`/`bl` to insert the new box right next to my selected box, so the new box appears where I'm actually working instead of at the end of the canvas.
 
 ## Acceptance Criteria
