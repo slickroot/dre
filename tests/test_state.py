@@ -9,6 +9,7 @@ from sketch.state import (
     Box,
     Space,
     State,
+    below,
     beside,
     edit,
     handle_key,
@@ -226,37 +227,17 @@ class PendingCommandTest(unittest.TestCase):
 
 
 class MoveSelectionTest(unittest.TestCase):
-    def test_j_skips_a_space_and_lands_on_the_next_box(self):
-        state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=0)
-        self.assertEqual(handle_key(state, "j").selected, 2)
-
     def test_k_skips_a_space_and_lands_on_the_previous_box(self):
         state = State([Box("a"), Space(), Box("b"), Space(), Box("c")], selected=4)
         self.assertEqual(handle_key(state, "k").selected, 2)
-
-    def test_j_on_the_bottom_box_keeps_the_selection(self):
-        state = State([Box("a"), Space(), Box("b")], selected=2)
-        self.assertEqual(handle_key(state, "j").selected, 2)
 
     def test_k_on_the_top_box_keeps_the_selection(self):
         state = State([Box("a"), Space(), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "k").selected, 0)
 
-    def test_j_on_an_empty_canvas_returns_the_state_unchanged(self):
-        state = State([])
-        self.assertEqual(handle_key(state, "j"), state)
-
     def test_k_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State([])
         self.assertEqual(handle_key(state, "k"), state)
-
-    def test_j_preserves_the_mode_the_running_flag_and_the_nodes(self):
-        state = State([Box("a"), Space(), Box("b")], selected=0)
-        moved = handle_key(state, "j")
-        self.assertEqual(
-            (moved.mode, moved.running, moved.nodes),
-            (state.mode, state.running, state.nodes),
-        )
 
     def test_k_preserves_the_mode_the_running_flag_and_the_nodes(self):
         state = State([Box("a"), Space(), Box("b")], selected=2)
@@ -266,19 +247,10 @@ class MoveSelectionTest(unittest.TestCase):
             (state.mode, state.running, state.nodes),
         )
 
-    def test_j_does_not_mutate_the_given_state(self):
-        state = State([Box("a"), Space(), Box("b")], selected=0)
-        handle_key(state, "j")
-        self.assertEqual(state.selected, 0)
-
     def test_k_does_not_mutate_the_given_state(self):
         state = State([Box("a"), Space(), Box("b")], selected=2)
         handle_key(state, "k")
         self.assertEqual(state.selected, 2)
-
-    def test_j_preserves_source(self):
-        state = State([Box("a"), Space(), Box("b")], selected=0, source=0)
-        self.assertEqual(handle_key(state, "j").source, 0)
 
     def test_k_preserves_source(self):
         state = State([Box("a"), Space(), Box("b")], selected=2, source=2)
@@ -321,6 +293,32 @@ class BesideTest(unittest.TestCase):
     def test_refuses_on_the_leftmost_box(self):
         nodes = [Box("a"), Space(direction="right"), Box("b")]
         self.assertEqual(beside(nodes, 0, -1), 0)
+
+
+class BelowTest(unittest.TestCase):
+    def test_crosses_a_space_down_to_the_box_below_it(self):
+        nodes = [Box("a"), Space(direction="down"), Box("b")]
+        self.assertEqual(below(nodes, 0), 2)
+
+    def test_crosses_an_arrow_down_to_the_box_below_it(self):
+        nodes = [Box("a"), Arrow(direction="down"), Box("b")]
+        self.assertEqual(below(nodes, 0), 2)
+
+    def test_crosses_an_arrow_up_to_the_box_below_it(self):
+        nodes = [Box("a"), Arrow(direction="up"), Box("b")]
+        self.assertEqual(below(nodes, 0), 2)
+
+    def test_refuses_across_a_space_right(self):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(below(nodes, 0), 0)
+
+    def test_refuses_on_the_bottom_box(self):
+        nodes = [Box("a"), Space(direction="down"), Box("b")]
+        self.assertEqual(below(nodes, 2), 2)
+
+    def test_refuses_when_the_slot_holds_a_box(self):
+        nodes = [Box("a"), Box("b"), Box("c")]
+        self.assertEqual(below(nodes, 0), 0)
 
 
 class MoveSelectionRightTest(unittest.TestCase):
@@ -390,6 +388,61 @@ class MoveSelectionLeftTest(unittest.TestCase):
     def test_h_in_insert_mode_types_the_letter_h(self):
         state = State([Box("a" + PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "h").nodes, [Box("ah" + PAD)])
+
+
+class MoveSelectionDownTest(unittest.TestCase):
+    def test_j_moves_the_selection_to_the_box_below(self):
+        state = State([Box("a"), Space(direction="down"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "j").selected, 2)
+
+    def test_j_with_nothing_below_it_keeps_the_selection(self):
+        state = State([Box("a"), Space(direction="down"), Box("b")], selected=2)
+        self.assertEqual(handle_key(state, "j").selected, 2)
+
+    def test_j_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "j"), state)
+
+    def test_j_preserves_the_mode_the_running_flag_and_the_nodes(self):
+        state = State([Box("a"), Space(direction="down"), Box("b")], selected=0)
+        moved = handle_key(state, "j")
+        self.assertEqual(
+            (moved.mode, moved.running, moved.nodes),
+            (state.mode, state.running, state.nodes),
+        )
+
+    def test_j_preserves_source(self):
+        state = State(
+            [Box("a"), Space(direction="down"), Box("b")], selected=0, source=0
+        )
+        self.assertEqual(handle_key(state, "j").source, 0)
+
+    def test_j_does_not_mutate_the_given_state(self):
+        state = State([Box("a"), Space(direction="down"), Box("b")], selected=0)
+        handle_key(state, "j")
+        self.assertEqual(state.selected, 0)
+
+    def test_j_leaves_colours_unchanged(self):
+        nodes = [
+            Box("a", colour=0),
+            Space(direction="down"),
+            Box("b", colour=1),
+        ]
+        state = State(nodes, selected=0)
+        self.assertEqual(handle_key(state, "j").nodes, nodes)
+
+    def test_j_leaves_fills_unchanged(self):
+        nodes = [Box("a", fill=0), Space(direction="down"), Box("b", fill=1)]
+        state = State(nodes, selected=0)
+        self.assertEqual(handle_key(state, "j").nodes, nodes)
+
+    def test_j_in_insert_mode_types_the_letter_j(self):
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "j").nodes, [Box("aj" + PAD)])
+
+    def test_j_does_not_cross_a_space_right(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "j").selected, 0)
 
 
 class SpaceTest(unittest.TestCase):
