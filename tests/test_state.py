@@ -288,27 +288,39 @@ class MoveSelectionTest(unittest.TestCase):
 class BesideTest(unittest.TestCase):
     def test_crosses_a_space_right_to_the_box_beside_it(self):
         nodes = [Box("a"), Space(direction="right"), Box("b")]
-        self.assertEqual(beside(nodes, 0), 2)
+        self.assertEqual(beside(nodes, 0, 1), 2)
 
     def test_crosses_an_arrow_right_to_the_box_beside_it(self):
         nodes = [Box("a"), Arrow(direction="right"), Box("b")]
-        self.assertEqual(beside(nodes, 0), 2)
+        self.assertEqual(beside(nodes, 0, 1), 2)
 
     def test_crosses_an_arrow_left_to_the_box_beside_it(self):
         nodes = [Box("a"), Arrow(direction="left"), Box("b")]
-        self.assertEqual(beside(nodes, 0), 2)
+        self.assertEqual(beside(nodes, 0, 1), 2)
 
     def test_refuses_across_a_space_down(self):
         nodes = [Box("a"), Space(direction="down"), Box("b")]
-        self.assertEqual(beside(nodes, 0), 0)
+        self.assertEqual(beside(nodes, 0, 1), 0)
 
     def test_refuses_on_the_rightmost_box(self):
         nodes = [Box("a"), Space(direction="right"), Box("b")]
-        self.assertEqual(beside(nodes, 2), 2)
+        self.assertEqual(beside(nodes, 2, 1), 2)
 
     def test_refuses_when_the_slot_holds_a_box(self):
         nodes = [Box("a"), Box("b"), Box("c")]
-        self.assertEqual(beside(nodes, 0), 0)
+        self.assertEqual(beside(nodes, 0, 1), 0)
+
+    def test_crosses_a_space_left_to_the_box_beside_it(self):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 2, -1), 0)
+
+    def test_crosses_an_arrow_left_to_the_box_beside_it_going_left(self):
+        nodes = [Box("a"), Arrow(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 2, -1), 0)
+
+    def test_refuses_on_the_leftmost_box(self):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 0, -1), 0)
 
 
 class MoveSelectionRightTest(unittest.TestCase):
@@ -360,6 +372,24 @@ class MoveSelectionRightTest(unittest.TestCase):
     def test_l_in_insert_mode_types_the_letter_l(self):
         state = State([Box("a" + PAD)], mode="insert", selected=0)
         self.assertEqual(handle_key(state, "l").nodes, [Box("al" + PAD)])
+
+
+class MoveSelectionLeftTest(unittest.TestCase):
+    def test_h_moves_the_selection_to_the_box_on_the_left(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=2)
+        self.assertEqual(handle_key(state, "h").selected, 0)
+
+    def test_h_with_nothing_on_the_left_keeps_the_selection(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "h").selected, 0)
+
+    def test_h_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "h"), state)
+
+    def test_h_in_insert_mode_types_the_letter_h(self):
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "h").nodes, [Box("ah" + PAD)])
 
 
 class SpaceTest(unittest.TestCase):
