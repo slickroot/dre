@@ -83,6 +83,10 @@ def bj(state, key1="b", key2="j"):
     return handle_key(handle_key(state, key1), key2)
 
 
+def bl(state, key1="b", key2="l"):
+    return handle_key(handle_key(state, key1), key2)
+
+
 class HandleKeyTest(unittest.TestCase):
     def test_bj_appends_a_box(self):
         self.assertEqual(bj(State([])).nodes, [Box(PAD)])
@@ -155,7 +159,7 @@ class HandleKeyTest(unittest.TestCase):
 
     def test_bj_selects_the_new_box_when_the_selection_was_not_last(self):
         state = State([Box("a"), Space(), Box("b")], selected=0)
-        self.assertEqual(bj(state).selected, 4)
+        self.assertEqual(bj(state).selected, 2)
 
     def test_q_preserves_the_selection(self):
         state = State([Box("a"), Space(), Box("b")], selected=0)
@@ -216,6 +220,12 @@ class PendingCommandTest(unittest.TestCase):
         result = handle_key(handle_key(state, "b"), "j")
         self.assertEqual(result.pending, "")
 
+    def test_bj_appends_when_selected_is_last_via_negative_index(self):
+        state = State([Box("a")], selected=-1)
+        result = handle_key(handle_key(state, "b"), "j")
+        self.assertEqual(result.nodes, [Box("a"), Space(direction="down"), Box(PAD)])
+        self.assertEqual(result.selected, 2)
+
     def test_b_then_unrecognized_key_clears_pending(self):
         state = State([Box("a")], selected=0)
         result = handle_key(handle_key(state, "b"), "i")
@@ -235,6 +245,147 @@ class PendingCommandTest(unittest.TestCase):
         state = State([Box("a")], selected=0, source=0)
         result = handle_key(handle_key(state, "b"), "i")
         self.assertEqual((result.selected, result.source), (0, 0))
+
+
+class InsertAtSelectionTest(unittest.TestCase):
+    def test_bj_splices_below_a_selected_box_that_is_not_last(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        result = bj(state)
+        self.assertEqual(
+            result.nodes,
+            [
+                Box("a"),
+                Push(),
+                Space("down"),
+                Box(PAD),
+                Pop(),
+                Space("right"),
+                Box("b"),
+            ],
+        )
+
+    def test_bj_selects_the_newly_spliced_box(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        result = bj(state)
+        self.assertEqual(result.selected, 3)
+
+    def test_bj_enters_insert_mode_when_splicing(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        self.assertEqual(bj(state).mode, "insert")
+
+    def test_bj_clears_pending_when_splicing(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        self.assertEqual(bj(state).pending, "")
+
+    def test_bj_leaves_the_tail_branch_after_the_selected_box_in_place(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        result = bj(state)
+        self.assertEqual(result.nodes[5:], [Space("right"), Box("b")])
+
+    def test_bl_splices_right_of_a_selected_box_that_is_not_last(self):
+        state = State([Box("a"), Space("down"), Box("b")], selected=0)
+        result = bl(state)
+        self.assertEqual(
+            result.nodes,
+            [
+                Box("a"),
+                Push(),
+                Space("right"),
+                Box(PAD),
+                Pop(),
+                Space("down"),
+                Box("b"),
+            ],
+        )
+
+    def test_bj_extends_an_existing_down_branch_at_its_separator(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space("down"),
+            Box("c"),
+            Pop(),
+            Space("right"),
+            Box("b"),
+        ]
+        state = State(nodes, selected=0)
+        result = bj(state)
+        self.assertEqual(
+            result.nodes,
+            [
+                Box("a"),
+                Push(),
+                Space("down"),
+                Box(PAD),
+                Space("down"),
+                Box("c"),
+                Pop(),
+                Space("right"),
+                Box("b"),
+            ],
+        )
+
+    def test_bj_extending_a_branch_selects_the_new_box(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space("down"),
+            Box("c"),
+            Pop(),
+            Space("right"),
+            Box("b"),
+        ]
+        state = State(nodes, selected=0)
+        self.assertEqual(bj(state).selected, 3)
+
+    def test_bj_extending_a_branch_leaves_the_existing_chain_intact(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space("down"),
+            Box("c"),
+            Pop(),
+            Space("right"),
+            Box("b"),
+        ]
+        state = State(nodes, selected=0)
+        result = bj(state)
+        self.assertEqual(result.nodes[5:], [Box("c"), Pop(), Space("right"), Box("b")])
+
+    def test_bl_extends_an_existing_right_branch_at_its_separator(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=0)
+        result = bl(state)
+        self.assertEqual(
+            result.nodes,
+            [Box("a"), Space("right"), Box(PAD), Space("right"), Box("b")],
+        )
+
+    def test_bj_is_a_no_op_when_the_down_branch_is_an_arrow(self):
+        state = State([Box("a"), Arrow("down"), Box("b")], selected=0)
+        result = bj(state)
+        self.assertEqual(result.nodes, [Box("a"), Arrow("down"), Box("b")])
+        self.assertEqual(result.selected, 0)
+        self.assertEqual(result.mode, "command")
+
+    def test_bj_arrow_guard_still_clears_pending(self):
+        state = State([Box("a"), Arrow("down"), Box("b")], selected=0)
+        self.assertEqual(bj(state).pending, "")
+
+    def test_bl_is_a_no_op_when_the_right_branch_is_an_arrow(self):
+        state = State([Box("a"), Arrow("right"), Box("b")], selected=0)
+        result = bl(state)
+        self.assertEqual(result.nodes, [Box("a"), Arrow("right"), Box("b")])
+        self.assertEqual(result.selected, 0)
+        self.assertEqual(result.mode, "command")
+
+    def test_bj_still_appends_when_selected_box_is_last(self):
+        state = State([Box("a"), Space("right"), Box("b")], selected=2)
+        result = bj(state)
+        self.assertEqual(
+            result.nodes,
+            [Box("a"), Space("right"), Box("b"), Space("down"), Box(PAD)],
+        )
+        self.assertEqual(result.selected, 4)
 
 
 class MoveSelectionTest(unittest.TestCase):

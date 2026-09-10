@@ -127,15 +127,45 @@ def outgoing(nodes: List[Node], i: int) -> List[tuple]:
 def handle_command(state: State, key: str) -> State:
     if state.pending == "b":
         if key in ("j", "l"):
+            if not state.nodes:
+                return replace(
+                    state,
+                    nodes=[Box(PAD)],
+                    mode="insert",
+                    selected=0,
+                    source=-1,
+                    pending="",
+                )
             direction: SpaceDirection = "down" if key == "j" else "right"
-            nodes = state.nodes + (
-                [Space(direction=direction), Box(PAD)] if state.nodes else [Box(PAD)]
+            selected = (
+                state.selected if state.selected >= 0 else len(state.nodes) - 1
+            )
+            branches = outgoing(state.nodes, selected)
+            match = next((b for b in branches if b[0] == direction), None)
+            if match is not None:
+                separator_index = match[1]
+                if isinstance(state.nodes[separator_index], Arrow):
+                    return replace(state, pending="")
+                insertion = [Space(direction=direction), Box(PAD)]
+                new_index = separator_index + 1
+            elif branches:
+                insertion = [Push(), Space(direction=direction), Box(PAD), Pop()]
+                separator_index = selected + 1
+                new_index = separator_index + 2
+            else:
+                insertion = [Space(direction=direction), Box(PAD)]
+                separator_index = selected + 1
+                new_index = separator_index + 1
+            nodes = (
+                state.nodes[:separator_index]
+                + insertion
+                + state.nodes[separator_index:]
             )
             return replace(
                 state,
                 nodes=nodes,
                 mode="insert",
-                selected=len(nodes) - 1,
+                selected=new_index,
                 source=-1,
                 pending="",
             )
