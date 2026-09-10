@@ -346,6 +346,52 @@ class PendingCommandTest(unittest.TestCase):
         result = handle_key(handle_key(state, "s"), "k")
         self.assertEqual(result.pending, "")
 
+    def test_sl_on_a_box_with_a_parent_adds_no_node(self):
+        state = State(
+            [Box("a"), Arrow(direction="down"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "l")
+        self.assertEqual(
+            result.nodes, [Box("a"), Arrow(direction="down"), Box("b")]
+        )
+
+    def test_sl_on_a_box_with_a_parent_does_not_change_mode(self):
+        state = State(
+            [Box("a"), Arrow(direction="down"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "l")
+        self.assertEqual(result.mode, "command")
+
+    def test_sl_on_a_box_with_a_parent_clears_pending(self):
+        state = State(
+            [Box("a"), Arrow(direction="down"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "l")
+        self.assertEqual(result.pending, "")
+
+    def test_sj_on_a_box_with_a_parent_adds_no_node(self):
+        state = State(
+            [Box("a"), Arrow(direction="right"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(
+            result.nodes, [Box("a"), Arrow(direction="right"), Box("b")]
+        )
+
+    def test_sj_on_a_box_with_a_parent_does_not_change_mode(self):
+        state = State(
+            [Box("a"), Arrow(direction="right"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.mode, "command")
+
+    def test_sj_on_a_box_with_a_parent_clears_pending(self):
+        state = State(
+            [Box("a"), Arrow(direction="right"), Box("b")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.pending, "")
+
 
 class MoveSelectionTest(unittest.TestCase):
     def test_k_skips_a_space_and_lands_on_the_previous_box(self):

@@ -81,6 +81,11 @@ def beside(nodes: List[Node], selected: int, step: int) -> int:
     return target
 
 
+# A box's "parent" is inferred from adjacency: it has a parent iff the node right before it is an Arrow.
+def has_parent(nodes: List[Node], selected: int) -> bool:
+    return selected > 0 and isinstance(nodes[selected - 1], Arrow)
+
+
 def below(nodes: List[Node], selected: int) -> int:
     slot, target = selected + 1, selected + 2
     if target >= len(nodes):
@@ -109,7 +114,7 @@ def handle_command(state: State, key: str) -> State:
             )
         return replace(state, pending="")
     if state.pending == "s":
-        if key in ("j", "l"):
+        if key in ("j", "l") and not has_parent(state.nodes, state.selected):
             direction: SpaceDirection = "down" if key == "j" else "right"
             nodes = state.nodes + [Space(direction=direction), Box(PAD)]
             return replace(
