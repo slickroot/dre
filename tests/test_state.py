@@ -1,7 +1,6 @@
 import unittest
 
 from sketch.state import (
-    CYCLE,
     PAD,
     PALETTE_SIZE,
     PLAIN,
@@ -14,7 +13,6 @@ from sketch.state import (
     edit,
     handle_key,
     next_colour,
-    next_fill,
 )
 
 
@@ -631,11 +629,11 @@ class CycleColourTest(unittest.TestCase):
 class CycleFillTest(unittest.TestCase):
     def test_f_advances_the_selected_box_from_plain(self):
         state = State([Box("a")], selected=0)
-        self.assertEqual(handle_key(state, "f").nodes, [Box("a", fill=next_fill(PLAIN))])
+        self.assertEqual(handle_key(state, "f").nodes, [Box("a", fill=next_colour(PLAIN))])
 
     def test_f_advances_the_selected_box_through_the_cycle(self):
         state = State([Box("a")], selected=0)
-        for _ in range(CYCLE - 1):
+        for _ in range(PALETTE_SIZE):
             state = handle_key(state, "f")
         self.assertNotEqual(state.nodes[0].fill, PLAIN)
         state = handle_key(state, "f")
@@ -645,7 +643,7 @@ class CycleFillTest(unittest.TestCase):
         state = State([Box("a"), Box("b")], selected=1)
         self.assertEqual(
             handle_key(state, "f").nodes,
-            [Box("a"), Box("b", fill=next_fill(PLAIN))],
+            [Box("a"), Box("b", fill=next_colour(PLAIN))],
         )
 
     def test_f_preserves_the_label(self):
@@ -687,8 +685,8 @@ class CycleFillTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "f").nodes, [Box("af" + PAD)])
 
     def test_c_does_not_change_fill(self):
-        state = State([Box("a", fill=next_fill(PLAIN))], selected=0)
-        self.assertEqual(handle_key(state, "c").nodes[0].fill, next_fill(PLAIN))
+        state = State([Box("a", fill=next_colour(PLAIN))], selected=0)
+        self.assertEqual(handle_key(state, "c").nodes[0].fill, next_colour(PLAIN))
 
     def test_f_does_not_change_colour(self):
         state = State([Box("a", colour=next_colour(PLAIN))], selected=0)
@@ -700,7 +698,7 @@ class CycleFillTest(unittest.TestCase):
         state = handle_key(state, "f")
         self.assertEqual(
             state.nodes,
-            [Box("a", colour=next_colour(PLAIN), fill=next_fill(PLAIN))],
+            [Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN))],
         )
 
 

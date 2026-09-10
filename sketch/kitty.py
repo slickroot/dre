@@ -20,7 +20,7 @@ class KittyGraphics:
     def _transmission(self, sprite: Sprite) -> str:
         chunks = _chunks(_encode(sprite.pixels))
         header = (
-            f"a=T,f=32,s={sprite.width},v={sprite.height},o=z,q=2,"
+            f"a=T,f=32,s={sprite.width},v={sprite.height},o=z,q=2,z=-1,"
             f"m={_more(chunks, 0)}"
         )
         escapes = [_escape(header, chunks[0])]
