@@ -44,7 +44,7 @@ class KittyGraphicsTest(unittest.TestCase):
         keys = escapes(self.graphics.draw([sprite(width=4, height=6)]))[0][0]
         self.assertEqual(
             set(keys.split(",")),
-            {"a=T", "f=32", "s=4", "v=6", "o=z", "q=2", "m=0"},
+            {"a=T", "f=32", "s=4", "v=6", "o=z", "q=2", "z=-1", "m=0"},
         )
 
     def test_the_payload_round_trips(self):
