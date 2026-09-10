@@ -316,6 +316,36 @@ class PendingCommandTest(unittest.TestCase):
         )
         self.assertEqual(result.selected, len(result.nodes) - 1)
 
+    def test_sh_adds_no_node(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "h")
+        self.assertEqual(result.nodes, [Box("a")])
+
+    def test_sh_does_not_change_mode(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "h")
+        self.assertEqual(result.mode, "command")
+
+    def test_sh_clears_pending(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "h")
+        self.assertEqual(result.pending, "")
+
+    def test_sk_adds_no_node(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "k")
+        self.assertEqual(result.nodes, [Box("a")])
+
+    def test_sk_does_not_change_mode(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "k")
+        self.assertEqual(result.mode, "command")
+
+    def test_sk_clears_pending(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "k")
+        self.assertEqual(result.pending, "")
+
 
 class MoveSelectionTest(unittest.TestCase):
     def test_k_skips_a_space_and_lands_on_the_previous_box(self):
