@@ -34,6 +34,7 @@ Grid = List[List[Cell]]
 BLANK_CELL = (BLANK, PLAIN, PLAIN)
 
 OPAQUE = 255
+FILL_ALPHA = 77
 TRANSPARENT = (0, 0, 0, 0)
 PLAIN_COLOUR = (128, 128, 128)
 PALETTE = (
@@ -113,6 +114,7 @@ class GraphicsRenderer:
         width = placement.width * self.cell_width
         height = placement.height * self.cell_height
         edge = _colour(placement.node.colour) + (OPAQUE,)
+        fill = _fill_colour(placement.node.fill)
         first_x = (left - placement.x) * self.cell_width
         last_x = (right - placement.x) * self.cell_width
         first_y = (top - placement.y) * self.cell_height
@@ -121,7 +123,7 @@ class GraphicsRenderer:
         for y in range(first_y, last_y):
             for x in range(first_x, last_x):
                 on_edge = x in (0, width - 1) or y in (0, height - 1)
-                pixels.extend(edge if on_edge else TRANSPARENT)
+                pixels.extend(edge if on_edge else fill)
         return Sprite(
             pixels=bytes(pixels),
             width=last_x - first_x,
@@ -251,6 +253,10 @@ def _colour(colour: int) -> Tuple[int, int, int]:
     if colour == PLAIN:
         return PLAIN_COLOUR
     return PALETTE[colour]
+
+
+def _fill_colour(fill: int) -> Tuple[int, int, int, int]:
+    return TRANSPARENT if fill == PLAIN else PALETTE[fill] + (FILL_ALPHA,)
 
 
 def _cell(character: str, colour: int, fill: int) -> str:

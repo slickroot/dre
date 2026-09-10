@@ -10,12 +10,20 @@ from sketch.render import (
     BOTTOM_LEFT,
     BOTTOM_RIGHT,
     CURSOR,
+    FILL_ALPHA,
     HORIZONTAL,
+    OPAQUE,
+    PALETTE,
     TOP_LEFT,
     TOP_RIGHT,
+    TRANSPARENT,
     VERTICAL,
+    GraphicsRenderer,
+    Sprite,
     TerminalRenderer,
     _cell,
+    _colour,
+    _fill_colour,
 )
 from sketch.state import PLAIN, Arrow, Box, Cursor
 
@@ -282,6 +290,36 @@ class DrawArrowTest(unittest.TestCase):
         grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
         self.renderer._draw_arrow(grid, Placement(Arrow("right"), 2, 1, 1, 2))
         self.assertEqual(grid[1][2], (ARROW_RIGHT, PLAIN, PLAIN))
+
+
+class GraphicsRendererFillTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = GraphicsRenderer(
+            text=TerminalRenderer(), graphics=None, cell_width=1, cell_height=1
+        )
+
+    def outline(self, box, width=3, height=3):
+        placement = Placement(box, x=0, y=0, width=width, height=height)
+        return self.renderer._outline_box(
+            placement, left=0, top=0, right=width, bottom=height
+        )
+
+    def pixel(self, sprite, x, y):
+        offset = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[offset : offset + 4])
+
+    def test_plain_fill_renders_transparent_interior(self):
+        sprite = self.outline(Box(fill=PLAIN))
+        self.assertEqual(self.pixel(sprite, 1, 1), TRANSPARENT)
+
+    def test_a_fill_colour_renders_the_palette_colour_at_thirty_percent_opacity(self):
+        sprite = self.outline(Box(fill=2))
+        self.assertEqual(self.pixel(sprite, 1, 1), PALETTE[2] + (FILL_ALPHA,))
+
+    def test_border_pixels_are_unaffected_by_fill(self):
+        sprite = self.outline(Box(colour=3, fill=2))
+        self.assertEqual(self.pixel(sprite, 0, 0), _colour(3) + (OPAQUE,))
+        self.assertEqual(self.pixel(sprite, 1, 1), _fill_colour(2))
 
 
 if __name__ == "__main__":
