@@ -104,6 +104,26 @@ def below(nodes: List[Node], selected: int) -> int:
     return target
 
 
+def outgoing(nodes: List[Node], i: int) -> List[tuple]:
+    branches = []
+    index = i + 1
+    if index < len(nodes) and isinstance(nodes[index], Push):
+        separator_index = index + 1
+        branches.append((nodes[separator_index].direction, separator_index))
+        depth = 1
+        index = separator_index
+        while depth > 0:
+            index += 1
+            if isinstance(nodes[index], Push):
+                depth += 1
+            elif isinstance(nodes[index], Pop):
+                depth -= 1
+        index += 1
+    if index < len(nodes) and isinstance(nodes[index], (Space, Arrow)):
+        branches.append((nodes[index].direction, index))
+    return branches
+
+
 def handle_command(state: State, key: str) -> State:
     if state.pending == "b":
         if key in ("j", "l"):

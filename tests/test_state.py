@@ -15,6 +15,7 @@ from sketch.state import (
     edit,
     handle_key,
     next_colour,
+    outgoing,
 )
 
 
@@ -453,6 +454,51 @@ class MoveSelectionDownTest(unittest.TestCase):
     def test_j_does_not_cross_a_space_right(self):
         state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
         self.assertEqual(handle_key(state, "j").selected, 0)
+
+
+class OutgoingTest(unittest.TestCase):
+    def test_a_lone_box_has_no_outgoing_branches(self):
+        self.assertEqual(outgoing([Box()], 0), [])
+
+    def test_a_bare_separator_is_the_tail_branch(self):
+        nodes = [Box(), Space("right"), Box()]
+        self.assertEqual(outgoing(nodes, 0), [("right", 1)])
+
+    def test_a_bracketed_branch_and_a_tail_branch_are_both_reported(self):
+        nodes = [Box(), Push(), Space("down"), Box(), Pop(), Space("right"), Box()]
+        self.assertEqual(outgoing(nodes, 0), [("down", 2), ("right", 5)])
+
+    def test_a_lone_bracketed_branch_with_no_tail(self):
+        nodes = [Box(), Push(), Space("down"), Box(), Pop()]
+        self.assertEqual(outgoing(nodes, 0), [("down", 2)])
+
+    def test_an_arrow_is_reported_as_a_tail_branch(self):
+        nodes = [Box(), Arrow("down"), Box()]
+        self.assertEqual(outgoing(nodes, 0), [("down", 1)])
+
+    def test_a_bracket_can_contain_nested_brackets_before_its_matching_pop(self):
+        nodes = [
+            Box(),
+            Push(),
+            Space("down"),
+            Box(),
+            Push(),
+            Space("right"),
+            Box(),
+            Pop(),
+            Pop(),
+            Space("right"),
+            Box(),
+        ]
+        self.assertEqual(outgoing(nodes, 0), [("down", 2), ("right", 9)])
+
+    def test_only_branches_of_the_given_box_are_reported(self):
+        nodes = [Box(), Space("right"), Box(), Space("right"), Box()]
+        self.assertEqual(outgoing(nodes, 2), [("right", 3)])
+
+    def test_a_box_followed_immediately_by_a_pop_has_no_branches(self):
+        nodes = [Box(), Push(), Space("down"), Box(), Pop()]
+        self.assertEqual(outgoing(nodes, 3), [])
 
 
 class SpaceTest(unittest.TestCase):
