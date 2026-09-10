@@ -86,6 +86,19 @@ def beside(nodes: List[Node], selected: int, step: int) -> int:
     return target
 
 
+def below(nodes: List[Node], selected: int) -> int:
+    slot, target = selected + 1, selected + 2
+    if target >= len(nodes):
+        return selected
+    if not isinstance(nodes[slot], (Space, Arrow)):
+        return selected
+    if axis(nodes[slot]) != "row":
+        return selected
+    if not isinstance(nodes[target], Box):
+        return selected
+    return target
+
+
 def handle_command(state: State, key: str) -> State:
     if state.pending == "b":
         if key in ("j", "l"):
@@ -117,11 +130,14 @@ def handle_command(state: State, key: str) -> State:
         box = state.nodes[state.selected]
         nodes = edit(state.nodes, state.selected, box.label + PAD)
         return replace(state, nodes=nodes, mode="insert", source=-1)
-    if key in ("j", "k"):
+    if key == "j":
         if not state.nodes:
             return state
-        step = 1 if key == "j" else -1
-        selected = move(state.nodes, state.selected, step)
+        return replace(state, selected=below(state.nodes, state.selected))
+    if key == "k":
+        if not state.nodes:
+            return state
+        selected = move(state.nodes, state.selected, -1)
         return replace(state, selected=selected)
     if key == "c":
         if not state.nodes:
