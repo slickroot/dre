@@ -14,7 +14,7 @@ from sketch.layout import (
     walk,
     width,
 )
-from sketch.state import PAD, Arrow, Box, Cursor, Space, State
+from sketch.state import PAD, Arrow, Box, Cursor, Pop, Push, Space, State
 
 
 def boxes(placements):
@@ -305,6 +305,12 @@ class HeightTest(unittest.TestCase):
     def test_a_cursor_is_a_gap_tall(self):
         self.assertEqual(height(Cursor()), GAP_HEIGHT)
 
+    def test_a_push_has_no_height(self):
+        self.assertEqual(height(Push()), 0)
+
+    def test_a_pop_has_no_height(self):
+        self.assertEqual(height(Pop()), 0)
+
 
 class WidthTest(unittest.TestCase):
     def test_a_box_is_as_wide_as_its_interior_and_borders(self):
@@ -326,6 +332,12 @@ class WidthTest(unittest.TestCase):
     def test_a_horizontal_arrow_is_four_columns_wide(self):
         self.assertEqual(width(Arrow("right")), 4)
         self.assertEqual(width(Arrow("left")), 4)
+
+    def test_a_push_has_no_width(self):
+        self.assertEqual(width(Push()), 0)
+
+    def test_a_pop_has_no_width(self):
+        self.assertEqual(width(Pop()), 0)
 
 
 class WalkTest(unittest.TestCase):
@@ -383,6 +395,31 @@ class WalkTest(unittest.TestCase):
         with_arrow_right = walk([Box(), Arrow("right"), Box()])
         with_arrow_left = walk([Box(), Arrow("left"), Box()])
         self.assertEqual(with_arrow_right, with_arrow_left)
+
+    def test_a_bracketed_branch_restores_the_position_after_the_branch(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        coordinates = walk(nodes)
+        self.assertEqual(coordinates[0], Coordinate(0, 0))
+        self.assertEqual(coordinates[3], Coordinate(2, 0))
+        self.assertEqual(coordinates[6], Coordinate(0, 2))
+
+    def test_push_and_pop_do_not_advance_the_turtle(self):
+        nodes = [Box("a"), Push(), Pop(), Space(direction="right"), Box("b")]
+        coordinates = walk(nodes)
+        self.assertEqual(coordinates[1], Coordinate(0, 0))
+        self.assertEqual(coordinates[2], Coordinate(0, 0))
+
+    def test_walk_returns_a_coordinate_for_every_node_including_push_and_pop(self):
+        nodes = [Box("a"), Push(), Space(direction="down"), Box("b"), Pop()]
+        self.assertEqual(len(walk(nodes)), len(nodes))
 
     def test_the_minimum_row_and_column_are_both_zero(self):
         nodes = [

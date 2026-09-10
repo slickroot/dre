@@ -6,6 +6,8 @@ from sketch.state import (
     PLAIN,
     Arrow,
     Box,
+    Pop,
+    Push,
     Space,
     State,
     below,
@@ -37,6 +39,16 @@ class BoxLabelTest(unittest.TestCase):
 
     def test_boxes_with_different_labels_are_not_equal(self):
         self.assertNotEqual(Box("a"), Box("b"))
+
+
+class PushTest(unittest.TestCase):
+    def test_pushes_are_equal(self):
+        self.assertEqual(Push(), Push())
+
+
+class PopTest(unittest.TestCase):
+    def test_pops_are_equal(self):
+        self.assertEqual(Pop(), Pop())
 
 
 class StateTest(unittest.TestCase):

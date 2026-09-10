@@ -40,7 +40,17 @@ def axis(node: Union[Space, Arrow]) -> Literal["row", "col"]:
     return "col" if node.direction in HORIZONTAL else "row"
 
 
-Node = Union[Box, Space, Arrow, Cursor]
+@dataclass(frozen=True)
+class Push:
+    pass
+
+
+@dataclass(frozen=True)
+class Pop:
+    pass
+
+
+Node = Union[Box, Space, Arrow, Cursor, Push, Pop]
 
 Mode = Literal["command", "insert"]
 

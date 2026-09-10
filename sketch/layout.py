@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List
 
-from .state import Arrow, Box, Cursor, Node, Space, State
+from .state import Arrow, Box, Cursor, Node, Pop, Push, Space, State
 from .state import axis as node_axis
 
 BOX_HEIGHT = 3
@@ -33,7 +33,16 @@ class Track:
 def walk(nodes: List[Node]) -> List[Coordinate]:
     coordinates = [Coordinate(0, 0)]
     row, col, active = 0, 0, "row"
+    stack = []
     for node in nodes[1:]:
+        if isinstance(node, Push):
+            coordinates.append(Coordinate(row, col))
+            stack.append((row, col, active))
+            continue
+        if isinstance(node, Pop):
+            coordinates.append(Coordinate(row, col))
+            row, col, active = stack.pop()
+            continue
         if isinstance(node, (Space, Arrow)):
             active = node_axis(node)
         if active == "row":
@@ -73,6 +82,8 @@ def interior(label: str) -> int:
 def height(node: Node) -> int:
     if isinstance(node, Box):
         return BOX_HEIGHT
+    if isinstance(node, (Push, Pop)):
+        return 0
     return GAP_HEIGHT
 
 
