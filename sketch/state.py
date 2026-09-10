@@ -98,9 +98,7 @@ def handle_command(state: State, key: str) -> State:
     if state.pending == "b":
         if key in ("j", "l"):
             direction: SpaceDirection = "down" if key == "j" else "right"
-            nodes = state.nodes + (
-                [Space(direction=direction), Box(PAD)] if state.nodes else [Box(PAD)]
-            )
+            nodes = state.nodes + [Space(direction=direction), Box(PAD)]
             return replace(
                 state,
                 nodes=nodes,
@@ -116,6 +114,8 @@ def handle_command(state: State, key: str) -> State:
         step = 1 if key == "l" else -1
         return replace(state, selected=beside(state.nodes, state.selected, step))
     if key == "b":
+        if not state.nodes:
+            return replace(state, nodes=[Box(PAD)], mode="insert", selected=0)
         return replace(state, pending="b")
     if key == "q":
         return replace(state, running=False)
