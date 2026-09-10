@@ -9,6 +9,7 @@ from sketch.state import (
     Box,
     Space,
     State,
+    beside,
     edit,
     handle_key,
     next_colour,
@@ -282,6 +283,83 @@ class MoveSelectionTest(unittest.TestCase):
     def test_k_preserves_source(self):
         state = State([Box("a"), Space(), Box("b")], selected=2, source=2)
         self.assertEqual(handle_key(state, "k").source, 2)
+
+
+class BesideTest(unittest.TestCase):
+    def test_crosses_a_space_right_to_the_box_beside_it(self):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 0), 2)
+
+    def test_crosses_an_arrow_right_to_the_box_beside_it(self):
+        nodes = [Box("a"), Arrow(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 0), 2)
+
+    def test_crosses_an_arrow_left_to_the_box_beside_it(self):
+        nodes = [Box("a"), Arrow(direction="left"), Box("b")]
+        self.assertEqual(beside(nodes, 0), 2)
+
+    def test_refuses_across_a_space_down(self):
+        nodes = [Box("a"), Space(direction="down"), Box("b")]
+        self.assertEqual(beside(nodes, 0), 0)
+
+    def test_refuses_on_the_rightmost_box(self):
+        nodes = [Box("a"), Space(direction="right"), Box("b")]
+        self.assertEqual(beside(nodes, 2), 2)
+
+    def test_refuses_when_the_slot_holds_a_box(self):
+        nodes = [Box("a"), Box("b"), Box("c")]
+        self.assertEqual(beside(nodes, 0), 0)
+
+
+class MoveSelectionRightTest(unittest.TestCase):
+    def test_l_moves_the_selection_to_the_box_on_the_right(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
+        self.assertEqual(handle_key(state, "l").selected, 2)
+
+    def test_l_with_nothing_on_the_right_keeps_the_selection(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=2)
+        self.assertEqual(handle_key(state, "l").selected, 2)
+
+    def test_l_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State([])
+        self.assertEqual(handle_key(state, "l"), state)
+
+    def test_l_preserves_the_mode_the_running_flag_and_the_nodes(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
+        moved = handle_key(state, "l")
+        self.assertEqual(
+            (moved.mode, moved.running, moved.nodes),
+            (state.mode, state.running, state.nodes),
+        )
+
+    def test_l_preserves_source(self):
+        state = State(
+            [Box("a"), Space(direction="right"), Box("b")], selected=0, source=0
+        )
+        self.assertEqual(handle_key(state, "l").source, 0)
+
+    def test_l_does_not_mutate_the_given_state(self):
+        state = State([Box("a"), Space(direction="right"), Box("b")], selected=0)
+        handle_key(state, "l")
+        self.assertEqual(state.selected, 0)
+
+    def test_l_leaves_colours_unchanged(self):
+        nodes = [
+            Box("a", colour=0),
+            Space(direction="right"),
+            Box("b", colour=1),
+        ]
+        state = State(nodes, selected=0)
+        self.assertEqual(handle_key(state, "l").nodes, nodes)
+
+    def test_l_leaves_fills_unchanged(self):
+        nodes = [Box("a", fill=0), Space(direction="right"), Box("b", fill=1)]
+        state = State(nodes, selected=0)
+        self.assertEqual(handle_key(state, "l").nodes, nodes)
+
+    def test_l_in_insert_mode_types_the_letter_l(self):
+        state = State([Box("a" + PAD)], mode="insert", selected=0)
+        self.assertEqual(handle_key(state, "l").nodes, [Box("al" + PAD)])
 
 
 class SpaceTest(unittest.TestCase):
