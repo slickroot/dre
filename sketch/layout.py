@@ -1,17 +1,22 @@
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Tuple
 
-from .state import Arrow, Box, Cursor, Node, Space, State
-from .state import axis as node_axis
+from .state import Box, Cursor, Path, State, at
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 2
+GAP_WIDTH = 4
 BORDERS = 2
+
+
+@dataclass(frozen=True)
+class Arrow:
+    stops: Tuple[int, ...]
 
 
 @dataclass
 class Placement:
-    node: Node
+    node: object
     x: int
     y: int
     width: int
@@ -19,31 +24,9 @@ class Placement:
 
 
 @dataclass(frozen=True)
-class Coordinate:
-    row: int
-    col: int
-
-
-@dataclass(frozen=True)
 class Track:
     offset: int
     extent: int
-
-
-def walk(nodes: List[Node]) -> List[Coordinate]:
-    coordinates = [Coordinate(0, 0)]
-    row, col, active = 0, 0, "row"
-    for node in nodes[1:]:
-        if isinstance(node, (Space, Arrow)):
-            active = node_axis(node)
-        if active == "row":
-            row += 1
-        else:
-            col += 1
-        coordinates.append(Coordinate(row, col))
-    top = min(c.row for c in coordinates)
-    left = min(c.col for c in coordinates)
-    return [Coordinate(c.row - top, c.col - left) for c in coordinates]
 
 
 def tracks(extents: List[int], indices: List[int]) -> List[Track]:
@@ -70,52 +53,113 @@ def interior(label: str) -> int:
     return max(len(label), 1)
 
 
-def height(node: Node) -> int:
-    if isinstance(node, Box):
-        return BOX_HEIGHT
-    return GAP_HEIGHT
+def width(box: Box) -> int:
+    return interior(box.label) + BORDERS
 
 
-def width(node: Node) -> int:
-    if isinstance(node, Box):
-        return interior(node.label) + BORDERS
-    if isinstance(node, Arrow):
-        return 4 if node_axis(node) == "col" else 1
-    if isinstance(node, Space) and node.direction == "right":
-        return 4
-    return 0
+def height(box: Box) -> int:
+    return BOX_HEIGHT
 
 
-def cursor(state: State, placements: List[Placement]) -> List[Placement]:
-    if state.selected < 0 or not isinstance(state.nodes[state.selected], Box):
+def _place(
+    box: Box,
+    depth: int,
+    row: int,
+    path: Path,
+    box_entries: list,
+    arrow_entries: list,
+) -> int:
+    if not box.children:
+        box_entries.append((box, depth, row, path))
+        return 1
+
+    child_row = row
+    child_rows = []
+    for index, child in enumerate(box.children):
+        child_rows.append(child_row)
+        child_row += _place(
+            child, depth + 1, child_row, path + (index,), box_entries, arrow_entries
+        )
+
+    box_entries.append((box, depth, row, path))
+    arrow_entries.append((depth, row, child_rows))
+    return child_row - row
+
+
+def cursor(
+    state: State, placements_by_path: Dict[Path, Placement]
+) -> List[Placement]:
+    if not state.selected:
         return []
-    box = placements[state.selected]
-    x = box.x + interior(box.node.label)
-    return [Placement(Cursor(), x=x, y=box.y + 1, width=1, height=1)]
+    box = at(state.boxes, state.selected)
+    placement = placements_by_path[state.selected]
+    x = placement.x + interior(box.label)
+    return [Placement(Cursor(), x=x, y=placement.y + 1, width=1, height=1)]
 
 
 def layout(state: State, cols: int, rows: int) -> List[Placement]:
-    if not state.nodes:
+    if not state.boxes:
         return []
 
-    coordinates = walk(state.nodes)
-    widths = [width(node) for node in state.nodes]
-    heights = [height(node) for node in state.nodes]
+    box_entries: List[Tuple[Box, int, int, Path]] = []
+    arrow_entries: List[Tuple[int, int, List[int]]] = []
 
-    columns = tracks(widths, [c.col for c in coordinates])
-    rows_ = tracks(heights, [c.row for c in coordinates])
+    row = 0
+    for index, box in enumerate(state.boxes):
+        row += _place(box, 0, row, (index,), box_entries, arrow_entries)
+
+    max_row = max(row for _, _, row, _ in box_entries)
+
+    # Depth and row are doubled into track indices so a gap track can sit
+    # between every pair of box tracks: box column d / row r own tracks
+    # 2d / 2r, and the arrow-gap / sibling-gap after it owns 2d+1 / 2r+1.
+    column_extents = [width(box) for box, _, _, _ in box_entries] + [
+        GAP_WIDTH for _ in arrow_entries
+    ]
+    column_indices = [2 * depth for _, depth, _, _ in box_entries] + [
+        2 * depth + 1 for depth, _, _ in arrow_entries
+    ]
+    row_extents = [BOX_HEIGHT for _ in box_entries] + [
+        GAP_HEIGHT for _ in range(max_row)
+    ]
+    row_indices = [2 * r for _, _, r, _ in box_entries] + [
+        2 * r + 1 for r in range(max_row)
+    ]
+
+    columns = tracks(column_extents, column_indices)
+    rows_ = tracks(row_extents, row_indices)
     total_width, total_height = span(columns), span(rows_)
 
-    placements = [
-        Placement(
-            node,
-            x=centre(columns[at.col], node_width, cols, total_width),
-            y=centre(rows_[at.row], node_height, rows, total_height),
-            width=node_width,
-            height=node_height,
+    placements_by_pos: Dict[Tuple[int, int], Placement] = {}
+    placements_by_path: Dict[Path, Placement] = {}
+    box_placements: List[Placement] = []
+    for box, depth, row, path in box_entries:
+        box_width = width(box)
+        placement = Placement(
+            box,
+            x=centre(columns[2 * depth], box_width, cols, total_width),
+            y=centre(rows_[2 * row], BOX_HEIGHT, rows, total_height),
+            width=box_width,
+            height=BOX_HEIGHT,
         )
-        for node, at, node_width, node_height in zip(
-            state.nodes, coordinates, widths, heights
+        box_placements.append(placement)
+        placements_by_pos[(depth, row)] = placement
+        placements_by_path[path] = placement
+
+    arrow_placements: List[Placement] = []
+    for depth, row, child_rows in arrow_entries:
+        parent = placements_by_pos[(depth, row)]
+        top = parent.y + parent.height // 2
+        child_centres = [
+            placements_by_pos[(depth + 1, r)].y
+            + placements_by_pos[(depth + 1, r)].height // 2
+            for r in child_rows
+        ]
+        bottom = child_centres[-1]
+        stops = tuple(centre_y - top for centre_y in child_centres)
+        x = centre(columns[2 * depth + 1], GAP_WIDTH, cols, total_width)
+        arrow_placements.append(
+            Placement(Arrow(stops), x=x, y=top, width=GAP_WIDTH, height=bottom - top + 1)
         )
-    ]
-    return placements + cursor(state, placements)
+
+    return box_placements + arrow_placements + cursor(state, placements_by_path)
