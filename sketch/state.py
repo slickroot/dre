@@ -78,30 +78,48 @@ def move(nodes: List[Node], selected: int, step: int) -> int:
     return selected
 
 
+def preceding_box(nodes: List[Node], index: int) -> int:
+    i = index - 1
+    if i >= 0 and isinstance(nodes[i], Pop):
+        depth = 1
+        i -= 1
+        while depth > 0:
+            if isinstance(nodes[i], Pop):
+                depth += 1
+            elif isinstance(nodes[i], Push):
+                depth -= 1
+            i -= 1
+    return i if i >= 0 and isinstance(nodes[i], Box) else -1
+
+
+def forward(nodes: List[Node], selected: int, wanted_axis: str) -> int:
+    for _, sep_index in outgoing(nodes, selected):
+        if axis(nodes[sep_index]) != wanted_axis:
+            continue
+        target = sep_index + 1
+        if target < len(nodes) and isinstance(nodes[target], Box):
+            return target
+    return selected
+
+
 def beside(nodes: List[Node], selected: int, step: int) -> int:
-    slot, target = selected + step, selected + 2 * step
-    if not 0 <= target < len(nodes):
+    if selected < 0:
+        selected = len(nodes) - 1
+    if step > 0:
+        return forward(nodes, selected, "col")
+    sep_index = selected - 1
+    if sep_index < 0 or not isinstance(nodes[sep_index], (Space, Arrow)):
         return selected
-    if not isinstance(nodes[slot], (Space, Arrow)):
+    if axis(nodes[sep_index]) != "col":
         return selected
-    if axis(nodes[slot]) != "col":
-        return selected
-    if not isinstance(nodes[target], Box):
-        return selected
-    return target
+    source = preceding_box(nodes, sep_index)
+    return source if source >= 0 else selected
 
 
 def below(nodes: List[Node], selected: int) -> int:
-    slot, target = selected + 1, selected + 2
-    if target >= len(nodes):
-        return selected
-    if not isinstance(nodes[slot], (Space, Arrow)):
-        return selected
-    if axis(nodes[slot]) != "row":
-        return selected
-    if not isinstance(nodes[target], Box):
-        return selected
-    return target
+    if selected < 0:
+        selected = len(nodes) - 1
+    return forward(nodes, selected, "row")
 
 
 def outgoing(nodes: List[Node], i: int) -> List[tuple]:

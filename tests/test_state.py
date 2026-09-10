@@ -169,6 +169,21 @@ class HandleKeyTest(unittest.TestCase):
         state = State([Box("a")], selected=0, source=0)
         self.assertEqual(bj(state).source, -1)
 
+    def test_movement_still_works_after_branching_a_selected_box(self):
+        state = State([])
+        state = handle_key(handle_key(state, "b"), "j")  # A
+        state = handle_key(state, "\x1b")
+        state = handle_key(handle_key(state, "b"), "l")  # B, right of A
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "h")  # back to A
+        self.assertEqual(state.selected, 0)
+        state = handle_key(handle_key(state, "b"), "j")  # bracket New below A
+        state = handle_key(state, "\x1b")
+        state = handle_key(state, "k")  # back to A
+        self.assertEqual(state.selected, 0)
+        self.assertEqual(handle_key(state, "j").selected, 3)
+        self.assertEqual(handle_key(state, "l").selected, 6)
+
 
 class PendingCommandTest(unittest.TestCase):
     def test_b_sets_pending_to_b(self):
@@ -456,6 +471,45 @@ class BesideTest(unittest.TestCase):
         nodes = [Box("a"), Space(direction="right"), Box("b")]
         self.assertEqual(beside(nodes, 0, -1), 0)
 
+    def test_crosses_a_bracketed_branch_to_reach_the_tail_box(self):
+        # [A, Push, Space(down), New, Pop, Space(right), B]: A's tail branch
+        # (right, to B) survives even though A also branched down to New.
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        self.assertEqual(beside(nodes, 0, 1), 6)
+
+    def test_crosses_back_over_a_bracketed_branch_going_left(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        self.assertEqual(beside(nodes, 6, -1), 0)
+
+    def test_refuses_left_across_a_bracketed_down_branch(self):
+        # New sits below A, not beside anything: no left neighbour for it.
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        self.assertEqual(beside(nodes, 3, -1), 3)
+
 
 class BelowTest(unittest.TestCase):
     def test_crosses_a_space_down_to_the_box_below_it(self):
@@ -477,6 +531,31 @@ class BelowTest(unittest.TestCase):
     def test_refuses_on_the_bottom_box(self):
         nodes = [Box("a"), Space(direction="down"), Box("b")]
         self.assertEqual(below(nodes, 2), 2)
+
+    def test_crosses_a_bracketed_branch_to_reach_its_box(self):
+        # A's down branch is bracketed away from its tail (right) branch.
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        self.assertEqual(below(nodes, 0), 3)
+
+    def test_refuses_below_the_tail_box_of_a_bracketed_selection(self):
+        nodes = [
+            Box("a"),
+            Push(),
+            Space(direction="down"),
+            Box("new"),
+            Pop(),
+            Space(direction="right"),
+            Box("b"),
+        ]
+        self.assertEqual(below(nodes, 6), 6)
 
     def test_refuses_when_the_slot_holds_a_box(self):
         nodes = [Box("a"), Box("b"), Box("c")]
