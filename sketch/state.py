@@ -117,6 +117,10 @@ def handle_command(state: State, key: str) -> State:
         if not state.nodes:
             return replace(state, nodes=[Box(PAD)], mode="insert", selected=0)
         return replace(state, pending="b")
+    if key == "s":
+        if not state.nodes:
+            return state
+        return replace(state, pending="s")
     if key == "q":
         return replace(state, running=False)
     if key == "i":

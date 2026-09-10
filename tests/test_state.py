@@ -213,6 +213,31 @@ class PendingCommandTest(unittest.TestCase):
         result = handle_key(handle_key(state, "b"), "i")
         self.assertEqual((result.selected, result.source), (0, 0))
 
+    def test_s_on_an_empty_canvas_adds_no_node(self):
+        self.assertEqual(handle_key(State([]), "s").nodes, [])
+
+    def test_s_on_an_empty_canvas_stays_in_command_mode(self):
+        self.assertEqual(handle_key(State([]), "s").mode, "command")
+
+    def test_s_on_an_empty_canvas_does_not_set_pending(self):
+        self.assertEqual(handle_key(State([]), "s").pending, "")
+
+    def test_s_sets_pending_to_s(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "s").pending, "s")
+
+    def test_s_does_not_add_a_node(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "s").nodes, [Box("a")])
+
+    def test_s_does_not_change_mode(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "s").mode, "command")
+
+    def test_s_does_not_change_selected(self):
+        state = State([Box("a")], selected=0)
+        self.assertEqual(handle_key(state, "s").selected, 0)
+
 
 class MoveSelectionTest(unittest.TestCase):
     def test_k_skips_a_space_and_lands_on_the_previous_box(self):
