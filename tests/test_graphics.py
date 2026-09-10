@@ -1,7 +1,7 @@
 import unittest
 from math import cos, radians, tan
 
-from sketch.layout import Placement
+from sketch.layout import Arrow, Placement
 from sketch.render import (
     ARROWHEAD_ANGLE_DEG,
     ARROWHEAD_EDGE_LENGTH,
@@ -10,7 +10,7 @@ from sketch.render import (
     PLAIN_COLOUR,
     GraphicsRenderer,
 )
-from sketch.state import PLAIN, Arrow, Box, Cursor, Space
+from sketch.state import PLAIN, Box, Cursor
 
 
 class FakeText:
@@ -102,206 +102,143 @@ class GraphicsRendererTest(unittest.TestCase):
         )
         self.assertEqual(self.pixel(sprite, 0, 0), PLAIN_COLOUR + (OPAQUE,))
 
-    def test_an_arrow_sprite_is_one_cell_wide_and_two_cells_tall(self):
+    def test_an_arrow_sprite_covers_the_placement_in_pixels(self):
         sprite = self.only_sprite(
-            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
-        self.assertEqual((sprite.width, sprite.height), (5, 8))
+        self.assertEqual((sprite.width, sprite.height), (8, 5))
 
-    def test_an_arrow_shaft_is_opaque_on_every_row(self):
+    def test_a_single_stop_arrow_is_a_straight_line_across_every_column(self):
+        # stops == (0,) is the degenerate case: shaft and trunk collapse onto
+        # one row, so the sprite is exactly today's straight "-->" arrow.
         sprite = self.only_sprite(
-            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
-        cx = sprite.width // 2
-        for y in range(sprite.height):
-            self.assertEqual(self.pixel(sprite, cx, y)[3], OPAQUE)
-
-    def test_a_forward_arrow_tip_is_a_single_pixel_at_the_bottom(self):
-        sprite = self.only_sprite(
-            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
-        )
-        cx = sprite.width // 2
-        tip = sprite.height - 1
+        shaft_row = sprite.height // 2
         for x in range(sprite.width):
-            expected = OPAQUE if x == cx else 0
-            self.assertEqual(self.pixel(sprite, x, tip)[3], expected)
+            self.assertEqual(self.pixel(sprite, x, shaft_row)[3], OPAQUE)
 
-    def test_a_backward_arrow_tip_is_a_single_pixel_at_the_top(self):
+    def test_a_single_stop_arrow_tip_is_a_single_pixel_at_the_right_edge(self):
         sprite = self.only_sprite(
-            Placement(Arrow("up"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
-        cx = sprite.width // 2
-        for x in range(sprite.width):
-            expected = OPAQUE if x == cx else 0
-            self.assertEqual(self.pixel(sprite, x, 0)[3], expected)
-
-    def test_the_forward_head_diagonals_are_symmetric_about_the_shaft(self):
-        sprite = self.only_sprite(
-            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
-        )
-        cx = sprite.width // 2
-        # Base row of the head: furthest from the tip, widest spread.
-        base = sprite.height - 4
-        opaque_xs = [
-            x
-            for x in range(sprite.width)
-            if x != cx and self.pixel(sprite, x, base)[3] == OPAQUE
-        ]
-        self.assertEqual(len(opaque_xs), 2)
-        left, right = opaque_xs
-        self.assertEqual(cx - left, right - cx)
-        self.assertGreater(right, cx)
-
-    def test_the_backward_head_diagonals_are_symmetric_about_the_shaft(self):
-        sprite = self.only_sprite(
-            Placement(Arrow("up"), x=1, y=1, width=1, height=2), cell=(5, 4)
-        )
-        cx = sprite.width // 2
-        base = 3
-        opaque_xs = [
-            x
-            for x in range(sprite.width)
-            if x != cx and self.pixel(sprite, x, base)[3] == OPAQUE
-        ]
-        self.assertEqual(len(opaque_xs), 2)
-        left, right = opaque_xs
-        self.assertEqual(cx - left, right - cx)
-        self.assertGreater(right, cx)
-
-    def test_a_right_arrow_tip_is_a_single_pixel_at_the_right_edge(self):
-        sprite = self.only_sprite(
-            Placement(Arrow("right"), x=1, y=1, width=2, height=1), cell=(4, 5)
-        )
-        cy = sprite.height // 2
+        shaft_row = sprite.height // 2
         tip = sprite.width - 1
         for y in range(sprite.height):
-            expected = OPAQUE if y == cy else 0
+            expected = OPAQUE if y == shaft_row else 0
             self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
 
-    def test_a_left_arrow_tip_is_a_single_pixel_at_the_left_edge(self):
+    def test_a_single_stop_arrowhead_diagonals_are_symmetric_about_the_shaft(self):
         sprite = self.only_sprite(
-            Placement(Arrow("left"), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
-        cy = sprite.height // 2
-        for y in range(sprite.height):
-            expected = OPAQUE if y == cy else 0
-            self.assertEqual(self.pixel(sprite, 0, y)[3], expected)
-
-    def test_the_right_head_diagonals_are_symmetric_about_the_shaft(self):
-        sprite = self.only_sprite(
-            Placement(Arrow("right"), x=1, y=1, width=2, height=1), cell=(4, 5)
-        )
-        cy = sprite.height // 2
+        shaft_row = sprite.height // 2
         # Base column of the head: furthest from the tip, widest spread.
         base = sprite.width - 4
         opaque_ys = [
             y
             for y in range(sprite.height)
-            if y != cy and self.pixel(sprite, base, y)[3] == OPAQUE
+            if y != shaft_row and self.pixel(sprite, base, y)[3] == OPAQUE
         ]
         self.assertEqual(len(opaque_ys), 2)
         top, bottom = opaque_ys
-        self.assertEqual(cy - top, bottom - cy)
-        self.assertGreater(bottom, cy)
+        self.assertEqual(shaft_row - top, bottom - shaft_row)
+        self.assertGreater(bottom, shaft_row)
 
-    def test_the_left_head_diagonals_are_symmetric_about_the_shaft(self):
+    def test_arrowhead_shape_matches_the_thirty_degree_geometry(self):
         sprite = self.only_sprite(
-            Placement(Arrow("left"), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,)), x=1, y=1, width=3, height=1), cell=(40, 20)
         )
-        cy = sprite.height // 2
-        base = 3
-        opaque_ys = [
-            y
-            for y in range(sprite.height)
-            if y != cy and self.pixel(sprite, base, y)[3] == OPAQUE
-        ]
-        self.assertEqual(len(opaque_ys), 2)
-        top, bottom = opaque_ys
-        self.assertEqual(cy - top, bottom - cy)
-        self.assertGreater(bottom, cy)
+        shaft_row = sprite.height // 2
+        tip = sprite.width - 1
 
-    def test_arrowhead_shape_is_consistent_regardless_of_direction(self):
-        # cell_width != cell_height here, which used to make vertical and
-        # horizontal arrowheads different shapes.
-        vertical = self.only_sprite(
-            Placement(Arrow("down"), x=1, y=1, width=1, height=3), cell=(40, 20)
-        )
-        horizontal = self.only_sprite(
-            Placement(Arrow("right"), x=1, y=1, width=3, height=1), cell=(40, 20)
-        )
-
-        def spreads(sprite, vertical, depth):
-            if vertical:
-                cx = sprite.width // 2
-                tip = sprite.height - 1
-                get = lambda d: [
-                    x
-                    for x in range(sprite.width)
-                    if x != cx
-                    and self.pixel(sprite, x, tip - d)[3] == OPAQUE
-                ]
-                centre = cx
-            else:
-                cy = sprite.height // 2
-                tip = sprite.width - 1
-                get = lambda d: [
-                    y
-                    for y in range(sprite.height)
-                    if y != cy
-                    and self.pixel(sprite, tip - d, y)[3] == OPAQUE
-                ]
-                centre = cy
-            result = []
-            for d in range(depth):
-                opaque = get(d)
-                result.append(abs(opaque[0] - centre) if opaque else 0)
-            return result
+        def spread_at(distance_from_tip):
+            opaque = [
+                y
+                for y in range(sprite.height)
+                if y != shaft_row
+                and self.pixel(sprite, tip - distance_from_tip, y)[3] == OPAQUE
+            ]
+            return abs(opaque[0] - shaft_row) if opaque else 0
 
         depth = int(ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG)))
         expected = [
             round(d * tan(radians(ARROWHEAD_ANGLE_DEG))) for d in range(depth)
         ]
-        vertical_spreads = spreads(vertical, vertical=True, depth=depth)
-        horizontal_spreads = spreads(horizontal, vertical=False, depth=depth)
-        self.assertEqual(vertical_spreads, horizontal_spreads)
-        self.assertEqual(vertical_spreads, expected)
+        self.assertEqual([spread_at(d) for d in range(depth)], expected)
 
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
-            Placement(Arrow("down"), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         self.assertEqual(self.pixel(sprite, 0, 0), (0, 0, 0, 0))
 
     def test_an_arrow_is_plain_grey(self):
         sprite = self.only_sprite(
-            Placement(Arrow(), x=1, y=1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
-        cx = sprite.width // 2
-        self.assertEqual(self.pixel(sprite, cx, 0), PLAIN_COLOUR + (OPAQUE,))
+        shaft_row = sprite.height // 2
+        self.assertEqual(
+            self.pixel(sprite, 0, shaft_row), PLAIN_COLOUR + (OPAQUE,)
+        )
 
     def test_an_arrow_overhanging_the_top_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Arrow(), x=1, y=-1, width=1, height=2), cell=(5, 4)
+            Placement(Arrow((0, 3)), x=1, y=-1, width=2, height=4), cell=(4, 5)
         )
         self.assertEqual(sprite.row, 0)
-        self.assertEqual(sprite.height, 4)
+        self.assertEqual(sprite.height, 15)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
 
     def test_an_arrow_overhanging_the_bottom_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Arrow(), x=1, y=1, width=1, height=2),
+            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4),
             cols=40,
             rows=2,
-            cell=(5, 4),
+            cell=(4, 5),
         )
         self.assertEqual(sprite.row, 1)
-        self.assertEqual(sprite.height, 4)
+        self.assertEqual(sprite.height, 5)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
 
-    def test_a_space_has_no_sprite(self):
-        self.assertEqual(
-            self.sprites([Placement(Space(), x=1, y=1, width=0, height=2)]), []
+    def test_a_branching_arrow_trunk_spans_from_the_shaft_to_the_last_stop(self):
+        sprite = self.only_sprite(
+            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
+        midpoint = sprite.width // 2
+        shaft_row = 5 // 2  # centre of the parent's own row
+        last_stop_row = 3 * 5 + 5 // 2
+        for y in range(shaft_row, last_stop_row + 1):
+            self.assertEqual(self.pixel(sprite, midpoint, y)[3], OPAQUE)
+
+    def test_a_branching_arrow_has_a_stub_at_every_stop(self):
+        sprite = self.only_sprite(
+            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        midpoint = sprite.width // 2
+        for stop in (0, 3):
+            row = stop * 5 + 5 // 2
+            for x in range(midpoint, sprite.width):
+                self.assertEqual(self.pixel(sprite, x, row)[3], OPAQUE)
+
+    def test_a_branching_arrow_rows_between_stops_are_blank_past_the_trunk(self):
+        sprite = self.only_sprite(
+            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        midpoint = sprite.width // 2
+        row_between_stops = 1 * 5 + 5 // 2
+        for x in range(midpoint + 1, sprite.width):
+            self.assertEqual(self.pixel(sprite, x, row_between_stops)[3], 0)
+
+    def test_three_stubs_each_end_in_their_own_arrowhead(self):
+        sprite = self.only_sprite(
+            Placement(Arrow((0, 1, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        tip = sprite.width - 1
+        stop_rows = {stop * 5 + 5 // 2 for stop in (0, 1, 3)}
+        for y in range(sprite.height):
+            expected = OPAQUE if y in stop_rows else 0
+            self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
 
     def test_a_cursor_has_no_sprite(self):
         self.assertEqual(

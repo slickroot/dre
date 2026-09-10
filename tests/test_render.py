@@ -1,11 +1,8 @@
 import unittest
 
+from sketch.layout import Arrow as LayoutArrow
 from sketch.layout import Placement
 from sketch.render import (
-    ARROW_DOWN,
-    ARROW_LEFT,
-    ARROW_RIGHT,
-    ARROW_UP,
     BLANK,
     BOTTOM_LEFT,
     BOTTOM_RIGHT,
@@ -25,7 +22,7 @@ from sketch.render import (
     _colour,
     _fill_colour,
 )
-from sketch.state import PLAIN, Arrow, Box, Cursor
+from sketch.state import PLAIN, Box, Cursor
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -169,20 +166,16 @@ class TerminalRendererTest(unittest.TestCase):
         rest = rest[1:]
         self.assertTrue(rest.startswith(_cell(BLANK, PLAIN, second_fill)))
 
-    def test_a_forward_arrow_leaves_the_gap_blank(self):
+    def test_an_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(Arrow("down"), 2, 1, 1, 2)], 4, 4
-        )
-        self.assertEqual(grid, [BLANK * 4] * 4)
-
-    def test_a_backward_arrow_leaves_the_gap_blank(self):
-        grid = self.renderer.render(
-            [Placement(Arrow("up"), 2, 1, 1, 2)], 4, 4
+            [Placement(LayoutArrow((0,)), 2, 1, 1, 2)], 4, 4
         )
         self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_an_arrow_outside_the_grid_is_clipped(self):
-        grid = self.renderer.render([Placement(Arrow("down"), 9, 9, 1, 2)], 4, 3)
+        grid = self.renderer.render(
+            [Placement(LayoutArrow((0,)), 9, 9, 1, 2)], 4, 3
+        )
         self.assertEqual(grid, [BLANK * 4] * 3)
 
     def test_an_unfilled_box_emits_no_escapes(self):
@@ -265,31 +258,6 @@ class BoxCharacterTest(unittest.TestCase):
 
     def test_the_interior_is_blank(self):
         self.assertEqual(self.character(2, 1), BLANK)
-
-
-class DrawArrowTest(unittest.TestCase):
-    def setUp(self):
-        self.renderer = TerminalRenderer()
-
-    def test_a_forward_arrow_draws_the_down_glyph(self):
-        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("down"), 2, 1, 1, 2))
-        self.assertEqual(grid[1][2], (ARROW_DOWN, PLAIN, PLAIN))
-
-    def test_a_backward_arrow_draws_the_up_glyph(self):
-        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("up"), 2, 1, 1, 2))
-        self.assertEqual(grid[1][2], (ARROW_UP, PLAIN, PLAIN))
-
-    def test_a_left_arrow_draws_the_left_glyph(self):
-        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("left"), 2, 1, 1, 2))
-        self.assertEqual(grid[1][2], (ARROW_LEFT, PLAIN, PLAIN))
-
-    def test_a_right_arrow_draws_the_right_glyph(self):
-        grid = [[(" ", PLAIN, PLAIN)] * 4 for _ in range(3)]
-        self.renderer._draw_arrow(grid, Placement(Arrow("right"), 2, 1, 1, 2))
-        self.assertEqual(grid[1][2], (ARROW_RIGHT, PLAIN, PLAIN))
 
 
 class GraphicsRendererFillTest(unittest.TestCase):
