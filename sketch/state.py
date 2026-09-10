@@ -108,6 +108,18 @@ def handle_command(state: State, key: str) -> State:
                 pending="",
             )
         return replace(state, pending="")
+    if state.pending == "s":
+        if key == "l":
+            nodes = state.nodes + [Space(direction="right"), Box(PAD)]
+            return replace(
+                state,
+                nodes=nodes,
+                mode="insert",
+                selected=len(nodes) - 1,
+                source=-1,
+                pending="",
+            )
+        return replace(state, pending="")
     if key in ("h", "l"):
         if not state.nodes:
             return state
