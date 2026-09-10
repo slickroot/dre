@@ -277,6 +277,45 @@ class PendingCommandTest(unittest.TestCase):
         )
         self.assertEqual(result.selected, len(result.nodes) - 1)
 
+    def test_sj_appends_a_space_directed_down_and_a_box(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.nodes, [Box("a"), Space(direction="down"), Box(PAD)])
+
+    def test_sj_selects_the_new_box(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.selected, len(result.nodes) - 1)
+
+    def test_sj_enters_insert_mode(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.mode, "insert")
+
+    def test_sj_clears_pending(self):
+        state = State([Box("a")], selected=0)
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(result.pending, "")
+
+    def test_sj_appends_after_the_last_node_when_selection_is_not_last(self):
+        state = State(
+            [Box("a"), Space(), Box("b"), Space(), Box("c")], selected=2
+        )
+        result = handle_key(handle_key(state, "s"), "j")
+        self.assertEqual(
+            result.nodes,
+            [
+                Box("a"),
+                Space(),
+                Box("b"),
+                Space(),
+                Box("c"),
+                Space(direction="down"),
+                Box(PAD),
+            ],
+        )
+        self.assertEqual(result.selected, len(result.nodes) - 1)
+
 
 class MoveSelectionTest(unittest.TestCase):
     def test_k_skips_a_space_and_lands_on_the_previous_box(self):

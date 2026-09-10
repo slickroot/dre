@@ -109,8 +109,9 @@ def handle_command(state: State, key: str) -> State:
             )
         return replace(state, pending="")
     if state.pending == "s":
-        if key == "l":
-            nodes = state.nodes + [Space(direction="right"), Box(PAD)]
+        if key in ("j", "l"):
+            direction: SpaceDirection = "down" if key == "j" else "right"
+            nodes = state.nodes + [Space(direction=direction), Box(PAD)]
             return replace(
                 state,
                 nodes=nodes,
