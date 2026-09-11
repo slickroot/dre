@@ -15,6 +15,7 @@ diagram stays tidy when a neighbouring box grows wider.
 5. In a box with no text, the cursor sits in the middle of the box.
 
 ## Technical Design
+
 A box is sized by its column track (`column_tracks`), so `placement.width` is
 already the widest box in that column — that is why a neighbour growing makes
 this box grow. Today two separate modules independently assume the text starts
