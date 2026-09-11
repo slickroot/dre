@@ -4,7 +4,10 @@ from math import cos, radians, tan
 from sketch.layout import Arrow, Placement
 from sketch.render import (
     ARROWHEAD_ANGLE_DEG,
+    ARROWHEAD_DEPTH,
     ARROWHEAD_EDGE_LENGTH,
+    ARROWHEAD_SLOPE,
+    CACHE_LIMIT,
     PALETTE,
     OPAQUE,
     PLAIN_COLOUR,
@@ -286,3 +289,73 @@ class GraphicsRendererTest(unittest.TestCase):
             ),
             [],
         )
+
+
+class ArrowheadConstantsTest(unittest.TestCase):
+    def test_depth_matches_the_edge_length_and_angle(self):
+        self.assertEqual(
+            ARROWHEAD_DEPTH,
+            ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG)),
+        )
+
+    def test_slope_matches_the_angle(self):
+        self.assertEqual(ARROWHEAD_SLOPE, tan(radians(ARROWHEAD_ANGLE_DEG)))
+
+
+class SpriteCacheTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = GraphicsRenderer(
+            FakeText(["line"]), FakeGraphics(), cell_width=2, cell_height=4
+        )
+
+    def draw(self, placement, cols=40, rows=20):
+        return self.renderer._sprites([placement], cols, rows)[0]
+
+    def test_an_unchanged_box_is_not_redrawn(self):
+        placement = Placement(Box("hi", colour=1, fill=2), x=0, y=0, width=4, height=3)
+        first = self.draw(placement)
+        self.assertEqual(len(self.renderer.cache), 1)
+        self.assertEqual(self.draw(placement).pixels, first.pixels)
+        self.assertEqual(len(self.renderer.cache), 1)
+
+    def test_a_recoloured_box_is_redrawn(self):
+        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        blue = self.draw(Placement(Box("hi", colour=4), x=0, y=0, width=4, height=3))
+        self.assertNotEqual(plain.pixels, blue.pixels)
+        self.assertEqual(len(self.renderer.cache), 2)
+
+    def test_a_refilled_box_is_redrawn(self):
+        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        filled = self.draw(Placement(Box("hi", fill=3), x=0, y=0, width=4, height=3))
+        self.assertNotEqual(plain.pixels, filled.pixels)
+
+    def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
+        first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        second = self.draw(Placement(Box("ok"), x=0, y=0, width=4, height=3))
+        self.assertEqual(second.pixels, first.pixels)
+        self.assertEqual(len(self.renderer.cache), 1)
+
+    def test_a_cached_sprite_moves_to_its_own_position(self):
+        self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        moved = self.draw(Placement(Box("hi"), x=5, y=2, width=4, height=3))
+        self.assertEqual((moved.col, moved.row), (5, 2))
+
+    def test_a_differently_cropped_box_is_redrawn(self):
+        whole = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        cropped = self.draw(
+            Placement(Box("hi"), x=0, y=0, width=4, height=3), cols=2, rows=20
+        )
+        self.assertNotEqual(whole.width, cropped.width)
+        self.assertEqual(len(self.renderer.cache), 2)
+
+    def test_arrows_with_different_stops_are_redrawn(self):
+        one = self.draw(Placement(Arrow((0,)), x=0, y=0, width=4, height=6))
+        two = self.draw(Placement(Arrow((0, 2)), x=0, y=0, width=4, height=6))
+        self.assertNotEqual(one.pixels, two.pixels)
+
+    def test_the_cache_is_bounded(self):
+        for width in range(CACHE_LIMIT + 2):
+            self.renderer._sprites(
+                [Placement(Box("hi"), x=0, y=0, width=width + 1, height=3)], 4000, 20
+            )
+        self.assertLessEqual(len(self.renderer.cache), CACHE_LIMIT)
