@@ -6,10 +6,15 @@ from sketch.layout import (
     GAP_HEIGHT,
     GAP_WIDTH,
     Arrow,
+    Node,
     Placement,
     Track,
+    cells,
+    fold_up,
     height,
     layout,
+    measure,
+    push_down,
     span,
     tracks,
     width,
@@ -81,6 +86,30 @@ class LayoutTest(unittest.TestCase):
         top = placements[0].y
         bottom = placements[-1].y + placements[-1].height
         self.assertLessEqual(abs((top + bottom) / 2 - 11 / 2), 0.5)
+
+
+class ColumnWidthTest(unittest.TestCase):
+    def test_top_level_boxes_share_the_width_of_the_widest(self):
+        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        short, wide = find(placements, "x"), find(placements, "wide")
+        self.assertEqual(short.width, width(Box("wide")))
+        self.assertEqual(short.width, wide.width)
+
+    def test_boxes_in_a_column_are_left_aligned_with_each_other(self):
+        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        self.assertEqual(find(placements, "x").x, find(placements, "wide").x)
+
+    def test_siblings_share_the_width_of_the_widest_sibling(self):
+        state = State((Box("a", children=(Box("c"), Box("dddd"))),))
+        placements = layout(state, cols=31, rows=21)
+        short, wide = find(placements, "c"), find(placements, "dddd")
+        self.assertEqual(short.width, width(Box("dddd")))
+        self.assertEqual(short.x, wide.x)
+
+    def test_a_narrower_column_does_not_widen_to_match_another(self):
+        state = State((Box("a", children=(Box("dddd"),)),))
+        placements = layout(state, cols=31, rows=21)
+        self.assertEqual(find(placements, "a").width, width(Box("a")))
 
 
 class CursorTest(unittest.TestCase):
@@ -242,6 +271,84 @@ class WidthHeightTest(unittest.TestCase):
 
     def test_a_box_is_as_tall_as_a_box(self):
         self.assertEqual(height(Box("hi")), BOX_HEIGHT)
+
+
+def celled(box, index=0):
+    return push_down(cells, fold_up(measure, box), (0, 0, (index,)))
+
+
+class CombinatorTest(unittest.TestCase):
+    def test_fold_up_gives_a_parent_its_transformed_children(self):
+        tree = Node("a", (Node("b"), Node("c")))
+        folded = fold_up(
+            lambda node, kids: node.value + "".join(k.value for k in kids), tree
+        )
+        self.assertEqual(folded.value, "abc")
+
+    def test_fold_up_preserves_the_shape_of_the_tree(self):
+        tree = Node(1, (Node(2, (Node(3),)),))
+        self.assertEqual(
+            fold_up(lambda node, _: node.value * 10, tree),
+            Node(10, (Node(20, (Node(30),)),)),
+        )
+
+    def test_push_down_hands_each_child_its_own_context(self):
+        tree = Node("a", (Node("b"), Node("c")))
+
+        def step(node, context):
+            return f"{node.value}{context}", [context + 1] * len(node.children)
+
+        pushed = push_down(step, tree, 0)
+        self.assertEqual(pushed.value, "a0")
+        self.assertEqual([c.value for c in pushed.children], ["b1", "c1"])
+
+    def test_push_down_preserves_the_shape_of_the_tree(self):
+        tree = Node(1, (Node(2, (Node(3),)),))
+        pushed = push_down(lambda node, ctx: (ctx, [ctx + 1]), tree, 0)
+        self.assertEqual(pushed, Node(0, (Node(1, (Node(2),)),)))
+
+
+class MeasureTest(unittest.TestCase):
+    def test_a_leaf_spans_a_single_row(self):
+        self.assertEqual(fold_up(measure, Box()).value.span, 1)
+
+    def test_a_parent_spans_the_sum_of_its_children(self):
+        tree = fold_up(measure, Box("a", children=(Box(), Box(), Box())))
+        self.assertEqual(tree.value.span, 3)
+
+    def test_spans_accumulate_through_generations(self):
+        inner = Box("b", children=(Box(), Box()))
+        tree = fold_up(measure, Box("a", children=(inner, Box())))
+        self.assertEqual(tree.value.span, 3)
+
+    def test_a_box_is_measured_at_its_own_width(self):
+        self.assertEqual(fold_up(measure, Box("hi")).value.width, width(Box("hi")))
+
+
+class CellsTest(unittest.TestCase):
+    def test_the_root_takes_the_context_it_is_given(self):
+        root = celled(Box("a")).value
+        self.assertEqual((root.column, root.row, root.path), (0, 0, (0,)))
+
+    def test_a_child_sits_one_column_right_of_its_parent(self):
+        tree = celled(Box("a", children=(Box("b"),)))
+        self.assertEqual(tree.children[0].value.column, 1)
+
+    def test_a_parent_shares_the_row_of_its_first_child(self):
+        tree = celled(Box("a", children=(Box("b"), Box("c"))))
+        self.assertEqual(tree.children[0].value.row, tree.value.row)
+
+    def test_a_sibling_starts_below_the_previous_subtree(self):
+        parent = Box("a", children=(Box("b", children=(Box(), Box())), Box("c")))
+        first, second = celled(parent).children
+        self.assertEqual(
+            second.value.row,
+            first.value.row + fold_up(measure, parent).children[0].value.span,
+        )
+
+    def test_a_child_extends_the_parents_path_by_its_index(self):
+        tree = celled(Box("a", children=(Box("b"), Box("c"))))
+        self.assertEqual([c.value.path for c in tree.children], [(0, 0), (0, 1)])
 
 
 if __name__ == "__main__":
