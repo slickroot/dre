@@ -173,7 +173,10 @@ class GraphicsRenderer:
             stop * self.cell_height + self.cell_height // 2
             for stop in placement.node.stops
         ]
-        shaft_row = stop_rows[0]
+        shaft_row = (
+            placement.node.shaft * self.cell_height + self.cell_height // 2
+        )
+        trunk_top = min(stop_rows)
         trunk_bottom = max(stop_rows)
         midpoint = width // 2
         ink = bytes(_colour(PLAIN) + (OPAQUE,))
@@ -185,7 +188,7 @@ class GraphicsRenderer:
         # field down once and stroke only the lit pixels.
         canvas = Canvas(first_x, last_x, first_y, last_y, ink)
         canvas.horizontal(shaft_row, 0, midpoint)
-        canvas.vertical(midpoint, shaft_row, trunk_bottom)
+        canvas.vertical(midpoint, trunk_top, trunk_bottom)
         for stop_row in stop_rows:
             canvas.horizontal(stop_row, midpoint, width - 1)
             self._arrowhead(canvas, stop_row, midpoint, width - 1)
@@ -319,7 +322,7 @@ def _key(
 ) -> Key:
     node = placement.node
     shape = (
-        (node.colour, node.fill) if isinstance(node, Box) else node.stops
+        (node.colour, node.fill) if isinstance(node, Box) else (node.stops, node.shaft)
     )
     return (
         type(node),

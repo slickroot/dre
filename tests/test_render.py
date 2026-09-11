@@ -168,13 +168,13 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_an_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
-            [Placement(LayoutArrow((0,)), 2, 1, 1, 2)], 4, 4
+            [Placement(LayoutArrow((0,), 0), 2, 1, 1, 2)], 4, 4
         )
         self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_an_arrow_outside_the_grid_is_clipped(self):
         grid = self.renderer.render(
-            [Placement(LayoutArrow((0,)), 9, 9, 1, 2)], 4, 3
+            [Placement(LayoutArrow((0,), 0), 9, 9, 1, 2)], 4, 3
         )
         self.assertEqual(grid, [BLANK * 4] * 3)
 
