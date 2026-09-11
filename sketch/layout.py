@@ -8,6 +8,7 @@ BOX_HEIGHT = 3
 GAP_HEIGHT = 2
 GAP_WIDTH = 4
 BORDERS = 2
+ROW_PITCH = BOX_HEIGHT + GAP_HEIGHT
 
 A = TypeVar("A")
 
@@ -153,25 +154,20 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
 
     max_row = max(cell.row for cell in placed)
 
-    # Column and row are doubled into track indices so a gap track can sit
-    # between every pair of box tracks: box column c / row r own tracks
-    # 2c / 2r, and the arrow-gap / sibling-gap after it owns 2c+1 / 2r+1.
+    # Column is doubled into a track index so a gap track can sit between
+    # every pair of box tracks: box column c owns track 2c, and the arrow
+    # gap after it owns 2c + 1.
     column_extents = [cell.width for cell in placed] + [
         GAP_WIDTH for _ in arrow_entries
     ]
     column_indices = [2 * cell.column for cell in placed] + [
         2 * column + 1 for column, _, _ in arrow_entries
     ]
-    row_extents = [BOX_HEIGHT for _ in placed] + [
-        GAP_HEIGHT for _ in range(max_row)
-    ]
-    row_indices = [2 * cell.row for cell in placed] + [
-        2 * r + 1 for r in range(max_row)
-    ]
 
     columns = tracks(column_extents, column_indices)
-    rows_ = tracks(row_extents, row_indices)
-    total_width, total_height = span(columns), span(rows_)
+    total_width = span(columns)
+    total_height = max_row * ROW_PITCH + BOX_HEIGHT
+    top = (rows - total_height) // 2
 
     placements_by_pos: Dict[Tuple[int, int], Placement] = {}
     placements_by_path: Dict[Path, Placement] = {}
@@ -181,7 +177,7 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
         placement = Placement(
             cell.box,
             x=centre(columns[2 * cell.column], box_width, cols, total_width),
-            y=centre(rows_[2 * cell.row], BOX_HEIGHT, rows, total_height),
+            y=top + cell.row * ROW_PITCH,
             width=box_width,
             height=BOX_HEIGHT,
         )
