@@ -88,6 +88,30 @@ class LayoutTest(unittest.TestCase):
         self.assertLessEqual(abs((top + bottom) / 2 - 11 / 2), 0.5)
 
 
+class ColumnWidthTest(unittest.TestCase):
+    def test_top_level_boxes_share_the_width_of_the_widest(self):
+        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        short, wide = find(placements, "x"), find(placements, "wide")
+        self.assertEqual(short.width, width(Box("wide")))
+        self.assertEqual(short.width, wide.width)
+
+    def test_boxes_in_a_column_are_left_aligned_with_each_other(self):
+        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        self.assertEqual(find(placements, "x").x, find(placements, "wide").x)
+
+    def test_siblings_share_the_width_of_the_widest_sibling(self):
+        state = State((Box("a", children=(Box("c"), Box("dddd"))),))
+        placements = layout(state, cols=31, rows=21)
+        short, wide = find(placements, "c"), find(placements, "dddd")
+        self.assertEqual(short.width, width(Box("dddd")))
+        self.assertEqual(short.x, wide.x)
+
+    def test_a_narrower_column_does_not_widen_to_match_another(self):
+        state = State((Box("a", children=(Box("dddd"),)),))
+        placements = layout(state, cols=31, rows=21)
+        self.assertEqual(find(placements, "a").width, width(Box("a")))
+
+
 class CursorTest(unittest.TestCase):
     def test_an_empty_canvas_emits_no_cursor(self):
         self.assertEqual(cursors(layout(State(()), cols=11, rows=11)), [])

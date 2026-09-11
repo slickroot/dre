@@ -177,11 +177,12 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
     placements_by_path: Dict[Path, Placement] = {}
     box_placements: List[Placement] = []
     for cell in placed:
+        box_width = columns[2 * cell.column].extent
         placement = Placement(
             cell.box,
-            x=centre(columns[2 * cell.column], cell.width, cols, total_width),
+            x=centre(columns[2 * cell.column], box_width, cols, total_width),
             y=centre(rows_[2 * cell.row], BOX_HEIGHT, rows, total_height),
-            width=cell.width,
+            width=box_width,
             height=BOX_HEIGHT,
         )
         box_placements.append(placement)
