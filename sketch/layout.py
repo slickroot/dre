@@ -89,6 +89,11 @@ def height(box: Box) -> int:
     return BOX_HEIGHT
 
 
+def centre(width: int, label: str) -> int:
+    leftover = width - BORDERS - interior(label)
+    return 1 + leftover - leftover // 2
+
+
 def fold_up(f, node):
     children = tuple(fold_up(f, child) for child in node.children)
     return replace(f(node, children), children=children)

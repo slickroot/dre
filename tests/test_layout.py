@@ -10,8 +10,10 @@ from sketch.layout import (
     Placement,
     Track,
     cells,
+    centre,
     fold_up,
     height,
+    interior,
     layout,
     measure,
     push_down,
@@ -271,6 +273,23 @@ class WidthHeightTest(unittest.TestCase):
 
     def test_a_box_is_as_tall_as_a_box(self):
         self.assertEqual(height(Box("hi")), BOX_HEIGHT)
+
+
+class CentreTest(unittest.TestCase):
+    def test_no_leftover_starts_one_cell_in(self):
+        label = "hi"
+        self.assertEqual(centre(width(Box(label)), label), 1)
+
+    def test_an_odd_leftover_puts_the_extra_cell_on_the_left(self):
+        label = "hi"
+        box_width = width(Box(label)) + 1
+        leftover = box_width - BORDERS - interior(label)
+        self.assertEqual(leftover, 1)
+        self.assertEqual(centre(box_width, label), 1 + leftover - leftover // 2)
+        self.assertEqual(centre(box_width, label), 2)
+
+    def test_an_empty_label_is_measured_as_one_cell(self):
+        self.assertEqual(centre(width(Box()), ""), centre(width(Box("x")), "x"))
 
 
 def celled(box, index=0):
