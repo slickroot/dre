@@ -1,5 +1,9 @@
 # 024 - Place a sibling beside a box
 
+**Status: Not done.** Closed without merging — the need for unconnected
+siblings wasn't clear enough to justify the work. Revisit if placing a box
+beside another without an arrow turns out to be worth having.
+
 ## Story
 
 Bob has a box selected with nothing pointing into it. He presses `sl` and a new
