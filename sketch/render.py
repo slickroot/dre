@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from math import cos, radians, tan
 from typing import List, Protocol, Tuple
 
-from .layout import Placement
-from .state import PLAIN, Arrow, Box, Cursor, axis
+from .layout import Arrow, Placement
+from .state import PLAIN, Box, Cursor
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"
@@ -13,17 +13,7 @@ HORIZONTAL = "─"
 VERTICAL = "│"
 BLANK = " "
 CURSOR = "\u2588"
-ARROW_DOWN = "\u2193"
-ARROW_UP = "\u2191"
-ARROW_LEFT = "\u2190"
-ARROW_RIGHT = "\u2192"
 
-ARROW_GLYPHS = {
-    "down": ARROW_DOWN,
-    "up": ARROW_UP,
-    "left": ARROW_LEFT,
-    "right": ARROW_RIGHT,
-}
 ARROWHEAD_ANGLE_DEG = 30
 ARROWHEAD_EDGE_LENGTH = 15
 RESET = "\x1b[0m"
@@ -136,17 +126,16 @@ class GraphicsRenderer:
         self, placement: Placement, left: int, top: int, right: int, bottom: int
     ) -> Sprite:
         width = placement.width * self.cell_width
-        height = placement.height * self.cell_height
-        direction = placement.node.direction
-        vertical = axis(placement.node) == "row"
-        if vertical:
-            length = height
-            centre = width // 2
-            head_at_far_end = direction == "down"
-        else:
-            length = width
-            centre = height // 2
-            head_at_far_end = direction == "right"
+        # A stop is a child centre-row relative to the sprite's top, in the
+        # same row units as box placements; the pixel row of its centre is
+        # the row's own midpoint.
+        stop_rows = [
+            stop * self.cell_height + self.cell_height // 2
+            for stop in placement.node.stops
+        ]
+        shaft_row = stop_rows[0]
+        trunk_bottom = max(stop_rows)
+        midpoint = width // 2
         ink = _colour(PLAIN) + (OPAQUE,)
         first_x = (left - placement.x) * self.cell_width
         last_x = (right - placement.x) * self.cell_width
@@ -155,9 +144,13 @@ class GraphicsRenderer:
         pixels = bytearray()
         for y in range(first_y, last_y):
             for x in range(first_x, last_x):
-                along, across = (y, x) if vertical else (x, y)
-                on_arrow = self._on_arrow(
-                    along, across, length, centre, head_at_far_end
+                on_arrow = (
+                    (y == shaft_row and x <= midpoint)
+                    or (x == midpoint and shaft_row <= y <= trunk_bottom)
+                    or any(
+                        x >= midpoint and self._on_arrow(x, y - stop_row, width - 1)
+                        for stop_row in stop_rows
+                    )
                 )
                 pixels.extend(ink if on_arrow else TRANSPARENT)
         return Sprite(
@@ -168,25 +161,15 @@ class GraphicsRenderer:
             row=top,
         )
 
-    def _on_arrow(
-        self,
-        along: int,
-        across: int,
-        length: int,
-        centre: int,
-        head_at_far_end: bool,
-    ) -> bool:
-        if across == centre:
+    def _on_arrow(self, x: int, across: int, right_edge: int) -> bool:
+        if across == 0:
             return True
-        if head_at_far_end:
-            distance = (length - 1) - along
-        else:
-            distance = along
+        distance = right_edge - x
         depth = ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG))
         if distance < 0 or distance >= depth:
             return False
         spread = round(distance * tan(radians(ARROWHEAD_ANGLE_DEG)))
-        return abs(across - centre) == spread
+        return abs(across) == spread
 
 
 class TerminalRenderer:
@@ -210,10 +193,6 @@ class TerminalRenderer:
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
         self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
-
-    def _draw_arrow(self, grid: Grid, placement: Placement) -> None:
-        glyph = ARROW_GLYPHS[placement.node.direction]
-        self._put(grid, placement.x, placement.y, (glyph, PLAIN, PLAIN))
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
         fill = placement.node.fill

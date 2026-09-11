@@ -60,7 +60,7 @@ def run(stream: TextIO, stdin: TextIO) -> None:
     renderer = GraphicsRenderer(
         TerminalRenderer(), KittyGraphics(), *cell_size()
     )
-    state = State([])
+    state = State()
     with terminal_session(stream, stdin):
         while state.running:
             frame(state, renderer, stream)
