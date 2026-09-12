@@ -339,5 +339,70 @@ class GraphicsRendererFillTest(unittest.TestCase):
         self.assertEqual(self.pixel(sprite, 1, 1), _fill_colour(2))
 
 
+class GraphicsRendererBorderThicknessTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = GraphicsRenderer(
+            text=TerminalRenderer(), graphics=None, cell_width=4, cell_height=4
+        )
+
+    def outline(self, box, width=3, height=3):
+        placement = Placement(box, x=0, y=0, width=width, height=height)
+        return self.renderer._outline_box(
+            placement, left=0, top=0, right=width, bottom=height
+        )
+
+    def pixel(self, sprite, x, y):
+        offset = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[offset : offset + 4])
+
+    def test_a_thin_border_is_one_pixel_at_each_edge(self):
+        sprite = self.outline(Box(colour=1, fill=2, border=1))
+        edge = _colour(1) + (OPAQUE,)
+        fill = _fill_colour(2)
+        # Top and bottom edges, checked across a middle column.
+        self.assertEqual(self.pixel(sprite, 5, 0), edge)
+        self.assertEqual(self.pixel(sprite, 5, 1), fill)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 2), fill)
+        # Left and right edges, checked across a middle row.
+        self.assertEqual(self.pixel(sprite, 0, 5), edge)
+        self.assertEqual(self.pixel(sprite, 1, 5), fill)
+        self.assertEqual(self.pixel(sprite, sprite.width - 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 2, 5), fill)
+
+    def test_a_thick_border_is_two_pixels_at_each_edge(self):
+        sprite = self.outline(Box(colour=1, fill=2, border=2))
+        edge = _colour(1) + (OPAQUE,)
+        fill = _fill_colour(2)
+        # Top edge: two edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, 0), edge)
+        self.assertEqual(self.pixel(sprite, 5, 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, 2), fill)
+        # Bottom edge: two edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 2), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 3), fill)
+        # Left edge: two edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, 0, 5), edge)
+        self.assertEqual(self.pixel(sprite, 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, 2, 5), fill)
+        # Right edge: two edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, sprite.width - 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 2, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 3, 5), fill)
+
+    def test_border_thickness_does_not_change_sprite_size(self):
+        thin = self.outline(Box(border=1))
+        thick = self.outline(Box(border=2))
+        self.assertEqual((thin.width, thin.height), (thick.width, thick.height))
+
+    def test_interior_still_fills_correctly_with_a_thick_border(self):
+        sprite = self.outline(Box(fill=2, border=2))
+        fill = _fill_colour(2)
+        for y in range(2, sprite.height - 2):
+            for x in range(2, sprite.width - 2):
+                self.assertEqual(self.pixel(sprite, x, y), fill)
+
+
 if __name__ == "__main__":
     unittest.main()

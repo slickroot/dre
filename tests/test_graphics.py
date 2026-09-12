@@ -329,6 +329,14 @@ class SpriteCacheTest(unittest.TestCase):
         filled = self.draw(Placement(Box("hi", fill=3), x=0, y=0, width=4, height=3))
         self.assertNotEqual(plain.pixels, filled.pixels)
 
+    def test_a_rethickened_box_is_redrawn(self):
+        thin = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        thick = self.draw(
+            Placement(Box("hi", border=2), x=0, y=0, width=4, height=3)
+        )
+        self.assertNotEqual(thin.pixels, thick.pixels)
+        self.assertEqual(len(self.renderer.cache), 2)
+
     def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
         first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
         second = self.draw(Placement(Box("ok"), x=0, y=0, width=4, height=3))
