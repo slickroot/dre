@@ -125,6 +125,7 @@ class GraphicsRenderer:
     ) -> Sprite:
         width = placement.width * self.cell_width
         height = placement.height * self.cell_height
+        border = placement.node.border
         edge = _colour(placement.node.colour) + (OPAQUE,)
         fill = _fill_colour(placement.node.fill)
         first_x = (left - placement.x) * self.cell_width
@@ -135,25 +136,27 @@ class GraphicsRenderer:
         # A box has only two kinds of row, so build each once and repeat it
         # rather than deciding pixel by pixel.
         edge_row = bytes(edge) * span
-        if width <= 2:
+        if width <= 2 * border:
             body_row = edge_row
         else:
             body = bytearray()
-            if first_x == 0:
-                body.extend(edge)
-            body.extend(bytes(fill) * (min(last_x, width - 1) - max(first_x, 1)))
-            if last_x == width:
-                body.extend(edge)
+            left_edge = max(0, border - first_x)
+            body.extend(bytes(edge) * left_edge)
+            right_edge = max(0, border - (width - last_x))
+            fill_count = span - left_edge - right_edge
+            body.extend(bytes(fill) * fill_count)
+            body.extend(bytes(edge) * right_edge)
             body_row = bytes(body)
         pixels = bytearray()
-        if height <= 2:
+        if height <= 2 * border:
             pixels.extend(edge_row * (last_y - first_y))
         else:
-            if first_y == 0:
-                pixels.extend(edge_row)
-            pixels.extend(body_row * (min(last_y, height - 1) - max(first_y, 1)))
-            if last_y == height:
-                pixels.extend(edge_row)
+            top_edge = max(0, border - first_y)
+            pixels.extend(edge_row * top_edge)
+            bottom_edge = max(0, border - (height - last_y))
+            body_count = (last_y - first_y) - top_edge - bottom_edge
+            pixels.extend(body_row * body_count)
+            pixels.extend(edge_row * bottom_edge)
         return Sprite(
             pixels=bytes(pixels),
             width=span,
@@ -322,7 +325,9 @@ def _key(
 ) -> Key:
     node = placement.node
     shape = (
-        (node.colour, node.fill) if isinstance(node, Box) else (node.stops, node.shaft)
+        (node.colour, node.fill, node.border)
+        if isinstance(node, Box)
+        else (node.stops, node.shaft)
     )
     return (
         type(node),
