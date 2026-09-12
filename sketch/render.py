@@ -22,9 +22,6 @@ ARROWHEAD_DEPTH = ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG))
 ARROWHEAD_SLOPE = tan(radians(ARROWHEAD_ANGLE_DEG))
 RESET = "\x1b[0m"
 
-SUPERSAMPLE = 4
-SUBPIXELS = tuple((step + 0.5) / SUPERSAMPLE for step in range(SUPERSAMPLE))
-
 Cell = Tuple[str, int, int]
 Grid = List[List[Cell]]
 Key = Tuple
@@ -247,7 +244,7 @@ class RoundedBox:
     def _corner_row(self, y: int, first_x: int, last_x: int) -> bytes:
         row = bytearray()
         for x in range(first_x, min(self.outer, last_x)):
-            row.extend(self._supersampled(x, y))
+            row.extend(self._pixel(x, y))
         middle = min(self.width - self.outer, last_x) - max(
             self.outer, first_x
         )
@@ -259,34 +256,52 @@ class RoundedBox:
             )
             row.extend(straight * middle)
         for x in range(max(self.width - self.outer, first_x), last_x):
-            row.extend(self._supersampled(x, y))
+            row.extend(self._pixel(x, y))
         return bytes(row)
 
-    def _supersampled(self, x: int, y: int) -> bytes:
-        weighted = [0.0, 0.0, 0.0]
-        total_alpha = 0.0
-        for offset_y in SUBPIXELS:
-            for offset_x in SUBPIXELS:
-                sample = self._sample(x + offset_x, y + offset_y)
-                total_alpha += sample[3]
-                for channel in range(3):
-                    weighted[channel] += sample[channel] * sample[3]
-        if not total_alpha:
-            return self.clear
-        return bytes(
-            [round(value / total_alpha) for value in weighted]
-            + [round(total_alpha / SUPERSAMPLE ** 2)]
+    def _pixel(self, x: int, y: int) -> bytes:
+        px = x + 0.5
+        py = y + 0.5
+        outer_coverage = self._coverage(
+            px, py, self.width, self.height, self.outer
         )
-
-    def _sample(self, px: float, py: float) -> bytes:
-        centre_x = min(max(px, self.outer), self.width - self.outer)
-        centre_y = min(max(py, self.outer), self.height - self.outer)
-        distance = hypot(px - centre_x, py - centre_y)
-        if distance > self.outer:
+        inner_coverage = self._coverage(
+            px - self.border,
+            py - self.border,
+            self.width - 2 * self.border,
+            self.height - 2 * self.border,
+            self.radius,
+        )
+        edge_coverage = outer_coverage - inner_coverage
+        alpha = edge_coverage * self.edge[3] + inner_coverage * self.fill[3]
+        if not alpha:
             return self.clear
-        if distance > self.radius:
-            return self.edge
-        return self.fill
+        channels = [
+            round(
+                (
+                    self.edge[channel] * edge_coverage * self.edge[3]
+                    + self.fill[channel] * inner_coverage * self.fill[3]
+                )
+                / alpha
+            )
+            for channel in range(3)
+        ]
+        return bytes(channels + [round(alpha)])
+
+    @staticmethod
+    def _coverage(
+        px: float, py: float, width: int, height: int, radius: int
+    ) -> float:
+        half_x = width / 2
+        half_y = height / 2
+        qx = abs(px - half_x) - (half_x - radius)
+        qy = abs(py - half_y) - (half_y - radius)
+        distance = (
+            hypot(max(qx, 0), max(qy, 0))
+            + min(max(qx, qy), 0)
+            - radius
+        )
+        return min(max(0.5 - distance, 0), 1)
 
 
 class Canvas:

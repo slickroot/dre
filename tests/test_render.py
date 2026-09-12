@@ -554,6 +554,18 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
             any(0 < alpha < OPAQUE for alpha in rounded.pixels[3::4])
         )
 
+    def test_arc_coverage_is_continuous_at_the_pixel_centre(self):
+        sprite = self.outline(
+            Box(colour=1, fill=PLAIN, border=1, radius=LARGE_RADIUS)
+        )
+        self.assertEqual(self.pixel(sprite, 6, 6), _colour(1) + (253,))
+
+    def test_border_and_fill_coverage_are_composed_in_premultiplied_alpha(self):
+        sprite = self.outline(
+            Box(colour=1, fill=2, border=1, radius=LARGE_RADIUS)
+        )
+        self.assertEqual(self.pixel(sprite, 6, 7), (253, 52, 48, 132))
+
     def test_a_larger_radius_cuts_away_more_than_a_smaller_one(self):
         square = self.outline(Box(colour=1, fill=2, radius=SQUARE))
         small = self.outline(Box(colour=1, fill=2, radius=SMALL_RADIUS))
