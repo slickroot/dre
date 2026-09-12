@@ -96,9 +96,9 @@ class CellSizeTest(unittest.TestCase):
         with WindowSize(rows=20, cols=100, xpixel=800, ypixel=400):
             self.assertEqual(cell_size(), (8, 20))
 
-    def test_a_partial_cell_is_rounded_down(self):
-        with WindowSize(rows=10, cols=10, xpixel=95, ypixel=105):
-            self.assertEqual(cell_size(), (9, 10))
+    def test_a_partial_cell_is_rounded_to_the_nearest_pixel(self):
+        with WindowSize(rows=10, cols=10, xpixel=96, ypixel=104):
+            self.assertEqual(cell_size(), (10, 10))
 
 
 class Stdin:
