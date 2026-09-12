@@ -10,6 +10,7 @@ GAP_WIDTH = 8
 BORDERS = 2
 ROW_PITCH = BOX_HEIGHT + GAP_HEIGHT
 HALF_PITCH = BOX_HEIGHT
+LEAF_STRIDE = 2
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,23 @@ def cells(node: Measured, context) -> Tuple[Celled, List[Tuple[int, int, Path]]]
         for index in range(len(node.children))
     ]
     return Celled(node.box, node.width, column, row, path), contexts
+
+
+def anchor(children: List[Celled]) -> int:
+    middle = len(children) // 2
+    if len(children) % 2:
+        return children[middle].row
+    return children[middle - 1].row + 1
+
+
+def assign(box: Box, column: int, path: Path, free: int) -> Tuple[Celled, int]:
+    if not box.children:
+        return Celled(box, width(box), column, free, path), free + LEAF_STRIDE
+    children = []
+    for index, child in enumerate(box.children):
+        node, free = assign(child, column + 1, path + (index,), free)
+        children.append(node)
+    return Celled(box, width(box), column, anchor(children), path, tuple(children)), free
 
 
 def forest(boxes: Tuple[Box, ...]) -> Tuple[Celled, ...]:

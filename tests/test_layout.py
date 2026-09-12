@@ -6,10 +6,12 @@ from sketch.layout import (
     BOX_HEIGHT,
     GAP_HEIGHT,
     GAP_WIDTH,
+    LEAF_STRIDE,
     Arrow,
     Label,
     Placement,
     Track,
+    assign,
     cells,
     centre,
     fold_up,
@@ -20,6 +22,7 @@ from sketch.layout import (
     push_down,
     span,
     tracks,
+    walk,
     width,
 )
 from sketch.state import PAD, Box, Cursor, State
@@ -438,6 +441,68 @@ class CellsTest(unittest.TestCase):
     def test_a_child_extends_the_parents_path_by_its_index(self):
         tree = celled(Box("a", children=(Box("b"), Box("c"))))
         self.assertEqual([c.path for c in tree.children], [(0, 0), (0, 1)])
+
+
+class AssignTest(unittest.TestCase):
+    def test_a_leaf_takes_the_free_row_and_hands_back_the_next(self):
+        node, free = assign(Box("a"), 0, (0,), 4)
+        self.assertEqual(node.row, 4)
+        self.assertEqual(free, 4 + LEAF_STRIDE)
+
+    def test_consecutive_leaves_are_one_stride_apart(self):
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        first, second = tree.children
+        self.assertEqual(second.row - first.row, LEAF_STRIDE)
+
+    def test_a_child_sits_one_column_right_of_its_parent(self):
+        tree, _ = assign(Box("a", children=(Box("b"),)), 0, (0,), 0)
+        self.assertEqual(tree.children[0].column, tree.column + 1)
+
+    def test_a_child_extends_the_parents_path_by_its_index(self):
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        self.assertEqual([child.path for child in tree.children], [(0, 0), (0, 1)])
+
+    def test_three_leaf_children_straddle_the_parent(self):
+        tree, _ = assign(
+            Box("a", children=(Box("b"), Box("c"), Box("d"))), 0, (0,), 0
+        )
+        self.assertEqual(
+            [child.row for child in tree.children],
+            [0, LEAF_STRIDE, 2 * LEAF_STRIDE],
+        )
+        self.assertEqual(tree.row, LEAF_STRIDE)
+
+    def test_each_gap_is_sized_from_its_own_two_neighbours(self):
+        middle = Box("c", children=(Box(), Box()))
+        tree, _ = assign(Box("a", children=(Box("b"), middle, Box("d"))), 0, (0,), 0)
+        self.assertEqual([child.row for child in tree.children], [0, 3, 6])
+        self.assertEqual(tree.row, 3)
+
+    def test_an_even_parent_sits_a_half_slot_below_the_first_middle_child(self):
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        self.assertEqual(tree.row, tree.children[0].row + 1)
+
+    def test_no_two_boxes_in_a_column_are_closer_than_a_stride(self):
+        tree, _ = assign(
+            Box(
+                "a",
+                children=(
+                    Box("b", children=(Box(), Box())),
+                    Box("c"),
+                    Box("d", children=(Box("e", children=(Box(), Box(), Box())),)),
+                ),
+            ),
+            0,
+            (0,),
+            0,
+        )
+        columns = {}
+        for node in walk((tree,)):
+            columns.setdefault(node.column, []).append(node.row)
+        for rows in columns.values():
+            rows.sort()
+            for earlier, later in zip(rows, rows[1:]):
+                self.assertGreaterEqual(later - earlier, LEAF_STRIDE)
 
 
 if __name__ == "__main__":
