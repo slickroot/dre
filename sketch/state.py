@@ -12,7 +12,7 @@ class Box:
     colour: int = PLAIN
     fill: int = PLAIN
     border: Literal[1, 2, 3, 4] = 1
-    radius: Literal[0, 4, 8] = 0
+    radius: Literal[0, 10, 20] = 0
     children: Tuple["Box", ...] = ()
 
 
@@ -151,7 +151,7 @@ def handle_command(state: State, key: str) -> State:
         boxes = rewrite(
             state.boxes,
             state.selected,
-            lambda box: replace(box, radius=(box.radius + 4) % 12),
+            lambda box: replace(box, radius=(box.radius + 10) % 30),
         )
         return replace(state, boxes=boxes)
     if key == "q":

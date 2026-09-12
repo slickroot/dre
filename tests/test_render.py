@@ -475,7 +475,10 @@ class GraphicsRendererBorderThicknessTest(unittest.TestCase):
 class GraphicsRendererCornerRadiusTest(unittest.TestCase):
     def setUp(self):
         self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(), graphics=None, cell_width=4, cell_height=4
+            text=TerminalRenderer(),
+            graphics=None,
+            cell_width=2 * LARGE_RADIUS // 5,
+            cell_height=2 * LARGE_RADIUS // 5,
         )
 
     def outline(self, box, width=10, height=10):
