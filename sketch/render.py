@@ -366,10 +366,9 @@ class TerminalRenderer:
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
-        fill = placement.node.fill
         for y in range(placement.y, placement.y + placement.height):
             for x in range(placement.x, placement.x + placement.width):
-                self._put(grid, x, y, (BLANK, PLAIN, fill))
+                self._put(grid, x, y, BLANK_CELL)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
         self._stamp(grid, placement.x, placement.y, CURSOR)
@@ -483,7 +482,11 @@ def _colour(colour: int) -> Tuple[int, int, int]:
 
 
 def _fill_colour(fill: int) -> Tuple[int, int, int, int]:
-    return TRANSPARENT if fill == PLAIN else PALETTE[fill] + (FILL_ALPHA,)
+    if fill == PLAIN:
+        return TRANSPARENT
+    return tuple(
+        round(channel * FILL_ALPHA / OPAQUE) for channel in PALETTE[fill]
+    ) + (OPAQUE,)
 
 
 def _cell(character: str, colour: int, fill: int) -> str:

@@ -65,9 +65,7 @@ class TerminalRendererTest(unittest.TestCase):
     def test_a_box_reaching_past_the_edge_is_clipped(self):
         fill = 3
         grid = self.renderer.render([Placement(Box(fill=fill), 3, 1, 3, 3)], 4, 2)
-        self.assertEqual(
-            grid, [BLANK * 4, BLANK * 3 + _cell(BLANK, PLAIN, fill)]
-        )
+        self.assertEqual(grid, [BLANK * 4, BLANK * 4])
 
     def test_label_is_drawn_inside_the_box(self):
         grid = self.renderer.render(
@@ -128,13 +126,7 @@ class TerminalRendererTest(unittest.TestCase):
             11,
             3,
         )
-        self.assertEqual(
-            grid[0],
-            _cell(BLANK, PLAIN, first_fill) * 3
-            + BLANK
-            + _cell(BLANK, PLAIN, second_fill) * 3
-            + BLANK * 4,
-        )
+        self.assertEqual(grid[0], BLANK * 11)
 
     def test_a_plain_box_emits_no_escapes(self):
         grid = self.renderer.render(
@@ -175,23 +167,16 @@ class TerminalRendererTest(unittest.TestCase):
         )
         self.assertEqual(grid[1], BLANK + CURSOR + BLANK * 3)
 
-    def test_two_boxes_render_their_own_fills(self):
-        first_fill, second_fill = 0, 6
+    def test_a_box_claims_cells_drawn_by_an_earlier_placement(self):
         grid = self.renderer.render(
             [
-                Placement(Box(fill=first_fill), 0, 0, 3, 3),
-                Placement(Box(fill=second_fill), 4, 0, 3, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+                Placement(Box(fill=2), 0, 0, 5, 3),
             ],
-            11,
+            5,
             3,
         )
-        rest = grid[0]
-        for _ in range(3):
-            self.assertTrue(rest.startswith(_cell(BLANK, PLAIN, first_fill)))
-            rest = rest[len(_cell(BLANK, PLAIN, first_fill)) :]
-        self.assertTrue(rest.startswith(BLANK))
-        rest = rest[1:]
-        self.assertTrue(rest.startswith(_cell(BLANK, PLAIN, second_fill)))
+        self.assertEqual(grid, [BLANK * 5] * 3)
 
     def test_an_arrow_leaves_the_gap_blank(self):
         grid = self.renderer.render(
@@ -205,32 +190,25 @@ class TerminalRendererTest(unittest.TestCase):
         )
         self.assertEqual(grid, [BLANK * 4] * 3)
 
-    def test_an_unfilled_box_emits_no_escapes(self):
-        grid = self.renderer.render([Placement(Box(fill=PLAIN), 0, 0, 5, 4)], 5, 4)
+    def test_a_filled_rounded_box_emits_no_escapes(self):
+        grid = self.renderer.render(
+            [Placement(Box(fill=2, radius=SMALL_RADIUS), 0, 0, 5, 4)], 5, 4
+        )
         self.assertNotIn("\x1b", "".join(grid))
 
-    def test_a_filled_box_paints_every_cell(self):
+    def test_a_filled_box_claims_every_cell_as_blank(self):
         fill = 2
         grid = self.renderer.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
-        self.assertEqual(grid, [_cell(BLANK, PLAIN, fill) * 5] * 4)
+        self.assertEqual(grid, [BLANK * 5] * 4)
 
-    def test_a_filled_box_paints_the_cells_that_used_to_be_border(self):
-        fill = 6
-        grid = self.renderer.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
-        painted = _cell(BLANK, PLAIN, fill)
-        self.assertTrue(grid[0].startswith(painted))
-        self.assertTrue(grid[0].endswith(painted))
-        self.assertTrue(grid[3].startswith(painted))
-        self.assertTrue(grid[1].startswith(painted))
-
-    def test_a_box_with_border_colour_and_fill_paints_only_the_fill(self):
+    def test_a_box_with_border_colour_and_fill_emits_plain_cells(self):
         fill = 4
         grid = self.renderer.render(
             [Placement(Box(colour=1, fill=fill), 0, 0, 5, 4)], 5, 4
         )
-        self.assertEqual(grid, [_cell(BLANK, PLAIN, fill) * 5] * 4)
+        self.assertEqual(grid, [BLANK * 5] * 4)
 
-    def test_a_label_sits_on_top_of_the_fill(self):
+    def test_a_label_sits_on_top_of_a_filled_box(self):
         fill = 3
         grid = self.renderer.render(
             [
@@ -240,15 +218,9 @@ class TerminalRendererTest(unittest.TestCase):
             5,
             3,
         )
-        self.assertEqual(
-            grid[1],
-            _cell(BLANK, PLAIN, fill)
-            + _cell("h", PLAIN, fill)
-            + _cell("i", PLAIN, fill)
-            + _cell(BLANK, PLAIN, fill) * 2,
-        )
+        self.assertEqual(grid[1], BLANK + "hi" + BLANK * 2)
 
-    def test_the_cursor_keeps_the_fill_of_a_filled_box(self):
+    def test_the_cursor_sits_on_top_of_a_filled_box(self):
         fill = 5
         grid = self.renderer.render(
             [
@@ -258,28 +230,20 @@ class TerminalRendererTest(unittest.TestCase):
             5,
             3,
         )
-        rest = grid[1][len(_cell(BLANK, PLAIN, fill)) :]
-        self.assertTrue(rest.startswith(_cell(CURSOR, PLAIN, fill)))
+        self.assertEqual(grid[1], BLANK + CURSOR + BLANK * 3)
 
-    def test_the_fill_survives_under_the_label_and_the_cursor(self):
+    def test_label_and_cursor_stamp_over_a_filled_rounded_box(self):
         fill = 4
         grid = self.renderer.render(
             [
-                Placement(Box(fill=fill), 0, 0, 5, 3),
+                Placement(Box(fill=fill, radius=LARGE_RADIUS), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
                 Placement(Cursor(), 3, 1, 1, 1),
             ],
             5,
             3,
         )
-        self.assertEqual(
-            grid[1],
-            _cell(BLANK, PLAIN, fill)
-            + _cell("h", PLAIN, fill)
-            + _cell("i", PLAIN, fill)
-            + _cell(CURSOR, PLAIN, fill)
-            + _cell(BLANK, PLAIN, fill),
-        )
+        self.assertEqual(grid[1], BLANK + "hi" + CURSOR + BLANK)
 
     def test_empty_canvas_with_no_boxes_emits_no_escapes(self):
         grid = self.renderer.render([], cols=11, rows=5)
@@ -332,9 +296,12 @@ class GraphicsRendererFillTest(unittest.TestCase):
         sprite = self.outline(Box(fill=PLAIN))
         self.assertEqual(self.pixel(sprite, 1, 1), TRANSPARENT)
 
-    def test_a_fill_colour_renders_the_palette_colour_at_thirty_percent_opacity(self):
+    def test_a_fill_colour_is_composited_over_black_and_made_opaque(self):
         sprite = self.outline(Box(fill=2))
-        self.assertEqual(self.pixel(sprite, 1, 1), PALETTE[2] + (FILL_ALPHA,))
+        composited = tuple(
+            round(channel * FILL_ALPHA / OPAQUE) for channel in PALETTE[2]
+        ) + (OPAQUE,)
+        self.assertEqual(self.pixel(sprite, 1, 1), composited)
 
     def test_border_pixels_are_unaffected_by_fill(self):
         sprite = self.outline(Box(colour=3, fill=2))
@@ -560,11 +527,11 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
         )
         self.assertEqual(self.pixel(sprite, 6, 6), _colour(1) + (253,))
 
-    def test_border_and_fill_coverage_are_composed_in_premultiplied_alpha(self):
+    def test_border_coverage_is_composed_over_the_opaque_fill(self):
         sprite = self.outline(
             Box(colour=1, fill=2, border=1, radius=LARGE_RADIUS)
         )
-        self.assertEqual(self.pixel(sprite, 6, 7), (253, 52, 48, 132))
+        self.assertEqual(self.pixel(sprite, 6, 7), (131, 27, 25, OPAQUE))
 
     def test_a_larger_radius_cuts_away_more_than_a_smaller_one(self):
         square = self.outline(Box(colour=1, fill=2, radius=SQUARE))
