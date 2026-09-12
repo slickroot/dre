@@ -593,5 +593,61 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
                 )
 
 
+class GraphicsRendererSmallBoxTest(unittest.TestCase):
+    """A box no larger than twice its corner radius, where the two corner
+    bands of a row would otherwise overlap."""
+
+    def setUp(self):
+        cell = LARGE_RADIUS // 2
+        self.renderer = GraphicsRenderer(
+            text=TerminalRenderer(),
+            graphics=None,
+            cell_width=cell,
+            cell_height=cell,
+        )
+        self.cells = 2
+
+    def outline(self, box, hidden_cols=0):
+        placement = Placement(
+            box,
+            x=-hidden_cols,
+            y=0,
+            width=self.cells,
+            height=self.cells,
+        )
+        return self.renderer._outline_box(
+            placement,
+            left=0,
+            top=0,
+            right=self.cells - hidden_cols,
+            bottom=self.cells,
+        )
+
+    def pixel(self, sprite, x, y):
+        offset = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[offset : offset + 4])
+
+    def test_the_sprite_holds_exactly_one_pixel_per_cell_of_its_area(self):
+        for radius in (SMALL_RADIUS, LARGE_RADIUS):
+            with self.subTest(radius=radius):
+                sprite = self.outline(Box(colour=1, fill=2, radius=radius))
+                self.assertEqual(
+                    len(sprite.pixels), sprite.width * sprite.height * 4
+                )
+
+    def test_clipping_a_small_box_is_a_pure_crop_of_the_whole_box(self):
+        box = Box(colour=1, fill=2, radius=LARGE_RADIUS)
+        whole = self.outline(box)
+        hidden_cols = 1
+        clipped = self.outline(box, hidden_cols=hidden_cols)
+        offset = hidden_cols * self.renderer.cell_width
+        self.assertEqual(clipped.width, whole.width - offset)
+        for y in range(clipped.height):
+            for x in range(clipped.width):
+                self.assertEqual(
+                    self.pixel(clipped, x, y), self.pixel(whole, x + offset, y)
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

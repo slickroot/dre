@@ -222,7 +222,7 @@ class RoundedBox:
         self.height = height
         self.border = border
         self.radius = radius
-        self.outer = radius + border
+        self.outer = min(radius + border, width // 2, height // 2)
         self.edge = bytes(edge)
         self.fill = bytes(fill)
         self.clear = bytes(TRANSPARENT)
