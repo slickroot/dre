@@ -490,6 +490,10 @@ class HandleInsertTest(unittest.TestCase):
         state = State(boxes=(Box("a" + PAD),), mode="insert", selected=(0,))
         self.assertEqual(handle_key(state, "t").boxes, (Box("at" + PAD),))
 
+    def test_r_in_insert_mode_types_the_letter_r(self):
+        state = State(boxes=(Box("a" + PAD),), mode="insert", selected=(0,))
+        self.assertEqual(handle_key(state, "r").boxes, (Box("ar" + PAD),))
+
 
 class CycleColourTest(unittest.TestCase):
     def test_c_advances_the_selected_box_from_plain(self):
@@ -635,6 +639,54 @@ class CycleBorderTest(unittest.TestCase):
         result = handle_key(state, "t").boxes[0]
         self.assertEqual(result.colour, next_colour(PLAIN))
         self.assertEqual(result.fill, next_colour(PLAIN))
+
+
+class CycleRadiusTest(unittest.TestCase):
+    def test_new_box_starts_with_square_corners(self):
+        self.assertEqual(Box("a").radius, 0)
+
+    def test_r_cycles_the_selected_box_through_all_three_levels(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        state = handle_key(state, "r")
+        self.assertEqual(state.boxes, (Box("a", radius=4),))
+        state = handle_key(state, "r")
+        self.assertEqual(state.boxes, (Box("a", radius=8),))
+        state = handle_key(state, "r")
+        self.assertEqual(state.boxes, (Box("a", radius=0),))
+
+    def test_r_changes_only_the_selected_box(self):
+        state = State(boxes=(Box("a"), Box("b")), selected=(1,))
+        self.assertEqual(
+            handle_key(state, "r").boxes,
+            (Box("a"), Box("b", radius=4)),
+        )
+
+    def test_r_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State()
+        self.assertEqual(handle_key(state, "r"), state)
+
+    def test_r_does_not_mutate_the_given_state(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        handle_key(state, "r")
+        self.assertEqual(state.boxes, (Box("a"),))
+
+    def test_r_on_a_nested_box_changes_only_that_box(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        state = State(boxes=boxes, selected=(0, 1))
+        self.assertEqual(
+            handle_key(state, "r").boxes,
+            (Box("a", children=(Box("c"), Box("d", radius=4))),),
+        )
+
+    def test_r_does_not_change_colour_fill_or_border(self):
+        state = State(
+            boxes=(Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
+            selected=(0,),
+        )
+        result = handle_key(state, "r").boxes[0]
+        self.assertEqual(result.colour, next_colour(PLAIN))
+        self.assertEqual(result.fill, next_colour(PLAIN))
+        self.assertEqual(result.border, Box("a").border)
 
 
 class ColourRowTest(unittest.TestCase):
