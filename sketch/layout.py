@@ -14,16 +14,6 @@ LEAF_STRIDE = 2
 
 
 @dataclass(frozen=True)
-class Measured:
-    box: Box
-    width: int
-    above: int
-    below: int
-    pitch: int
-    children: Tuple["Measured", ...] = ()
-
-
-@dataclass(frozen=True)
 class Celled:
     box: Box
     width: int
@@ -103,21 +93,6 @@ def centre(width: int, label: str) -> int:
     return 1 + leftover - leftover // 2
 
 
-def fold_up(f, node):
-    children = tuple(fold_up(f, child) for child in node.children)
-    return replace(f(node, children), children=children)
-
-
-def push_down(f, node, context):
-    value, contexts = f(node, context)
-    return replace(
-        value,
-        children=tuple(
-            push_down(f, child, ctx) for child, ctx in zip(node.children, contexts)
-        ),
-    )
-
-
 def fmap(f, node):
     return replace(f(node), children=tuple(fmap(f, child) for child in node.children))
 
@@ -126,32 +101,6 @@ def flatten(f, node) -> Iterator:
     yield from f(node, node.children)
     for child in node.children:
         yield from flatten(f, child)
-
-
-def measure(box: Box, children: Tuple[Measured, ...]) -> Measured:
-    if not children:
-        return Measured(box, width(box), 0, 0, 0)
-    required = max(
-        (a.below + b.above + 2 for a, b in zip(children, children[1:])),
-        default=0,
-    )
-    pitch = max(2, required)
-    if pitch % 2:
-        pitch += 1
-    half = pitch * (len(children) - 1) // 2
-    return Measured(
-        box, width(box), half + children[0].above, half + children[-1].below, pitch
-    )
-
-
-def cells(node: Measured, context) -> Tuple[Celled, List[Tuple[int, int, Path]]]:
-    column, row, path = context
-    half = node.pitch * (len(node.children) - 1) // 2
-    contexts = [
-        (column + 1, row - half + index * node.pitch, path + (index,))
-        for index in range(len(node.children))
-    ]
-    return Celled(node.box, node.width, column, row, path), contexts
 
 
 def anchor(children: List[Celled]) -> int:
