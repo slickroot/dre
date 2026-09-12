@@ -342,6 +342,11 @@ class SpriteCacheTest(unittest.TestCase):
             self.draw(Placement(Box("hi", border=border), x=0, y=0, width=4, height=3))
         self.assertEqual(len(self.renderer.cache), 4)
 
+    def test_each_corner_radius_is_cached_distinctly(self):
+        for radius in (0, 4, 8):
+            self.draw(Placement(Box("hi", radius=radius), x=0, y=0, width=4, height=3))
+        self.assertEqual(len(self.renderer.cache), 3)
+
     def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
         first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
         second = self.draw(Placement(Box("ok"), x=0, y=0, width=4, height=3))

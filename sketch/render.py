@@ -325,7 +325,7 @@ def _key(
 ) -> Key:
     node = placement.node
     shape = (
-        (node.colour, node.fill, node.border)
+        (node.colour, node.fill, node.border, node.radius)
         if isinstance(node, Box)
         else (node.stops, node.shaft)
     )
