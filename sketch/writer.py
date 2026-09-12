@@ -42,7 +42,7 @@ def cell_size() -> Tuple[int, int]:
         sys.stdout, termios.TIOCGWINSZ, struct.pack(WINSIZE, 0, 0, 0, 0)
     )
     rows, cols, xpixel, ypixel = struct.unpack(WINSIZE, packed)
-    return xpixel // cols, ypixel // rows
+    return round(xpixel / cols), round(ypixel / rows)
 
 
 def paint(stream: TextIO, lines: List[str]) -> None:
