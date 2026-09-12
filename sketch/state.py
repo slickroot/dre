@@ -122,6 +122,10 @@ def handle_command(state: State, key: str) -> State:
             lambda box: replace(box, colour=next_colour(box.colour)),
         )
         return replace(state, boxes=boxes)
+    if key == "C":
+        if len(state.selected) <= 1:
+            return state
+        return replace(state, boxes=colour_row(state.boxes, state.selected))
     if key == "f":
         if not state.selected:
             return state
