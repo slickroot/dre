@@ -10,16 +10,7 @@ GAP_WIDTH = 8
 BORDERS = 2
 ROW_PITCH = BOX_HEIGHT + GAP_HEIGHT
 HALF_PITCH = BOX_HEIGHT
-
-
-@dataclass(frozen=True)
-class Measured:
-    box: Box
-    width: int
-    above: int
-    below: int
-    pitch: int
-    children: Tuple["Measured", ...] = ()
+LEAF_STRIDE = 2
 
 
 @dataclass(frozen=True)
@@ -102,21 +93,6 @@ def centre(width: int, label: str) -> int:
     return 1 + leftover - leftover // 2
 
 
-def fold_up(f, node):
-    children = tuple(fold_up(f, child) for child in node.children)
-    return replace(f(node, children), children=children)
-
-
-def push_down(f, node, context):
-    value, contexts = f(node, context)
-    return replace(
-        value,
-        children=tuple(
-            push_down(f, child, ctx) for child, ctx in zip(node.children, contexts)
-        ),
-    )
-
-
 def fmap(f, node):
     return replace(f(node), children=tuple(fmap(f, child) for child in node.children))
 
@@ -127,51 +103,30 @@ def flatten(f, node) -> Iterator:
         yield from flatten(f, child)
 
 
-def measure(box: Box, children: Tuple[Measured, ...]) -> Measured:
-    if not children:
-        return Measured(box, width(box), 0, 0, 0)
-    required = max(
-        (a.below + b.above + 2 for a, b in zip(children, children[1:])),
-        default=0,
-    )
-    pitch = max(2, required)
-    if pitch % 2:
-        pitch += 1
-    half = pitch * (len(children) - 1) // 2
-    return Measured(
-        box, width(box), half + children[0].above, half + children[-1].below, pitch
-    )
+def anchor(children: List[Celled]) -> int:
+    middle = len(children) // 2
+    if len(children) % 2:
+        return children[middle].row
+    return children[middle - 1].row + 1
 
 
-def cells(node: Measured, context) -> Tuple[Celled, List[Tuple[int, int, Path]]]:
-    column, row, path = context
-    half = node.pitch * (len(node.children) - 1) // 2
-    contexts = [
-        (column + 1, row - half + index * node.pitch, path + (index,))
-        for index in range(len(node.children))
-    ]
-    return Celled(node.box, node.width, column, row, path), contexts
+def assign(box: Box, column: int, path: Path, free: int) -> Tuple[Celled, int]:
+    if not box.children:
+        return Celled(box, width(box), column, free, path), free + LEAF_STRIDE
+    children = []
+    for index, child in enumerate(box.children):
+        node, free = assign(child, column + 1, path + (index,), free)
+        children.append(node)
+    return Celled(box, width(box), column, anchor(children), path, tuple(children)), free
 
 
 def forest(boxes: Tuple[Box, ...]) -> Tuple[Celled, ...]:
-    measured = [fold_up(measure, box) for box in boxes]
-    starts: List[int] = []
-    for index, node in enumerate(measured):
-        if index == 0:
-            starts.append(0)
-        else:
-            starts.append(starts[-1] + measured[index - 1].below + 2 + node.above)
-    trees = tuple(
-        push_down(cells, node, (0, start, (index,)))
-        for index, (node, start) in enumerate(zip(measured, starts))
-    )
-    minimum = min((node.row for node in walk(trees)), default=0)
-    if minimum == 0:
-        return trees
-    return tuple(
-        fmap(lambda node: replace(node, row=node.row - minimum), tree)
-        for tree in trees
-    )
+    trees = []
+    free = 0
+    for index, box in enumerate(boxes):
+        tree, free = assign(box, 0, (index,), free)
+        trees.append(tree)
+    return tuple(trees)
 
 
 def walk(nodes: Tuple[Celled, ...]) -> Iterator[Celled]:

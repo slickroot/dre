@@ -1,25 +1,24 @@
 import unittest
-from dataclasses import replace
 
 from sketch.layout import (
     BORDERS,
     BOX_HEIGHT,
     GAP_HEIGHT,
     GAP_WIDTH,
+    LEAF_STRIDE,
     Arrow,
     Label,
     Placement,
     Track,
-    cells,
+    assign,
     centre,
-    fold_up,
+    forest,
     height,
     interior,
     layout,
-    measure,
-    push_down,
     span,
     tracks,
+    walk,
     width,
 )
 from sketch.state import PAD, Box, Cursor, State
@@ -346,98 +345,101 @@ class CentreTest(unittest.TestCase):
         self.assertEqual(centre(width(Box()), ""), centre(width(Box("x")), "x"))
 
 
-def celled(box, index=0):
-    return push_down(cells, fold_up(measure, box), (0, 0, (index,)))
+class AssignTest(unittest.TestCase):
+    def test_a_leaf_takes_the_free_row_and_hands_back_the_next(self):
+        node, free = assign(Box("a"), 0, (0,), 4)
+        self.assertEqual(node.row, 4)
+        self.assertEqual(free, 4 + LEAF_STRIDE)
 
-
-class CombinatorTest(unittest.TestCase):
-    def test_fold_up_gives_a_parent_its_transformed_children(self):
-        tree = Box("a", children=(Box("b"), Box("c")))
-        folded = fold_up(
-            lambda box, kids: replace(
-                box, label=box.label + "".join(k.label for k in kids)
-            ),
-            tree,
-        )
-        self.assertEqual(folded.label, "abc")
-
-    def test_fold_up_preserves_the_shape_of_the_tree(self):
-        tree = Box("a", children=(Box("b", children=(Box("c"),)),))
-        self.assertEqual(
-            fold_up(lambda box, _: replace(box, label=box.label * 2), tree),
-            Box("aa", children=(Box("bb", children=(Box("cc"),)),)),
-        )
-
-    def test_push_down_hands_each_child_its_own_context(self):
-        tree = Box("a", children=(Box("b"), Box("c")))
-
-        def step(box, context):
-            return replace(box, label=f"{box.label}{context}"), [context + 1] * len(
-                box.children
-            )
-
-        pushed = push_down(step, tree, 0)
-        self.assertEqual(pushed.label, "a0")
-        self.assertEqual([c.label for c in pushed.children], ["b1", "c1"])
-
-    def test_push_down_preserves_the_shape_of_the_tree(self):
-        tree = Box("a", children=(Box("b", children=(Box("c"),)),))
-        pushed = push_down(
-            lambda box, ctx: (replace(box, label=str(ctx)), [ctx + 1]), tree, 0
-        )
-        self.assertEqual(pushed, Box("0", children=(Box("1", children=(Box("2"),)),)))
-
-
-class MeasureTest(unittest.TestCase):
-    def test_a_leaf_has_no_reach_or_pitch(self):
-        leaf = fold_up(measure, Box())
-        self.assertEqual((leaf.above, leaf.below, leaf.pitch), (0, 0, 0))
-
-    def test_a_single_child_leaves_the_parent_matching_its_reach(self):
-        tree = fold_up(measure, Box("a", children=(Box(),)))
-        child = tree.children[0]
-        self.assertEqual(tree.above, child.above)
-        self.assertEqual(tree.below, child.below)
-
-    def test_two_leaf_children_pick_the_minimum_even_pitch(self):
-        tree = fold_up(measure, Box("a", children=(Box(), Box())))
-        self.assertEqual(tree.pitch, 2)
-        half = tree.pitch * (2 - 1) // 2
-        self.assertEqual(tree.above, half + tree.children[0].above)
-        self.assertEqual(tree.below, half + tree.children[-1].below)
-
-    def test_a_box_is_measured_at_its_own_width(self):
-        self.assertEqual(fold_up(measure, Box("hi")).width, width(Box("hi")))
-
-
-class CellsTest(unittest.TestCase):
-    def test_the_root_takes_the_context_it_is_given(self):
-        root = celled(Box("a"))
-        self.assertEqual((root.column, root.row, root.path), (0, 0, (0,)))
+    def test_consecutive_leaves_are_one_stride_apart(self):
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        first, second = tree.children
+        self.assertEqual(second.row - first.row, LEAF_STRIDE)
 
     def test_a_child_sits_one_column_right_of_its_parent(self):
-        tree = celled(Box("a", children=(Box("b"),)))
-        self.assertEqual(tree.children[0].column, 1)
-
-    def test_a_parent_centres_between_its_first_and_last_child(self):
-        box = Box("a", children=(Box("b"), Box("c")))
-        tree_measured = fold_up(measure, box)
-        tree = celled(box)
-        half = tree_measured.pitch * (2 - 1) // 2
-        self.assertEqual(tree.children[0].row + half, tree.row)
-        self.assertEqual(tree.row, tree.children[1].row - half)
-
-    def test_a_sibling_starts_below_the_previous_subtree(self):
-        parent = Box("a", children=(Box("b", children=(Box(), Box())), Box("c")))
-        first, second = celled(parent).children
-        self.assertEqual(
-            second.row - first.row,
-            fold_up(measure, parent).pitch,
-        )
+        tree, _ = assign(Box("a", children=(Box("b"),)), 0, (0,), 0)
+        self.assertEqual(tree.children[0].column, tree.column + 1)
 
     def test_a_child_extends_the_parents_path_by_its_index(self):
-        tree = celled(Box("a", children=(Box("b"), Box("c"))))
-        self.assertEqual([c.path for c in tree.children], [(0, 0), (0, 1)])
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        self.assertEqual([child.path for child in tree.children], [(0, 0), (0, 1)])
+
+    def test_three_leaf_children_straddle_the_parent(self):
+        tree, _ = assign(
+            Box("a", children=(Box("b"), Box("c"), Box("d"))), 0, (0,), 0
+        )
+        self.assertEqual(
+            [child.row for child in tree.children],
+            [0, LEAF_STRIDE, 2 * LEAF_STRIDE],
+        )
+        self.assertEqual(tree.row, LEAF_STRIDE)
+
+    def test_each_gap_is_sized_from_its_own_two_neighbours(self):
+        middle = Box("c", children=(Box(), Box()))
+        tree, _ = assign(Box("a", children=(Box("b"), middle, Box("d"))), 0, (0,), 0)
+        self.assertEqual([child.row for child in tree.children], [0, 3, 6])
+        self.assertEqual(tree.row, 3)
+
+    def test_an_even_parent_sits_a_half_slot_below_the_first_middle_child(self):
+        tree, _ = assign(Box("a", children=(Box("b"), Box("c"))), 0, (0,), 0)
+        self.assertEqual(tree.row, tree.children[0].row + 1)
+
+    def test_no_two_boxes_in_a_column_are_closer_than_a_stride(self):
+        tree, _ = assign(
+            Box(
+                "a",
+                children=(
+                    Box("b", children=(Box(), Box())),
+                    Box("c"),
+                    Box("d", children=(Box("e", children=(Box(), Box(), Box())),)),
+                ),
+            ),
+            0,
+            (0,),
+            0,
+        )
+        columns = {}
+        for node in walk((tree,)):
+            columns.setdefault(node.column, []).append(node.row)
+        for rows in columns.values():
+            rows.sort()
+            for earlier, later in zip(rows, rows[1:]):
+                self.assertGreaterEqual(later - earlier, LEAF_STRIDE)
+
+
+class ForestTest(unittest.TestCase):
+    def test_a_tall_middle_child_only_spreads_its_own_neighbours(self):
+        box = Box(
+            "a", children=(Box("b"), Box("c", children=(Box(), Box())), Box("d"))
+        )
+        tree, = forest((box,))
+        self.assertEqual([child.row for child in tree.children], [0, 3, 6])
+        self.assertEqual(tree.row, 3)
+
+    def test_two_leaf_roots_are_one_stride_apart(self):
+        first, second = forest((Box("a"), Box("b")))
+        self.assertEqual([first.row, second.row], [0, LEAF_STRIDE])
+
+    def test_three_leaf_children_straddle_the_parent(self):
+        tree, = forest((Box("a", children=(Box("b"), Box("c"), Box("d"))),))
+        self.assertEqual(
+            [child.row for child in tree.children],
+            [0, LEAF_STRIDE, 2 * LEAF_STRIDE],
+        )
+        self.assertEqual(tree.row, LEAF_STRIDE)
+
+    def test_a_later_root_starts_below_the_previous_tree(self):
+        trees = forest((Box("a", children=(Box(), Box())), Box("b")))
+        self.assertEqual(trees[1].row, trees[0].children[-1].row + LEAF_STRIDE)
+
+    def test_every_row_is_non_negative(self):
+        trees = forest(
+            (
+                Box("a", children=(Box("b", children=(Box(), Box())), Box("c"))),
+                Box("d", children=(Box(), Box(), Box())),
+            )
+        )
+        self.assertTrue(all(node.row >= 0 for node in walk(trees)))
 
 
 if __name__ == "__main__":
