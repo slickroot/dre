@@ -49,6 +49,11 @@ class Arrow:
     shaft: int
 
 
+@dataclass(frozen=True)
+class Label:
+    text: str
+
+
 @dataclass
 class Placement:
     node: object
@@ -90,6 +95,11 @@ def width(box: Box) -> int:
 
 def height(box: Box) -> int:
     return BOX_HEIGHT
+
+
+def centre(width: int, label: str) -> int:
+    leftover = width - BORDERS - interior(label)
+    return 1 + leftover - leftover // 2
 
 
 def fold_up(f, node):
@@ -187,11 +197,16 @@ def emit(
 ) -> Iterator[Placement]:
     yield Placement(here.box, here.x, here.y, here.width, here.height)
 
+    start = here.x + centre(here.width, here.box.label)
+    middle = here.y + here.height // 2
+    yield Placement(Label(here.box.label), x=start, y=middle,
+                     width=interior(here.box.label), height=1)
+
     if here.path == selected:
         yield Placement(
             Cursor(),
-            x=here.x + interior(here.box.label),
-            y=here.y + here.height // 2,
+            x=start + interior(here.box.label) - 1,
+            y=middle,
             width=1,
             height=1,
         )

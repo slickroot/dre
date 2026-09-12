@@ -1,7 +1,7 @@
 import unittest
 
 from sketch.layout import Arrow as LayoutArrow
-from sketch.layout import Placement
+from sketch.layout import Label, Placement
 from sketch.render import (
     BLANK,
     BOTTOM_LEFT,
@@ -67,12 +67,23 @@ class TerminalRendererTest(unittest.TestCase):
         )
 
     def test_label_is_drawn_inside_the_box(self):
-        grid = self.renderer.render([Placement(Box("hi"), 0, 0, 5, 3)], 5, 3)
+        grid = self.renderer.render(
+            [
+                Placement(Box("hi"), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+            ],
+            5,
+            3,
+        )
         self.assertEqual(grid[1], BLANK + "hi" + BLANK * 2)
 
     def test_cursor_is_drawn_after_the_label(self):
         grid = self.renderer.render(
-            [Placement(Box("hi"), 0, 0, 5, 3), Placement(Cursor(), 3, 1, 1, 1)],
+            [
+                Placement(Box("hi"), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+                Placement(Cursor(), 3, 1, 1, 1),
+            ],
             5,
             3,
         )
@@ -80,7 +91,11 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_label_and_cursor_past_the_edge_are_clipped(self):
         grid = self.renderer.render(
-            [Placement(Box("hi"), 0, 0, 5, 3), Placement(Cursor(), 3, 1, 1, 1)],
+            [
+                Placement(Box("hi"), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+                Placement(Cursor(), 3, 1, 1, 1),
+            ],
             3,
             3,
         )
@@ -120,7 +135,11 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_a_plain_box_emits_no_escapes(self):
         grid = self.renderer.render(
-            [Placement(Box("hi"), 0, 0, 5, 3), Placement(Cursor(), 3, 1, 1, 1)],
+            [
+                Placement(Box("hi"), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+                Placement(Cursor(), 3, 1, 1, 1),
+            ],
             5,
             3,
         )
@@ -136,7 +155,12 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_a_label_inside_a_coloured_box_is_plain(self):
         grid = self.renderer.render(
-            [Placement(Box("hi", colour=5), 0, 0, 5, 3)], 5, 3
+            [
+                Placement(Box("hi", colour=5), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+            ],
+            5,
+            3,
         )
         self.assertEqual(grid[1], BLANK + "hi" + BLANK * 2)
 
@@ -206,7 +230,12 @@ class TerminalRendererTest(unittest.TestCase):
     def test_a_label_sits_on_top_of_the_fill(self):
         fill = 3
         grid = self.renderer.render(
-            [Placement(Box("hi", fill=fill), 0, 0, 5, 3)], 5, 3
+            [
+                Placement(Box("hi", fill=fill), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+            ],
+            5,
+            3,
         )
         self.assertEqual(
             grid[1],
@@ -216,7 +245,7 @@ class TerminalRendererTest(unittest.TestCase):
             + _cell(BLANK, PLAIN, fill) * 2,
         )
 
-    def test_the_cursor_is_plain_over_a_filled_box(self):
+    def test_the_cursor_keeps_the_fill_of_a_filled_box(self):
         fill = 5
         grid = self.renderer.render(
             [
@@ -227,7 +256,27 @@ class TerminalRendererTest(unittest.TestCase):
             3,
         )
         rest = grid[1][len(_cell(BLANK, PLAIN, fill)) :]
-        self.assertTrue(rest.startswith(_cell(CURSOR, PLAIN, PLAIN)))
+        self.assertTrue(rest.startswith(_cell(CURSOR, PLAIN, fill)))
+
+    def test_the_fill_survives_under_the_label_and_the_cursor(self):
+        fill = 4
+        grid = self.renderer.render(
+            [
+                Placement(Box(fill=fill), 0, 0, 5, 3),
+                Placement(Label("hi"), 1, 1, 2, 1),
+                Placement(Cursor(), 3, 1, 1, 1),
+            ],
+            5,
+            3,
+        )
+        self.assertEqual(
+            grid[1],
+            _cell(BLANK, PLAIN, fill)
+            + _cell("h", PLAIN, fill)
+            + _cell("i", PLAIN, fill)
+            + _cell(CURSOR, PLAIN, fill)
+            + _cell(BLANK, PLAIN, fill),
+        )
 
     def test_empty_canvas_with_no_boxes_emits_no_escapes(self):
         grid = self.renderer.render([], cols=11, rows=5)

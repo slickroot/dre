@@ -7,11 +7,14 @@ from sketch.layout import (
     GAP_HEIGHT,
     GAP_WIDTH,
     Arrow,
+    Label,
     Placement,
     Track,
     cells,
+    centre,
     fold_up,
     height,
+    interior,
     layout,
     measure,
     push_down,
@@ -34,6 +37,10 @@ def cursors(placements):
     return [p for p in placements if isinstance(p.node, Cursor)]
 
 
+def labels(placements):
+    return [p for p in placements if isinstance(p.node, Label)]
+
+
 def find(placements, label):
     for placement in boxes(placements):
         if placement.node.label == label:
@@ -48,7 +55,7 @@ class LayoutTest(unittest.TestCase):
     def test_box_is_centered(self):
         placements = layout(State((Box(),)), cols=11, rows=11)
         self.assertEqual(
-            placements,
+            boxes(placements),
             [Placement(Box(), x=4, y=4, width=BORDERS + 1, height=BOX_HEIGHT)],
         )
 
@@ -144,6 +151,38 @@ class CursorTest(unittest.TestCase):
         cursor = cursors(placements)[0]
         self.assertTrue(child.x <= cursor.x < child.x + child.width)
         self.assertTrue(child.y <= cursor.y < child.y + child.height)
+
+
+class LabelLayoutTest(unittest.TestCase):
+    def test_a_widened_box_recentres_its_label(self):
+        state = State((Box("x"), Box("wide")))
+        placements = layout(state, cols=31, rows=21)
+        widened_box = [p for p in boxes(placements) if p.node.label == "x"][0]
+        widened_label = [p for p in labels(placements) if p.node.text == "x"][0]
+
+        alone = layout(State((Box("x"),)), cols=31, rows=21)
+        solo_box = boxes(alone)[0]
+        solo_label = labels(alone)[0]
+
+        self.assertGreater(
+            widened_label.x - widened_box.x, solo_label.x - solo_box.x
+        )
+
+    def test_the_cursor_sits_on_the_last_cell_of_the_label(self):
+        state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
+        placements = layout(state, cols=11, rows=11)
+        label = labels(placements)[0]
+        cursor = cursors(placements)[0]
+        self.assertEqual(cursor.x, label.x + label.width - 1)
+        self.assertEqual(cursor.y, label.y)
+
+    def test_the_cursor_sits_in_the_middle_of_a_widened_empty_box(self):
+        state = State((Box(""), Box("wide")), selected=(0,))
+        placements = layout(state, cols=31, rows=21)
+        empty = [p for p in boxes(placements) if p.node.label == ""][0]
+        cursor = cursors(placements)[0]
+        self.assertGreater(empty.width, width(Box("")))
+        self.assertEqual(cursor.x, empty.x + centre(empty.width, ""))
 
 
 class ArrowLayoutTest(unittest.TestCase):
@@ -288,6 +327,23 @@ class WidthHeightTest(unittest.TestCase):
 
     def test_a_box_is_as_tall_as_a_box(self):
         self.assertEqual(height(Box("hi")), BOX_HEIGHT)
+
+
+class CentreTest(unittest.TestCase):
+    def test_no_leftover_starts_one_cell_in(self):
+        label = "hi"
+        self.assertEqual(centre(width(Box(label)), label), 1)
+
+    def test_an_odd_leftover_puts_the_extra_cell_on_the_left(self):
+        label = "hi"
+        box_width = width(Box(label)) + 1
+        leftover = box_width - BORDERS - interior(label)
+        self.assertEqual(leftover, 1)
+        self.assertEqual(centre(box_width, label), 1 + leftover - leftover // 2)
+        self.assertEqual(centre(box_width, label), 2)
+
+    def test_an_empty_label_is_measured_as_one_cell(self):
+        self.assertEqual(centre(width(Box()), ""), centre(width(Box("x")), "x"))
 
 
 def celled(box, index=0):

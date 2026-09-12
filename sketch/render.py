@@ -2,7 +2,7 @@ from dataclasses import dataclass, replace
 from math import cos, radians, tan
 from typing import Dict, List, Protocol, Tuple
 
-from .layout import Arrow, Placement
+from .layout import Arrow, Label, Placement
 from .state import PLAIN, Box, Cursor
 
 TOP_LEFT = "┌"
@@ -271,6 +271,8 @@ class TerminalRenderer:
                 self._draw_box(grid, placement)
             elif isinstance(placement.node, Cursor):
                 self._draw_cursor(grid, placement)
+            elif isinstance(placement.node, Label):
+                self._draw_label(grid, placement)
         return ["".join(_cell(*cell) for cell in row) for row in grid]
 
     def _draw_box(self, grid: Grid, placement: Placement) -> None:
@@ -278,20 +280,13 @@ class TerminalRenderer:
         for y in range(placement.y, placement.y + placement.height):
             for x in range(placement.x, placement.x + placement.width):
                 self._put(grid, x, y, (BLANK, PLAIN, fill))
-        self._draw_label(grid, placement)
 
     def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
-        self._put(grid, placement.x, placement.y, (CURSOR, PLAIN, PLAIN))
+        self._stamp(grid, placement.x, placement.y, CURSOR)
 
     def _draw_label(self, grid: Grid, placement: Placement) -> None:
-        fill = placement.node.fill
-        for offset, character in enumerate(placement.node.label):
-            self._put(
-                grid,
-                placement.x + 1 + offset,
-                placement.y + 1,
-                (character, PLAIN, fill),
-            )
+        for offset, character in enumerate(placement.node.text):
+            self._stamp(grid, placement.x + offset, placement.y, character)
 
     def _box_character(
         self, x: int, y: int, left: int, right: int, top: int, bottom: int
@@ -315,6 +310,11 @@ class TerminalRenderer:
     def _put(self, grid: Grid, x: int, y: int, cell: Cell) -> None:
         if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
             grid[y][x] = cell
+
+    def _stamp(self, grid: Grid, x: int, y: int, character: str) -> None:
+        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
+            _, colour, fill = grid[y][x]
+            grid[y][x] = (character, colour, fill)
 
 
 def _key(
