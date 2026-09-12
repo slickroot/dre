@@ -337,6 +337,11 @@ class SpriteCacheTest(unittest.TestCase):
         self.assertNotEqual(thin.pixels, thick.pixels)
         self.assertEqual(len(self.renderer.cache), 2)
 
+    def test_each_border_thickness_is_cached_distinctly(self):
+        for border in (1, 2, 3, 4):
+            self.draw(Placement(Box("hi", border=border), x=0, y=0, width=4, height=3))
+        self.assertEqual(len(self.renderer.cache), 4)
+
     def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
         first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
         second = self.draw(Placement(Box("ok"), x=0, y=0, width=4, height=3))

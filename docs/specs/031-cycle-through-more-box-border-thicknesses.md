@@ -19,3 +19,20 @@ thickest — and pressing `t` again after the thickest wraps back to thin.
 
 ## Technical Design
 
+- `Box` (`state.py`) widens `border: Literal[1, 2]` to `Literal[1, 2, 3, 4] = 1`
+  — the field was already a plain integer thickness (not a bool), so this is
+  a type-level change only; the default of `1` (thin) is unchanged.
+- `handle_command`'s `"t"` branch (`state.py`) changes its `rewrite` lambda
+  from the 1↔2 toggle `border=3 - box.border` to a 1→2→3→4→1 cycle:
+  `border=box.border % 4 + 1`. The surrounding guard
+  (`if not state.selected: return state`) is unchanged.
+- Insert mode needs no change — `t` still falls through `handle_insert`'s
+  printable-character branch into the label.
+- `GraphicsRenderer._outline_box` already paints `border` edge pixels
+  generically (not hardcoded to 1 or 2), so border=3 and border=4 render
+  correctly with no rendering code changes — verified with new tests for
+  3px and 4px edges and interior fill.
+- `_key`'s cache `shape` tuple already includes `node.border` generically,
+  so all four thickness values are cached distinctly with no cache-key
+  changes — verified with a new test.
+
