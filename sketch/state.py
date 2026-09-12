@@ -55,6 +55,18 @@ def rewrite(
     return boxes[:index] + (box,) + boxes[index + 1 :]
 
 
+def colour_row(boxes: Tuple[Box, ...], path: Path) -> Tuple[Box, ...]:
+    parent = path[:-1]
+    siblings = at(boxes, parent).children if parent else boxes
+    if len({box.colour for box in siblings}) == 1:
+        new_colour = next_colour(siblings[0].colour)
+    else:
+        new_colour = 0
+    for i in range(len(siblings)):
+        boxes = rewrite(boxes, parent + (i,), lambda box: replace(box, colour=new_colour))
+    return boxes
+
+
 def grow(boxes: Tuple[Box, ...], path: Path) -> Tuple[Tuple[Box, ...], Path]:
     if not path:
         return boxes + (Box(PAD),), (len(boxes),)

@@ -7,6 +7,7 @@ from sketch.state import (
     Box,
     State,
     at,
+    colour_row,
     grow,
     handle_key,
     next_colour,
@@ -633,6 +634,69 @@ class ToggleBorderTest(unittest.TestCase):
         result = handle_key(state, "t").boxes[0]
         self.assertEqual(result.colour, next_colour(PLAIN))
         self.assertEqual(result.fill, next_colour(PLAIN))
+
+
+class ColourRowTest(unittest.TestCase):
+    def test_colour_row_advances_uniformly_coloured_siblings(self):
+        boxes = (Box("a"), Box("b"))
+        self.assertEqual(
+            colour_row(boxes, (0,)),
+            (Box("a", colour=next_colour(PLAIN)), Box("b", colour=next_colour(PLAIN))),
+        )
+
+    def test_colour_row_sets_mixed_siblings_to_the_first_palette_colour(self):
+        boxes = (Box("a", colour=0), Box("b", colour=1))
+        self.assertEqual(
+            colour_row(boxes, (0,)),
+            (Box("a", colour=0), Box("b", colour=0)),
+        )
+
+    def test_colour_row_leaves_other_top_level_boxes_alone(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))), Box("e"))
+        result = colour_row(boxes, (0, 0))
+        self.assertEqual(result[1], Box("e"))
+
+    def test_colour_row_leaves_the_parent_unchanged(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        result = colour_row(boxes, (0, 0))
+        self.assertEqual(result[0].label, "a")
+
+    def test_colour_row_only_affects_the_given_siblings_group(self):
+        boxes = (
+            Box("a", children=(Box("c"), Box("d"))),
+            Box("e", children=(Box("f"),)),
+        )
+        result = colour_row(boxes, (0, 0))
+        self.assertEqual(result[1], Box("e", children=(Box("f"),)))
+
+    def test_colour_row_affects_nested_siblings(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        self.assertEqual(
+            colour_row(boxes, (0, 0)),
+            (
+                Box(
+                    "a",
+                    children=(
+                        Box("c", colour=next_colour(PLAIN)),
+                        Box("d", colour=next_colour(PLAIN)),
+                    ),
+                ),
+            ),
+        )
+
+    def test_colour_row_does_not_mutate_the_given_boxes(self):
+        boxes = (Box("a"), Box("b"))
+        colour_row(boxes, (0,))
+        self.assertEqual(boxes, (Box("a"), Box("b")))
+
+    def test_colour_row_cycles_back_to_plain(self):
+        boxes = (Box("a"), Box("b"))
+        for _ in range(PALETTE_SIZE):
+            boxes = colour_row(boxes, (0,))
+        self.assertNotEqual(boxes[0].colour, PLAIN)
+        boxes = colour_row(boxes, (0,))
+        self.assertEqual(boxes[0].colour, PLAIN)
+        self.assertEqual(boxes[1].colour, PLAIN)
 
 
 if __name__ == "__main__":
