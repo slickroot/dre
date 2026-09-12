@@ -189,12 +189,12 @@ class ArrowLayoutTest(unittest.TestCase):
         self.assertEqual(arrow.node.stops[0], 0)
         self.assertGreater(arrow.node.stops[1], 0)
 
-    def test_the_arrow_spans_from_the_parent_row_to_the_last_child_row(self):
+    def test_the_arrow_spans_from_the_first_child_row_to_the_last_child_row(self):
         state = State((Box("a", children=(Box("c"), Box("d"), Box("e"))),))
         placements = layout(state, cols=21, rows=21)
-        parent, e = find(placements, "a"), find(placements, "e")
+        c, e = find(placements, "c"), find(placements, "e")
         arrow = arrows(placements)[0]
-        self.assertEqual(arrow.y, parent.y + parent.height // 2)
+        self.assertEqual(arrow.y, c.y + c.height // 2)
         self.assertEqual(
             arrow.y + arrow.height - 1, e.y + e.height // 2
         )
@@ -213,11 +213,28 @@ class ArrowLayoutTest(unittest.TestCase):
         self.assertEqual(c.x - b.x, b.width + GAP_WIDTH)
         self.assertEqual(len(arrows(placements)), 2)
 
-    def test_a_parent_is_top_aligned_with_its_first_child(self):
+    def test_a_parent_centres_between_its_first_and_last_child(self):
         state = State((Box("a", children=(Box("c"), Box("d"))),))
         placements = layout(state, cols=21, rows=21)
-        parent, first = find(placements, "a"), find(placements, "c")
-        self.assertEqual(parent.y, first.y)
+        parent = find(placements, "a")
+        first, last = find(placements, "c"), find(placements, "d")
+        self.assertEqual(2 * parent.y, first.y + last.y)
+
+    def test_a_parent_lines_up_with_the_middle_child_when_odd(self):
+        state = State((Box("a", children=(Box("c"), Box("d"), Box("e"))),))
+        placements = layout(state, cols=21, rows=21)
+        parent, middle = find(placements, "a"), find(placements, "d")
+        self.assertEqual(parent.y, middle.y)
+
+    def test_a_parent_fills_the_gap_between_the_two_middle_children_when_even(self):
+        state = State(
+            (Box("a", children=(Box("c"), Box("d"), Box("e"), Box("f"))),)
+        )
+        placements = layout(state, cols=21, rows=21)
+        parent = find(placements, "a")
+        middle_low, middle_high = find(placements, "d"), find(placements, "e")
+        self.assertEqual(parent.y, middle_low.y + middle_low.height)
+        self.assertEqual(parent.y + parent.height, middle_high.y)
 
 
 class TracksTest(unittest.TestCase):
@@ -316,17 +333,22 @@ class CombinatorTest(unittest.TestCase):
 
 
 class MeasureTest(unittest.TestCase):
-    def test_a_leaf_spans_a_single_row(self):
-        self.assertEqual(fold_up(measure, Box()).span, 1)
+    def test_a_leaf_has_no_reach_or_pitch(self):
+        leaf = fold_up(measure, Box())
+        self.assertEqual((leaf.above, leaf.below, leaf.pitch), (0, 0, 0))
 
-    def test_a_parent_spans_the_sum_of_its_children(self):
-        tree = fold_up(measure, Box("a", children=(Box(), Box(), Box())))
-        self.assertEqual(tree.span, 3)
+    def test_a_single_child_leaves_the_parent_matching_its_reach(self):
+        tree = fold_up(measure, Box("a", children=(Box(),)))
+        child = tree.children[0]
+        self.assertEqual(tree.above, child.above)
+        self.assertEqual(tree.below, child.below)
 
-    def test_spans_accumulate_through_generations(self):
-        inner = Box("b", children=(Box(), Box()))
-        tree = fold_up(measure, Box("a", children=(inner, Box())))
-        self.assertEqual(tree.span, 3)
+    def test_two_leaf_children_pick_the_minimum_even_pitch(self):
+        tree = fold_up(measure, Box("a", children=(Box(), Box())))
+        self.assertEqual(tree.pitch, 2)
+        half = tree.pitch * (2 - 1) // 2
+        self.assertEqual(tree.above, half + tree.children[0].above)
+        self.assertEqual(tree.below, half + tree.children[-1].below)
 
     def test_a_box_is_measured_at_its_own_width(self):
         self.assertEqual(fold_up(measure, Box("hi")).width, width(Box("hi")))
@@ -341,16 +363,20 @@ class CellsTest(unittest.TestCase):
         tree = celled(Box("a", children=(Box("b"),)))
         self.assertEqual(tree.children[0].column, 1)
 
-    def test_a_parent_shares_the_row_of_its_first_child(self):
-        tree = celled(Box("a", children=(Box("b"), Box("c"))))
-        self.assertEqual(tree.children[0].row, tree.row)
+    def test_a_parent_centres_between_its_first_and_last_child(self):
+        box = Box("a", children=(Box("b"), Box("c")))
+        tree_measured = fold_up(measure, box)
+        tree = celled(box)
+        half = tree_measured.pitch * (2 - 1) // 2
+        self.assertEqual(tree.children[0].row + half, tree.row)
+        self.assertEqual(tree.row, tree.children[1].row - half)
 
     def test_a_sibling_starts_below_the_previous_subtree(self):
         parent = Box("a", children=(Box("b", children=(Box(), Box())), Box("c")))
         first, second = celled(parent).children
         self.assertEqual(
-            second.row,
-            first.row + fold_up(measure, parent).children[0].span,
+            second.row - first.row,
+            fold_up(measure, parent).pitch,
         )
 
     def test_a_child_extends_the_parents_path_by_its_index(self):

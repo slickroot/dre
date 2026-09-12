@@ -1,22 +1,24 @@
 from dataclasses import dataclass, replace
 from functools import partial
-from itertools import accumulate
 from typing import Iterator, List, Tuple
 
 from .state import Box, Cursor, Path, State
 
 BOX_HEIGHT = 3
-GAP_HEIGHT = 2
+GAP_HEIGHT = 3
 GAP_WIDTH = 4
 BORDERS = 2
 ROW_PITCH = BOX_HEIGHT + GAP_HEIGHT
+HALF_PITCH = BOX_HEIGHT
 
 
 @dataclass(frozen=True)
 class Measured:
     box: Box
     width: int
-    span: int
+    above: int
+    below: int
+    pitch: int
     children: Tuple["Measured", ...] = ()
 
 
@@ -44,6 +46,7 @@ class Positioned:
 @dataclass(frozen=True)
 class Arrow:
     stops: Tuple[int, ...]
+    shaft: int
 
 
 @dataclass
@@ -115,25 +118,49 @@ def flatten(f, node) -> Iterator:
 
 
 def measure(box: Box, children: Tuple[Measured, ...]) -> Measured:
-    return Measured(box, width(box), sum(c.span for c in children) or 1)
+    if not children:
+        return Measured(box, width(box), 0, 0, 0)
+    required = max(
+        (a.below + b.above + 2 for a, b in zip(children, children[1:])),
+        default=0,
+    )
+    pitch = max(2, required)
+    if pitch % 2:
+        pitch += 1
+    half = pitch * (len(children) - 1) // 2
+    return Measured(
+        box, width(box), half + children[0].above, half + children[-1].below, pitch
+    )
 
 
 def cells(node: Measured, context) -> Tuple[Celled, List[Tuple[int, int, Path]]]:
     column, row, path = context
-    starts = accumulate((child.span for child in node.children), initial=row)
+    half = node.pitch * (len(node.children) - 1) // 2
     contexts = [
-        (column + 1, start, path + (index,))
-        for index, start in zip(range(len(node.children)), starts)
+        (column + 1, row - half + index * node.pitch, path + (index,))
+        for index in range(len(node.children))
     ]
     return Celled(node.box, node.width, column, row, path), contexts
 
 
 def forest(boxes: Tuple[Box, ...]) -> Tuple[Celled, ...]:
     measured = [fold_up(measure, box) for box in boxes]
-    starts = accumulate((node.span for node in measured), initial=0)
-    return tuple(
+    starts: List[int] = []
+    for index, node in enumerate(measured):
+        if index == 0:
+            starts.append(0)
+        else:
+            starts.append(starts[-1] + measured[index - 1].below + 2 + node.above)
+    trees = tuple(
         push_down(cells, node, (0, start, (index,)))
         for index, (node, start) in enumerate(zip(measured, starts))
+    )
+    minimum = min((node.row for node in walk(trees)), default=0)
+    if minimum == 0:
+        return trees
+    return tuple(
+        fmap(lambda node: replace(node, row=node.row - minimum), tree)
+        for tree in trees
     )
 
 
@@ -149,7 +176,7 @@ def position(node: Celled, columns: List[Track], left: int, top: int) -> Positio
         box=node.box,
         path=node.path,
         x=left + track.offset,
-        y=top + node.row * ROW_PITCH,
+        y=top + node.row * HALF_PITCH,
         width=track.extent,
         height=BOX_HEIGHT,
     )
@@ -170,14 +197,15 @@ def emit(
         )
 
     if children:
-        shaft = here.y + here.height // 2
-        stops = [child.y + child.height // 2 - shaft for child in children]
+        origin = children[0].y + children[0].height // 2
+        stops = tuple(child.y + child.height // 2 - origin for child in children)
+        shaft = here.y + here.height // 2 - origin
         yield Placement(
-            Arrow(tuple(stops)),
+            Arrow(stops, shaft),
             x=here.x + here.width,
-            y=shaft,
+            y=origin,
             width=GAP_WIDTH,
-            height=stops[-1] + 1,
+            height=stops[-1] - stops[0] + 1,
         )
 
 
@@ -200,7 +228,7 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
         return []
 
     columns = column_tracks(nodes)
-    total_height = max(node.row for node in nodes) * ROW_PITCH + BOX_HEIGHT
+    total_height = max(node.row for node in nodes) * HALF_PITCH + BOX_HEIGHT
     left = (cols - span(columns)) // 2
     top = (rows - total_height) // 2
 

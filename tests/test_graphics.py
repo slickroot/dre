@@ -107,7 +107,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_an_arrow_sprite_covers_the_placement_in_pixels(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         self.assertEqual((sprite.width, sprite.height), (8, 5))
 
@@ -115,7 +115,7 @@ class GraphicsRendererTest(unittest.TestCase):
         # stops == (0,) is the degenerate case: shaft and trunk collapse onto
         # one row, so the sprite is exactly today's straight "-->" arrow.
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         shaft_row = sprite.height // 2
         for x in range(sprite.width):
@@ -123,7 +123,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_single_stop_arrow_tip_is_a_single_pixel_at_the_right_edge(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         shaft_row = sprite.height // 2
         tip = sprite.width - 1
@@ -133,7 +133,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_single_stop_arrowhead_diagonals_are_symmetric_about_the_shaft(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         shaft_row = sprite.height // 2
         # Base column of the head: furthest from the tip, widest spread.
@@ -150,7 +150,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_arrowhead_shape_matches_the_thirty_degree_geometry(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=3, height=1), cell=(40, 20)
+            Placement(Arrow((0,), 0), x=1, y=1, width=3, height=1), cell=(40, 20)
         )
         shaft_row = sprite.height // 2
         tip = sprite.width - 1
@@ -172,13 +172,13 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         self.assertEqual(self.pixel(sprite, 0, 0), (0, 0, 0, 0))
 
     def test_an_arrow_is_plain_grey(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,)), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
         )
         shaft_row = sprite.height // 2
         self.assertEqual(
@@ -187,7 +187,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_an_arrow_overhanging_the_top_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 3)), x=1, y=-1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 3), 0), x=1, y=-1, width=2, height=4), cell=(4, 5)
         )
         self.assertEqual(sprite.row, 0)
         self.assertEqual(sprite.height, 15)
@@ -195,7 +195,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_an_arrow_overhanging_the_bottom_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4),
+            Placement(Arrow((0, 3), 0), x=1, y=1, width=2, height=4),
             cols=40,
             rows=2,
             cell=(4, 5),
@@ -206,7 +206,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_branching_arrow_trunk_spans_from_the_shaft_to_the_last_stop(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
         midpoint = sprite.width // 2
         shaft_row = 5 // 2  # centre of the parent's own row
@@ -216,7 +216,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_branching_arrow_has_a_stub_at_every_stop(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
         midpoint = sprite.width // 2
         for stop in (0, 3):
@@ -226,7 +226,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_branching_arrow_rows_between_stops_are_blank_past_the_trunk(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
         midpoint = sprite.width // 2
         row_between_stops = 1 * 5 + 5 // 2
@@ -235,7 +235,7 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_three_stubs_each_end_in_their_own_arrowhead(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0, 1, 3)), x=1, y=1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 1, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
         tip = sprite.width - 1
         stop_rows = {stop * 5 + 5 // 2 for stop in (0, 1, 3)}
@@ -349,8 +349,13 @@ class SpriteCacheTest(unittest.TestCase):
         self.assertEqual(len(self.renderer.cache), 2)
 
     def test_arrows_with_different_stops_are_redrawn(self):
-        one = self.draw(Placement(Arrow((0,)), x=0, y=0, width=4, height=6))
-        two = self.draw(Placement(Arrow((0, 2)), x=0, y=0, width=4, height=6))
+        one = self.draw(Placement(Arrow((0,), 0), x=0, y=0, width=4, height=6))
+        two = self.draw(Placement(Arrow((0, 2), 0), x=0, y=0, width=4, height=6))
+        self.assertNotEqual(one.pixels, two.pixels)
+
+    def test_arrows_with_different_shafts_are_redrawn(self):
+        one = self.draw(Placement(Arrow((0, 2), 0), x=0, y=0, width=4, height=6))
+        two = self.draw(Placement(Arrow((0, 2), 1), x=0, y=0, width=4, height=6))
         self.assertNotEqual(one.pixels, two.pixels)
 
     def test_the_cache_is_bounded(self):
