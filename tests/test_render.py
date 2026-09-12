@@ -391,16 +391,81 @@ class GraphicsRendererBorderThicknessTest(unittest.TestCase):
         self.assertEqual(self.pixel(sprite, sprite.width - 2, 5), edge)
         self.assertEqual(self.pixel(sprite, sprite.width - 3, 5), fill)
 
+    def test_a_border_of_three_is_three_pixels_at_each_edge(self):
+        sprite = self.outline(Box(colour=1, fill=2, border=3))
+        edge = _colour(1) + (OPAQUE,)
+        fill = _fill_colour(2)
+        # Top edge: three edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, 0), edge)
+        self.assertEqual(self.pixel(sprite, 5, 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, 2), edge)
+        self.assertEqual(self.pixel(sprite, 5, 3), fill)
+        # Bottom edge: three edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 2), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 3), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 4), fill)
+        # Left edge: three edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, 0, 5), edge)
+        self.assertEqual(self.pixel(sprite, 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, 2, 5), edge)
+        self.assertEqual(self.pixel(sprite, 3, 5), fill)
+        # Right edge: three edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, sprite.width - 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 2, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 3, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 4, 5), fill)
+
+    def test_a_border_of_four_is_four_pixels_at_each_edge(self):
+        sprite = self.outline(Box(colour=1, fill=2, border=4))
+        edge = _colour(1) + (OPAQUE,)
+        fill = _fill_colour(2)
+        # Top edge: four edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, 0), edge)
+        self.assertEqual(self.pixel(sprite, 5, 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, 2), edge)
+        self.assertEqual(self.pixel(sprite, 5, 3), edge)
+        self.assertEqual(self.pixel(sprite, 5, 4), fill)
+        # Bottom edge: four edge rows, then fill.
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 1), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 2), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 3), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 4), edge)
+        self.assertEqual(self.pixel(sprite, 5, sprite.height - 5), fill)
+        # Left edge: four edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, 0, 5), edge)
+        self.assertEqual(self.pixel(sprite, 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, 2, 5), edge)
+        self.assertEqual(self.pixel(sprite, 3, 5), edge)
+        self.assertEqual(self.pixel(sprite, 4, 5), fill)
+        # Right edge: four edge columns, then fill.
+        self.assertEqual(self.pixel(sprite, sprite.width - 1, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 2, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 3, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 4, 5), edge)
+        self.assertEqual(self.pixel(sprite, sprite.width - 5, 5), fill)
+
     def test_border_thickness_does_not_change_sprite_size(self):
         thin = self.outline(Box(border=1))
         thick = self.outline(Box(border=2))
+        thicker = self.outline(Box(border=3))
+        thickest = self.outline(Box(border=4))
         self.assertEqual((thin.width, thin.height), (thick.width, thick.height))
+        self.assertEqual((thin.width, thin.height), (thicker.width, thicker.height))
+        self.assertEqual((thin.width, thin.height), (thickest.width, thickest.height))
 
     def test_interior_still_fills_correctly_with_a_thick_border(self):
         sprite = self.outline(Box(fill=2, border=2))
         fill = _fill_colour(2)
         for y in range(2, sprite.height - 2):
             for x in range(2, sprite.width - 2):
+                self.assertEqual(self.pixel(sprite, x, y), fill)
+
+    def test_interior_still_fills_correctly_with_a_border_of_four(self):
+        sprite = self.outline(Box(fill=2, border=4))
+        fill = _fill_colour(2)
+        for y in range(4, sprite.height - 4):
+            for x in range(4, sprite.width - 4):
                 self.assertEqual(self.pixel(sprite, x, y), fill)
 
 

@@ -587,17 +587,18 @@ class CycleFillTest(unittest.TestCase):
         )
 
 
-class ToggleBorderTest(unittest.TestCase):
+class CycleBorderTest(unittest.TestCase):
     def test_new_box_starts_with_a_thin_border(self):
         self.assertEqual(Box("a").border, 1)
 
-    def test_t_toggles_the_selected_box_from_thin_to_thick(self):
-        state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "t").boxes, (Box("a", border=2),))
-
-    def test_t_twice_returns_to_thin(self):
+    def test_t_cycles_the_selected_box_through_all_four_levels(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         state = handle_key(state, "t")
+        self.assertEqual(state.boxes, (Box("a", border=2),))
+        state = handle_key(state, "t")
+        self.assertEqual(state.boxes, (Box("a", border=3),))
+        state = handle_key(state, "t")
+        self.assertEqual(state.boxes, (Box("a", border=4),))
         state = handle_key(state, "t")
         self.assertEqual(state.boxes, (Box("a", border=1),))
 
