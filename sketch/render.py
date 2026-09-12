@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from math import cos, radians, tan
+from math import cos, hypot, radians, tan
 from typing import Dict, List, Protocol, Tuple
 
 from .layout import Arrow, Label, Placement
@@ -21,6 +21,9 @@ ARROWHEAD_EDGE_LENGTH = 15
 ARROWHEAD_DEPTH = ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG))
 ARROWHEAD_SLOPE = tan(radians(ARROWHEAD_ANGLE_DEG))
 RESET = "\x1b[0m"
+
+SUPERSAMPLE = 4
+SUBPIXELS = tuple((step + 0.5) / SUPERSAMPLE for step in range(SUPERSAMPLE))
 
 Cell = Tuple[str, int, int]
 Grid = List[List[Cell]]
@@ -133,32 +136,18 @@ class GraphicsRenderer:
         first_y = (top - placement.y) * self.cell_height
         last_y = (bottom - placement.y) * self.cell_height
         span = last_x - first_x
-        # A box has only two kinds of row, so build each once and repeat it
-        # rather than deciding pixel by pixel.
-        edge_row = bytes(edge) * span
-        if width <= 2 * border:
-            body_row = edge_row
+        radius = placement.node.radius
+        if radius:
+            pixels = RoundedBox(
+                width, height, radius, border, edge, fill
+            ).pixels(first_x, last_x, first_y, last_y)
         else:
-            body = bytearray()
-            left_edge = max(0, border - first_x)
-            body.extend(bytes(edge) * left_edge)
-            right_edge = max(0, border - (width - last_x))
-            fill_count = span - left_edge - right_edge
-            body.extend(bytes(fill) * fill_count)
-            body.extend(bytes(edge) * right_edge)
-            body_row = bytes(body)
-        pixels = bytearray()
-        if height <= 2 * border:
-            pixels.extend(edge_row * (last_y - first_y))
-        else:
-            top_edge = max(0, border - first_y)
-            pixels.extend(edge_row * top_edge)
-            bottom_edge = max(0, border - (height - last_y))
-            body_count = (last_y - first_y) - top_edge - bottom_edge
-            pixels.extend(body_row * body_count)
-            pixels.extend(edge_row * bottom_edge)
+            pixels = _square_pixels(
+                width, height, border, edge, fill,
+                first_x, last_x, first_y, last_y,
+            )
         return Sprite(
-            pixels=bytes(pixels),
+            pixels=pixels,
             width=span,
             height=last_y - first_y,
             col=left,
@@ -215,6 +204,89 @@ class GraphicsRenderer:
             spread = round(distance * ARROWHEAD_SLOPE)
             canvas.point(x, stop_row - spread)
             canvas.point(x, stop_row + spread)
+
+
+class RoundedBox:
+    """A box whose corners are cut from a rounded-rectangle distance field."""
+
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        radius: int,
+        border: int,
+        edge: Tuple[int, int, int, int],
+        fill: Tuple[int, int, int, int],
+    ) -> None:
+        self.width = width
+        self.height = height
+        self.border = border
+        self.radius = radius
+        self.outer = radius + border
+        self.edge = bytes(edge)
+        self.fill = bytes(fill)
+        self.clear = bytes(TRANSPARENT)
+
+    def pixels(
+        self, first_x: int, last_x: int, first_y: int, last_y: int
+    ) -> bytes:
+        buffer = bytearray()
+        straight_row = None
+        for y in range(first_y, last_y):
+            if self.outer <= y < self.height - self.outer:
+                if straight_row is None:
+                    straight_row = _body_row(
+                        self.width, self.border, self.edge, self.fill,
+                        first_x, last_x,
+                    )
+                buffer.extend(straight_row)
+            else:
+                buffer.extend(self._corner_row(y, first_x, last_x))
+        return bytes(buffer)
+
+    def _corner_row(self, y: int, first_x: int, last_x: int) -> bytes:
+        row = bytearray()
+        for x in range(first_x, min(self.outer, last_x)):
+            row.extend(self._supersampled(x, y))
+        middle = min(self.width - self.outer, last_x) - max(
+            self.outer, first_x
+        )
+        if middle > 0:
+            straight = (
+                self.edge
+                if y < self.border or y >= self.height - self.border
+                else self.fill
+            )
+            row.extend(straight * middle)
+        for x in range(max(self.width - self.outer, first_x), last_x):
+            row.extend(self._supersampled(x, y))
+        return bytes(row)
+
+    def _supersampled(self, x: int, y: int) -> bytes:
+        weighted = [0.0, 0.0, 0.0]
+        total_alpha = 0.0
+        for offset_y in SUBPIXELS:
+            for offset_x in SUBPIXELS:
+                sample = self._sample(x + offset_x, y + offset_y)
+                total_alpha += sample[3]
+                for channel in range(3):
+                    weighted[channel] += sample[channel] * sample[3]
+        if not total_alpha:
+            return self.clear
+        return bytes(
+            [round(value / total_alpha) for value in weighted]
+            + [round(total_alpha / SUPERSAMPLE ** 2)]
+        )
+
+    def _sample(self, px: float, py: float) -> bytes:
+        centre_x = min(max(px, self.outer), self.width - self.outer)
+        centre_y = min(max(py, self.outer), self.height - self.outer)
+        distance = hypot(px - centre_x, py - centre_y)
+        if distance > self.outer:
+            return self.clear
+        if distance > self.radius:
+            return self.edge
+        return self.fill
 
 
 class Canvas:
@@ -318,6 +390,54 @@ class TerminalRenderer:
         if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
             _, colour, fill = grid[y][x]
             grid[y][x] = (character, colour, fill)
+
+
+def _square_pixels(
+    width: int,
+    height: int,
+    border: int,
+    edge: Tuple[int, int, int, int],
+    fill: Tuple[int, int, int, int],
+    first_x: int,
+    last_x: int,
+    first_y: int,
+    last_y: int,
+) -> bytes:
+    # A square box has only two kinds of row, so build each once and repeat it
+    # rather than deciding pixel by pixel.
+    edge_row = bytes(edge) * (last_x - first_x)
+    body_row = _body_row(width, border, edge, fill, first_x, last_x)
+    pixels = bytearray()
+    if height <= 2 * border:
+        pixels.extend(edge_row * (last_y - first_y))
+    else:
+        top_edge = max(0, border - first_y)
+        pixels.extend(edge_row * top_edge)
+        bottom_edge = max(0, border - (height - last_y))
+        body_count = (last_y - first_y) - top_edge - bottom_edge
+        pixels.extend(body_row * body_count)
+        pixels.extend(edge_row * bottom_edge)
+    return bytes(pixels)
+
+
+def _body_row(
+    width: int,
+    border: int,
+    edge: Tuple[int, int, int, int],
+    fill: Tuple[int, int, int, int],
+    first_x: int,
+    last_x: int,
+) -> bytes:
+    span = last_x - first_x
+    if width <= 2 * border:
+        return bytes(edge) * span
+    row = bytearray()
+    left_edge = max(0, border - first_x)
+    row.extend(bytes(edge) * left_edge)
+    right_edge = max(0, border - (width - last_x))
+    row.extend(bytes(fill) * (span - left_edge - right_edge))
+    row.extend(bytes(edge) * right_edge)
+    return bytes(row)
 
 
 def _key(
