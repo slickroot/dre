@@ -6,7 +6,7 @@ from .state import Box, Cursor, Path, State
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 3
-GAP_WIDTH = 4
+GAP_WIDTH = 8
 BORDERS = 2
 ROW_PITCH = BOX_HEIGHT + GAP_HEIGHT
 HALF_PITCH = BOX_HEIGHT
