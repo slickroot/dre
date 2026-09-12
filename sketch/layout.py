@@ -172,24 +172,12 @@ def assign(box: Box, column: int, path: Path, free: int) -> Tuple[Celled, int]:
 
 
 def forest(boxes: Tuple[Box, ...]) -> Tuple[Celled, ...]:
-    measured = [fold_up(measure, box) for box in boxes]
-    starts: List[int] = []
-    for index, node in enumerate(measured):
-        if index == 0:
-            starts.append(0)
-        else:
-            starts.append(starts[-1] + measured[index - 1].below + 2 + node.above)
-    trees = tuple(
-        push_down(cells, node, (0, start, (index,)))
-        for index, (node, start) in enumerate(zip(measured, starts))
-    )
-    minimum = min((node.row for node in walk(trees)), default=0)
-    if minimum == 0:
-        return trees
-    return tuple(
-        fmap(lambda node: replace(node, row=node.row - minimum), tree)
-        for tree in trees
-    )
+    trees = []
+    free = 0
+    for index, box in enumerate(boxes):
+        tree, free = assign(box, 0, (index,), free)
+        trees.append(tree)
+    return tuple(trees)
 
 
 def walk(nodes: Tuple[Celled, ...]) -> Iterator[Celled]:

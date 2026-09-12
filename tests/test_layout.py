@@ -15,6 +15,7 @@ from sketch.layout import (
     cells,
     centre,
     fold_up,
+    forest,
     height,
     interior,
     layout,
@@ -503,6 +504,41 @@ class AssignTest(unittest.TestCase):
             rows.sort()
             for earlier, later in zip(rows, rows[1:]):
                 self.assertGreaterEqual(later - earlier, LEAF_STRIDE)
+
+
+class ForestTest(unittest.TestCase):
+    def test_a_tall_middle_child_only_spreads_its_own_neighbours(self):
+        box = Box(
+            "a", children=(Box("b"), Box("c", children=(Box(), Box())), Box("d"))
+        )
+        tree, = forest((box,))
+        self.assertEqual([child.row for child in tree.children], [0, 3, 6])
+        self.assertEqual(tree.row, 3)
+
+    def test_two_leaf_roots_are_one_stride_apart(self):
+        first, second = forest((Box("a"), Box("b")))
+        self.assertEqual([first.row, second.row], [0, LEAF_STRIDE])
+
+    def test_three_leaf_children_straddle_the_parent(self):
+        tree, = forest((Box("a", children=(Box("b"), Box("c"), Box("d"))),))
+        self.assertEqual(
+            [child.row for child in tree.children],
+            [0, LEAF_STRIDE, 2 * LEAF_STRIDE],
+        )
+        self.assertEqual(tree.row, LEAF_STRIDE)
+
+    def test_a_later_root_starts_below_the_previous_tree(self):
+        trees = forest((Box("a", children=(Box(), Box())), Box("b")))
+        self.assertEqual(trees[1].row, trees[0].children[-1].row + LEAF_STRIDE)
+
+    def test_every_row_is_non_negative(self):
+        trees = forest(
+            (
+                Box("a", children=(Box("b", children=(Box(), Box())), Box("c"))),
+                Box("d", children=(Box(), Box(), Box())),
+            )
+        )
+        self.assertTrue(all(node.row >= 0 for node in walk(trees)))
 
 
 if __name__ == "__main__":
