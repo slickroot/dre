@@ -11,6 +11,7 @@ class Box:
     label: str = ""
     colour: int = PLAIN
     fill: int = PLAIN
+    border: Literal[1, 2] = 1
     children: Tuple["Box", ...] = ()
 
 
@@ -116,6 +117,15 @@ def handle_command(state: State, key: str) -> State:
             state.boxes,
             state.selected,
             lambda box: replace(box, fill=next_colour(box.fill)),
+        )
+        return replace(state, boxes=boxes)
+    if key == "t":
+        if not state.selected:
+            return state
+        boxes = rewrite(
+            state.boxes,
+            state.selected,
+            lambda box: replace(box, border=3 - box.border),
         )
         return replace(state, boxes=boxes)
     if key == "q":

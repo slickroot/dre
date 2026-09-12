@@ -485,6 +485,10 @@ class HandleInsertTest(unittest.TestCase):
         state = State(boxes=(Box("a" + PAD),), mode="insert", selected=(0,))
         self.assertEqual(handle_key(state, "f").boxes, (Box("af" + PAD),))
 
+    def test_t_in_insert_mode_types_the_letter_t(self):
+        state = State(boxes=(Box("a" + PAD),), mode="insert", selected=(0,))
+        self.assertEqual(handle_key(state, "t").boxes, (Box("at" + PAD),))
+
 
 class CycleColourTest(unittest.TestCase):
     def test_c_advances_the_selected_box_from_plain(self):
@@ -581,6 +585,54 @@ class CycleFillTest(unittest.TestCase):
             state.boxes,
             (Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
         )
+
+
+class ToggleBorderTest(unittest.TestCase):
+    def test_new_box_starts_with_a_thin_border(self):
+        self.assertEqual(Box("a").border, 1)
+
+    def test_t_toggles_the_selected_box_from_thin_to_thick(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        self.assertEqual(handle_key(state, "t").boxes, (Box("a", border=2),))
+
+    def test_t_twice_returns_to_thin(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        state = handle_key(state, "t")
+        state = handle_key(state, "t")
+        self.assertEqual(state.boxes, (Box("a", border=1),))
+
+    def test_t_changes_only_the_selected_box(self):
+        state = State(boxes=(Box("a"), Box("b")), selected=(1,))
+        self.assertEqual(
+            handle_key(state, "t").boxes,
+            (Box("a"), Box("b", border=2)),
+        )
+
+    def test_t_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State()
+        self.assertEqual(handle_key(state, "t"), state)
+
+    def test_t_does_not_mutate_the_given_state(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        handle_key(state, "t")
+        self.assertEqual(state.boxes, (Box("a"),))
+
+    def test_t_on_a_nested_box_changes_only_that_box(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        state = State(boxes=boxes, selected=(0, 1))
+        self.assertEqual(
+            handle_key(state, "t").boxes,
+            (Box("a", children=(Box("c"), Box("d", border=2))),),
+        )
+
+    def test_t_does_not_change_colour_or_fill(self):
+        state = State(
+            boxes=(Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
+            selected=(0,),
+        )
+        result = handle_key(state, "t").boxes[0]
+        self.assertEqual(result.colour, next_colour(PLAIN))
+        self.assertEqual(result.fill, next_colour(PLAIN))
 
 
 if __name__ == "__main__":
