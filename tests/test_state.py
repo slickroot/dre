@@ -592,55 +592,6 @@ class CycleFillTest(unittest.TestCase):
         )
 
 
-class CycleBorderTest(unittest.TestCase):
-    def test_new_box_starts_with_a_thin_border(self):
-        self.assertEqual(Box("a").border, 1)
-
-    def test_t_cycles_the_selected_box_through_all_four_levels(self):
-        state = State(boxes=(Box("a"),), selected=(0,))
-        state = handle_key(state, "t")
-        self.assertEqual(state.boxes, (Box("a", border=2),))
-        state = handle_key(state, "t")
-        self.assertEqual(state.boxes, (Box("a", border=3),))
-        state = handle_key(state, "t")
-        self.assertEqual(state.boxes, (Box("a", border=4),))
-        state = handle_key(state, "t")
-        self.assertEqual(state.boxes, (Box("a", border=1),))
-
-    def test_t_changes_only_the_selected_box(self):
-        state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        self.assertEqual(
-            handle_key(state, "t").boxes,
-            (Box("a"), Box("b", border=2)),
-        )
-
-    def test_t_on_an_empty_canvas_returns_the_state_unchanged(self):
-        state = State()
-        self.assertEqual(handle_key(state, "t"), state)
-
-    def test_t_does_not_mutate_the_given_state(self):
-        state = State(boxes=(Box("a"),), selected=(0,))
-        handle_key(state, "t")
-        self.assertEqual(state.boxes, (Box("a"),))
-
-    def test_t_on_a_nested_box_changes_only_that_box(self):
-        boxes = (Box("a", children=(Box("c"), Box("d"))),)
-        state = State(boxes=boxes, selected=(0, 1))
-        self.assertEqual(
-            handle_key(state, "t").boxes,
-            (Box("a", children=(Box("c"), Box("d", border=2))),),
-        )
-
-    def test_t_does_not_change_colour_or_fill(self):
-        state = State(
-            boxes=(Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
-            selected=(0,),
-        )
-        result = handle_key(state, "t").boxes[0]
-        self.assertEqual(result.colour, next_colour(PLAIN))
-        self.assertEqual(result.fill, next_colour(PLAIN))
-
-
 class ToggleRoundedTest(unittest.TestCase):
     def test_new_box_starts_with_square_corners(self):
         self.assertEqual(Box("a").rounded, False)
@@ -680,7 +631,7 @@ class ToggleRoundedTest(unittest.TestCase):
             (Box("a", children=(Box("c"), Box("d", rounded=True))),),
         )
 
-    def test_r_does_not_change_colour_fill_or_border(self):
+    def test_r_does_not_change_colour_or_fill(self):
         state = State(
             boxes=(Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
             selected=(0,),
@@ -688,7 +639,6 @@ class ToggleRoundedTest(unittest.TestCase):
         result = handle_key(state, "r").boxes[0]
         self.assertEqual(result.colour, next_colour(PLAIN))
         self.assertEqual(result.fill, next_colour(PLAIN))
-        self.assertEqual(result.border, Box("a").border)
 
 
 class ColourRowTest(unittest.TestCase):
