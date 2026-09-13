@@ -1,7 +1,7 @@
 import unittest
 
 from sketch.layout import Arrow as LayoutArrow
-from sketch.layout import Label, Placement
+from sketch.layout import Cursor, Label, Placement
 from sketch.render import (
     ARROW_STROKE,
     ARROWHEAD_SLOPE,
@@ -28,7 +28,7 @@ from sketch.render import (
     _colour,
     _fill_colour,
 )
-from sketch.state import PLAIN, Box, Cursor
+from sketch.state import PLAIN, Box
 
 
 class TerminalRendererTest(unittest.TestCase):

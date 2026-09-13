@@ -2,7 +2,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import Iterator, List, Tuple
 
-from .state import Box, Cursor, Path, State
+from .state import Box, Path
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 3
@@ -43,6 +43,12 @@ class Arrow:
 @dataclass(frozen=True)
 class Label:
     text: str
+    path: Path = ()
+
+
+@dataclass(frozen=True)
+class Cursor:
+    pass
 
 
 @dataclass
@@ -148,23 +154,14 @@ def position(node: Celled, columns: List[Track], left: int, top: int) -> Positio
 
 
 def emit(
-    here: Positioned, children: Tuple[Positioned, ...], selected: Path
+    here: Positioned, children: Tuple[Positioned, ...]
 ) -> Iterator[Placement]:
     yield Placement(here.box, here.x, here.y, here.width, here.height)
 
     start = here.x + centre(here.width, here.box.label)
     middle = here.y + here.height // 2
-    yield Placement(Label(here.box.label), x=start, y=middle,
+    yield Placement(Label(here.box.label, here.path), x=start, y=middle,
                      width=interior(here.box.label), height=1)
-
-    if here.path == selected:
-        yield Placement(
-            Cursor(),
-            x=start + interior(here.box.label) - 1,
-            y=middle,
-            width=1,
-            height=1,
-        )
 
     if children:
         origin = children[0].y + children[0].height // 2
@@ -179,6 +176,21 @@ def emit(
         )
 
 
+def with_cursor(placements: List[Placement], selected: Path) -> List[Placement]:
+    for placement in placements:
+        if isinstance(placement.node, Label) and placement.node.path == selected:
+            return placements + [
+                Placement(
+                    Cursor(),
+                    x=placement.x + placement.width - 1,
+                    y=placement.y,
+                    width=1,
+                    height=1,
+                )
+            ]
+    return placements
+
+
 def column_tracks(nodes: List[Celled]) -> List[Track]:
     parents = [node for node in nodes if node.children]
     # Column is doubled into a track index so a gap track can sit between
@@ -191,8 +203,8 @@ def column_tracks(nodes: List[Celled]) -> List[Track]:
     )
 
 
-def layout(state: State, cols: int, rows: int) -> List[Placement]:
-    trees = forest(state.boxes)
+def layout(boxes: Tuple[Box, ...], cols: int, rows: int) -> List[Placement]:
+    trees = forest(boxes)
     nodes = list(walk(trees))
     if not nodes:
         return []
@@ -203,11 +215,10 @@ def layout(state: State, cols: int, rows: int) -> List[Placement]:
     top = (rows - total_height) // 2
 
     place = partial(position, columns=columns, left=left, top=top)
-    show = partial(emit, selected=state.selected)
     placements = [
         placement
         for tree in trees
-        for placement in flatten(show, fmap(place, tree))
+        for placement in flatten(emit, fmap(place, tree))
     ]
 
     # Boxes are opaque, so they are drawn before the arrows and cursor that

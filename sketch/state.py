@@ -15,11 +15,6 @@ class Box:
     children: Tuple["Box", ...] = ()
 
 
-@dataclass(frozen=True)
-class Cursor:
-    pass
-
-
 Mode = Literal["command", "insert"]
 Path = Tuple[int, ...]
 
