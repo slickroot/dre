@@ -43,6 +43,7 @@ class Arrow:
 @dataclass(frozen=True)
 class Label:
     text: str
+    path: Path = ()
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,7 @@ def emit(
 
     start = here.x + centre(here.width, here.box.label)
     middle = here.y + here.height // 2
-    yield Placement(Label(here.box.label), x=start, y=middle,
+    yield Placement(Label(here.box.label, here.path), x=start, y=middle,
                      width=interior(here.box.label), height=1)
 
     if here.path == selected:
