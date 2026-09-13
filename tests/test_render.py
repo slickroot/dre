@@ -3,6 +3,8 @@ import unittest
 from sketch.layout import Arrow as LayoutArrow
 from sketch.layout import Label, Placement
 from sketch.render import (
+    ARROW_STROKE,
+    ARROWHEAD_SLOPE,
     BLANK,
     BOTTOM_LEFT,
     BOTTOM_RIGHT,
@@ -16,10 +18,12 @@ from sketch.render import (
     TOP_RIGHT,
     TRANSPARENT,
     VERTICAL,
+    Canvas,
     GraphicsRenderer,
     Sprite,
     TerminalRenderer,
     _cell,
+    _centered_span,
     _colour,
     _fill_colour,
 )
@@ -249,6 +253,82 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertNotIn("\x1b", "".join(grid))
 
 
+class CanvasTest(unittest.TestCase):
+    def setUp(self):
+        self.ink = _colour(1) + (OPAQUE,)
+
+    def canvas(self, first_x=0, last_x=20, first_y=0, last_y=20):
+        return Canvas(first_x, last_x, first_y, last_y, bytes(self.ink))
+
+    def pixel(self, canvas, x, y):
+        offset = ((y - canvas.first_y) * canvas.span + (x - canvas.first_x)) * 4
+        return tuple(canvas.buffer[offset : offset + 4])
+
+    def blank(self):
+        return tuple(TRANSPARENT)
+
+    def test_point_with_width_one_stamps_a_single_pixel(self):
+        canvas = self.canvas()
+        canvas.point(10, 10, width=1)
+        self.assertEqual(self.pixel(canvas, 10, 10), self.ink)
+        for x, y in [(9, 10), (11, 10), (10, 9), (10, 11)]:
+            self.assertEqual(self.pixel(canvas, x, y), self.blank())
+
+    def test_point_with_width_four_stamps_a_four_by_four_block(self):
+        canvas = self.canvas()
+        canvas.point(10, 10, width=4)
+        for x in (9, 10, 11, 12):
+            for y in (9, 10, 11, 12):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for x, y in [(8, 10), (13, 10), (10, 8), (10, 13)]:
+            self.assertEqual(self.pixel(canvas, x, y), self.blank())
+
+    def test_horizontal_with_width_four_paints_four_rows(self):
+        canvas = self.canvas()
+        canvas.horizontal(10, 2, 6, width=4)
+        for y in (9, 10, 11, 12):
+            for x in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for y in (8, 13):
+            for x in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.blank())
+        self.assertEqual(self.pixel(canvas, 1, 10), self.blank())
+        self.assertEqual(self.pixel(canvas, 7, 10), self.blank())
+
+    def test_vertical_with_width_four_paints_four_columns(self):
+        canvas = self.canvas()
+        canvas.vertical(10, 2, 6, width=4)
+        for x in (9, 10, 11, 12):
+            for y in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for x in (8, 13):
+            for y in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.blank())
+        self.assertEqual(self.pixel(canvas, 10, 1), self.blank())
+        self.assertEqual(self.pixel(canvas, 10, 7), self.blank())
+
+    def test_a_thick_point_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.point(0, 0, width=4)
+        for x in (0, 1):
+            for y in (0, 1):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+
+    def test_a_thick_horizontal_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.horizontal(0, 2, 6, width=4)
+        for x in range(2, 7):
+            self.assertEqual(self.pixel(canvas, x, 0), self.ink)
+            self.assertEqual(self.pixel(canvas, x, 1), self.ink)
+
+    def test_a_thick_vertical_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.vertical(0, 2, 6, width=4)
+        for y in range(2, 7):
+            self.assertEqual(self.pixel(canvas, 0, y), self.ink)
+            self.assertEqual(self.pixel(canvas, 1, y), self.ink)
+
+
 class BoxCharacterTest(unittest.TestCase):
     def setUp(self):
         self.renderer = TerminalRenderer()
@@ -435,6 +515,76 @@ class GraphicsRendererBorderThicknessTest(unittest.TestCase):
         for y in range(4, sprite.height - 4):
             for x in range(4, sprite.width - 4):
                 self.assertEqual(self.pixel(sprite, x, y), fill)
+
+
+class GraphicsRendererArrowThicknessTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = GraphicsRenderer(
+            text=TerminalRenderer(), graphics=None, cell_width=10, cell_height=10
+        )
+        self.ink = _colour(PLAIN) + (OPAQUE,)
+        self.blank = tuple(TRANSPARENT)
+
+    def outline(self, arrow, width=4, height=3):
+        placement = Placement(arrow, x=0, y=0, width=width, height=height)
+        return self.renderer._outline_arrow(
+            placement, left=0, top=0, right=width, bottom=height
+        )
+
+    def pixel(self, sprite, x, y):
+        offset = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[offset : offset + 4])
+
+    def test_the_shaft_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        shaft_row = 1 * 10 + 5
+        rows = list(_centered_span(shaft_row, ARROW_STROKE))
+        for y in rows:
+            self.assertEqual(self.pixel(sprite, 5, y), self.ink)
+        self.assertEqual(self.pixel(sprite, 5, rows[0] - 1), self.blank)
+        self.assertEqual(self.pixel(sprite, 5, rows[-1] + 1), self.blank)
+
+    def test_the_trunk_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        midpoint = (4 * 10) // 2
+        columns = list(_centered_span(midpoint, ARROW_STROKE))
+        for x in columns:
+            self.assertEqual(self.pixel(sprite, x, 10), self.ink)
+        self.assertEqual(self.pixel(sprite, columns[0] - 1, 10), self.blank)
+        self.assertEqual(self.pixel(sprite, columns[-1] + 1, 10), self.blank)
+
+    def test_each_stops_run_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        stop_row = 0 * 10 + 5
+        rows = list(_centered_span(stop_row, ARROW_STROKE))
+        for y in rows:
+            self.assertEqual(self.pixel(sprite, 25, y), self.ink)
+        self.assertEqual(self.pixel(sprite, 25, rows[0] - 1), self.blank)
+        self.assertEqual(self.pixel(sprite, 25, rows[-1] + 1), self.blank)
+
+    def test_the_arrowhead_stamps_are_arrow_stroke_squares(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        stop_row = 5
+        right_edge = 4 * 10 - 1
+        distance = 6
+        spread = round(distance * ARROWHEAD_SLOPE)
+        x = right_edge - distance
+        y = stop_row - spread
+        columns = list(_centered_span(x, ARROW_STROKE))
+        rows = list(_centered_span(y, ARROW_STROKE))
+        for cx in columns:
+            for cy in rows:
+                self.assertEqual(self.pixel(sprite, cx, cy), self.ink)
+        self.assertEqual(self.pixel(sprite, 25, 2), self.blank)
+
+    def test_the_arrowhead_tip_sits_at_the_stop_row(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        right_edge = 4 * 10 - 1
+        for stop_row in (5, 25):
+            self.assertEqual(self.pixel(sprite, right_edge, stop_row), self.ink)
+            self.assertEqual(
+                self.pixel(sprite, right_edge - 1, stop_row), self.ink
+            )
 
 
 class GraphicsRendererCornerRadiusTest(unittest.TestCase):

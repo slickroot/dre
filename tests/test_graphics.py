@@ -3,6 +3,7 @@ from math import cos, radians, tan
 
 from sketch.layout import Arrow, Placement
 from sketch.render import (
+    ARROW_STROKE,
     ARROWHEAD_ANGLE_DEG,
     ARROWHEAD_DEPTH,
     ARROWHEAD_EDGE_LENGTH,
@@ -12,6 +13,7 @@ from sketch.render import (
     OPAQUE,
     PLAIN_COLOUR,
     GraphicsRenderer,
+    _centered_span,
 )
 from sketch.state import PLAIN, Box, Cursor
 
@@ -121,19 +123,26 @@ class GraphicsRendererTest(unittest.TestCase):
         for x in range(sprite.width):
             self.assertEqual(self.pixel(sprite, x, shaft_row)[3], OPAQUE)
 
-    def test_a_single_stop_arrow_tip_is_a_single_pixel_at_the_right_edge(self):
+    def test_a_single_stop_arrow_tip_is_arrow_stroke_pixels_at_the_right_edge(self):
+        # With a 1px stroke the tip would be a single lit pixel; at
+        # ARROW_STROKE thickness the nearby stamps overlap and widen the
+        # opaque band a little past the raw stroke width, so the sprite is
+        # tall enough here to keep that band clear of the top/bottom edges.
         sprite = self.only_sprite(
-            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 40)
         )
         shaft_row = sprite.height // 2
         tip = sprite.width - 1
+        low = shaft_row - ARROW_STROKE // 2
+        high = shaft_row + ARROW_STROKE // 2 + 2
+        expected_rows = set(range(low, high))
         for y in range(sprite.height):
-            expected = OPAQUE if y == shaft_row else 0
+            expected = OPAQUE if y in expected_rows else 0
             self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
 
     def test_a_single_stop_arrowhead_diagonals_are_symmetric_about_the_shaft(self):
         sprite = self.only_sprite(
-            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+            Placement(Arrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 40)
         )
         shaft_row = sprite.height // 2
         # Base column of the head: furthest from the tip, widest spread.
@@ -143,32 +152,38 @@ class GraphicsRendererTest(unittest.TestCase):
             for y in range(sprite.height)
             if y != shaft_row and self.pixel(sprite, base, y)[3] == OPAQUE
         ]
-        self.assertEqual(len(opaque_ys), 2)
-        top, bottom = opaque_ys
-        self.assertEqual(shaft_row - top, bottom - shaft_row)
+        self.assertTrue(opaque_ys)
+        top, bottom = min(opaque_ys), max(opaque_ys)
+        # A 4px stroke can't be perfectly centred on a single row, so allow
+        # the off-by-one bias that _centered_span's rounding introduces.
+        self.assertAlmostEqual(shaft_row - top, bottom - shaft_row, delta=1)
         self.assertGreater(bottom, shaft_row)
 
     def test_arrowhead_shape_matches_the_thirty_degree_geometry(self):
         sprite = self.only_sprite(
             Placement(Arrow((0,), 0), x=1, y=1, width=3, height=1), cell=(40, 20)
         )
-        shaft_row = sprite.height // 2
         tip = sprite.width - 1
 
-        def spread_at(distance_from_tip):
+        def half_span_at(distance_from_tip):
             opaque = [
                 y
                 for y in range(sprite.height)
-                if y != shaft_row
-                and self.pixel(sprite, tip - distance_from_tip, y)[3] == OPAQUE
+                if self.pixel(sprite, tip - distance_from_tip, y)[3] == OPAQUE
             ]
-            return abs(opaque[0] - shaft_row) if opaque else 0
+            return (max(opaque) - min(opaque)) / 2
 
         depth = int(ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG)))
-        expected = [
-            round(d * tan(radians(ARROWHEAD_ANGLE_DEG))) for d in range(depth)
-        ]
-        self.assertEqual([spread_at(d) for d in range(depth)], expected)
+        spans = [half_span_at(d) for d in range(depth)]
+        # The angle and depth are unchanged: the head still widens
+        # monotonically towards its base, by at least as much as the old,
+        # unthickened 30-degree geometry would.
+        self.assertEqual(spans, sorted(spans))
+        self.assertGreaterEqual(spans[0], (ARROW_STROKE - 1) / 2)
+        self.assertGreaterEqual(
+            spans[-1] - spans[0],
+            round((depth - 1) * tan(radians(ARROWHEAD_ANGLE_DEG))),
+        )
 
     def test_arrow_off_shape_pixels_are_transparent(self):
         sprite = self.only_sprite(
@@ -229,18 +244,29 @@ class GraphicsRendererTest(unittest.TestCase):
             Placement(Arrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
         )
         midpoint = sprite.width // 2
+        # The trunk itself is ARROW_STROKE pixels wide, so it occupies more
+        # than just the midpoint column now.
+        trunk_columns = set(_centered_span(midpoint, ARROW_STROKE))
         row_between_stops = 1 * 5 + 5 // 2
-        for x in range(midpoint + 1, sprite.width):
-            self.assertEqual(self.pixel(sprite, x, row_between_stops)[3], 0)
+        for x in range(sprite.width):
+            expected = OPAQUE if x in trunk_columns else 0
+            self.assertEqual(self.pixel(sprite, x, row_between_stops)[3], expected)
 
     def test_three_stubs_each_end_in_their_own_arrowhead(self):
+        # Cells are large enough here that the three arrowheads' opaque
+        # bands, widened by ARROW_STROKE, don't merge into each other.
         sprite = self.only_sprite(
-            Placement(Arrow((0, 1, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
+            Placement(Arrow((0, 1, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 60)
         )
         tip = sprite.width - 1
-        stop_rows = {stop * 5 + 5 // 2 for stop in (0, 1, 3)}
+        stop_rows = {stop * 60 + 60 // 2 for stop in (0, 1, 3)}
+        expected_rows = set()
+        for stop_row in stop_rows:
+            low = stop_row - ARROW_STROKE // 2
+            high = stop_row + ARROW_STROKE // 2 + 2
+            expected_rows |= set(range(low, high))
         for y in range(sprite.height):
-            expected = OPAQUE if y in stop_rows else 0
+            expected = OPAQUE if y in expected_rows else 0
             self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
 
     def test_a_cursor_has_no_sprite(self):
