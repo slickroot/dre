@@ -185,6 +185,21 @@ def emit(
         )
 
 
+def with_cursor(placements: List[Placement], selected: Path) -> List[Placement]:
+    for placement in placements:
+        if isinstance(placement.node, Label) and placement.node.path == selected:
+            return placements + [
+                Placement(
+                    Cursor(),
+                    x=placement.x + placement.width - 1,
+                    y=placement.y,
+                    width=1,
+                    height=1,
+                )
+            ]
+    return placements
+
+
 def column_tracks(nodes: List[Celled]) -> List[Track]:
     parents = [node for node in nodes if node.children]
     # Column is doubled into a track index so a gap track can sit between

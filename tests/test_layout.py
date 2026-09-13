@@ -21,6 +21,7 @@ from sketch.layout import (
     tracks,
     walk,
     width,
+    with_cursor,
 )
 from sketch.state import PAD, Box, State
 
@@ -151,6 +152,58 @@ class CursorTest(unittest.TestCase):
         cursor = cursors(placements)[0]
         self.assertTrue(child.x <= cursor.x < child.x + child.width)
         self.assertTrue(child.y <= cursor.y < child.y + child.height)
+
+
+class WithCursorTest(unittest.TestCase):
+    def test_an_empty_placement_list_comes_back_empty(self):
+        self.assertEqual(with_cursor([], selected=(0,)), [])
+
+    def test_no_matching_label_comes_back_unchanged(self):
+        placements = [
+            Placement(Box("hi"), x=0, y=0, width=4, height=3),
+            Placement(Label("hi", (0,)), x=1, y=1, width=2, height=1),
+        ]
+        self.assertEqual(with_cursor(placements, selected=(1,)), placements)
+
+    def test_cursor_is_appended_at_the_right_hand_end_of_the_label(self):
+        placements = [
+            Placement(Label("hi", (0,)), x=5, y=2, width=2, height=1),
+        ]
+        result = with_cursor(placements, selected=(0,))
+        cursor = cursors(result)[0]
+        self.assertEqual(cursor.x, 6)
+        self.assertEqual(cursor.y, 2)
+        self.assertEqual(cursor.width, 1)
+        self.assertEqual(cursor.height, 1)
+
+    def test_a_one_cell_label_puts_the_cursor_on_its_single_cell(self):
+        placements = [
+            Placement(Label("", (0,)), x=3, y=4, width=1, height=1),
+        ]
+        result = with_cursor(placements, selected=(0,))
+        cursor = cursors(result)[0]
+        self.assertEqual(cursor.x, 3)
+        self.assertEqual(cursor.y, 4)
+
+    def test_only_the_selected_label_attracts_the_cursor(self):
+        placements = [
+            Placement(Label("aa", (0,)), x=0, y=0, width=2, height=1),
+            Placement(Label("bb", (1,)), x=10, y=10, width=2, height=1),
+        ]
+        result = with_cursor(placements, selected=(1,))
+        cursor = cursors(result)[0]
+        self.assertEqual(cursor.x, 11)
+        self.assertEqual(cursor.y, 10)
+
+    def test_exactly_one_cursor_is_appended_and_it_is_last(self):
+        placements = [
+            Placement(Label("aa", (0,)), x=0, y=0, width=2, height=1),
+            Placement(Label("bb", (1,)), x=10, y=10, width=2, height=1),
+        ]
+        result = with_cursor(placements, selected=(0,))
+        self.assertEqual(len(cursors(result)), 1)
+        self.assertEqual(len(result), len(placements) + 1)
+        self.assertIsInstance(result[-1].node, Cursor)
 
 
 class LabelLayoutTest(unittest.TestCase):
