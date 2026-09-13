@@ -17,3 +17,24 @@ radius. Pressing `r` again makes them square.
 - On a canvas with no boxes, `r` does nothing.
 
 ## Technical Design
+
+Spec 032 previously gave `Box` a `radius: Literal[0, 10, 20]` field with `r`
+cycling through all three values. This story replaces that with a strict
+two-state toggle:
+
+- `Box.radius` becomes `Box.rounded: bool = False` (`sketch/state.py`). A new
+  box defaults to `False` (square), matching the acceptance criteria.
+- The `r` command handler in `handle_command` changes from the cycle formula
+  to a plain negation: `replace(box, rounded=not box.rounded)`. It keeps the
+  existing guard (no-op when `state.selected` is empty) and continues to use
+  `rewrite` so only the selected box is touched.
+- `render.py` gains a module-level constant `ROUNDED_RADIUS = 20`. In
+  `_outline_box`, the radius passed to `RoundedBox` is derived as
+  `ROUNDED_RADIUS if placement.node.rounded else 0`; a falsy value keeps the
+  existing `_square_pixels` fast path.
+- The sprite cache key's shape tuple swaps `node.radius` for `node.rounded`
+  directly (`(node.colour, node.fill, node.border, node.rounded)`), so cache
+  entries are keyed on the boolean rather than a pixel value.
+
+No changes are needed for persistence or undo/redo, since neither exists in
+the codebase; `Box` remains a plain immutable dataclass.
