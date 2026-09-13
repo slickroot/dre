@@ -8,6 +8,7 @@ from sketch.render import (
     ARROWHEAD_DEPTH,
     ARROWHEAD_EDGE_LENGTH,
     ARROWHEAD_SLOPE,
+    BORDER,
     CACHE_LIMIT,
     PALETTE,
     OPAQUE,
@@ -83,15 +84,17 @@ class GraphicsRendererTest(unittest.TestCase):
         self.assertEqual((sprite.col, sprite.row), (1, 2))
 
     def test_edges_are_opaque_and_the_inside_is_transparent(self):
-        sprite = self.only_sprite(Placement(Box("hi"), x=0, y=0, width=3, height=2))
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=0, y=0, width=3, height=3), cell=(4, 4)
+        )
         for x in range(sprite.width):
             self.assertEqual(self.pixel(sprite, x, 0)[3], OPAQUE)
             self.assertEqual(self.pixel(sprite, x, sprite.height - 1)[3], OPAQUE)
         for y in range(sprite.height):
             self.assertEqual(self.pixel(sprite, 0, y)[3], OPAQUE)
             self.assertEqual(self.pixel(sprite, sprite.width - 1, y)[3], OPAQUE)
-        for y in range(1, sprite.height - 1):
-            for x in range(1, sprite.width - 1):
+        for y in range(BORDER, sprite.height - BORDER):
+            for x in range(BORDER, sprite.width - BORDER):
                 self.assertEqual(self.pixel(sprite, x, y), (0, 0, 0, 0))
 
     def test_border_takes_the_colour_of_its_palette_index(self):
@@ -276,37 +279,52 @@ class GraphicsRendererTest(unittest.TestCase):
 
     def test_a_box_overhanging_the_left_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Box("hi"), x=-2, y=1, width=5, height=3), cols=40, rows=20
+            Placement(Box("hi"), x=-2, y=1, width=5, height=3),
+            cols=40,
+            rows=20,
+            cell=(4, 4),
         )
         self.assertEqual(sprite.col, 0)
-        self.assertEqual(sprite.width, 3 * 2)
+        self.assertEqual(sprite.width, 3 * 4)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
-        self.assertEqual(self.pixel(sprite, 0, 1)[3], 0)
+        self.assertEqual(self.pixel(sprite, 0, sprite.height // 2)[3], 0)
 
     def test_a_box_overhanging_the_top_is_cropped(self):
-        sprite = self.only_sprite(Placement(Box("hi"), x=1, y=-1, width=4, height=3))
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=1, y=-2, width=4, height=5), cell=(4, 4)
+        )
         self.assertEqual(sprite.row, 0)
-        self.assertEqual(sprite.height, 2 * 4)
+        self.assertEqual(sprite.height, 3 * 4)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
-        self.assertEqual(self.pixel(sprite, 1, 0)[3], 0)
+        self.assertEqual(self.pixel(sprite, sprite.width // 2, 0)[3], 0)
 
     def test_a_box_overhanging_the_right_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Box("hi"), x=3, y=0, width=4, height=2), cols=5, rows=20
+            Placement(Box("hi"), x=1, y=0, width=6, height=3),
+            cols=4,
+            rows=20,
+            cell=(4, 4),
         )
-        self.assertEqual(sprite.col, 3)
-        self.assertEqual(sprite.width, 2 * 2)
+        self.assertEqual(sprite.col, 1)
+        self.assertEqual(sprite.width, 3 * 4)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
-        self.assertEqual(self.pixel(sprite, sprite.width - 1, 1)[3], 0)
+        self.assertEqual(
+            self.pixel(sprite, sprite.width - 1, sprite.height // 2)[3], 0
+        )
 
     def test_a_box_overhanging_the_bottom_is_cropped(self):
         sprite = self.only_sprite(
-            Placement(Box("hi"), x=0, y=1, width=2, height=4), cols=40, rows=3
+            Placement(Box("hi"), x=0, y=1, width=3, height=6),
+            cols=40,
+            rows=4,
+            cell=(4, 4),
         )
         self.assertEqual(sprite.row, 1)
-        self.assertEqual(sprite.height, 2 * 4)
+        self.assertEqual(sprite.height, 3 * 4)
         self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
-        self.assertEqual(self.pixel(sprite, 1, sprite.height - 1)[3], 0)
+        self.assertEqual(
+            self.pixel(sprite, sprite.width // 2, sprite.height - 1)[3], 0
+        )
 
     def test_a_box_off_screen_has_no_sprite(self):
         self.assertEqual(
@@ -351,22 +369,9 @@ class SpriteCacheTest(unittest.TestCase):
         self.assertEqual(len(self.renderer.cache), 2)
 
     def test_a_refilled_box_is_redrawn(self):
-        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
-        filled = self.draw(Placement(Box("hi", fill=3), x=0, y=0, width=4, height=3))
+        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=6, height=3))
+        filled = self.draw(Placement(Box("hi", fill=3), x=0, y=0, width=6, height=3))
         self.assertNotEqual(plain.pixels, filled.pixels)
-
-    def test_a_rethickened_box_is_redrawn(self):
-        thin = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
-        thick = self.draw(
-            Placement(Box("hi", border=2), x=0, y=0, width=4, height=3)
-        )
-        self.assertNotEqual(thin.pixels, thick.pixels)
-        self.assertEqual(len(self.renderer.cache), 2)
-
-    def test_each_border_thickness_is_cached_distinctly(self):
-        for border in (1, 2, 3, 4):
-            self.draw(Placement(Box("hi", border=border), x=0, y=0, width=4, height=3))
-        self.assertEqual(len(self.renderer.cache), 4)
 
     def test_rounded_and_square_are_cached_distinctly(self):
         for rounded in (False, True):
