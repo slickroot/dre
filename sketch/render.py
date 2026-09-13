@@ -30,6 +30,8 @@ Key = Tuple
 CACHE_LIMIT = 512
 
 ROUNDED_RADIUS = 20
+# Boxes always have a bold border; thickness is fixed, not configurable.
+BORDER = 4
 
 BLANK_CELL = (BLANK, PLAIN, PLAIN)
 
@@ -127,7 +129,7 @@ class GraphicsRenderer:
     ) -> Sprite:
         width = placement.width * self.cell_width
         height = placement.height * self.cell_height
-        border = placement.node.border
+        border = BORDER
         edge = _colour(placement.node.colour) + (OPAQUE,)
         fill = _fill_colour(placement.node.fill)
         first_x = (left - placement.x) * self.cell_width
@@ -461,7 +463,7 @@ def _key(
 ) -> Key:
     node = placement.node
     shape = (
-        (node.colour, node.fill, node.border, node.rounded)
+        (node.colour, node.fill, node.rounded)
         if isinstance(node, Box)
         else (node.stops, node.shaft)
     )
