@@ -176,10 +176,10 @@ class GraphicsRenderer:
         # The arrow is a handful of lines on a transparent field, so lay the
         # field down once and stroke only the lit pixels.
         canvas = Canvas(first_x, last_x, first_y, last_y, ink)
-        canvas.horizontal(shaft_row, 0, midpoint)
-        canvas.vertical(midpoint, trunk_top, trunk_bottom)
+        canvas.horizontal(shaft_row, 0, midpoint, width=1)
+        canvas.vertical(midpoint, trunk_top, trunk_bottom, width=1)
         for stop_row in stop_rows:
-            canvas.horizontal(stop_row, midpoint, width - 1)
+            canvas.horizontal(stop_row, midpoint, width - 1, width=1)
             self._arrowhead(canvas, stop_row, midpoint, width - 1)
         return Sprite(
             pixels=canvas.pixels(),
@@ -199,8 +199,8 @@ class GraphicsRenderer:
             if x < midpoint:
                 break
             spread = round(distance * ARROWHEAD_SLOPE)
-            canvas.point(x, stop_row - spread)
-            canvas.point(x, stop_row + spread)
+            canvas.point(x, stop_row - spread, width=1)
+            canvas.point(x, stop_row + spread, width=1)
 
 
 class RoundedBox:
@@ -304,6 +304,11 @@ class RoundedBox:
         return min(max(0.5 - distance, 0), 1)
 
 
+def _centered_span(c: int, width: int) -> range:
+    start = c - (width - 1) // 2
+    return range(start, start + width)
+
+
 class Canvas:
     """A clipped, transparent pixel field that lines are stroked onto."""
 
@@ -320,29 +325,36 @@ class Canvas:
             bytes(TRANSPARENT) * (self.span * (last_y - first_y))
         )
 
-    def point(self, x: int, y: int) -> None:
-        if self.first_x <= x < self.last_x and self.first_y <= y < self.last_y:
-            start = self._offset(x, y)
-            self.buffer[start : start + 4] = self.ink
+    def point(self, x: int, y: int, width: int) -> None:
+        for px in _centered_span(x, width):
+            for py in _centered_span(y, width):
+                if (
+                    self.first_x <= px < self.last_x
+                    and self.first_y <= py < self.last_y
+                ):
+                    start = self._offset(px, py)
+                    self.buffer[start : start + 4] = self.ink
 
-    def horizontal(self, y: int, x0: int, x1: int) -> None:
-        if not self.first_y <= y < self.last_y:
-            return
+    def horizontal(self, y: int, x0: int, x1: int, width: int) -> None:
         start_x = max(x0, self.first_x)
         stop_x = min(x1 + 1, self.last_x)
         if start_x >= stop_x:
             return
-        start = self._offset(start_x, y)
-        self.buffer[start : start + (stop_x - start_x) * 4] = self.ink * (
-            stop_x - start_x
-        )
+        for py in _centered_span(y, width):
+            if not self.first_y <= py < self.last_y:
+                continue
+            start = self._offset(start_x, py)
+            self.buffer[start : start + (stop_x - start_x) * 4] = self.ink * (
+                stop_x - start_x
+            )
 
-    def vertical(self, x: int, y0: int, y1: int) -> None:
-        if not self.first_x <= x < self.last_x:
-            return
-        for y in range(max(y0, self.first_y), min(y1 + 1, self.last_y)):
-            start = self._offset(x, y)
-            self.buffer[start : start + 4] = self.ink
+    def vertical(self, x: int, y0: int, y1: int, width: int) -> None:
+        for px in _centered_span(x, width):
+            if not self.first_x <= px < self.last_x:
+                continue
+            for y in range(max(y0, self.first_y), min(y1 + 1, self.last_y)):
+                start = self._offset(px, y)
+                self.buffer[start : start + 4] = self.ink
 
     def pixels(self) -> bytes:
         return bytes(self.buffer)

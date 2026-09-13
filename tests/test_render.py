@@ -16,6 +16,7 @@ from sketch.render import (
     TOP_RIGHT,
     TRANSPARENT,
     VERTICAL,
+    Canvas,
     GraphicsRenderer,
     Sprite,
     TerminalRenderer,
@@ -249,6 +250,82 @@ class TerminalRendererTest(unittest.TestCase):
         grid = self.renderer.render([], cols=11, rows=5)
         self.assertEqual(grid, [BLANK * 11] * 5)
         self.assertNotIn("\x1b", "".join(grid))
+
+
+class CanvasTest(unittest.TestCase):
+    def setUp(self):
+        self.ink = _colour(1) + (OPAQUE,)
+
+    def canvas(self, first_x=0, last_x=20, first_y=0, last_y=20):
+        return Canvas(first_x, last_x, first_y, last_y, bytes(self.ink))
+
+    def pixel(self, canvas, x, y):
+        offset = ((y - canvas.first_y) * canvas.span + (x - canvas.first_x)) * 4
+        return tuple(canvas.buffer[offset : offset + 4])
+
+    def blank(self):
+        return tuple(TRANSPARENT)
+
+    def test_point_with_width_one_stamps_a_single_pixel(self):
+        canvas = self.canvas()
+        canvas.point(10, 10, width=1)
+        self.assertEqual(self.pixel(canvas, 10, 10), self.ink)
+        for x, y in [(9, 10), (11, 10), (10, 9), (10, 11)]:
+            self.assertEqual(self.pixel(canvas, x, y), self.blank())
+
+    def test_point_with_width_four_stamps_a_four_by_four_block(self):
+        canvas = self.canvas()
+        canvas.point(10, 10, width=4)
+        for x in (9, 10, 11, 12):
+            for y in (9, 10, 11, 12):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for x, y in [(8, 10), (13, 10), (10, 8), (10, 13)]:
+            self.assertEqual(self.pixel(canvas, x, y), self.blank())
+
+    def test_horizontal_with_width_four_paints_four_rows(self):
+        canvas = self.canvas()
+        canvas.horizontal(10, 2, 6, width=4)
+        for y in (9, 10, 11, 12):
+            for x in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for y in (8, 13):
+            for x in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.blank())
+        self.assertEqual(self.pixel(canvas, 1, 10), self.blank())
+        self.assertEqual(self.pixel(canvas, 7, 10), self.blank())
+
+    def test_vertical_with_width_four_paints_four_columns(self):
+        canvas = self.canvas()
+        canvas.vertical(10, 2, 6, width=4)
+        for x in (9, 10, 11, 12):
+            for y in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+        for x in (8, 13):
+            for y in range(2, 7):
+                self.assertEqual(self.pixel(canvas, x, y), self.blank())
+        self.assertEqual(self.pixel(canvas, 10, 1), self.blank())
+        self.assertEqual(self.pixel(canvas, 10, 7), self.blank())
+
+    def test_a_thick_point_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.point(0, 0, width=4)
+        for x in (0, 1):
+            for y in (0, 1):
+                self.assertEqual(self.pixel(canvas, x, y), self.ink)
+
+    def test_a_thick_horizontal_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.horizontal(0, 2, 6, width=4)
+        for x in range(2, 7):
+            self.assertEqual(self.pixel(canvas, x, 0), self.ink)
+            self.assertEqual(self.pixel(canvas, x, 1), self.ink)
+
+    def test_a_thick_vertical_near_the_edge_is_clipped(self):
+        canvas = self.canvas(first_x=0, last_x=20, first_y=0, last_y=20)
+        canvas.vertical(0, 2, 6, width=4)
+        for y in range(2, 7):
+            self.assertEqual(self.pixel(canvas, 0, y), self.ink)
+            self.assertEqual(self.pixel(canvas, 1, y), self.ink)
 
 
 class BoxCharacterTest(unittest.TestCase):
