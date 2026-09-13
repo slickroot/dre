@@ -7,6 +7,7 @@ from sketch.layout import (
     GAP_WIDTH,
     LEAF_STRIDE,
     Arrow,
+    Cursor,
     Label,
     Placement,
     Track,
@@ -21,7 +22,7 @@ from sketch.layout import (
     walk,
     width,
 )
-from sketch.state import PAD, Box, Cursor, State
+from sketch.state import PAD, Box, State
 
 
 def boxes(placements):

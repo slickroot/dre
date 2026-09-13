@@ -2,8 +2,8 @@ from dataclasses import dataclass, replace
 from math import cos, hypot, radians, tan
 from typing import Dict, List, Protocol, Tuple
 
-from .layout import Arrow, Label, Placement
-from .state import PLAIN, Box, Cursor
+from .layout import Arrow, Cursor, Label, Placement
+from .state import PLAIN, Box
 
 TOP_LEFT = "┌"
 TOP_RIGHT = "┐"

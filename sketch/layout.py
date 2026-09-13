@@ -2,7 +2,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import Iterator, List, Tuple
 
-from .state import Box, Cursor, Path, State
+from .state import Box, Path, State
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 3
@@ -43,6 +43,11 @@ class Arrow:
 @dataclass(frozen=True)
 class Label:
     text: str
+
+
+@dataclass(frozen=True)
+class Cursor:
+    pass
 
 
 @dataclass
