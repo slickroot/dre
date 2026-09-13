@@ -51,27 +51,27 @@ def find(placements, label):
 
 class LayoutTest(unittest.TestCase):
     def test_empty_state_has_no_placements(self):
-        self.assertEqual(layout(State(()), cols=11, rows=11), [])
+        self.assertEqual(layout(State(()).boxes, cols=11, rows=11), [])
 
     def test_box_is_centered(self):
-        placements = layout(State((Box(),)), cols=11, rows=11)
+        placements = layout(State((Box(),)).boxes, cols=11, rows=11)
         self.assertEqual(
             boxes(placements),
             [Placement(Box(), x=4, y=4, width=BORDERS + 1, height=BOX_HEIGHT)],
         )
 
     def test_box_is_sized_by_the_layout(self):
-        placement = layout(State((Box(),)), cols=11, rows=11)[0]
+        placement = layout(State((Box(),)).boxes, cols=11, rows=11)[0]
         self.assertEqual((placement.width, placement.height), (BORDERS + 1, BOX_HEIGHT))
 
     def test_box_stays_centered_in_a_larger_terminal(self):
-        placement = layout(State((Box(),)), cols=80, rows=25)[0]
+        placement = layout(State((Box(),)).boxes, cols=80, rows=25)[0]
         self.assertLessEqual(abs(80 - 2 * placement.x - placement.width), 1)
         self.assertLessEqual(abs(25 - 2 * placement.y - placement.height), 1)
 
     def test_box_widens_to_fit_the_label(self):
         state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
-        placements = layout(state, cols=11, rows=11)
+        placements = layout(state.boxes, cols=11, rows=11)
         self.assertEqual(
             boxes(placements)[0],
             Placement(Box("hi" + PAD), x=3, y=4, width=5, height=3),
@@ -80,17 +80,17 @@ class LayoutTest(unittest.TestCase):
     def test_box_stays_centered_as_it_grows(self):
         def x(label):
             state = State((Box(label + PAD),), mode="insert", selected=(0,))
-            return boxes(layout(state, 21, 11))[0].x
+            return boxes(layout(state.boxes, 21, 11))[0].x
 
         self.assertEqual([x(""), x("ab"), x("abcd")], [9, 8, 7])
 
     def test_two_top_level_boxes_stack_as_siblings(self):
-        first, second = boxes(layout(State((Box(), Box())), cols=11, rows=11))
+        first, second = boxes(layout(State((Box(), Box())).boxes, cols=11, rows=11))
         self.assertEqual(second.y - first.y, BOX_HEIGHT + GAP_HEIGHT)
         self.assertEqual(first.x, second.x)
 
     def test_the_stack_of_top_level_boxes_is_vertically_centered(self):
-        placements = boxes(layout(State((Box(), Box(), Box())), cols=11, rows=11))
+        placements = boxes(layout(State((Box(), Box(), Box())).boxes, cols=11, rows=11))
         top = placements[0].y
         bottom = placements[-1].y + placements[-1].height
         self.assertLessEqual(abs((top + bottom) / 2 - 11 / 2), 0.5)
@@ -98,60 +98,71 @@ class LayoutTest(unittest.TestCase):
 
 class ColumnWidthTest(unittest.TestCase):
     def test_top_level_boxes_share_the_width_of_the_widest(self):
-        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        placements = layout(State((Box("x"), Box("wide"))).boxes, cols=31, rows=21)
         short, wide = find(placements, "x"), find(placements, "wide")
         self.assertEqual(short.width, width(Box("wide")))
         self.assertEqual(short.width, wide.width)
 
     def test_boxes_in_a_column_are_left_aligned_with_each_other(self):
-        placements = layout(State((Box("x"), Box("wide"))), cols=31, rows=21)
+        placements = layout(State((Box("x"), Box("wide"))).boxes, cols=31, rows=21)
         self.assertEqual(find(placements, "x").x, find(placements, "wide").x)
 
     def test_siblings_share_the_width_of_the_widest_sibling(self):
         state = State((Box("a", children=(Box("c"), Box("dddd"))),))
-        placements = layout(state, cols=31, rows=21)
+        placements = layout(state.boxes, cols=31, rows=21)
         short, wide = find(placements, "c"), find(placements, "dddd")
         self.assertEqual(short.width, width(Box("dddd")))
         self.assertEqual(short.x, wide.x)
 
     def test_a_narrower_column_does_not_widen_to_match_another(self):
         state = State((Box("a", children=(Box("dddd"),)),))
-        placements = layout(state, cols=31, rows=21)
+        placements = layout(state.boxes, cols=31, rows=21)
         self.assertEqual(find(placements, "a").width, width(Box("a")))
 
 
 class CursorTest(unittest.TestCase):
     def test_an_empty_canvas_emits_no_cursor(self):
-        self.assertEqual(cursors(layout(State(()), cols=11, rows=11)), [])
+        placements = with_cursor(layout(State(()).boxes, cols=11, rows=11), ())
+        self.assertEqual(cursors(placements), [])
 
     def test_nothing_selected_emits_no_cursor(self):
-        self.assertEqual(
-            cursors(layout(State((Box("hi"),)), cols=11, rows=11)), []
+        placements = with_cursor(
+            layout(State((Box("hi"),)).boxes, cols=11, rows=11), ()
         )
+        self.assertEqual(cursors(placements), [])
 
     def test_command_mode_cursor_sits_on_the_last_character(self):
         state = State((Box("hi"),), selected=(0,))
-        box = boxes(layout(state, 11, 11))[0]
-        cursor = cursors(layout(state, 11, 11))[0]
+        placements = with_cursor(layout(state.boxes, 11, 11), state.selected)
+        box = boxes(placements)[0]
+        cursor = cursors(placements)[0]
         interior = box.x + BORDERS // 2
         self.assertEqual(cursor.x, interior + len("hi") - 1)
         self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
 
     def test_insert_mode_cursor_sits_one_past_the_last_character(self):
         state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
-        box = boxes(layout(state, 11, 11))[0]
-        cursor = cursors(layout(state, 11, 11))[0]
+        placements = with_cursor(layout(state.boxes, 11, 11), state.selected)
+        box = boxes(placements)[0]
+        cursor = cursors(placements)[0]
         interior = box.x + BORDERS // 2
         self.assertEqual(cursor.x, interior + len("hi"))
         self.assertEqual(cursor.y, box.y + BOX_HEIGHT // 2)
 
     def test_cursor_follows_a_selected_child(self):
         state = State((Box("a", children=(Box("bb"),)),), selected=(0, 0))
-        placements = layout(state, cols=21, rows=11)
+        placements = with_cursor(
+            layout(state.boxes, cols=21, rows=11), state.selected
+        )
         child = find(placements, "bb")
         cursor = cursors(placements)[0]
         self.assertTrue(child.x <= cursor.x < child.x + child.width)
         self.assertTrue(child.y <= cursor.y < child.y + child.height)
+
+    def test_layout_alone_never_emits_a_cursor(self):
+        state = State((Box("hi"),), selected=(0,))
+        placements = layout(state.boxes, cols=11, rows=11)
+        self.assertEqual(cursors(placements), [])
 
 
 class WithCursorTest(unittest.TestCase):
@@ -209,11 +220,11 @@ class WithCursorTest(unittest.TestCase):
 class LabelLayoutTest(unittest.TestCase):
     def test_a_widened_box_recentres_its_label(self):
         state = State((Box("x"), Box("wide")))
-        placements = layout(state, cols=31, rows=21)
+        placements = layout(state.boxes, cols=31, rows=21)
         widened_box = [p for p in boxes(placements) if p.node.label == "x"][0]
         widened_label = [p for p in labels(placements) if p.node.text == "x"][0]
 
-        alone = layout(State((Box("x"),)), cols=31, rows=21)
+        alone = layout(State((Box("x"),)).boxes, cols=31, rows=21)
         solo_box = boxes(alone)[0]
         solo_label = labels(alone)[0]
 
@@ -223,7 +234,9 @@ class LabelLayoutTest(unittest.TestCase):
 
     def test_the_cursor_sits_on_the_last_cell_of_the_label(self):
         state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
-        placements = layout(state, cols=11, rows=11)
+        placements = with_cursor(
+            layout(state.boxes, cols=11, rows=11), state.selected
+        )
         label = labels(placements)[0]
         cursor = cursors(placements)[0]
         self.assertEqual(cursor.x, label.x + label.width - 1)
@@ -231,7 +244,9 @@ class LabelLayoutTest(unittest.TestCase):
 
     def test_the_cursor_sits_in_the_middle_of_a_widened_empty_box(self):
         state = State((Box(""), Box("wide")), selected=(0,))
-        placements = layout(state, cols=31, rows=21)
+        placements = with_cursor(
+            layout(state.boxes, cols=31, rows=21), state.selected
+        )
         empty = [p for p in boxes(placements) if p.node.label == ""][0]
         cursor = cursors(placements)[0]
         self.assertGreater(empty.width, width(Box("")))
@@ -240,18 +255,18 @@ class LabelLayoutTest(unittest.TestCase):
 
 class ArrowLayoutTest(unittest.TestCase):
     def test_a_childless_box_emits_no_arrow(self):
-        placements = layout(State((Box(),)), cols=11, rows=11)
+        placements = layout(State((Box(),)).boxes, cols=11, rows=11)
         self.assertEqual(arrows(placements), [])
 
     def test_a_single_child_gets_a_straight_arrow_with_no_trunk(self):
         state = State((Box("a", children=(Box("bb"),)),))
-        placements = layout(state, cols=21, rows=11)
+        placements = layout(state.boxes, cols=21, rows=11)
         arrow = arrows(placements)[0]
         self.assertEqual(arrow.node.stops, (0,))
 
     def test_the_arrow_sits_in_the_gap_column_between_parent_and_child(self):
         state = State((Box("a", children=(Box("bb"),)),))
-        placements = layout(state, cols=21, rows=11)
+        placements = layout(state.boxes, cols=21, rows=11)
         parent, child = find(placements, "a"), find(placements, "bb")
         arrow = arrows(placements)[0]
         self.assertEqual(arrow.x, parent.x + parent.width)
@@ -260,7 +275,7 @@ class ArrowLayoutTest(unittest.TestCase):
 
     def test_the_straight_arrow_is_centred_on_the_boxes_it_joins(self):
         state = State((Box("a", children=(Box("bb"),)),))
-        placements = layout(state, cols=21, rows=11)
+        placements = layout(state.boxes, cols=21, rows=11)
         parent, child = find(placements, "a"), find(placements, "bb")
         arrow = arrows(placements)[0]
         self.assertEqual(arrow.y, parent.y + parent.height // 2)
@@ -268,7 +283,7 @@ class ArrowLayoutTest(unittest.TestCase):
 
     def test_two_children_branch_from_a_shared_trunk(self):
         state = State((Box("a", children=(Box("c"), Box("d"))),))
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         first, second = find(placements, "c"), find(placements, "d")
         arrow = arrows(placements)[0]
         self.assertEqual(
@@ -283,7 +298,7 @@ class ArrowLayoutTest(unittest.TestCase):
 
     def test_the_arrow_spans_from_the_first_child_row_to_the_last_child_row(self):
         state = State((Box("a", children=(Box("c"), Box("d"), Box("e"))),))
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         c, e = find(placements, "c"), find(placements, "e")
         arrow = arrows(placements)[0]
         self.assertEqual(arrow.y, c.y + c.height // 2)
@@ -293,13 +308,13 @@ class ArrowLayoutTest(unittest.TestCase):
 
     def test_a_second_child_sits_below_the_first(self):
         state = State((Box("a", children=(Box("c"), Box("d"))),))
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         first, second = find(placements, "c"), find(placements, "d")
         self.assertEqual(second.y - first.y, BOX_HEIGHT + GAP_HEIGHT)
 
     def test_a_grandchild_sits_two_columns_over(self):
         state = State((Box("a", children=(Box("b", children=(Box("c"),)),)),))
-        placements = layout(state, cols=31, rows=11)
+        placements = layout(state.boxes, cols=31, rows=11)
         a, b, c = find(placements, "a"), find(placements, "b"), find(placements, "c")
         self.assertEqual(b.x - a.x, a.width + GAP_WIDTH)
         self.assertEqual(c.x - b.x, b.width + GAP_WIDTH)
@@ -307,14 +322,14 @@ class ArrowLayoutTest(unittest.TestCase):
 
     def test_a_parent_centres_between_its_first_and_last_child(self):
         state = State((Box("a", children=(Box("c"), Box("d"))),))
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         parent = find(placements, "a")
         first, last = find(placements, "c"), find(placements, "d")
         self.assertEqual(2 * parent.y, first.y + last.y)
 
     def test_a_parent_lines_up_with_the_middle_child_when_odd(self):
         state = State((Box("a", children=(Box("c"), Box("d"), Box("e"))),))
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         parent, middle = find(placements, "a"), find(placements, "d")
         self.assertEqual(parent.y, middle.y)
 
@@ -322,7 +337,7 @@ class ArrowLayoutTest(unittest.TestCase):
         state = State(
             (Box("a", children=(Box("c"), Box("d"), Box("e"), Box("f"))),)
         )
-        placements = layout(state, cols=21, rows=21)
+        placements = layout(state.boxes, cols=21, rows=21)
         parent = find(placements, "a")
         middle_low, middle_high = find(placements, "d"), find(placements, "e")
         self.assertEqual(parent.y, middle_low.y + middle_low.height)

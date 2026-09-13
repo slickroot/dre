@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import Iterator, List, TextIO, Tuple
 
 from .kitty import KittyGraphics
-from .layout import layout
+from .layout import layout, with_cursor
 from .render import GraphicsRenderer, Renderer, TerminalRenderer
 from .state import State, handle_key
 
@@ -53,7 +53,8 @@ def paint(stream: TextIO, lines: List[str]) -> None:
 
 def frame(state: State, renderer: Renderer, stream: TextIO) -> None:
     cols, rows = os.get_terminal_size()
-    paint(stream, renderer.render(layout(state, cols, rows), cols, rows))
+    placements = with_cursor(layout(state.boxes, cols, rows), state.selected)
+    paint(stream, renderer.render(placements, cols, rows))
 
 
 def run(stream: TextIO, stdin: TextIO) -> None:
