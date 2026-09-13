@@ -1,6 +1,5 @@
 import unittest
 from math import cos, radians, tan
-from typing import get_args, get_type_hints
 
 from sketch.layout import Arrow, Placement
 from sketch.render import (
@@ -15,8 +14,6 @@ from sketch.render import (
     GraphicsRenderer,
 )
 from sketch.state import PLAIN, Box, Cursor
-
-RADII = get_args(get_type_hints(Box)["radius"])
 
 
 class FakeText:
@@ -345,10 +342,12 @@ class SpriteCacheTest(unittest.TestCase):
             self.draw(Placement(Box("hi", border=border), x=0, y=0, width=4, height=3))
         self.assertEqual(len(self.renderer.cache), 4)
 
-    def test_each_corner_radius_is_cached_distinctly(self):
-        for radius in RADII:
-            self.draw(Placement(Box("hi", radius=radius), x=0, y=0, width=4, height=3))
-        self.assertEqual(len(self.renderer.cache), len(RADII))
+    def test_rounded_and_square_are_cached_distinctly(self):
+        for rounded in (False, True):
+            self.draw(
+                Placement(Box("hi", rounded=rounded), x=0, y=0, width=4, height=3)
+            )
+        self.assertEqual(len(self.renderer.cache), 2)
 
     def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
         first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))

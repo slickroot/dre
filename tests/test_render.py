@@ -1,5 +1,4 @@
 import unittest
-from typing import get_args, get_type_hints
 
 from sketch.layout import Arrow as LayoutArrow
 from sketch.layout import Label, Placement
@@ -12,6 +11,7 @@ from sketch.render import (
     HORIZONTAL,
     OPAQUE,
     PALETTE,
+    ROUNDED_RADIUS,
     TOP_LEFT,
     TOP_RIGHT,
     TRANSPARENT,
@@ -24,8 +24,6 @@ from sketch.render import (
     _fill_colour,
 )
 from sketch.state import PLAIN, Box, Cursor
-
-SQUARE, SMALL_RADIUS, LARGE_RADIUS = get_args(get_type_hints(Box)["radius"])
 
 
 class TerminalRendererTest(unittest.TestCase):
@@ -192,7 +190,7 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_a_filled_rounded_box_emits_no_escapes(self):
         grid = self.renderer.render(
-            [Placement(Box(fill=2, radius=SMALL_RADIUS), 0, 0, 5, 4)], 5, 4
+            [Placement(Box(fill=2, rounded=True), 0, 0, 5, 4)], 5, 4
         )
         self.assertNotIn("\x1b", "".join(grid))
 
@@ -236,7 +234,7 @@ class TerminalRendererTest(unittest.TestCase):
         fill = 4
         grid = self.renderer.render(
             [
-                Placement(Box(fill=fill, radius=LARGE_RADIUS), 0, 0, 5, 3),
+                Placement(Box(fill=fill, rounded=True), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
                 Placement(Cursor(), 3, 1, 1, 1),
             ],
@@ -444,8 +442,8 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
         self.renderer = GraphicsRenderer(
             text=TerminalRenderer(),
             graphics=None,
-            cell_width=2 * LARGE_RADIUS // 5,
-            cell_height=2 * LARGE_RADIUS // 5,
+            cell_width=2 * ROUNDED_RADIUS // 5,
+            cell_height=2 * ROUNDED_RADIUS // 5,
         )
 
     def outline(self, box, width=10, height=10):
@@ -463,7 +461,7 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
 
     def test_a_square_box_is_built_from_flat_edge_and_body_rows(self):
         border = 2
-        sprite = self.outline(Box(colour=1, fill=2, border=border, radius=SQUARE))
+        sprite = self.outline(Box(colour=1, fill=2, border=border, rounded=False))
         edge = bytes(_colour(1) + (OPAQUE,))
         fill = bytes(_fill_colour(2))
         edge_row = edge * sprite.width
@@ -478,7 +476,7 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
         )
 
     def test_a_rounded_box_cuts_away_its_extreme_corners(self):
-        sprite = self.outline(Box(colour=1, fill=2, radius=SMALL_RADIUS))
+        sprite = self.outline(Box(colour=1, fill=2, rounded=True))
         last_x, last_y = sprite.width - 1, sprite.height - 1
         self.assertEqual(self.pixel(sprite, 0, 0), TRANSPARENT)
         self.assertEqual(self.pixel(sprite, last_x, 0), TRANSPARENT)
@@ -486,9 +484,9 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
         self.assertEqual(self.pixel(sprite, last_x, last_y), TRANSPARENT)
 
     def test_straight_edges_stay_as_crisp_as_a_square_box(self):
-        square = self.outline(Box(colour=1, fill=2, border=2, radius=SQUARE))
+        square = self.outline(Box(colour=1, fill=2, border=2, rounded=False))
         rounded = self.outline(
-            Box(colour=1, fill=2, border=2, radius=LARGE_RADIUS)
+            Box(colour=1, fill=2, border=2, rounded=True)
         )
         middle_y = square.height // 2
         middle_x = square.width // 2
@@ -503,8 +501,8 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
 
     def test_the_radius_leaves_the_sprite_size_and_position_alone(self):
         sprites = [
-            self.outline(Box(colour=1, fill=2, radius=radius))
-            for radius in (SQUARE, SMALL_RADIUS, LARGE_RADIUS)
+            self.outline(Box(colour=1, fill=2, rounded=rounded))
+            for rounded in (False, True)
         ]
         sizes = {(sprite.width, sprite.height) for sprite in sprites}
         positions = {(sprite.col, sprite.row) for sprite in sprites}
@@ -512,8 +510,8 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
         self.assertEqual(len(positions), 1)
 
     def test_the_arc_is_anti_aliased(self):
-        square = self.outline(Box(colour=1, fill=PLAIN, radius=SQUARE))
-        rounded = self.outline(Box(colour=1, fill=PLAIN, radius=LARGE_RADIUS))
+        square = self.outline(Box(colour=1, fill=PLAIN, rounded=False))
+        rounded = self.outline(Box(colour=1, fill=PLAIN, rounded=True))
         self.assertFalse(
             any(0 < alpha < OPAQUE for alpha in square.pixels[3::4])
         )
@@ -523,25 +521,23 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
 
     def test_arc_coverage_is_continuous_at_the_pixel_centre(self):
         sprite = self.outline(
-            Box(colour=1, fill=PLAIN, border=1, radius=LARGE_RADIUS)
+            Box(colour=1, fill=PLAIN, border=1, rounded=True)
         )
         self.assertEqual(self.pixel(sprite, 6, 6), _colour(1) + (253,))
 
     def test_border_coverage_is_composed_over_the_opaque_fill(self):
         sprite = self.outline(
-            Box(colour=1, fill=2, border=1, radius=LARGE_RADIUS)
+            Box(colour=1, fill=2, border=1, rounded=True)
         )
         self.assertEqual(self.pixel(sprite, 6, 7), (131, 27, 25, OPAQUE))
 
-    def test_a_larger_radius_cuts_away_more_than_a_smaller_one(self):
-        square = self.outline(Box(colour=1, fill=2, radius=SQUARE))
-        small = self.outline(Box(colour=1, fill=2, radius=SMALL_RADIUS))
-        large = self.outline(Box(colour=1, fill=2, radius=LARGE_RADIUS))
-        self.assertLess(self.alpha_total(small), self.alpha_total(square))
-        self.assertLess(self.alpha_total(large), self.alpha_total(small))
+    def test_a_rounded_box_cuts_away_more_than_a_square_one(self):
+        square = self.outline(Box(colour=1, fill=2, rounded=False))
+        rounded = self.outline(Box(colour=1, fill=2, rounded=True))
+        self.assertLess(self.alpha_total(rounded), self.alpha_total(square))
 
     def test_the_fringe_keeps_the_edge_colour_instead_of_fading_to_black(self):
-        sprite = self.outline(Box(colour=1, fill=PLAIN, radius=LARGE_RADIUS))
+        sprite = self.outline(Box(colour=1, fill=PLAIN, rounded=True))
         edge = _colour(1)
         partial = [
             self.pixel(sprite, x, y)
@@ -554,7 +550,7 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
             self.assertEqual((red, green, blue), edge)
 
     def test_clipping_a_rounded_box_is_a_pure_crop_of_the_whole_box(self):
-        box = Box(colour=1, fill=2, radius=LARGE_RADIUS)
+        box = Box(colour=1, fill=2, rounded=True)
         whole = self.outline(box)
         hidden_cols = 2
         clipped = self.renderer._outline_box(
@@ -577,7 +573,7 @@ class GraphicsRendererSmallBoxTest(unittest.TestCase):
     bands of a row would otherwise overlap."""
 
     def setUp(self):
-        cell = LARGE_RADIUS // 2
+        cell = ROUNDED_RADIUS // 2
         self.renderer = GraphicsRenderer(
             text=TerminalRenderer(),
             graphics=None,
@@ -607,15 +603,13 @@ class GraphicsRendererSmallBoxTest(unittest.TestCase):
         return tuple(sprite.pixels[offset : offset + 4])
 
     def test_the_sprite_holds_exactly_one_pixel_per_cell_of_its_area(self):
-        for radius in (SMALL_RADIUS, LARGE_RADIUS):
-            with self.subTest(radius=radius):
-                sprite = self.outline(Box(colour=1, fill=2, radius=radius))
-                self.assertEqual(
-                    len(sprite.pixels), sprite.width * sprite.height * 4
-                )
+        sprite = self.outline(Box(colour=1, fill=2, rounded=True))
+        self.assertEqual(
+            len(sprite.pixels), sprite.width * sprite.height * 4
+        )
 
     def test_clipping_a_small_box_is_a_pure_crop_of_the_whole_box(self):
-        box = Box(colour=1, fill=2, radius=LARGE_RADIUS)
+        box = Box(colour=1, fill=2, rounded=True)
         whole = self.outline(box)
         hidden_cols = 1
         clipped = self.outline(box, hidden_cols=hidden_cols)
