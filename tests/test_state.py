@@ -1,5 +1,4 @@
 import unittest
-from typing import get_args, get_type_hints
 
 from sketch.state import (
     PAD,
@@ -14,9 +13,6 @@ from sketch.state import (
     next_colour,
     rewrite,
 )
-
-
-SQUARE, SMALL_RADIUS, LARGE_RADIUS = get_args(get_type_hints(Box)["radius"])
 
 
 class BoxTest(unittest.TestCase):
@@ -645,27 +641,26 @@ class CycleBorderTest(unittest.TestCase):
         self.assertEqual(result.fill, next_colour(PLAIN))
 
 
-class CycleRadiusTest(unittest.TestCase):
+class ToggleRoundedTest(unittest.TestCase):
     def test_new_box_starts_with_square_corners(self):
-        self.assertEqual(Box("a").radius, SQUARE)
+        self.assertEqual(Box("a").rounded, False)
 
-    def test_the_three_radii_are_square_then_two_rounder_steps(self):
-        self.assertEqual((SQUARE, SMALL_RADIUS, LARGE_RADIUS), (0, 10, 20))
-
-    def test_r_cycles_the_selected_box_through_all_three_levels(self):
+    def test_r_toggles_the_selected_box_to_rounded_corners(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         state = handle_key(state, "r")
-        self.assertEqual(state.boxes, (Box("a", radius=SMALL_RADIUS),))
+        self.assertEqual(state.boxes, (Box("a", rounded=True),))
+
+    def test_r_toggles_back_to_square_corners_with_no_intermediate_state(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
         state = handle_key(state, "r")
-        self.assertEqual(state.boxes, (Box("a", radius=LARGE_RADIUS),))
         state = handle_key(state, "r")
-        self.assertEqual(state.boxes, (Box("a", radius=SQUARE),))
+        self.assertEqual(state.boxes, (Box("a", rounded=False),))
 
     def test_r_changes_only_the_selected_box(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
         self.assertEqual(
             handle_key(state, "r").boxes,
-            (Box("a"), Box("b", radius=SMALL_RADIUS)),
+            (Box("a"), Box("b", rounded=True)),
         )
 
     def test_r_on_an_empty_canvas_returns_the_state_unchanged(self):
@@ -682,7 +677,7 @@ class CycleRadiusTest(unittest.TestCase):
         state = State(boxes=boxes, selected=(0, 1))
         self.assertEqual(
             handle_key(state, "r").boxes,
-            (Box("a", children=(Box("c"), Box("d", radius=SMALL_RADIUS))),),
+            (Box("a", children=(Box("c"), Box("d", rounded=True))),),
         )
 
     def test_r_does_not_change_colour_fill_or_border(self):
