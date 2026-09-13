@@ -29,6 +29,8 @@ Key = Tuple
 # Distinct shapes on a board are few; this only bounds a pathological run.
 CACHE_LIMIT = 512
 
+ROUNDED_RADIUS = 20
+
 BLANK_CELL = (BLANK, PLAIN, PLAIN)
 
 OPAQUE = 255
@@ -133,7 +135,7 @@ class GraphicsRenderer:
         first_y = (top - placement.y) * self.cell_height
         last_y = (bottom - placement.y) * self.cell_height
         span = last_x - first_x
-        radius = placement.node.radius
+        radius = ROUNDED_RADIUS if placement.node.rounded else 0
         if radius:
             pixels = RoundedBox(
                 width, height, radius, border, edge, fill
@@ -459,7 +461,7 @@ def _key(
 ) -> Key:
     node = placement.node
     shape = (
-        (node.colour, node.fill, node.border, node.radius)
+        (node.colour, node.fill, node.border, node.rounded)
         if isinstance(node, Box)
         else (node.stops, node.shaft)
     )
