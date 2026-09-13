@@ -4,6 +4,8 @@ from typing import get_args, get_type_hints
 from sketch.layout import Arrow as LayoutArrow
 from sketch.layout import Label, Placement
 from sketch.render import (
+    ARROW_STROKE,
+    ARROWHEAD_SLOPE,
     BLANK,
     BOTTOM_LEFT,
     BOTTOM_RIGHT,
@@ -21,6 +23,7 @@ from sketch.render import (
     Sprite,
     TerminalRenderer,
     _cell,
+    _centered_span,
     _colour,
     _fill_colour,
 )
@@ -514,6 +517,76 @@ class GraphicsRendererBorderThicknessTest(unittest.TestCase):
         for y in range(4, sprite.height - 4):
             for x in range(4, sprite.width - 4):
                 self.assertEqual(self.pixel(sprite, x, y), fill)
+
+
+class GraphicsRendererArrowThicknessTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = GraphicsRenderer(
+            text=TerminalRenderer(), graphics=None, cell_width=10, cell_height=10
+        )
+        self.ink = _colour(PLAIN) + (OPAQUE,)
+        self.blank = tuple(TRANSPARENT)
+
+    def outline(self, arrow, width=4, height=3):
+        placement = Placement(arrow, x=0, y=0, width=width, height=height)
+        return self.renderer._outline_arrow(
+            placement, left=0, top=0, right=width, bottom=height
+        )
+
+    def pixel(self, sprite, x, y):
+        offset = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[offset : offset + 4])
+
+    def test_the_shaft_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        shaft_row = 1 * 10 + 5
+        rows = list(_centered_span(shaft_row, ARROW_STROKE))
+        for y in rows:
+            self.assertEqual(self.pixel(sprite, 5, y), self.ink)
+        self.assertEqual(self.pixel(sprite, 5, rows[0] - 1), self.blank)
+        self.assertEqual(self.pixel(sprite, 5, rows[-1] + 1), self.blank)
+
+    def test_the_trunk_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        midpoint = (4 * 10) // 2
+        columns = list(_centered_span(midpoint, ARROW_STROKE))
+        for x in columns:
+            self.assertEqual(self.pixel(sprite, x, 10), self.ink)
+        self.assertEqual(self.pixel(sprite, columns[0] - 1, 10), self.blank)
+        self.assertEqual(self.pixel(sprite, columns[-1] + 1, 10), self.blank)
+
+    def test_each_stops_run_is_arrow_stroke_pixels_thick(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        stop_row = 0 * 10 + 5
+        rows = list(_centered_span(stop_row, ARROW_STROKE))
+        for y in rows:
+            self.assertEqual(self.pixel(sprite, 25, y), self.ink)
+        self.assertEqual(self.pixel(sprite, 25, rows[0] - 1), self.blank)
+        self.assertEqual(self.pixel(sprite, 25, rows[-1] + 1), self.blank)
+
+    def test_the_arrowhead_stamps_are_arrow_stroke_squares(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        stop_row = 5
+        right_edge = 4 * 10 - 1
+        distance = 6
+        spread = round(distance * ARROWHEAD_SLOPE)
+        x = right_edge - distance
+        y = stop_row - spread
+        columns = list(_centered_span(x, ARROW_STROKE))
+        rows = list(_centered_span(y, ARROW_STROKE))
+        for cx in columns:
+            for cy in rows:
+                self.assertEqual(self.pixel(sprite, cx, cy), self.ink)
+        self.assertEqual(self.pixel(sprite, 25, 2), self.blank)
+
+    def test_the_arrowhead_tip_sits_at_the_stop_row(self):
+        sprite = self.outline(LayoutArrow(stops=(0, 2), shaft=1))
+        right_edge = 4 * 10 - 1
+        for stop_row in (5, 25):
+            self.assertEqual(self.pixel(sprite, right_edge, stop_row), self.ink)
+            self.assertEqual(
+                self.pixel(sprite, right_edge - 1, stop_row), self.ink
+            )
 
 
 class GraphicsRendererCornerRadiusTest(unittest.TestCase):

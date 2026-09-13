@@ -14,6 +14,7 @@ VERTICAL = "│"
 BLANK = " "
 CURSOR = "\u2588"
 
+ARROW_STROKE = 4
 ARROWHEAD_ANGLE_DEG = 30
 ARROWHEAD_EDGE_LENGTH = 15
 # The arrowhead is a fixed shape, so its depth and slope are constants
@@ -176,10 +177,10 @@ class GraphicsRenderer:
         # The arrow is a handful of lines on a transparent field, so lay the
         # field down once and stroke only the lit pixels.
         canvas = Canvas(first_x, last_x, first_y, last_y, ink)
-        canvas.horizontal(shaft_row, 0, midpoint, width=1)
-        canvas.vertical(midpoint, trunk_top, trunk_bottom, width=1)
+        canvas.horizontal(shaft_row, 0, midpoint, width=ARROW_STROKE)
+        canvas.vertical(midpoint, trunk_top, trunk_bottom, width=ARROW_STROKE)
         for stop_row in stop_rows:
-            canvas.horizontal(stop_row, midpoint, width - 1, width=1)
+            canvas.horizontal(stop_row, midpoint, width - 1, width=ARROW_STROKE)
             self._arrowhead(canvas, stop_row, midpoint, width - 1)
         return Sprite(
             pixels=canvas.pixels(),
@@ -199,8 +200,8 @@ class GraphicsRenderer:
             if x < midpoint:
                 break
             spread = round(distance * ARROWHEAD_SLOPE)
-            canvas.point(x, stop_row - spread, width=1)
-            canvas.point(x, stop_row + spread, width=1)
+            canvas.point(x, stop_row - spread, width=ARROW_STROKE)
+            canvas.point(x, stop_row + spread, width=ARROW_STROKE)
 
 
 class RoundedBox:
