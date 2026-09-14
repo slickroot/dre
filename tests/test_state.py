@@ -523,7 +523,9 @@ class CycleColourTest(unittest.TestCase):
 
     def test_c_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "c"), state)
+        result = handle_key(state, "c")
+        self.assertEqual(result.boxes, state.boxes)
+        self.assertEqual(result.selected, state.selected)
 
     def test_c_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
@@ -571,7 +573,9 @@ class CycleFillTest(unittest.TestCase):
 
     def test_f_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "f"), state)
+        result = handle_key(state, "f")
+        self.assertEqual(result.boxes, state.boxes)
+        self.assertEqual(result.selected, state.selected)
 
     def test_f_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
@@ -616,7 +620,9 @@ class ToggleRoundedTest(unittest.TestCase):
 
     def test_r_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "r"), state)
+        result = handle_key(state, "r")
+        self.assertEqual(result.boxes, state.boxes)
+        self.assertEqual(result.selected, state.selected)
 
     def test_r_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
@@ -707,11 +713,15 @@ class ColourRowTest(unittest.TestCase):
 class ColourRowKeyTest(unittest.TestCase):
     def test_capital_c_on_a_top_level_box_does_nothing(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        self.assertEqual(handle_key(state, "C"), state)
+        result = handle_key(state, "C")
+        self.assertEqual(result.boxes, state.boxes)
+        self.assertEqual(result.selected, state.selected)
 
     def test_capital_c_with_nothing_selected_does_nothing(self):
         state = State(boxes=(Box("a"),), selected=())
-        self.assertEqual(handle_key(state, "C"), state)
+        result = handle_key(state, "C")
+        self.assertEqual(result.boxes, state.boxes)
+        self.assertEqual(result.selected, state.selected)
 
     def test_capital_c_advances_uniformly_coloured_siblings(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
@@ -763,6 +773,90 @@ class ColourRowKeyTest(unittest.TestCase):
         self.assertEqual(
             state.boxes, (Box("a", children=(Box("c"), Box("d"))),)
         )
+
+
+class UndoKeyTest(unittest.TestCase):
+    def test_u_after_b_restores_boxes_and_selected(self):
+        state = State()
+        before = state
+        after = handle_key(state, "b")
+        after_escape = handle_key(after, "\x1b")
+        self.assertEqual(handle_key(after_escape, "u"), before)
+
+    def test_u_after_c_restores_boxes(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        before = state
+        after = handle_key(state, "c")
+        self.assertEqual(handle_key(after, "u"), before)
+
+    def test_u_after_c_with_nothing_selected_is_a_no_op(self):
+        state = State(boxes=(Box("a"),), selected=())
+        after = handle_key(state, "c")
+        self.assertEqual(handle_key(after, "u").boxes, state.boxes)
+        self.assertEqual(handle_key(after, "u").selected, state.selected)
+
+    def test_u_after_f_restores_boxes(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        before = state
+        after = handle_key(state, "f")
+        self.assertEqual(handle_key(after, "u"), before)
+
+    def test_u_after_r_restores_boxes(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        before = state
+        after = handle_key(state, "r")
+        self.assertEqual(handle_key(after, "u"), before)
+
+    def test_u_after_capital_c_restores_boxes(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        state = State(boxes=boxes, selected=(0, 1))
+        before = state
+        after = handle_key(state, "C")
+        self.assertEqual(handle_key(after, "u"), before)
+
+    def test_u_with_no_previous_action_leaves_state_unchanged(self):
+        state = State()
+        self.assertEqual(handle_key(state, "u"), state)
+
+    def test_u_twice_in_a_row_does_not_redo(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        after_command = handle_key(state, "c")
+        after_first_undo = handle_key(after_command, "u")
+        after_second_undo = handle_key(after_first_undo, "u")
+        self.assertEqual(after_second_undo, after_first_undo)
+
+    def test_movement_keys_do_not_clobber_an_existing_undo_snapshot(self):
+        boxes = (Box("a", children=(Box("c"), Box("d"))),)
+        state = State(boxes=boxes, selected=(0, 0))
+        before = state
+        after_command = handle_key(state, "c")
+        navigated = handle_key(after_command, "j")
+        navigated = handle_key(navigated, "h")
+        navigated = handle_key(navigated, "l")
+        navigated = handle_key(navigated, "k")
+        self.assertEqual(handle_key(navigated, "u"), before)
+
+    def test_q_does_not_clobber_an_existing_undo_snapshot(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        before = state
+        after_command = handle_key(state, "c")
+        after_quit = handle_key(after_command, "q")
+        self.assertEqual(handle_key(after_quit, "u").boxes, before.boxes)
+        self.assertEqual(handle_key(after_quit, "u").selected, before.selected)
+
+    def test_u_after_an_insert_session_undoes_the_b_that_started_it(self):
+        state = State()
+        before = state
+        after_b = handle_key(state, "b")
+        after_typing = handle_key(after_b, "h")
+        after_typing = handle_key(after_typing, "i")
+        after_escape = handle_key(after_typing, "\x1b")
+        self.assertEqual(handle_key(after_escape, "u"), before)
 
 
 if __name__ == "__main__":

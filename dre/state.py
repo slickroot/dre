@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from typing import Callable, Literal, Tuple
+from typing import Callable, Literal, Optional, Tuple
 
 PLAIN = -1
 PALETTE_SIZE = 5
@@ -25,6 +25,7 @@ class State:
     running: bool = True
     mode: Mode = "command"
     selected: Path = ()
+    before: Optional["State"] = None
 
 
 def next_colour(colour: int) -> int:
@@ -72,7 +73,14 @@ def grow(boxes: Tuple[Box, ...], path: Path) -> Tuple[Tuple[Box, ...], Path]:
     return grown, path + (new_index,)
 
 
+UNDOABLE_KEYS = {"b", "c", "f", "r", "C"}
+
+
 def handle_command(state: State, key: str) -> State:
+    if key in UNDOABLE_KEYS:
+        state = replace(state, before=replace(state, before=None))
+    if key == "u":
+        return state.before if state.before is not None else state
     if key == "b":
         boxes, selected = grow(state.boxes, state.selected)
         return replace(state, boxes=boxes, mode="insert", selected=selected)
