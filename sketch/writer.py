@@ -1,5 +1,6 @@
 import fcntl
 import os
+import select
 import struct
 import sys
 import termios
@@ -19,6 +20,12 @@ SHOW_CURSOR = "\x1b[?25h"
 HOME_CURSOR = "\x1b[H"
 INTERRUPT = "\x03"
 WINSIZE = "HHHH"
+KITTY_GRAPHICS_QUERY = "\x1b_Gi=1,a=q;\x1b\\"
+NOT_SUPPORTED_MESSAGE = (
+    "sketch requires a terminal with Kitty graphics protocol support."
+)
+KITTY_GRAPHICS_REPLY_TIMEOUT = 0.5
+CLEAR_LINE = "\r\x1b[K"
 
 
 @contextmanager
@@ -35,6 +42,21 @@ def terminal_session(stream: TextIO, stdin: TextIO) -> Iterator[None]:
         stream.write(SHOW_CURSOR)
         stream.write(LEAVE_ALTERNATE_SCREEN)
         stream.flush()
+
+
+def supports_kitty_graphics(stream: TextIO, stdin: TextIO) -> bool:
+    saved = termios.tcgetattr(stdin)
+    stream.write(KITTY_GRAPHICS_QUERY)
+    stream.flush()
+    tty.setraw(stdin)
+    try:
+        ready, _, _ = select.select(
+            [stdin], [], [], KITTY_GRAPHICS_REPLY_TIMEOUT
+        )
+        reply = os.read(stdin.fileno(), 32) if ready else b""
+    finally:
+        termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
+    return b"i=1" in reply
 
 
 def cell_size() -> Tuple[int, int]:
@@ -72,4 +94,8 @@ def run(stream: TextIO, stdin: TextIO) -> None:
 
 
 def main() -> None:
+    if not supports_kitty_graphics(sys.stdout, sys.stdin):
+        sys.stdout.write(CLEAR_LINE)
+        print(NOT_SUPPORTED_MESSAGE)
+        sys.exit(1)
     run(sys.stdout, sys.stdin)
