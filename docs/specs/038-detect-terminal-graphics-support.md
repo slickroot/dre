@@ -11,3 +11,8 @@ As a user, when I launch sketch in a terminal that doesn't support the Kitty gra
 
 ## Technical Design
 
+- A single function, `supports_kitty_graphics()`, lives in `sketch/writer.py` alongside `main()`. No new module or class — this is a one-shot check, not a component with state or collaborators.
+- `main()` calls `supports_kitty_graphics()` first, before anything else runs. If it returns `False`, `main()` prints `"sketch requires a terminal with Kitty graphics protocol support."` and exits with `sys.exit(1)`. `run()` (and therefore `terminal_session`, the alternate screen, etc.) is never invoked.
+- Detection works by sending the Kitty graphics query escape sequence (`\x1b_Gi=1,a=q;\x1b\\`) to stdout and reading stdin for a reply. A terminal that implements the protocol answers with a response containing `i=1`; a terminal that doesn't ignores the query entirely and sends nothing.
+- Reading is a plain blocking read (`stdin.read`) — no `select`, no timeout, no polling. This mirrors the simplicity of the standard shell one-liner for this check.
+- Because the response must be read without waiting on Enter/line-buffering, `supports_kitty_graphics()` puts stdin into raw mode for the duration of the write+read, then restores the original `termios` settings — the same save/set-raw/restore shape already used by `terminal_session` in this file, just scoped locally to this function rather than shared with it. This only affects how keystrokes/replies are read; it is unrelated to the alternate screen (`ENTER_ALTERNATE_SCREEN`/`LEAVE_ALTERNATE_SCREEN`), which is never entered when the check fails.
