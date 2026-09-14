@@ -22,7 +22,7 @@ INTERRUPT = "\x03"
 WINSIZE = "HHHH"
 KITTY_GRAPHICS_QUERY = "\x1b_Gi=1,a=q;\x1b\\"
 NOT_SUPPORTED_MESSAGE = (
-    "sketch requires a terminal with Kitty graphics protocol support."
+    "Dre requires a terminal with Kitty graphics protocol support."
 )
 KITTY_GRAPHICS_REPLY_TIMEOUT = 0.5
 CLEAR_LINE = "\r\x1b[K"
