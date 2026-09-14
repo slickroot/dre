@@ -1,5 +1,4 @@
-import base64
-import zlib
+import dre_rs
 from typing import List
 
 from .render import Sprite
@@ -18,31 +17,12 @@ class KittyGraphics:
         )
 
     def _transmission(self, sprite: Sprite) -> str:
-        chunks = _chunks(_encode(sprite.pixels))
+        chunks = dre_rs.chunks(dre_rs.encode(sprite.pixels), CHUNK_SIZE)
         header = (
             f"a=T,f=32,s={sprite.width},v={sprite.height},o=z,q=2,z=-1,"
-            f"m={_more(chunks, 0)}"
+            f"m={dre_rs.more(chunks, 0)}"
         )
-        escapes = [_escape(header, chunks[0])]
+        escapes = [dre_rs.escape(header, chunks[0])]
         for index, chunk in enumerate(chunks[1:], start=1):
-            escapes.append(_escape(f"m={_more(chunks, index)}", chunk))
+            escapes.append(dre_rs.escape(f"m={dre_rs.more(chunks, index)}", chunk))
         return "".join(escapes)
-
-
-def _encode(pixels: bytes) -> str:
-    return base64.b64encode(zlib.compress(pixels)).decode()
-
-
-def _chunks(payload: str) -> List[str]:
-    return [
-        payload[start : start + CHUNK_SIZE]
-        for start in range(0, len(payload), CHUNK_SIZE)
-    ]
-
-
-def _more(chunks: List[str], index: int) -> int:
-    return 0 if index == len(chunks) - 1 else 1
-
-
-def _escape(keys: str, payload: str) -> str:
-    return f"\x1b_G{keys};{payload}\x1b\\"
