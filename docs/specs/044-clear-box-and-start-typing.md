@@ -11,3 +11,8 @@ As a user editing a box's text, I want to press `Shift+I` to instantly clear the
 - Pressing `u` (undo) after using `I` restores the box's previous label (i.e., `I` is added to `UNDOABLE_KEYS`).
 
 ## Technical Design
+
+- Extract a shared `enter_insert(state: State, base_label: str) -> State` helper in `dre/state.py` that rewrites the selected box's label to `base_label + PAD` and returns `replace(state, boxes=boxes, mode="insert")`.
+- The existing `i` branch in `handle_command` keeps its own `if not state.selected: return state` guard, then calls `enter_insert(state, at(state.boxes, state.selected).label)`.
+- Add a new `I` branch in `handle_command` with its own `if not state.selected: return state` guard, then calls `enter_insert(state, "")` — clearing the label before entering insert mode.
+- Add `"I"` to `UNDOABLE_KEYS` (`{"b", "c", "f", "r", "C", "I"}`), so the existing undo-snapshot mechanism at the top of `handle_command` covers it with no special-casing.
