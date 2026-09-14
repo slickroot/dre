@@ -1,29 +1,27 @@
 import unittest
+from math import cos, radians, tan
 
 from dre.layout import Arrow as LayoutArrow
 from dre.layout import Cursor, Label, Placement
 from dre.render import (
     ARROW_STROKE,
+    ARROWHEAD_ANGLE_DEG,
+    ARROWHEAD_DEPTH,
+    ARROWHEAD_EDGE_LENGTH,
     ARROWHEAD_SLOPE,
     BLANK,
     BORDER,
-    BOTTOM_LEFT,
-    BOTTOM_RIGHT,
+    CACHE_LIMIT,
     CURSOR,
     FILL_ALPHA,
-    HORIZONTAL,
     OPAQUE,
     PALETTE,
+    PLAIN_COLOUR,
     ROUNDED_RADIUS,
-    TOP_LEFT,
-    TOP_RIGHT,
     TRANSPARENT,
-    VERTICAL,
     Canvas,
-    GraphicsRenderer,
     Sprite,
     TerminalRenderer,
-    _cell,
     _centered_span,
     _colour,
     _fill_colour,
@@ -31,47 +29,62 @@ from dre.render import (
 from dre.state import PLAIN, Box
 
 
+class FakeGraphics:
+    def __init__(self, payload="<payload>"):
+        self.payload = payload
+        self.sprites = None
+
+    def draw(self, sprites):
+        self.sprites = sprites
+        return self.payload
+
+
 class TerminalRendererTest(unittest.TestCase):
     def setUp(self):
-        self.renderer = TerminalRenderer()
+        self.renderer = TerminalRenderer(
+            graphics=FakeGraphics(), cell_width=1, cell_height=1
+        )
+
+    def render(self, placements, cols, rows):
+        return self.renderer._grid(placements, cols, rows)
 
     def test_empty_canvas_fills_terminal(self):
         self.assertEqual(
-            self.renderer.render([], cols=11, rows=5), [BLANK * 11] * 5
+            self.render([], cols=11, rows=5), [BLANK * 11] * 5
         )
 
     def test_grid_matches_the_requested_size(self):
         cols, rows = 20, 7
-        grid = self.renderer.render([Placement(Box(), 4, 4, 3, 3)], cols, rows)
+        grid = self.render([Placement(Box(), 4, 4, 3, 3)], cols, rows)
         self.assertEqual(len(grid), rows)
         self.assertEqual({len(line) for line in grid}, {cols})
 
     def test_a_box_claims_its_cells_without_border_characters(self):
-        grid = self.renderer.render([Placement(Box(), 4, 4, 3, 3)], 11, 11)
+        grid = self.render([Placement(Box(), 4, 4, 3, 3)], 11, 11)
         self.assertEqual(grid[4][4:7], BLANK * 3)
 
     def test_every_row_of_a_box_is_blank(self):
-        grid = self.renderer.render([Placement(Box(), 4, 4, 3, 3)], 11, 11)
+        grid = self.render([Placement(Box(), 4, 4, 3, 3)], 11, 11)
         self.assertEqual([line[4:7] for line in grid[4:7]], [BLANK * 3] * 3)
 
     def test_box_interior_is_empty(self):
-        grid = self.renderer.render([Placement(Box(), 0, 0, 5, 4)], 5, 4)
+        grid = self.render([Placement(Box(), 0, 0, 5, 4)], 5, 4)
         self.assertEqual(grid, [BLANK * 5] * 4)
 
     def test_nothing_is_drawn_outside_the_box(self):
         fill = 2
-        grid = self.renderer.render([Placement(Box(fill=fill), 4, 4, 3, 3)], 11, 11)
+        grid = self.render([Placement(Box(fill=fill), 4, 4, 3, 3)], 11, 11)
         self.assertEqual(grid[3], BLANK * 11)
         self.assertEqual(grid[4][: len(BLANK * 4)], BLANK * 4)
         self.assertTrue(grid[4].endswith(BLANK * 4))
 
     def test_a_box_reaching_past_the_edge_is_clipped(self):
         fill = 3
-        grid = self.renderer.render([Placement(Box(fill=fill), 3, 1, 3, 3)], 4, 2)
+        grid = self.render([Placement(Box(fill=fill), 3, 1, 3, 3)], 4, 2)
         self.assertEqual(grid, [BLANK * 4, BLANK * 4])
 
     def test_label_is_drawn_inside_the_box(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi"), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -82,7 +95,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + "hi" + BLANK * 2)
 
     def test_cursor_is_drawn_after_the_label(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi"), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -94,7 +107,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + "hi" + CURSOR + BLANK)
 
     def test_label_and_cursor_past_the_edge_are_clipped(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi"), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -106,22 +119,22 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + "hi")
 
     def test_a_box_does_not_draw_a_cursor(self):
-        grid = self.renderer.render([Placement(Box("hi"), 0, 0, 5, 3)], 5, 3)
+        grid = self.render([Placement(Box("hi"), 0, 0, 5, 3)], 5, 3)
         self.assertNotIn(CURSOR, "".join(grid))
 
     def test_cursor_placement_is_drawn_at_its_own_position(self):
-        grid = self.renderer.render([Placement(Cursor(), 2, 1, 1, 1)], 4, 3)
+        grid = self.render([Placement(Cursor(), 2, 1, 1, 1)], 4, 3)
         self.assertEqual(
             grid, [BLANK * 4, BLANK * 2 + CURSOR + BLANK, BLANK * 4]
         )
 
     def test_a_cursor_outside_the_grid_is_clipped(self):
-        grid = self.renderer.render([Placement(Cursor(), 9, 9, 1, 1)], 4, 3)
+        grid = self.render([Placement(Cursor(), 9, 9, 1, 1)], 4, 3)
         self.assertEqual(grid, [BLANK * 4] * 3)
 
     def test_each_placement_is_drawn(self):
         first_fill, second_fill = 1, 2
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box(fill=first_fill), 0, 0, 3, 3),
                 Placement(Box(fill=second_fill), 4, 0, 3, 3),
@@ -132,7 +145,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[0], BLANK * 11)
 
     def test_a_plain_box_emits_no_escapes(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi"), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -144,15 +157,15 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertNotIn("\x1b", "".join(grid))
 
     def test_a_coloured_box_puts_no_colour_in_the_grid(self):
-        grid = self.renderer.render([Placement(Box(colour=2), 0, 0, 5, 3)], 5, 3)
+        grid = self.render([Placement(Box(colour=2), 0, 0, 5, 3)], 5, 3)
         self.assertEqual(grid, [BLANK * 5] * 3)
 
     def test_a_coloured_box_bottom_row_is_plain(self):
-        grid = self.renderer.render([Placement(Box(colour=4), 0, 0, 5, 3)], 5, 3)
+        grid = self.render([Placement(Box(colour=4), 0, 0, 5, 3)], 5, 3)
         self.assertEqual(grid[2], BLANK * 5)
 
     def test_a_label_inside_a_coloured_box_is_plain(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi", colour=5), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -163,7 +176,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + "hi" + BLANK * 2)
 
     def test_the_cursor_is_plain(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [Placement(Box(colour=1), 0, 0, 5, 3), Placement(Cursor(), 1, 1, 1, 1)],
             5,
             3,
@@ -171,7 +184,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + CURSOR + BLANK * 3)
 
     def test_a_box_claims_cells_drawn_by_an_earlier_placement(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Label("hi"), 1, 1, 2, 1),
                 Placement(Box(fill=2), 0, 0, 5, 3),
@@ -182,38 +195,38 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid, [BLANK * 5] * 3)
 
     def test_an_arrow_leaves_the_gap_blank(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [Placement(LayoutArrow((0,), 0), 2, 1, 1, 2)], 4, 4
         )
         self.assertEqual(grid, [BLANK * 4] * 4)
 
     def test_an_arrow_outside_the_grid_is_clipped(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [Placement(LayoutArrow((0,), 0), 9, 9, 1, 2)], 4, 3
         )
         self.assertEqual(grid, [BLANK * 4] * 3)
 
     def test_a_filled_rounded_box_emits_no_escapes(self):
-        grid = self.renderer.render(
+        grid = self.render(
             [Placement(Box(fill=2, rounded=True), 0, 0, 5, 4)], 5, 4
         )
         self.assertNotIn("\x1b", "".join(grid))
 
     def test_a_filled_box_claims_every_cell_as_blank(self):
         fill = 2
-        grid = self.renderer.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
+        grid = self.render([Placement(Box(fill=fill), 0, 0, 5, 4)], 5, 4)
         self.assertEqual(grid, [BLANK * 5] * 4)
 
     def test_a_box_with_border_colour_and_fill_emits_plain_cells(self):
         fill = 4
-        grid = self.renderer.render(
+        grid = self.render(
             [Placement(Box(colour=1, fill=fill), 0, 0, 5, 4)], 5, 4
         )
         self.assertEqual(grid, [BLANK * 5] * 4)
 
     def test_a_label_sits_on_top_of_a_filled_box(self):
         fill = 3
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box("hi", fill=fill), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -225,7 +238,7 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_the_cursor_sits_on_top_of_a_filled_box(self):
         fill = 5
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box(fill=fill), 0, 0, 5, 3),
                 Placement(Cursor(), 1, 1, 1, 1),
@@ -237,7 +250,7 @@ class TerminalRendererTest(unittest.TestCase):
 
     def test_label_and_cursor_stamp_over_a_filled_rounded_box(self):
         fill = 4
-        grid = self.renderer.render(
+        grid = self.render(
             [
                 Placement(Box(fill=fill, rounded=True), 0, 0, 5, 3),
                 Placement(Label("hi"), 1, 1, 2, 1),
@@ -249,7 +262,7 @@ class TerminalRendererTest(unittest.TestCase):
         self.assertEqual(grid[1], BLANK + "hi" + CURSOR + BLANK)
 
     def test_empty_canvas_with_no_boxes_emits_no_escapes(self):
-        grid = self.renderer.render([], cols=11, rows=5)
+        grid = self.render([], cols=11, rows=5)
         self.assertEqual(grid, [BLANK * 11] * 5)
         self.assertNotIn("\x1b", "".join(grid))
 
@@ -330,35 +343,10 @@ class CanvasTest(unittest.TestCase):
             self.assertEqual(self.pixel(canvas, 1, y), self.ink)
 
 
-class BoxCharacterTest(unittest.TestCase):
+class TerminalRendererFillTest(unittest.TestCase):
     def setUp(self):
-        self.renderer = TerminalRenderer()
-
-    def character(self, x, y):
-        return self.renderer._box_character(x, y, left=0, right=4, top=0, bottom=3)
-
-    def test_corners(self):
-        self.assertEqual(self.character(0, 0), TOP_LEFT)
-        self.assertEqual(self.character(4, 0), TOP_RIGHT)
-        self.assertEqual(self.character(0, 3), BOTTOM_LEFT)
-        self.assertEqual(self.character(4, 3), BOTTOM_RIGHT)
-
-    def test_top_and_bottom_edges_are_horizontal(self):
-        self.assertEqual(self.character(2, 0), HORIZONTAL)
-        self.assertEqual(self.character(2, 3), HORIZONTAL)
-
-    def test_left_and_right_edges_are_vertical(self):
-        self.assertEqual(self.character(0, 1), VERTICAL)
-        self.assertEqual(self.character(4, 1), VERTICAL)
-
-    def test_the_interior_is_blank(self):
-        self.assertEqual(self.character(2, 1), BLANK)
-
-
-class GraphicsRendererFillTest(unittest.TestCase):
-    def setUp(self):
-        self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(), graphics=None, cell_width=1, cell_height=1
+        self.renderer = TerminalRenderer(
+            graphics=None, cell_width=1, cell_height=1
         )
 
     def outline(self, box, width=2 * BORDER + 3, height=2 * BORDER + 3):
@@ -390,10 +378,10 @@ class GraphicsRendererFillTest(unittest.TestCase):
         )
 
 
-class GraphicsRendererBorderTest(unittest.TestCase):
+class TerminalRendererBorderTest(unittest.TestCase):
     def setUp(self):
-        self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(), graphics=None, cell_width=4, cell_height=4
+        self.renderer = TerminalRenderer(
+            graphics=None, cell_width=4, cell_height=4
         )
 
     def outline(self, box, width=3, height=3):
@@ -432,10 +420,10 @@ class GraphicsRendererBorderTest(unittest.TestCase):
         )
 
 
-class GraphicsRendererArrowThicknessTest(unittest.TestCase):
+class TerminalRendererArrowThicknessTest(unittest.TestCase):
     def setUp(self):
-        self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(), graphics=None, cell_width=10, cell_height=10
+        self.renderer = TerminalRenderer(
+            graphics=None, cell_width=10, cell_height=10
         )
         self.ink = _colour(PLAIN) + (OPAQUE,)
         self.blank = tuple(TRANSPARENT)
@@ -502,10 +490,9 @@ class GraphicsRendererArrowThicknessTest(unittest.TestCase):
             )
 
 
-class GraphicsRendererCornerRadiusTest(unittest.TestCase):
+class TerminalRendererCornerRadiusTest(unittest.TestCase):
     def setUp(self):
-        self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(),
+        self.renderer = TerminalRenderer(
             graphics=None,
             cell_width=2 * ROUNDED_RADIUS // 5,
             cell_height=2 * ROUNDED_RADIUS // 5,
@@ -629,14 +616,13 @@ class GraphicsRendererCornerRadiusTest(unittest.TestCase):
                 )
 
 
-class GraphicsRendererSmallBoxTest(unittest.TestCase):
+class TerminalRendererSmallBoxTest(unittest.TestCase):
     """A box no larger than twice its corner radius, where the two corner
     bands of a row would otherwise overlap."""
 
     def setUp(self):
         cell = ROUNDED_RADIUS // 2
-        self.renderer = GraphicsRenderer(
-            text=TerminalRenderer(),
+        self.renderer = TerminalRenderer(
             graphics=None,
             cell_width=cell,
             cell_height=cell,
@@ -681,6 +667,378 @@ class GraphicsRendererSmallBoxTest(unittest.TestCase):
                 self.assertEqual(
                     self.pixel(clipped, x, y), self.pixel(whole, x + offset, y)
                 )
+
+
+class TerminalRendererSpriteTest(unittest.TestCase):
+    def test_payload_is_appended_to_the_last_line(self):
+        graphics = FakeGraphics()
+        renderer = TerminalRenderer(graphics, cell_width=2, cell_height=4)
+        self.assertEqual(
+            renderer.render([], cols=3, rows=2),
+            [BLANK * 3, BLANK * 3 + "<payload>"],
+        )
+
+    def sprites(self, placements, cols=40, rows=20, cell=(2, 4)):
+        graphics = FakeGraphics()
+        renderer = TerminalRenderer(
+            graphics, cell_width=cell[0], cell_height=cell[1]
+        )
+        renderer.render(placements, cols, rows)
+        return graphics.sprites
+
+    def only_sprite(self, placement, cols=40, rows=20, cell=(2, 4)):
+        sprites = self.sprites([placement], cols, rows, cell)
+        self.assertEqual(len(sprites), 1)
+        return sprites[0]
+
+    def pixel(self, sprite, x, y):
+        start = (y * sprite.width + x) * 4
+        return tuple(sprite.pixels[start : start + 4])
+
+    def test_line_count_is_unchanged(self):
+        renderer = TerminalRenderer(FakeGraphics(), cell_width=2, cell_height=4)
+        self.assertEqual(len(renderer.render([], cols=3, rows=3)), 3)
+
+    def test_sprite_covers_the_placement_in_pixels(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=1, y=2, width=4, height=3), cell=(6, 12)
+        )
+        self.assertEqual((sprite.width, sprite.height), (24, 36))
+
+    def test_sprite_sits_at_the_placement_cell(self):
+        sprite = self.only_sprite(Placement(Box("hi"), x=1, y=2, width=4, height=3))
+        self.assertEqual((sprite.col, sprite.row), (1, 2))
+
+    def test_edges_are_opaque_and_the_inside_is_transparent(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=0, y=0, width=3, height=3), cell=(4, 4)
+        )
+        for x in range(sprite.width):
+            self.assertEqual(self.pixel(sprite, x, 0)[3], OPAQUE)
+            self.assertEqual(self.pixel(sprite, x, sprite.height - 1)[3], OPAQUE)
+        for y in range(sprite.height):
+            self.assertEqual(self.pixel(sprite, 0, y)[3], OPAQUE)
+            self.assertEqual(self.pixel(sprite, sprite.width - 1, y)[3], OPAQUE)
+        for y in range(BORDER, sprite.height - BORDER):
+            for x in range(BORDER, sprite.width - BORDER):
+                self.assertEqual(self.pixel(sprite, x, y), (0, 0, 0, 0))
+
+    def test_border_takes_the_colour_of_its_palette_index(self):
+        for index, rgb in enumerate(PALETTE):
+            sprite = self.only_sprite(
+                Placement(Box("hi", colour=index), x=0, y=0, width=2, height=2)
+            )
+            self.assertEqual(self.pixel(sprite, 0, 0), rgb + (OPAQUE,))
+
+    def test_a_plain_border_is_grey(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi", colour=PLAIN), x=0, y=0, width=2, height=2)
+        )
+        self.assertEqual(self.pixel(sprite, 0, 0), PLAIN_COLOUR + (OPAQUE,))
+
+    def test_an_arrow_sprite_covers_the_placement_in_pixels(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        self.assertEqual((sprite.width, sprite.height), (8, 5))
+
+    def test_a_single_stop_arrow_is_a_straight_line_across_every_column(self):
+        # stops == (0,) is the degenerate case: shaft and trunk collapse onto
+        # one row, so the sprite is exactly today's straight "-->" arrow.
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        shaft_row = sprite.height // 2
+        for x in range(sprite.width):
+            self.assertEqual(self.pixel(sprite, x, shaft_row)[3], OPAQUE)
+
+    def test_a_single_stop_arrow_tip_is_arrow_stroke_pixels_at_the_right_edge(self):
+        # With a 1px stroke the tip would be a single lit pixel; at
+        # ARROW_STROKE thickness the nearby stamps overlap and widen the
+        # opaque band a little past the raw stroke width, so the sprite is
+        # tall enough here to keep that band clear of the top/bottom edges.
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 40)
+        )
+        shaft_row = sprite.height // 2
+        tip = sprite.width - 1
+        low = shaft_row - ARROW_STROKE // 2
+        high = shaft_row + ARROW_STROKE // 2 + 2
+        expected_rows = set(range(low, high))
+        for y in range(sprite.height):
+            expected = OPAQUE if y in expected_rows else 0
+            self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
+
+    def test_a_single_stop_arrowhead_diagonals_are_symmetric_about_the_shaft(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 40)
+        )
+        shaft_row = sprite.height // 2
+        # Base column of the head: furthest from the tip, widest spread.
+        base = sprite.width - 4
+        opaque_ys = [
+            y
+            for y in range(sprite.height)
+            if y != shaft_row and self.pixel(sprite, base, y)[3] == OPAQUE
+        ]
+        self.assertTrue(opaque_ys)
+        top, bottom = min(opaque_ys), max(opaque_ys)
+        # A 4px stroke can't be perfectly centred on a single row, so allow
+        # the off-by-one bias that _centered_span's rounding introduces.
+        self.assertAlmostEqual(shaft_row - top, bottom - shaft_row, delta=1)
+        self.assertGreater(bottom, shaft_row)
+
+    def test_arrowhead_shape_matches_the_thirty_degree_geometry(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=3, height=1), cell=(40, 20)
+        )
+        tip = sprite.width - 1
+
+        def half_span_at(distance_from_tip):
+            opaque = [
+                y
+                for y in range(sprite.height)
+                if self.pixel(sprite, tip - distance_from_tip, y)[3] == OPAQUE
+            ]
+            return (max(opaque) - min(opaque)) / 2
+
+        depth = int(ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG)))
+        spans = [half_span_at(d) for d in range(depth)]
+        # The angle and depth are unchanged: the head still widens
+        # monotonically towards its base, by at least as much as the old,
+        # unthickened 30-degree geometry would.
+        self.assertEqual(spans, sorted(spans))
+        self.assertGreaterEqual(spans[0], (ARROW_STROKE - 1) / 2)
+        self.assertGreaterEqual(
+            spans[-1] - spans[0],
+            round((depth - 1) * tan(radians(ARROWHEAD_ANGLE_DEG))),
+        )
+
+    def test_arrow_off_shape_pixels_are_transparent(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        self.assertEqual(self.pixel(sprite, 0, 0), (0, 0, 0, 0))
+
+    def test_an_arrow_is_plain_grey(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0,), 0), x=1, y=1, width=2, height=1), cell=(4, 5)
+        )
+        shaft_row = sprite.height // 2
+        self.assertEqual(
+            self.pixel(sprite, 0, shaft_row), PLAIN_COLOUR + (OPAQUE,)
+        )
+
+    def test_an_arrow_overhanging_the_top_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 3), 0), x=1, y=-1, width=2, height=4), cell=(4, 5)
+        )
+        self.assertEqual(sprite.row, 0)
+        self.assertEqual(sprite.height, 15)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+
+    def test_an_arrow_overhanging_the_bottom_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 3), 0), x=1, y=1, width=2, height=4),
+            cols=40,
+            rows=2,
+            cell=(4, 5),
+        )
+        self.assertEqual(sprite.row, 1)
+        self.assertEqual(sprite.height, 5)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+
+    def test_a_branching_arrow_trunk_spans_from_the_shaft_to_the_last_stop(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        midpoint = sprite.width // 2
+        shaft_row = 5 // 2  # centre of the parent's own row
+        last_stop_row = 3 * 5 + 5 // 2
+        for y in range(shaft_row, last_stop_row + 1):
+            self.assertEqual(self.pixel(sprite, midpoint, y)[3], OPAQUE)
+
+    def test_a_branching_arrow_has_a_stub_at_every_stop(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        midpoint = sprite.width // 2
+        for stop in (0, 3):
+            row = stop * 5 + 5 // 2
+            for x in range(midpoint, sprite.width):
+                self.assertEqual(self.pixel(sprite, x, row)[3], OPAQUE)
+
+    def test_a_branching_arrow_rows_between_stops_are_blank_past_the_trunk(self):
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 5)
+        )
+        midpoint = sprite.width // 2
+        # The trunk itself is ARROW_STROKE pixels wide, so it occupies more
+        # than just the midpoint column now.
+        trunk_columns = set(_centered_span(midpoint, ARROW_STROKE))
+        row_between_stops = 1 * 5 + 5 // 2
+        for x in range(sprite.width):
+            expected = OPAQUE if x in trunk_columns else 0
+            self.assertEqual(self.pixel(sprite, x, row_between_stops)[3], expected)
+
+    def test_three_stubs_each_end_in_their_own_arrowhead(self):
+        # Cells are large enough here that the three arrowheads' opaque
+        # bands, widened by ARROW_STROKE, don't merge into each other.
+        sprite = self.only_sprite(
+            Placement(LayoutArrow((0, 1, 3), 0), x=1, y=1, width=2, height=4), cell=(4, 60)
+        )
+        tip = sprite.width - 1
+        stop_rows = {stop * 60 + 60 // 2 for stop in (0, 1, 3)}
+        expected_rows = set()
+        for stop_row in stop_rows:
+            low = stop_row - ARROW_STROKE // 2
+            high = stop_row + ARROW_STROKE // 2 + 2
+            expected_rows |= set(range(low, high))
+        for y in range(sprite.height):
+            expected = OPAQUE if y in expected_rows else 0
+            self.assertEqual(self.pixel(sprite, tip, y)[3], expected)
+
+    def test_a_cursor_has_no_sprite(self):
+        self.assertEqual(
+            self.sprites([Placement(Cursor(), x=1, y=1, width=1, height=1)]), []
+        )
+
+    def test_a_box_overhanging_the_left_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=-2, y=1, width=5, height=3),
+            cols=40,
+            rows=20,
+            cell=(4, 4),
+        )
+        self.assertEqual(sprite.col, 0)
+        self.assertEqual(sprite.width, 3 * 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+        self.assertEqual(self.pixel(sprite, 0, sprite.height // 2)[3], 0)
+
+    def test_a_box_overhanging_the_top_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=1, y=-2, width=4, height=5), cell=(4, 4)
+        )
+        self.assertEqual(sprite.row, 0)
+        self.assertEqual(sprite.height, 3 * 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+        self.assertEqual(self.pixel(sprite, sprite.width // 2, 0)[3], 0)
+
+    def test_a_box_overhanging_the_right_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=1, y=0, width=6, height=3),
+            cols=4,
+            rows=20,
+            cell=(4, 4),
+        )
+        self.assertEqual(sprite.col, 1)
+        self.assertEqual(sprite.width, 3 * 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+        self.assertEqual(
+            self.pixel(sprite, sprite.width - 1, sprite.height // 2)[3], 0
+        )
+
+    def test_a_box_overhanging_the_bottom_is_cropped(self):
+        sprite = self.only_sprite(
+            Placement(Box("hi"), x=0, y=1, width=3, height=6),
+            cols=40,
+            rows=4,
+            cell=(4, 4),
+        )
+        self.assertEqual(sprite.row, 1)
+        self.assertEqual(sprite.height, 3 * 4)
+        self.assertEqual(len(sprite.pixels), sprite.width * sprite.height * 4)
+        self.assertEqual(
+            self.pixel(sprite, sprite.width // 2, sprite.height - 1)[3], 0
+        )
+
+    def test_a_box_off_screen_has_no_sprite(self):
+        self.assertEqual(
+            self.sprites(
+                [Placement(Box("hi"), x=10, y=0, width=4, height=3)], cols=5, rows=20
+            ),
+            [],
+        )
+
+
+class ArrowheadConstantsTest(unittest.TestCase):
+    def test_depth_matches_the_edge_length_and_angle(self):
+        self.assertEqual(
+            ARROWHEAD_DEPTH,
+            ARROWHEAD_EDGE_LENGTH * cos(radians(ARROWHEAD_ANGLE_DEG)),
+        )
+
+    def test_slope_matches_the_angle(self):
+        self.assertEqual(ARROWHEAD_SLOPE, tan(radians(ARROWHEAD_ANGLE_DEG)))
+
+
+class SpriteCacheTest(unittest.TestCase):
+    def setUp(self):
+        self.renderer = TerminalRenderer(FakeGraphics(), cell_width=2, cell_height=4)
+
+    def draw(self, placement, cols=40, rows=20):
+        return self.renderer._sprites([placement], cols, rows)[0]
+
+    def test_an_unchanged_box_is_not_redrawn(self):
+        placement = Placement(Box("hi", colour=1, fill=2), x=0, y=0, width=4, height=3)
+        first = self.draw(placement)
+        self.assertEqual(len(self.renderer.cache), 1)
+        self.assertEqual(self.draw(placement).pixels, first.pixels)
+        self.assertEqual(len(self.renderer.cache), 1)
+
+    def test_a_recoloured_box_is_redrawn(self):
+        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        blue = self.draw(Placement(Box("hi", colour=4), x=0, y=0, width=4, height=3))
+        self.assertNotEqual(plain.pixels, blue.pixels)
+        self.assertEqual(len(self.renderer.cache), 2)
+
+    def test_a_refilled_box_is_redrawn(self):
+        plain = self.draw(Placement(Box("hi"), x=0, y=0, width=6, height=3))
+        filled = self.draw(Placement(Box("hi", fill=3), x=0, y=0, width=6, height=3))
+        self.assertNotEqual(plain.pixels, filled.pixels)
+
+    def test_rounded_and_square_are_cached_distinctly(self):
+        for rounded in (False, True):
+            self.draw(
+                Placement(Box("hi", rounded=rounded), x=0, y=0, width=4, height=3)
+            )
+        self.assertEqual(len(self.renderer.cache), 2)
+
+    def test_a_relabelled_box_of_the_same_size_reuses_its_pixels(self):
+        first = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        second = self.draw(Placement(Box("ok"), x=0, y=0, width=4, height=3))
+        self.assertEqual(second.pixels, first.pixels)
+        self.assertEqual(len(self.renderer.cache), 1)
+
+    def test_a_cached_sprite_moves_to_its_own_position(self):
+        self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        moved = self.draw(Placement(Box("hi"), x=5, y=2, width=4, height=3))
+        self.assertEqual((moved.col, moved.row), (5, 2))
+
+    def test_a_differently_cropped_box_is_redrawn(self):
+        whole = self.draw(Placement(Box("hi"), x=0, y=0, width=4, height=3))
+        cropped = self.draw(
+            Placement(Box("hi"), x=0, y=0, width=4, height=3), cols=2, rows=20
+        )
+        self.assertNotEqual(whole.width, cropped.width)
+        self.assertEqual(len(self.renderer.cache), 2)
+
+    def test_arrows_with_different_stops_are_redrawn(self):
+        one = self.draw(Placement(LayoutArrow((0,), 0), x=0, y=0, width=4, height=6))
+        two = self.draw(Placement(LayoutArrow((0, 2), 0), x=0, y=0, width=4, height=6))
+        self.assertNotEqual(one.pixels, two.pixels)
+
+    def test_arrows_with_different_shafts_are_redrawn(self):
+        one = self.draw(Placement(LayoutArrow((0, 2), 0), x=0, y=0, width=4, height=6))
+        two = self.draw(Placement(LayoutArrow((0, 2), 1), x=0, y=0, width=4, height=6))
+        self.assertNotEqual(one.pixels, two.pixels)
+
+    def test_the_cache_is_bounded(self):
+        for width in range(CACHE_LIMIT + 2):
+            self.renderer._sprites(
+                [Placement(Box("hi"), x=0, y=0, width=width + 1, height=3)], 4000, 20
+            )
+        self.assertLessEqual(len(self.renderer.cache), CACHE_LIMIT)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from typing import Iterator, List, TextIO, Tuple
 
 from .kitty import KittyGraphics
 from .layout import layout, with_cursor
-from .render import GraphicsRenderer, Renderer, TerminalRenderer
+from .render import Renderer, TerminalRenderer
 from .state import State, handle_key
 
 ENTER_ALTERNATE_SCREEN = "\x1b[?1049h"
@@ -80,9 +80,7 @@ def frame(state: State, renderer: Renderer, stream: TextIO) -> None:
 
 
 def run(stream: TextIO, stdin: TextIO) -> None:
-    renderer = GraphicsRenderer(
-        TerminalRenderer(), KittyGraphics(), *cell_size()
-    )
+    renderer = TerminalRenderer(KittyGraphics(), *cell_size())
     state = State()
     with terminal_session(stream, stdin):
         while state.running:
