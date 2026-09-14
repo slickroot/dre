@@ -11,7 +11,7 @@ from contextlib import contextmanager, redirect_stdout
 
 from dre import writer
 from dre.kitty import KittyGraphics
-from dre.render import GraphicsRenderer, TerminalRenderer
+from dre.render import TerminalRenderer
 from dre.writer import (
     HOME_CURSOR,
     INTERRUPT,
@@ -137,10 +137,9 @@ class RunTest(unittest.TestCase):
             writer.run(Stream(), Stdin([INTERRUPT]))
         return self.renderers[0]
 
-    def test_the_text_renderer_is_wrapped_in_a_graphics_renderer(self):
+    def test_the_renderer_is_a_terminal_renderer(self):
         renderer = self.renderer()
-        self.assertIsInstance(renderer, GraphicsRenderer)
-        self.assertIsInstance(renderer.text, TerminalRenderer)
+        self.assertIsInstance(renderer, TerminalRenderer)
 
     def test_the_graphics_are_drawn_by_kitty(self):
         self.assertIsInstance(self.renderer().graphics, KittyGraphics)

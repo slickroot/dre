@@ -5,12 +5,6 @@ from typing import Dict, List, Protocol, Tuple
 from .layout import Arrow, Cursor, Label, Placement
 from .state import PLAIN, Box
 
-TOP_LEFT = "┌"
-TOP_RIGHT = "┐"
-BOTTOM_LEFT = "└"
-BOTTOM_RIGHT = "┘"
-HORIZONTAL = "─"
-VERTICAL = "│"
 BLANK = " "
 CURSOR = "\u2588"
 
@@ -70,15 +64,13 @@ class GraphicsProtocol(Protocol):
         ...
 
 
-class GraphicsRenderer:
+class TerminalRenderer:
     def __init__(
         self,
-        text: Renderer,
         graphics: GraphicsProtocol,
         cell_width: int,
         cell_height: int,
     ) -> None:
-        self.text = text
         self.graphics = graphics
         self.cell_width = cell_width
         self.cell_height = cell_height
@@ -87,9 +79,43 @@ class GraphicsRenderer:
     def render(
         self, placements: List[Placement], cols: int, rows: int
     ) -> List[str]:
-        lines = self.text.render(placements, cols, rows)
+        lines = self._grid(placements, cols, rows)
         payload = self.graphics.draw(self._sprites(placements, cols, rows))
         return lines[:-1] + [lines[-1] + payload]
+
+    def _grid(
+        self, placements: List[Placement], cols: int, rows: int
+    ) -> List[str]:
+        grid = [[BLANK_CELL] * cols for _ in range(rows)]
+        for placement in placements:
+            if isinstance(placement.node, Box):
+                self._draw_box(grid, placement)
+            elif isinstance(placement.node, Cursor):
+                self._draw_cursor(grid, placement)
+            elif isinstance(placement.node, Label):
+                self._draw_label(grid, placement)
+        return ["".join(_cell(*cell) for cell in row) for row in grid]
+
+    def _draw_box(self, grid: Grid, placement: Placement) -> None:
+        for y in range(placement.y, placement.y + placement.height):
+            for x in range(placement.x, placement.x + placement.width):
+                self._put(grid, x, y, BLANK_CELL)
+
+    def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
+        self._stamp(grid, placement.x, placement.y, CURSOR)
+
+    def _draw_label(self, grid: Grid, placement: Placement) -> None:
+        for offset, character in enumerate(placement.node.text):
+            self._stamp(grid, placement.x + offset, placement.y, character)
+
+    def _put(self, grid: Grid, x: int, y: int, cell: Cell) -> None:
+        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
+            grid[y][x] = cell
+
+    def _stamp(self, grid: Grid, x: int, y: int, character: str) -> None:
+        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
+            _, colour, fill = grid[y][x]
+            grid[y][x] = (character, colour, fill)
 
     def _sprites(
         self, placements: List[Placement], cols: int, rows: int
@@ -366,61 +392,6 @@ class Canvas:
 
     def _offset(self, x: int, y: int) -> int:
         return ((y - self.first_y) * self.span + (x - self.first_x)) * 4
-
-
-class TerminalRenderer:
-    def render(
-        self, placements: List[Placement], cols: int, rows: int
-    ) -> List[str]:
-        grid = [[BLANK_CELL] * cols for _ in range(rows)]
-        for placement in placements:
-            if isinstance(placement.node, Box):
-                self._draw_box(grid, placement)
-            elif isinstance(placement.node, Cursor):
-                self._draw_cursor(grid, placement)
-            elif isinstance(placement.node, Label):
-                self._draw_label(grid, placement)
-        return ["".join(_cell(*cell) for cell in row) for row in grid]
-
-    def _draw_box(self, grid: Grid, placement: Placement) -> None:
-        for y in range(placement.y, placement.y + placement.height):
-            for x in range(placement.x, placement.x + placement.width):
-                self._put(grid, x, y, BLANK_CELL)
-
-    def _draw_cursor(self, grid: Grid, placement: Placement) -> None:
-        self._stamp(grid, placement.x, placement.y, CURSOR)
-
-    def _draw_label(self, grid: Grid, placement: Placement) -> None:
-        for offset, character in enumerate(placement.node.text):
-            self._stamp(grid, placement.x + offset, placement.y, character)
-
-    def _box_character(
-        self, x: int, y: int, left: int, right: int, top: int, bottom: int
-    ) -> str:
-        if y == top:
-            if x == left:
-                return TOP_LEFT
-            if x == right:
-                return TOP_RIGHT
-            return HORIZONTAL
-        if y == bottom:
-            if x == left:
-                return BOTTOM_LEFT
-            if x == right:
-                return BOTTOM_RIGHT
-            return HORIZONTAL
-        if x in (left, right):
-            return VERTICAL
-        return BLANK
-
-    def _put(self, grid: Grid, x: int, y: int, cell: Cell) -> None:
-        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
-            grid[y][x] = cell
-
-    def _stamp(self, grid: Grid, x: int, y: int, character: str) -> None:
-        if 0 <= y < len(grid) and 0 <= x < len(grid[y]):
-            _, colour, fill = grid[y][x]
-            grid[y][x] = (character, colour, fill)
 
 
 def _square_pixels(
