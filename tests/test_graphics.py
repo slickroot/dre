@@ -1,8 +1,8 @@
 import unittest
 from math import cos, radians, tan
 
-from sketch.layout import Arrow, Cursor, Placement
-from sketch.render import (
+from dre.layout import Arrow, Cursor, Placement
+from dre.render import (
     ARROW_STROKE,
     ARROWHEAD_ANGLE_DEG,
     ARROWHEAD_DEPTH,
@@ -16,7 +16,7 @@ from sketch.render import (
     GraphicsRenderer,
     _centered_span,
 )
-from sketch.state import PLAIN, Box
+from dre.state import PLAIN, Box
 
 
 class FakeText:
