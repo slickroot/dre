@@ -1,8 +1,12 @@
 import fcntl
+import io
 import os
 import struct
+import sys
+import termios
+import tty
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 
 from sketch import writer
 from sketch.kitty import KittyGraphics
@@ -13,7 +17,9 @@ from sketch.writer import (
     WINSIZE,
     cell_size,
     frame,
+    main,
     paint,
+    supports_kitty_graphics,
 )
 
 
@@ -141,3 +147,122 @@ class RunTest(unittest.TestCase):
     def test_the_renderer_carries_the_cell_size(self):
         renderer = self.renderer()
         self.assertEqual((renderer.cell_width, renderer.cell_height), (8, 32))
+
+
+class Termios:
+    def __init__(self):
+        self.saved = object()
+        self.tcgetattr = termios.tcgetattr
+        self.tcsetattr = termios.tcsetattr
+        self.setraw = tty.setraw
+        self.raw = []
+        self.restored = []
+
+    def __enter__(self):
+        termios.tcgetattr = lambda stdin: self.saved
+        termios.tcsetattr = lambda stdin, when, settings: self.restored.append(
+            settings
+        )
+        tty.setraw = lambda stdin: self.raw.append(stdin)
+        return self
+
+    def __exit__(self, *details):
+        termios.tcgetattr = self.tcgetattr
+        termios.tcsetattr = self.tcsetattr
+        tty.setraw = self.setraw
+
+
+class RawStdin:
+    def __init__(self, reply):
+        self.reply = reply
+        self.reads = []
+
+    def read(self, count):
+        self.reads.append(count)
+        return self.reply
+
+
+class SupportsKittyGraphicsTest(unittest.TestCase):
+    def test_the_query_is_written_to_the_stream(self):
+        stream = Stream()
+        with Termios():
+            supports_kitty_graphics(stream, RawStdin("i=1"))
+        self.assertEqual(stream.text(), "\x1b_Gi=1,a=q;\x1b\\")
+
+    def test_stdin_is_put_into_raw_mode(self):
+        stdin = RawStdin("i=1")
+        with Termios() as fake:
+            supports_kitty_graphics(Stream(), stdin)
+        self.assertEqual(fake.raw, [stdin])
+
+    def test_stdin_is_read_exactly_once(self):
+        stdin = RawStdin("i=1")
+        with Termios():
+            supports_kitty_graphics(Stream(), stdin)
+        self.assertEqual(len(stdin.reads), 1)
+
+    def test_the_original_termios_settings_are_restored(self):
+        stdin = RawStdin("i=1")
+        with Termios() as fake:
+            supports_kitty_graphics(Stream(), stdin)
+        self.assertEqual(fake.restored, [fake.saved])
+
+    def test_a_reply_containing_i_1_is_supported(self):
+        with Termios():
+            result = supports_kitty_graphics(
+                Stream(), RawStdin("\x1b_Gi=1;OK\x1b\\")
+            )
+        self.assertTrue(result)
+
+    def test_an_empty_reply_is_not_supported(self):
+        with Termios():
+            result = supports_kitty_graphics(Stream(), RawStdin(""))
+        self.assertFalse(result)
+
+    def test_a_reply_without_i_1_is_not_supported(self):
+        with Termios():
+            result = supports_kitty_graphics(Stream(), RawStdin("garbage"))
+        self.assertFalse(result)
+
+
+class MainTest(unittest.TestCase):
+    def setUp(self):
+        self.supports_kitty_graphics = writer.supports_kitty_graphics
+        self.run = writer.run
+        self.exit = sys.exit
+        self.runs = []
+        writer.run = lambda stream, stdin: self.runs.append((stream, stdin))
+
+    def tearDown(self):
+        writer.supports_kitty_graphics = self.supports_kitty_graphics
+        writer.run = self.run
+        sys.exit = self.exit
+
+    def test_run_is_called_with_graphics_support(self):
+        writer.supports_kitty_graphics = lambda stream, stdin: True
+        main()
+        self.assertEqual(self.runs, [(sys.stdout, sys.stdin)])
+
+    def test_run_is_not_called_without_graphics_support(self):
+        writer.supports_kitty_graphics = lambda stream, stdin: False
+        sys.exit = lambda code: None
+        main()
+        self.assertEqual(self.runs, [])
+
+    def test_the_message_is_printed_without_graphics_support(self):
+        writer.supports_kitty_graphics = lambda stream, stdin: False
+        sys.exit = lambda code: None
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main()
+        self.assertEqual(
+            output.getvalue().strip(),
+            "sketch requires a terminal with Kitty graphics protocol support.",
+        )
+
+    def test_exit_1_without_graphics_support(self):
+        writer.supports_kitty_graphics = lambda stream, stdin: False
+        codes = []
+        sys.exit = lambda code: codes.append(code)
+        main()
+        self.assertEqual(codes, [1])
