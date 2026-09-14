@@ -272,7 +272,7 @@ class MainTest(unittest.TestCase):
         with redirect_stdout(output), self.assertRaises(SystemExit):
             main()
         self.assertIn(
-            "sketch requires a terminal with Kitty graphics protocol support.",
+            "Dre requires a terminal with Kitty graphics protocol support.",
             output.getvalue(),
         )
 
