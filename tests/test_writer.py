@@ -229,14 +229,12 @@ class MainTest(unittest.TestCase):
     def setUp(self):
         self.supports_kitty_graphics = writer.supports_kitty_graphics
         self.run = writer.run
-        self.exit = sys.exit
         self.runs = []
         writer.run = lambda stream, stdin: self.runs.append((stream, stdin))
 
     def tearDown(self):
         writer.supports_kitty_graphics = self.supports_kitty_graphics
         writer.run = self.run
-        sys.exit = self.exit
 
     def test_run_is_called_with_graphics_support(self):
         writer.supports_kitty_graphics = lambda stream, stdin: True
@@ -245,15 +243,14 @@ class MainTest(unittest.TestCase):
 
     def test_run_is_not_called_without_graphics_support(self):
         writer.supports_kitty_graphics = lambda stream, stdin: False
-        sys.exit = lambda code: None
-        main()
+        with self.assertRaises(SystemExit):
+            main()
         self.assertEqual(self.runs, [])
 
     def test_the_message_is_printed_without_graphics_support(self):
         writer.supports_kitty_graphics = lambda stream, stdin: False
-        sys.exit = lambda code: None
         output = io.StringIO()
-        with redirect_stdout(output):
+        with redirect_stdout(output), self.assertRaises(SystemExit):
             main()
         self.assertEqual(
             output.getvalue().strip(),
@@ -262,7 +259,6 @@ class MainTest(unittest.TestCase):
 
     def test_exit_1_without_graphics_support(self):
         writer.supports_kitty_graphics = lambda stream, stdin: False
-        codes = []
-        sys.exit = lambda code: codes.append(code)
-        main()
-        self.assertEqual(codes, [1])
+        with self.assertRaises(SystemExit) as raised:
+            main()
+        self.assertEqual(raised.exception.code, 1)

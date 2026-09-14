@@ -91,5 +91,4 @@ def main() -> None:
     if not supports_kitty_graphics(sys.stdout, sys.stdin):
         print(NOT_SUPPORTED_MESSAGE)
         sys.exit(1)
-        return
     run(sys.stdout, sys.stdin)
