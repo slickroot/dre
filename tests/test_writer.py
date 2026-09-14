@@ -271,10 +271,17 @@ class MainTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output), self.assertRaises(SystemExit):
             main()
-        self.assertEqual(
-            output.getvalue().strip(),
+        self.assertIn(
             "sketch requires a terminal with Kitty graphics protocol support.",
+            output.getvalue(),
         )
+
+    def test_the_line_is_cleared_before_the_message(self):
+        writer.supports_kitty_graphics = lambda stream, stdin: False
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit):
+            main()
+        self.assertTrue(output.getvalue().startswith(writer.CLEAR_LINE))
 
     def test_exit_1_without_graphics_support(self):
         writer.supports_kitty_graphics = lambda stream, stdin: False

@@ -25,6 +25,7 @@ NOT_SUPPORTED_MESSAGE = (
     "sketch requires a terminal with Kitty graphics protocol support."
 )
 KITTY_GRAPHICS_REPLY_TIMEOUT = 0.5
+CLEAR_LINE = "\r\x1b[K"
 
 
 @contextmanager
@@ -94,6 +95,7 @@ def run(stream: TextIO, stdin: TextIO) -> None:
 
 def main() -> None:
     if not supports_kitty_graphics(sys.stdout, sys.stdin):
+        sys.stdout.write(CLEAR_LINE)
         print(NOT_SUPPORTED_MESSAGE)
         sys.exit(1)
     run(sys.stdout, sys.stdin)
