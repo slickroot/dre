@@ -371,6 +371,24 @@ class EnterInsertModeTest(unittest.TestCase):
             (Box("a", children=(Box("c" + PAD),)),),
         )
 
+    def test_capital_i_enters_insert_mode(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        self.assertEqual(handle_key(state, "I").mode, "insert")
+
+    def test_capital_i_clears_the_selected_boxs_label(self):
+        state = State(boxes=(Box("a"), Box("b")), selected=(1,))
+        self.assertEqual(handle_key(state, "I").boxes, (Box("a"), Box(PAD)))
+
+    def test_capital_i_on_an_already_empty_label_leaves_it_unchanged(self):
+        state = State(boxes=(Box(PAD),), selected=(0,))
+        self.assertEqual(handle_key(state, "I").boxes, (Box(PAD),))
+
+    def test_capital_i_on_an_empty_canvas_returns_the_state_unchanged(self):
+        state = State()
+        self.assertEqual(handle_key(state, "I").boxes, state.boxes)
+        self.assertEqual(handle_key(state, "I").selected, state.selected)
+        self.assertEqual(handle_key(state, "I").mode, state.mode)
+
 
 class HandleInsertTest(unittest.TestCase):
     def test_a_printable_character_appends_to_the_selected_box_label(self):
@@ -856,6 +874,14 @@ class UndoKeyTest(unittest.TestCase):
         after_typing = handle_key(after_b, "h")
         after_typing = handle_key(after_typing, "i")
         after_escape = handle_key(after_typing, "\x1b")
+        self.assertEqual(handle_key(after_escape, "u"), before)
+
+    def test_u_after_capital_i_restores_the_boxs_previous_label(self):
+        boxes = (Box("a"),)
+        state = State(boxes=boxes, selected=(0,))
+        before = state
+        after = handle_key(state, "I")
+        after_escape = handle_key(after, "\x1b")
         self.assertEqual(handle_key(after_escape, "u"), before)
 
 

@@ -73,7 +73,14 @@ def grow(boxes: Tuple[Box, ...], path: Path) -> Tuple[Tuple[Box, ...], Path]:
     return grown, path + (new_index,)
 
 
-UNDOABLE_KEYS = {"b", "c", "f", "r", "C"}
+UNDOABLE_KEYS = {"b", "c", "f", "r", "C", "I"}
+
+
+def enter_insert(state: State, base_label: str) -> State:
+    boxes = rewrite(
+        state.boxes, state.selected, lambda box: replace(box, label=base_label + PAD)
+    )
+    return replace(state, boxes=boxes, mode="insert")
 
 
 def handle_command(state: State, key: str) -> State:
@@ -112,10 +119,11 @@ def handle_command(state: State, key: str) -> State:
     if key == "i":
         if not state.selected:
             return state
-        boxes = rewrite(
-            state.boxes, state.selected, lambda box: replace(box, label=box.label + PAD)
-        )
-        return replace(state, boxes=boxes, mode="insert")
+        return enter_insert(state, at(state.boxes, state.selected).label)
+    if key == "I":
+        if not state.selected:
+            return state
+        return enter_insert(state, "")
     if key == "c":
         if not state.selected:
             return state
