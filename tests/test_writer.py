@@ -1,6 +1,7 @@
 import fcntl
 import io
 import os
+import select
 import struct
 import sys
 import termios
@@ -177,16 +178,22 @@ class RawStdin:
         self.reply = reply.encode()
         self.reads = []
         self.os_read = os.read
+        self.select = select.select
 
     def fileno(self):
         return id(self)
 
     def __enter__(self):
         os.read = self._read
+        select.select = self._select
         return self
 
     def __exit__(self, *details):
         os.read = self.os_read
+        select.select = self.select
+
+    def _select(self, readers, writers, errors, timeout):
+        return ((readers if self.reply else []), [], [])
 
     def _read(self, fd, count):
         assert fd == self.fileno()
@@ -221,10 +228,15 @@ class SupportsKittyGraphicsTest(unittest.TestCase):
             result = supports_kitty_graphics(Stream(), stdin)
         self.assertTrue(result)
 
-    def test_an_empty_reply_is_not_supported(self):
+    def test_no_reply_is_not_supported(self):
         with Termios(), RawStdin("") as stdin:
             result = supports_kitty_graphics(Stream(), stdin)
         self.assertFalse(result)
+
+    def test_stdin_is_not_read_when_nothing_arrives(self):
+        with Termios(), RawStdin("") as stdin:
+            supports_kitty_graphics(Stream(), stdin)
+        self.assertEqual(stdin.reads, [])
 
     def test_a_reply_without_i_1_is_not_supported(self):
         with Termios(), RawStdin("garbage") as stdin:

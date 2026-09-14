@@ -1,5 +1,6 @@
 import fcntl
 import os
+import select
 import struct
 import sys
 import termios
@@ -23,6 +24,7 @@ KITTY_GRAPHICS_QUERY = "\x1b_Gi=1,a=q;\x1b\\"
 NOT_SUPPORTED_MESSAGE = (
     "sketch requires a terminal with Kitty graphics protocol support."
 )
+KITTY_GRAPHICS_REPLY_TIMEOUT = 0.5
 
 
 @contextmanager
@@ -47,7 +49,10 @@ def supports_kitty_graphics(stream: TextIO, stdin: TextIO) -> bool:
     stream.flush()
     tty.setraw(stdin)
     try:
-        reply = os.read(stdin.fileno(), 32)
+        ready, _, _ = select.select(
+            [stdin], [], [], KITTY_GRAPHICS_REPLY_TIMEOUT
+        )
+        reply = os.read(stdin.fileno(), 32) if ready else b""
     finally:
         termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
     return b"i=1" in reply
