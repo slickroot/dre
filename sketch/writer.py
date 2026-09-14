@@ -47,10 +47,10 @@ def supports_kitty_graphics(stream: TextIO, stdin: TextIO) -> bool:
     stream.flush()
     tty.setraw(stdin)
     try:
-        reply = stdin.read(32)
+        reply = os.read(stdin.fileno(), 32)
     finally:
         termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
-    return "i=1" in reply
+    return b"i=1" in reply
 
 
 def cell_size() -> Tuple[int, int]:

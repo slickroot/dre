@@ -174,10 +174,22 @@ class Termios:
 
 class RawStdin:
     def __init__(self, reply):
-        self.reply = reply
+        self.reply = reply.encode()
         self.reads = []
+        self.os_read = os.read
 
-    def read(self, count):
+    def fileno(self):
+        return id(self)
+
+    def __enter__(self):
+        os.read = self._read
+        return self
+
+    def __exit__(self, *details):
+        os.read = self.os_read
+
+    def _read(self, fd, count):
+        assert fd == self.fileno()
         self.reads.append(count)
         return self.reply
 
@@ -185,43 +197,38 @@ class RawStdin:
 class SupportsKittyGraphicsTest(unittest.TestCase):
     def test_the_query_is_written_to_the_stream(self):
         stream = Stream()
-        with Termios():
-            supports_kitty_graphics(stream, RawStdin("i=1"))
+        with Termios(), RawStdin("i=1") as stdin:
+            supports_kitty_graphics(stream, stdin)
         self.assertEqual(stream.text(), "\x1b_Gi=1,a=q;\x1b\\")
 
     def test_stdin_is_put_into_raw_mode(self):
-        stdin = RawStdin("i=1")
-        with Termios() as fake:
+        with Termios() as fake, RawStdin("i=1") as stdin:
             supports_kitty_graphics(Stream(), stdin)
         self.assertEqual(fake.raw, [stdin])
 
     def test_stdin_is_read_exactly_once(self):
-        stdin = RawStdin("i=1")
-        with Termios():
+        with Termios(), RawStdin("i=1") as stdin:
             supports_kitty_graphics(Stream(), stdin)
         self.assertEqual(len(stdin.reads), 1)
 
     def test_the_original_termios_settings_are_restored(self):
-        stdin = RawStdin("i=1")
-        with Termios() as fake:
+        with Termios() as fake, RawStdin("i=1") as stdin:
             supports_kitty_graphics(Stream(), stdin)
         self.assertEqual(fake.restored, [fake.saved])
 
     def test_a_reply_containing_i_1_is_supported(self):
-        with Termios():
-            result = supports_kitty_graphics(
-                Stream(), RawStdin("\x1b_Gi=1;OK\x1b\\")
-            )
+        with Termios(), RawStdin("\x1b_Gi=1;OK\x1b\\") as stdin:
+            result = supports_kitty_graphics(Stream(), stdin)
         self.assertTrue(result)
 
     def test_an_empty_reply_is_not_supported(self):
-        with Termios():
-            result = supports_kitty_graphics(Stream(), RawStdin(""))
+        with Termios(), RawStdin("") as stdin:
+            result = supports_kitty_graphics(Stream(), stdin)
         self.assertFalse(result)
 
     def test_a_reply_without_i_1_is_not_supported(self):
-        with Termios():
-            result = supports_kitty_graphics(Stream(), RawStdin("garbage"))
+        with Termios(), RawStdin("garbage") as stdin:
+            result = supports_kitty_graphics(Stream(), stdin)
         self.assertFalse(result)
 
 
