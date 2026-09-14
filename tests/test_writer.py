@@ -9,10 +9,10 @@ import tty
 import unittest
 from contextlib import contextmanager, redirect_stdout
 
-from sketch import writer
-from sketch.kitty import KittyGraphics
-from sketch.render import GraphicsRenderer, TerminalRenderer
-from sketch.writer import (
+from dre import writer
+from dre.kitty import KittyGraphics
+from dre.render import GraphicsRenderer, TerminalRenderer
+from dre.writer import (
     HOME_CURSOR,
     INTERRUPT,
     WINSIZE,

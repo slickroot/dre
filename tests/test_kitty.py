@@ -4,8 +4,8 @@ import re
 import unittest
 import zlib
 
-from sketch.kitty import CHUNK_SIZE, DELETE_ALL, KittyGraphics
-from sketch.render import Sprite
+from dre.kitty import CHUNK_SIZE, DELETE_ALL, KittyGraphics
+from dre.render import Sprite
 
 
 def sprite(width=2, height=2, col=0, row=0, byte=b"\xff"):

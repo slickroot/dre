@@ -1,6 +1,6 @@
 import unittest
 
-from sketch.layout import (
+from dre.layout import (
     BORDERS,
     BOX_HEIGHT,
     GAP_HEIGHT,
@@ -23,7 +23,7 @@ from sketch.layout import (
     width,
     with_cursor,
 )
-from sketch.state import PAD, Box, State
+from dre.state import PAD, Box, State
 
 
 def boxes(placements):

@@ -1,6 +1,6 @@
 import unittest
 
-from sketch.state import (
+from dre.state import (
     PAD,
     PALETTE_SIZE,
     PLAIN,
