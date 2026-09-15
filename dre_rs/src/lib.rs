@@ -1,13 +1,18 @@
 use pyo3::prelude::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use miniz_oxide::deflate::compress_to_vec_zlib;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+use std::io::Write;
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
-const ZLIB_DEFAULT_COMPRESSION: u8 = 6;
 
 fn zlib(pixels: &[u8]) -> Vec<u8> {
-    compress_to_vec_zlib(pixels, ZLIB_DEFAULT_COMPRESSION)
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(pixels)
+        .and_then(|_| encoder.finish())
+        .expect("writes to an in-memory Vec<u8> can't fail")
 }
 
 fn base64(bytes: Vec<u8>) -> String {
