@@ -22,14 +22,11 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            pkgs.python312
-            pkgs.uv
             rustToolchain
           ];
 
           shellHook = ''
             export CARGO_TARGET_DIR=$HOME/.cache/dre-cargo-target
-            uv sync
           '';
         };
       });
