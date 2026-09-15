@@ -104,12 +104,6 @@ impl Default for Node {
     }
 }
 
-impl Node {
-    fn new(label: String, colour: i64, fill: i64, rounded: bool, children: Vec<Node>) -> Self {
-        Node { label, colour, fill, rounded, children }
-    }
-}
-
 #[derive(Clone)]
 struct State {
     boxes: Vec<Node>,
