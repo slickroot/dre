@@ -71,19 +71,20 @@ impl KittyGraphics {
     fn new() -> Self {
         KittyGraphics
     }
+}
 
-    fn draw(&self, sprites: Vec<Bound<'_, PyAny>>) -> PyResult<String> {
+// Not in the #[pymethods] block above: `sprites` is now a concrete Rust
+// `Vec<render::Sprite>`, which doesn't (and shouldn't) implement PyO3's
+// `FromPyObject`, since nothing outside `main` crosses the PyO3 boundary for
+// this call anymore.
+impl KittyGraphics {
+    fn draw(&self, sprites: Vec<render::Sprite>) -> String {
         let mut out = DELETE_ALL.to_string();
         for sprite in sprites {
-            let row: i64 = sprite.getattr("row")?.extract()?;
-            let col: i64 = sprite.getattr("col")?.extract()?;
-            let width: i64 = sprite.getattr("width")?.extract()?;
-            let height: i64 = sprite.getattr("height")?.extract()?;
-            let pixels: Vec<u8> = sprite.getattr("pixels")?.extract()?;
-            out.push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
-            out.push_str(&transmission(&pixels, width, height));
+            out.push_str(&format!("\x1b[{};{}H", sprite.row + 1, sprite.col + 1));
+            out.push_str(&transmission(&sprite.pixels, sprite.width, sprite.height));
         }
-        Ok(out)
+        out
     }
 }
 

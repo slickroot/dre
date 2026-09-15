@@ -410,6 +410,270 @@ pub(crate) fn sprite_key(
     }
 }
 
+pub(crate) const BLANK_CELL: (char, i64, i64) = (BLANK, crate::PLAIN, crate::PLAIN);
+
+/// A cropped, positioned pixel buffer ready for the Kitty graphics protocol.
+/// Matches Python's `Sprite` dataclass.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Sprite {
+    pub(crate) pixels: Vec<u8>,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    pub(crate) col: i64,
+    pub(crate) row: i64,
+}
+
+/// Matches Python's `TerminalRenderer`: draws the character grid and
+/// collects the box/arrow sprites, composing with a `KittyGraphics`
+/// collaborator held as a plain field.
+pub(crate) struct TerminalRenderer {
+    pub(crate) graphics: crate::KittyGraphics,
+    pub(crate) cell_width: i64,
+    pub(crate) cell_height: i64,
+    pub(crate) cache: std::collections::HashMap<SpriteKey, Sprite>,
+}
+
+impl TerminalRenderer {
+    pub(crate) fn new(graphics: crate::KittyGraphics, cell_width: i64, cell_height: i64) -> Self {
+        TerminalRenderer {
+            graphics,
+            cell_width,
+            cell_height,
+            cache: std::collections::HashMap::new(),
+        }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        placements: &[crate::layout::Placement],
+        cols: i64,
+        rows: i64,
+    ) -> Vec<String> {
+        let mut lines = self.grid(placements, cols, rows);
+        let sprites = self.sprites(placements, cols, rows);
+        let payload = self.graphics.draw(sprites);
+        let last = lines.len() - 1;
+        lines[last] = format!("{}{}", lines[last], payload);
+        lines
+    }
+
+    fn grid(&self, placements: &[crate::layout::Placement], cols: i64, rows: i64) -> Vec<String> {
+        use crate::layout::PlacementNode;
+
+        let mut grid = vec![vec![BLANK_CELL; cols as usize]; rows as usize];
+        for placement in placements {
+            match &placement.node {
+                PlacementNode::Node(_) => self.draw_box(&mut grid, placement),
+                PlacementNode::Cursor(_) => self.draw_cursor(&mut grid, placement),
+                PlacementNode::Label(label) => self.draw_label(&mut grid, placement, label),
+                PlacementNode::Arrow(_) => {}
+            }
+        }
+        grid.into_iter()
+            .map(|row| row.into_iter().map(|(c, colour, fill)| cell(c, colour, fill)).collect())
+            .collect()
+    }
+
+    fn draw_box(&self, grid: &mut [Vec<(char, i64, i64)>], placement: &crate::layout::Placement) {
+        for y in placement.y..placement.y + placement.height {
+            for x in placement.x..placement.x + placement.width {
+                self.put(grid, x, y, BLANK_CELL);
+            }
+        }
+    }
+
+    fn draw_cursor(&self, grid: &mut [Vec<(char, i64, i64)>], placement: &crate::layout::Placement) {
+        self.stamp(grid, placement.x, placement.y, CURSOR);
+    }
+
+    fn draw_label(
+        &self,
+        grid: &mut [Vec<(char, i64, i64)>],
+        placement: &crate::layout::Placement,
+        label: &crate::layout::Label,
+    ) {
+        for (offset, character) in label.text.chars().enumerate() {
+            self.stamp(grid, placement.x + offset as i64, placement.y, character);
+        }
+    }
+
+    fn put(&self, grid: &mut [Vec<(char, i64, i64)>], x: i64, y: i64, cell: (char, i64, i64)) {
+        if 0 <= y && (y as usize) < grid.len() {
+            let row = &mut grid[y as usize];
+            if 0 <= x && (x as usize) < row.len() {
+                row[x as usize] = cell;
+            }
+        }
+    }
+
+    fn stamp(&self, grid: &mut [Vec<(char, i64, i64)>], x: i64, y: i64, character: char) {
+        if 0 <= y && (y as usize) < grid.len() {
+            let row = &mut grid[y as usize];
+            if 0 <= x && (x as usize) < row.len() {
+                let (_, colour, fill) = row[x as usize];
+                row[x as usize] = (character, colour, fill);
+            }
+        }
+    }
+
+    fn sprites(&mut self, placements: &[crate::layout::Placement], cols: i64, rows: i64) -> Vec<Sprite> {
+        use crate::layout::PlacementNode;
+
+        let mut sprites = Vec::new();
+        for placement in placements {
+            if !matches!(placement.node, PlacementNode::Node(_) | PlacementNode::Arrow(_)) {
+                continue;
+            }
+            let left = placement.x.max(0);
+            let top = placement.y.max(0);
+            let right = (placement.x + placement.width).min(cols);
+            let bottom = (placement.y + placement.height).min(rows);
+            if left >= right || top >= bottom {
+                continue;
+            }
+            sprites.push(self.sprite(placement, left, top, right, bottom));
+        }
+        sprites
+    }
+
+    // A keystroke changes one box, so most sprites are pixel for pixel what
+    // they were last frame. Only the shape and the colours reach the pixels,
+    // never the label or the position on screen.
+    fn sprite(
+        &mut self,
+        placement: &crate::layout::Placement,
+        left: i64,
+        top: i64,
+        right: i64,
+        bottom: i64,
+    ) -> Sprite {
+        use crate::layout::PlacementNode;
+
+        let key = sprite_key(placement, left, top, right, bottom);
+        if !self.cache.contains_key(&key) {
+            let drawn = match &placement.node {
+                PlacementNode::Node(_) => self.outline_box(placement, left, top, right, bottom),
+                _ => self.outline_arrow(placement, left, top, right, bottom),
+            };
+            if self.cache.len() >= CACHE_LIMIT {
+                self.cache.clear();
+            }
+            self.cache.insert(key.clone(), drawn);
+        }
+        let drawn = &self.cache[&key];
+        Sprite {
+            pixels: drawn.pixels.clone(),
+            width: drawn.width,
+            height: drawn.height,
+            col: left,
+            row: top,
+        }
+    }
+
+    fn outline_box(
+        &self,
+        placement: &crate::layout::Placement,
+        left: i64,
+        top: i64,
+        right: i64,
+        bottom: i64,
+    ) -> Sprite {
+        use crate::layout::PlacementNode;
+
+        let node = match &placement.node {
+            PlacementNode::Node(node) => node,
+            _ => unreachable!("outline_box is only called for Box placements"),
+        };
+        let width = placement.width * self.cell_width;
+        let height = placement.height * self.cell_height;
+        let border = BORDER;
+        let (r, g, b) = colour(node.colour);
+        let edge = (r, g, b, OPAQUE);
+        let fill = fill_colour(node.fill);
+        let first_x = (left - placement.x) * self.cell_width;
+        let last_x = (right - placement.x) * self.cell_width;
+        let first_y = (top - placement.y) * self.cell_height;
+        let last_y = (bottom - placement.y) * self.cell_height;
+        let span = last_x - first_x;
+        let radius = if node.rounded { ROUNDED_RADIUS } else { 0 };
+        let pixels = if radius != 0 {
+            RoundedBox::new(width, height, radius, border, edge, fill)
+                .pixels(first_x, last_x, first_y, last_y)
+        } else {
+            square_pixels(width, height, border, edge, fill, first_x, last_x, first_y, last_y)
+        };
+        Sprite { pixels, width: span, height: last_y - first_y, col: left, row: top }
+    }
+
+    // The arrow is a handful of lines on a transparent field, so lay the
+    // field down once and stroke only the lit pixels.
+    fn outline_arrow(
+        &self,
+        placement: &crate::layout::Placement,
+        left: i64,
+        top: i64,
+        right: i64,
+        bottom: i64,
+    ) -> Sprite {
+        use crate::layout::PlacementNode;
+
+        let arrow = match &placement.node {
+            PlacementNode::Arrow(arrow) => arrow,
+            _ => unreachable!("outline_arrow is only called for Arrow placements"),
+        };
+        let width = placement.width * self.cell_width;
+        // A stop is a child centre-row relative to the sprite's top, in the
+        // same row units as box placements; the pixel row of its centre is
+        // the row's own midpoint.
+        let stop_rows: Vec<i64> = arrow
+            .stops
+            .iter()
+            .map(|stop| stop * self.cell_height + self.cell_height / 2)
+            .collect();
+        let shaft_row = arrow.shaft * self.cell_height + self.cell_height / 2;
+        let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
+        let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
+        let midpoint = width / 2;
+        let (r, g, b) = colour(crate::PLAIN);
+        let ink = [r, g, b, OPAQUE];
+        let first_x = (left - placement.x) * self.cell_width;
+        let last_x = (right - placement.x) * self.cell_width;
+        let first_y = (top - placement.y) * self.cell_height;
+        let last_y = (bottom - placement.y) * self.cell_height;
+        let mut canvas = Canvas::new(first_x, last_x, first_y, last_y, ink);
+        canvas.horizontal(shaft_row, 0, midpoint, ARROW_STROKE);
+        canvas.vertical(midpoint, trunk_top, trunk_bottom, ARROW_STROKE);
+        for &stop_row in &stop_rows {
+            canvas.horizontal(stop_row, midpoint, width - 1, ARROW_STROKE);
+            self.arrowhead(&mut canvas, stop_row, midpoint, width - 1);
+        }
+        Sprite {
+            pixels: canvas.pixels(),
+            width: last_x - first_x,
+            height: last_y - first_y,
+            col: left,
+            row: top,
+        }
+    }
+
+    fn arrowhead(&self, canvas: &mut Canvas, stop_row: i64, midpoint: i64, right_edge: i64) {
+        let depth = arrowhead_depth();
+        let slope = arrowhead_slope();
+        for distance in 0..=(depth as i64) {
+            if distance as f64 >= depth {
+                break;
+            }
+            let x = right_edge - distance;
+            if x < midpoint {
+                break;
+            }
+            let spread = python_round(distance as f64 * slope) as i64;
+            canvas.point(x, stop_row - spread, ARROW_STROKE);
+            canvas.point(x, stop_row + spread, ARROW_STROKE);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,5 +1168,476 @@ mod tests {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         assert_eq!(sprite_key(&a, 0, 0, 4, 3), sprite_key(&b, 0, 0, 4, 3));
+    }
+
+    // -- TerminalRenderer::grid --
+
+    fn renderer(cell_width: i64, cell_height: i64) -> TerminalRenderer {
+        TerminalRenderer::new(crate::KittyGraphics::new(), cell_width, cell_height)
+    }
+
+    fn label_placement(text: &str, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement {
+        crate::layout::Placement {
+            node: crate::layout::PlacementNode::Label(crate::layout::Label {
+                text: text.to_string(),
+                path: vec![],
+            }),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn cursor_placement(x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement {
+        crate::layout::Placement {
+            node: crate::layout::PlacementNode::Cursor(crate::layout::Cursor),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    // -- TerminalRenderer::render (grid + graphics payload) --
+
+    #[test]
+    fn line_count_is_unchanged() {
+        let mut r = renderer(2, 4);
+        assert_eq!(r.render(&[], 3, 3).len(), 3);
+    }
+
+    #[test]
+    fn the_graphics_payload_is_appended_to_the_last_line_only() {
+        let mut r = renderer(2, 4);
+        let lines = r.render(&[], 3, 2);
+        // No sprites, so the payload is exactly KittyGraphics's delete-all
+        // preamble.
+        assert_eq!(lines[0], BLANK.to_string().repeat(3));
+        assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), crate::DELETE_ALL));
+    }
+
+    #[test]
+    fn empty_canvas_fills_terminal() {
+        let grid = renderer(1, 1).grid(&[], 11, 5);
+        assert_eq!(grid, vec![BLANK.to_string().repeat(11); 5]);
+    }
+
+    #[test]
+    fn grid_matches_the_requested_size() {
+        let (cols, rows) = (20, 7);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 4, 4, 3, 3)], cols, rows);
+        assert_eq!(grid.len() as i64, rows);
+        for line in &grid {
+            assert_eq!(line.chars().count() as i64, cols);
+        }
+    }
+
+    #[test]
+    fn a_box_claims_its_cells_without_border_characters() {
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 4, 4, 3, 3)], 11, 11);
+        assert_eq!(&grid[4][4..7], "   ");
+    }
+
+    #[test]
+    fn a_box_reaching_past_the_edge_is_clipped() {
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, 3, false), 3, 1, 3, 3)], 4, 2);
+        assert_eq!(grid, vec!["    ".to_string(), "    ".to_string()]);
+    }
+
+    #[test]
+    fn label_is_drawn_inside_the_box() {
+        let placements = vec![
+            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            label_placement("hi", 1, 1, 2, 1),
+        ];
+        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        assert_eq!(grid[1], " hi  ");
+    }
+
+    #[test]
+    fn cursor_is_drawn_after_the_label() {
+        let placements = vec![
+            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            label_placement("hi", 1, 1, 2, 1),
+            cursor_placement(3, 1, 1, 1),
+        ];
+        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        assert_eq!(grid[1], format!(" hi{} ", CURSOR));
+    }
+
+    #[test]
+    fn label_and_cursor_past_the_edge_are_clipped() {
+        let placements = vec![
+            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            label_placement("hi", 1, 1, 2, 1),
+            cursor_placement(3, 1, 1, 1),
+        ];
+        let grid = renderer(1, 1).grid(&placements, 3, 3);
+        assert_eq!(grid[1], " hi");
+    }
+
+    #[test]
+    fn a_box_does_not_draw_a_cursor() {
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3)], 5, 3);
+        assert!(!grid.join("").contains(CURSOR));
+    }
+
+    #[test]
+    fn cursor_placement_is_drawn_at_its_own_position() {
+        let grid = renderer(1, 1).grid(&[cursor_placement(2, 1, 1, 1)], 4, 3);
+        assert_eq!(
+            grid,
+            vec!["    ".to_string(), format!("  {} ", CURSOR), "    ".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_cursor_outside_the_grid_is_clipped() {
+        let grid = renderer(1, 1).grid(&[cursor_placement(9, 9, 1, 1)], 4, 3);
+        assert_eq!(grid, vec!["    ".to_string(); 3]);
+    }
+
+    #[test]
+    fn an_arrow_leaves_the_gap_blank() {
+        let grid = renderer(1, 1).grid(&[arrow_placement(vec![0], 0, 2, 1, 1, 2)], 4, 4);
+        assert_eq!(grid, vec!["    ".to_string(); 4]);
+    }
+
+    #[test]
+    fn a_plain_box_emits_no_escapes() {
+        let placements = vec![
+            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            label_placement("hi", 1, 1, 2, 1),
+            cursor_placement(3, 1, 1, 1),
+        ];
+        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        assert!(!grid.join("").contains('\x1b'));
+    }
+
+    #[test]
+    fn a_coloured_box_puts_no_colour_in_the_grid() {
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(2, crate::PLAIN, false), 0, 0, 5, 3)], 5, 3);
+        assert_eq!(grid, vec!["     ".to_string(); 3]);
+    }
+
+    // -- TerminalRenderer::sprites: collection and clipping --
+
+    #[test]
+    fn a_cursor_has_no_sprite() {
+        let mut r = renderer(2, 4);
+        let sprites = r.sprites(&[cursor_placement(1, 1, 1, 1)], 40, 20);
+        assert!(sprites.is_empty());
+    }
+
+    #[test]
+    fn a_box_off_screen_has_no_sprite() {
+        let mut r = renderer(4, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 10, 0, 4, 3)], 5, 20);
+        assert!(sprites.is_empty());
+    }
+
+    #[test]
+    fn a_box_overhanging_the_left_is_cropped() {
+        let mut r = renderer(4, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), -2, 1, 5, 3)], 40, 20);
+        assert_eq!(sprites.len(), 1);
+        assert_eq!(sprites[0].col, 0);
+        assert_eq!(sprites[0].width, 3 * 4);
+    }
+
+    #[test]
+    fn a_box_overhanging_the_top_is_cropped() {
+        let mut r = renderer(4, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, -2, 4, 5)], 40, 20);
+        assert_eq!(sprites[0].row, 0);
+        assert_eq!(sprites[0].height, 3 * 4);
+    }
+
+    #[test]
+    fn a_box_overhanging_the_right_is_cropped() {
+        let mut r = renderer(4, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, 0, 6, 3)], 4, 20);
+        assert_eq!(sprites[0].col, 1);
+        assert_eq!(sprites[0].width, 3 * 4);
+    }
+
+    #[test]
+    fn a_box_overhanging_the_bottom_is_cropped() {
+        let mut r = renderer(4, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 1, 3, 6)], 40, 4);
+        assert_eq!(sprites[0].row, 1);
+        assert_eq!(sprites[0].height, 3 * 4);
+    }
+
+    #[test]
+    fn a_box_sprite_sits_at_the_placement_cell() {
+        let mut r = renderer(6, 12);
+        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, 2, 4, 3)], 40, 20);
+        assert_eq!((sprites[0].col, sprites[0].row), (1, 2));
+        assert_eq!((sprites[0].width, sprites[0].height), (24, 36));
+    }
+
+    #[test]
+    fn a_border_takes_the_colour_of_its_palette_index() {
+        for index in 0..PALETTE.len() as i64 {
+            let mut r = renderer(2, 4);
+            let sprites = r.sprites(&[box_placement(box_node(index, crate::PLAIN, false), 0, 0, 2, 2)], 40, 20);
+            let (px, py, pz) = colour(index);
+            assert_eq!(&sprites[0].pixels[0..4], &[px, py, pz, OPAQUE]);
+        }
+    }
+
+    // -- TerminalRenderer::sprite (cache) --
+
+    #[test]
+    fn an_unchanged_box_is_not_redrawn() {
+        let mut r = renderer(2, 4);
+        let placement = box_placement(box_node(1, 2, false), 0, 0, 4, 3);
+        let first = r.sprites(&[placement.clone()], 40, 20);
+        assert_eq!(r.cache.len(), 1);
+        let second = r.sprites(&[placement], 40, 20);
+        assert_eq!(first[0].pixels, second[0].pixels);
+        assert_eq!(r.cache.len(), 1);
+    }
+
+    #[test]
+    fn a_recoloured_box_is_redrawn() {
+        let mut r = renderer(2, 4);
+        let plain = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let blue = r.sprites(&[box_placement(box_node(4, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        assert_ne!(plain[0].pixels, blue[0].pixels);
+        assert_eq!(r.cache.len(), 2);
+    }
+
+    #[test]
+    fn rounded_and_square_are_cached_distinctly() {
+        let mut r = renderer(2, 4);
+        for rounded in [false, true] {
+            r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, rounded), 0, 0, 4, 3)], 40, 20);
+        }
+        assert_eq!(r.cache.len(), 2);
+    }
+
+    #[test]
+    fn a_relabelled_box_of_the_same_size_reuses_its_pixels() {
+        let mut r = renderer(2, 4);
+        // The cache only keys on shape/crop, never the label, since the
+        // label is drawn on the character grid, not the sprite.
+        let first = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let second = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        assert_eq!(first[0].pixels, second[0].pixels);
+        assert_eq!(r.cache.len(), 1);
+    }
+
+    #[test]
+    fn a_cached_sprite_moves_to_its_own_position() {
+        let mut r = renderer(2, 4);
+        r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let moved = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 5, 2, 4, 3)], 40, 20);
+        assert_eq!((moved[0].col, moved[0].row), (5, 2));
+    }
+
+    #[test]
+    fn a_differently_cropped_box_is_redrawn() {
+        let mut r = renderer(2, 4);
+        let whole = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let cropped = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 2, 20);
+        assert_ne!(whole[0].width, cropped[0].width);
+        assert_eq!(r.cache.len(), 2);
+    }
+
+    #[test]
+    fn arrows_with_different_stops_are_redrawn() {
+        let mut r = renderer(2, 4);
+        let one = r.sprites(&[arrow_placement(vec![0], 0, 0, 0, 4, 6)], 40, 20);
+        let two = r.sprites(&[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)], 40, 20);
+        assert_ne!(one[0].pixels, two[0].pixels);
+    }
+
+    #[test]
+    fn the_cache_is_bounded() {
+        let mut r = renderer(2, 4);
+        for width in 0..(CACHE_LIMIT as i64 + 2) {
+            r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, width + 1, 3)], 4000, 20);
+        }
+        assert!(r.cache.len() <= CACHE_LIMIT);
+    }
+
+    // -- TerminalRenderer::outline_box --
+
+    fn box_outline(r: &TerminalRenderer, node: crate::Node, width: i64, height: i64) -> Sprite {
+        let placement = box_placement(node, 0, 0, width, height);
+        r.outline_box(&placement, 0, 0, width, height)
+    }
+
+    fn pixel_of(sprite: &Sprite, x: i64, y: i64) -> (u8, u8, u8, u8) {
+        pixel_at(&sprite.pixels, sprite.width, x, y)
+    }
+
+    #[test]
+    fn plain_fill_renders_transparent_interior_via_outline_box() {
+        let r = renderer(1, 1);
+        let size = 2 * BORDER + 3;
+        let sprite = box_outline(&r, box_node(crate::PLAIN, crate::PLAIN, false), size, size);
+        assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), TRANSPARENT);
+    }
+
+    #[test]
+    fn a_fill_colour_is_composited_over_black_via_outline_box() {
+        let r = renderer(1, 1);
+        let size = 2 * BORDER + 3;
+        let sprite = box_outline(&r, box_node(crate::PLAIN, 2, false), size, size);
+        assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), fill_colour(2));
+    }
+
+    #[test]
+    fn a_rounded_box_cuts_away_its_extreme_corners_via_outline_box() {
+        let r = renderer(8, 8);
+        let sprite = box_outline(&r, box_node(1, 2, true), 10, 10);
+        let (last_x, last_y) = (sprite.width - 1, sprite.height - 1);
+        assert_eq!(pixel_of(&sprite, 0, 0), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, last_x, 0), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, 0, last_y), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, last_x, last_y), TRANSPARENT);
+    }
+
+    #[test]
+    fn the_radius_leaves_the_sprite_size_and_position_alone() {
+        let r = renderer(8, 8);
+        let square = box_outline(&r, box_node(1, 2, false), 10, 10);
+        let rounded = box_outline(&r, box_node(1, 2, true), 10, 10);
+        assert_eq!((square.width, square.height), (rounded.width, rounded.height));
+        assert_eq!((square.col, square.row), (rounded.col, rounded.row));
+    }
+
+    #[test]
+    fn clipping_via_outline_box_is_a_pure_crop_of_the_whole_box() {
+        let r = renderer(8, 8);
+        let node = box_node(1, 2, true);
+        let whole = box_outline(&r, node.clone(), 10, 10);
+        let hidden_cols = 2;
+        let placement = crate::layout::Placement {
+            node: crate::layout::PlacementNode::Node(node),
+            x: -hidden_cols,
+            y: 0,
+            width: 10,
+            height: 10,
+        };
+        let clipped = r.outline_box(&placement, 0, 0, 10 - hidden_cols, 10);
+        let offset = hidden_cols * r.cell_width;
+        for y in 0..clipped.height {
+            for x in 0..clipped.width {
+                assert_eq!(pixel_of(&clipped, x, y), pixel_of(&whole, x + offset, y));
+            }
+        }
+    }
+
+    // -- TerminalRenderer::outline_arrow --
+
+    fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Sprite {
+        let placement = crate::layout::Placement {
+            node: crate::layout::PlacementNode::Arrow(crate::layout::Arrow { stops, shaft }),
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        r.outline_arrow(&placement, 0, 0, width, height)
+    }
+
+    #[test]
+    fn the_shaft_is_arrow_stroke_pixels_thick() {
+        let r = renderer(10, 10);
+        let ink = colour(crate::PLAIN);
+        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
+        let shaft_row = 1 * 10 + 5;
+        let rows: Vec<i64> = centered_span(shaft_row, ARROW_STROKE).collect();
+        for &y in &rows {
+            assert_eq!(pixel_of(&sprite, 5, y), ink);
+        }
+        assert_eq!(pixel_of(&sprite, 5, rows[0] - 1), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, 5, rows[rows.len() - 1] + 1), TRANSPARENT);
+    }
+
+    #[test]
+    fn the_trunk_is_arrow_stroke_pixels_thick() {
+        let r = renderer(10, 10);
+        let ink = colour(crate::PLAIN);
+        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
+        let midpoint = (4 * 10) / 2;
+        let columns: Vec<i64> = centered_span(midpoint, ARROW_STROKE).collect();
+        for &x in &columns {
+            assert_eq!(pixel_of(&sprite, x, 10), ink);
+        }
+        assert_eq!(pixel_of(&sprite, columns[0] - 1, 10), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, columns[columns.len() - 1] + 1, 10), TRANSPARENT);
+    }
+
+    #[test]
+    fn the_arrowhead_tip_sits_at_the_stop_row() {
+        let r = renderer(10, 10);
+        let ink = colour(crate::PLAIN);
+        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
+        let right_edge = 4 * 10 - 1;
+        for stop_row in [5, 25] {
+            assert_eq!(pixel_of(&sprite, right_edge, stop_row), ink);
+            assert_eq!(pixel_of(&sprite, right_edge - 1, stop_row), ink);
+        }
+    }
+
+    #[test]
+    fn a_single_stop_arrow_is_a_straight_line_across_every_column() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
+        let shaft_row = sprite.height / 2;
+        for x in 0..sprite.width {
+            assert_eq!(pixel_of(&sprite, x, shaft_row).3, OPAQUE);
+        }
+    }
+
+    #[test]
+    fn arrow_off_shape_pixels_are_transparent() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
+        assert_eq!(pixel_of(&sprite, 0, 0), TRANSPARENT);
+    }
+
+    #[test]
+    fn an_arrow_is_plain_grey() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
+        let (pr, pg, pb) = PLAIN_COLOUR;
+        let shaft_row = sprite.height / 2;
+        assert_eq!(pixel_of(&sprite, 0, shaft_row), (pr, pg, pb, OPAQUE));
+    }
+
+    #[test]
+    fn a_branching_arrow_has_a_stub_at_every_stop() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0, 3], 0, 2, 4);
+        let midpoint = sprite.width / 2;
+        for stop in [0, 3] {
+            let row = stop * 5 + 5 / 2;
+            for x in midpoint..sprite.width {
+                assert_eq!(pixel_of(&sprite, x, row).3, OPAQUE);
+            }
+        }
+    }
+
+    #[test]
+    fn a_branching_arrow_rows_between_stops_are_blank_past_the_trunk() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0, 3], 0, 2, 4);
+        let midpoint = sprite.width / 2;
+        let trunk_columns: std::collections::HashSet<i64> = centered_span(midpoint, ARROW_STROKE).collect();
+        let row_between_stops = 1 * 5 + 5 / 2;
+        for x in 0..sprite.width {
+            let expected = if trunk_columns.contains(&x) { OPAQUE } else { 0 };
+            assert_eq!(pixel_of(&sprite, x, row_between_stops).3, expected);
+        }
     }
 }
