@@ -1,22 +1,10 @@
-// This submodule is grown incrementally (spec 051): slices 1-2 built the
-// pure geometry helpers and the tree-assignment helpers, all private. This
-// slice (3 of 4) adds the Python-visible `layout()`/`with_cursor()` entry
-// points, the `Label`/`Arrow`/`Cursor`/`Placement` pyclasses, and the
-// private `Positioned`/`position`/`emit`/`column_tracks` helpers that glue
-// them together. `Celled`, `Positioned`, `Track`, and every helper function
-// stay private per the spec; only `layout`, `with_cursor`, `Label`,
-// `Arrow`, `Cursor`, and `Placement` are Python-visible.
-
 use crate::Node;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
-// Ported straight from `layout.py`'s module-level constants; `GAP_HEIGHT`
-// and `ROW_PITCH` are unused there too (nothing in the Python file
-// references them either), so they stay `allow(dead_code)` here rather
-// than being dropped, to keep this a faithful 1:1 port of the constant set.
+// Unused here too in layout.py; kept for parity with the constant set rather than dropped.
 #[allow(dead_code)]
 pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
@@ -60,9 +48,7 @@ pub(crate) fn width(box_: &Node) -> i64 {
     interior(&box_.label) + BORDERS
 }
 
-// Ported straight from `layout.py`'s `height()`; nothing in the Python
-// file calls it either (`BOX_HEIGHT` is used directly wherever a box's
-// height is needed), so it stays `allow(dead_code)` for parity.
+// Unused here too in layout.py; kept for parity with the helper set rather than dropped.
 #[allow(dead_code)]
 pub(crate) fn height(_box_: &Node) -> i64 {
     BOX_HEIGHT
@@ -156,8 +142,6 @@ pub(crate) struct Positioned {
     pub(crate) children: Vec<Positioned>,
 }
 
-/// Ports `layout.py`'s `Label` dataclass. `text` and `path` mirror
-/// `State.selected`'s `Vec<i64>` convention.
 #[pyclass(get_all)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Label {
@@ -174,10 +158,9 @@ impl Label {
     }
 }
 
-/// Ports `layout.py`'s `Arrow` dataclass. `stops` is stored as `Vec<i64>`
-/// but exposed to Python as a `tuple` via a custom getter (not `get_all`),
-/// because `render.py`'s sprite cache uses `(node.stops, node.shaft)` as a
-/// dict key and a `list` there would be unhashable.
+// stops is exposed via a custom tuple getter, not get_all: render.py's
+// sprite cache keys a dict on (node.stops, node.shaft), and a list there
+// would be unhashable.
 #[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Arrow {
@@ -199,7 +182,6 @@ impl Arrow {
     }
 }
 
-/// Ports `layout.py`'s `Cursor` dataclass (a unit type).
 #[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Cursor;
@@ -212,15 +194,7 @@ impl Cursor {
     }
 }
 
-/// `Placement.node`'s polymorphism: a Rust enum wrapping the four pyclasses
-/// a placement's node can be. Converting this enum into Python hands back
-/// the wrapped concrete pyclass instance, so `isinstance(placement.node,
-/// Box)` / `Label` / `Arrow` / `Cursor` in `render.py` keeps working
-/// unchanged. The variant is named `Node`, not `Box`, avoiding the same
-/// `std::boxed::Box` collision spec 050 already resolved for the domain
-/// type. Converting a Python object into this enum (needed since
-/// `Placement`'s constructor accepts any of the four types as `node`)
-/// tries each variant's inner pyclass in turn.
+// Named Node, not Box, to avoid the std::boxed::Box collision.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode {
     Node(Node),
@@ -260,7 +234,6 @@ impl<'py> FromPyObject<'py> for PlacementNode {
     }
 }
 
-/// Ports `layout.py`'s `Placement` dataclass.
 #[pyclass(get_all)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Placement {
@@ -279,11 +252,6 @@ impl Placement {
     }
 }
 
-/// Ports `layout.py`'s `position()`, folded together with the part of
-/// `fmap` that walks children: rather than porting `fmap` as a generic
-/// higher-order helper, this directly builds the positioned tree in one
-/// recursive pass, since `position` is the only function ever mapped over
-/// a `Celled` tree in this codebase.
 fn position(node: &Celled, columns: &[Track], left: i64, top: i64) -> Positioned {
     let track = columns[(2 * node.column) as usize];
     let x = left + track.offset;
@@ -303,8 +271,6 @@ fn position(node: &Celled, columns: &[Track], left: i64, top: i64) -> Positioned
     }
 }
 
-/// Ports `layout.py`'s `emit()`, a generator yielding 2 or 3 `Placement`s
-/// per node (box, label, and an arrow to children when there are any).
 fn emit(here: &Positioned, children: &[Positioned]) -> Vec<Placement> {
     let mut placements = vec![Placement {
         node: PlacementNode::Node(here.box_.clone()),
@@ -340,10 +306,6 @@ fn emit(here: &Positioned, children: &[Positioned]) -> Vec<Placement> {
     placements
 }
 
-/// Ports `layout.py`'s `flatten(emit, ...)` composition: rather than
-/// porting `flatten` as a generic higher-order helper, this walks the
-/// `Positioned` tree directly, since `emit` is the only function ever
-/// flattened over it in this codebase.
 fn emit_tree(here: &Positioned) -> Vec<Placement> {
     let mut placements = emit(here, &here.children);
     for child in &here.children {
@@ -352,9 +314,8 @@ fn emit_tree(here: &Positioned) -> Vec<Placement> {
     placements
 }
 
-/// Ports `layout.py`'s `column_tracks()`: doubles column index into track
-/// index, with a gap track after every column that has a parent (so an
-/// arrow has somewhere to draw), per the comment in the Python source.
+// Doubles column index into track index, with a gap track after every
+// column that has a parent, so an arrow has somewhere to draw.
 fn column_tracks(nodes: &[Celled]) -> Vec<Track> {
     let parents: Vec<&Celled> = nodes.iter().filter(|node| !node.children.is_empty()).collect();
 
@@ -367,7 +328,6 @@ fn column_tracks(nodes: &[Celled]) -> Vec<Track> {
     tracks(&extents, &indices)
 }
 
-/// Ports `layout.py`'s `layout()`.
 #[pyfunction]
 pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
     let trees = forest(&boxes);
@@ -401,8 +361,6 @@ pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
     boxes_first
 }
 
-/// Ports `layout.py`'s `with_cursor()`. The `path == selected` comparison
-/// now happens entirely inside Rust, since both sides are `Vec<i64>`.
 #[pyfunction]
 pub(crate) fn with_cursor(placements: Vec<Placement>, selected: Vec<i64>) -> Vec<Placement> {
     for placement in &placements {
@@ -496,14 +454,11 @@ mod tests {
 
     #[test]
     fn centre_centers_the_label_within_the_box() {
-        // width 7, label "hi" -> interior 2, leftover = 7 - 2 - 2 = 3
-        // centre = 1 + 3 - 3 // 2 = 1 + 3 - 1 = 3
         assert_eq!(centre(7, "hi"), 3);
     }
 
     #[test]
     fn centre_of_a_tightly_fit_label_is_one() {
-        // width == interior(label) + BORDERS -> leftover == 0
         assert_eq!(centre(2 + BORDERS, "hi"), 1);
     }
 
@@ -523,7 +478,6 @@ mod tests {
             Celled { row: 0, ..leaf_at(0) },
             Celled { row: 2, ..leaf_at(0) },
         ];
-        // middle = 1, so we look at children[0].row + 1
         assert_eq!(anchor(&children), 1);
     }
 
@@ -560,10 +514,7 @@ mod tests {
         assert_eq!(cell.children[1].path, vec![3, 1]);
         assert_eq!(cell.children[1].row, LEAF_STRIDE);
 
-        // two leaves consume 2 * LEAF_STRIDE rows of "free" space
         assert_eq!(next_free, 2 * LEAF_STRIDE);
-
-        // parent's own row is anchored between its two children
         assert_eq!(cell.row, anchor(&cell.children));
     }
 
@@ -576,7 +527,6 @@ mod tests {
         assert_eq!(trees[0].path, vec![0]);
         assert_eq!(trees[0].row, 0);
         assert_eq!(trees[1].path, vec![1]);
-        // second tree's row starts where the first tree's free counter left off
         assert_eq!(trees[1].row, LEAF_STRIDE);
     }
 
@@ -586,7 +536,6 @@ mod tests {
         let trees = forest(&boxes);
 
         assert_eq!(trees.len(), 2);
-        // the parent tree consumed 2 leaf slots (its two children)
         assert_eq!(trees[1].row, 2 * LEAF_STRIDE);
     }
 
@@ -620,7 +569,6 @@ mod tests {
     fn column_tracks_has_no_gap_track_for_a_leaf_only_forest() {
         let boxes = vec![node("aa"), node("b")];
         let columns = columns_for(&boxes);
-        // no parents -> only the doubled leaf-column track exists (index 0)
         assert_eq!(columns.len(), 1);
         assert_eq!(columns[0].extent, width(&node("aa")));
     }
@@ -629,8 +577,6 @@ mod tests {
     fn column_tracks_adds_a_gap_track_after_a_parent_column() {
         let boxes = vec![node_with_children("parent", vec![node("a")])];
         let columns = columns_for(&boxes);
-        // column 0 (the parent) is track 0, its gap is track 1, and its
-        // child's column 1 is track 2
         assert_eq!(columns.len(), 3);
         assert_eq!(columns[1].extent, GAP_WIDTH);
     }
