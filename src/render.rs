@@ -47,7 +47,7 @@ pub(crate) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
 
 /// Resolves a palette index (or `PLAIN`) to an RGB colour.
 pub(crate) fn colour(colour: i64) -> (u8, u8, u8) {
-    if colour == crate::PLAIN {
+    if colour == crate::state::PLAIN {
         PLAIN_COLOUR
     } else {
         PALETTE[colour as usize]
@@ -58,7 +58,7 @@ pub(crate) fn colour(colour: i64) -> (u8, u8, u8) {
 /// fully transparent, any other index is the palette colour alpha-composited
 /// at `FILL_ALPHA` and reported fully opaque.
 pub(crate) fn fill_colour(fill: i64) -> (u8, u8, u8, u8) {
-    if fill == crate::PLAIN {
+    if fill == crate::state::PLAIN {
         TRANSPARENT
     } else {
         let (r, g, b) = PALETTE[fill as usize];
@@ -72,10 +72,10 @@ pub(crate) fn fill_colour(fill: i64) -> (u8, u8, u8, u8) {
 /// matching Python's `_cell`.
 pub(crate) fn cell(character: char, colour: i64, fill: i64) -> String {
     let mut codes = Vec::new();
-    if colour != crate::PLAIN {
+    if colour != crate::state::PLAIN {
         codes.push(30 + colour);
     }
-    if fill != crate::PLAIN {
+    if fill != crate::state::PLAIN {
         codes.push(40 + fill);
     }
     if codes.is_empty() {
@@ -410,7 +410,7 @@ pub(crate) fn sprite_key(
     }
 }
 
-pub(crate) const BLANK_CELL: (char, i64, i64) = (BLANK, crate::PLAIN, crate::PLAIN);
+pub(crate) const BLANK_CELL: (char, i64, i64) = (BLANK, crate::state::PLAIN, crate::state::PLAIN);
 
 /// A cropped, positioned pixel buffer ready for the Kitty graphics protocol.
 /// Matches Python's `Sprite` dataclass.
@@ -634,7 +634,7 @@ impl TerminalRenderer {
         let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
         let midpoint = width / 2;
-        let (r, g, b) = colour(crate::PLAIN);
+        let (r, g, b) = colour(crate::state::PLAIN);
         let ink = [r, g, b, OPAQUE];
         let first_x = (left - placement.x) * self.cell_width;
         let last_x = (right - placement.x) * self.cell_width;
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn colour_of_plain_is_the_plain_grey() {
-        assert_eq!(colour(crate::PLAIN), PLAIN_COLOUR);
+        assert_eq!(colour(crate::state::PLAIN), PLAIN_COLOUR);
     }
 
     #[test]
@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
-        assert_eq!(fill_colour(crate::PLAIN), TRANSPARENT);
+        assert_eq!(fill_colour(crate::state::PLAIN), TRANSPARENT);
     }
 
     #[test]
@@ -822,17 +822,17 @@ mod tests {
 
     #[test]
     fn cell_with_plain_colour_and_fill_is_the_bare_character() {
-        assert_eq!(cell('x', crate::PLAIN, crate::PLAIN), "x");
+        assert_eq!(cell('x', crate::state::PLAIN, crate::state::PLAIN), "x");
     }
 
     #[test]
     fn cell_with_a_colour_only_emits_a_foreground_code() {
-        assert_eq!(cell('x', 2, crate::PLAIN), "\x1b[32mx\x1b[0m");
+        assert_eq!(cell('x', 2, crate::state::PLAIN), "\x1b[32mx\x1b[0m");
     }
 
     #[test]
     fn cell_with_a_fill_only_emits_a_background_code() {
-        assert_eq!(cell('x', crate::PLAIN, 3), "\x1b[43mx\x1b[0m");
+        assert_eq!(cell('x', crate::state::PLAIN, 3), "\x1b[43mx\x1b[0m");
     }
 
     #[test]
@@ -856,8 +856,8 @@ mod tests {
     #[test]
     fn plain_fill_renders_transparent_interior() {
         let size = 2 * BORDER + 3;
-        let edge = edge_rgba(crate::PLAIN);
-        let fill = fill_colour(crate::PLAIN);
+        let edge = edge_rgba(crate::state::PLAIN);
+        let fill = fill_colour(crate::state::PLAIN);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), TRANSPARENT);
     }
@@ -865,7 +865,7 @@ mod tests {
     #[test]
     fn a_fill_colour_is_composited_over_black_and_made_opaque() {
         let size = 2 * BORDER + 3;
-        let edge = edge_rgba(crate::PLAIN);
+        let edge = edge_rgba(crate::state::PLAIN);
         let fill = fill_colour(2);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(2));
@@ -1091,11 +1091,11 @@ mod tests {
 
     // -- sprite_key --
 
-    fn box_node(colour: i64, fill: i64, rounded: bool) -> crate::Node {
-        crate::Node { label: String::new(), colour, fill, rounded, children: vec![] }
+    fn box_node(colour: i64, fill: i64, rounded: bool) -> crate::state::Node {
+        crate::state::Node { label: String::new(), colour, fill, rounded, children: vec![] }
     }
 
-    fn box_placement(node: crate::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement {
+    fn box_placement(node: crate::state::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Node(node),
             x,
@@ -1226,7 +1226,7 @@ mod tests {
     #[test]
     fn grid_matches_the_requested_size() {
         let (cols, rows) = (20, 7);
-        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 4, 4, 3, 3)], cols, rows);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 4, 4, 3, 3)], cols, rows);
         assert_eq!(grid.len() as i64, rows);
         for line in &grid {
             assert_eq!(line.chars().count() as i64, cols);
@@ -1235,20 +1235,20 @@ mod tests {
 
     #[test]
     fn a_box_claims_its_cells_without_border_characters() {
-        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 4, 4, 3, 3)], 11, 11);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 4, 4, 3, 3)], 11, 11);
         assert_eq!(&grid[4][4..7], "   ");
     }
 
     #[test]
     fn a_box_reaching_past_the_edge_is_clipped() {
-        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, 3, false), 3, 1, 3, 3)], 4, 2);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::state::PLAIN, 3, false), 3, 1, 3, 3)], 4, 2);
         assert_eq!(grid, vec!["    ".to_string(), "    ".to_string()]);
     }
 
     #[test]
     fn label_is_drawn_inside_the_box() {
         let placements = vec![
-            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
         ];
         let grid = renderer(1, 1).grid(&placements, 5, 3);
@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn cursor_is_drawn_after_the_label() {
         let placements = vec![
-            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
@@ -1269,7 +1269,7 @@ mod tests {
     #[test]
     fn label_and_cursor_past_the_edge_are_clipped() {
         let placements = vec![
-            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
@@ -1279,7 +1279,7 @@ mod tests {
 
     #[test]
     fn a_box_does_not_draw_a_cursor() {
-        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3)], 5, 3);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 5, 3)], 5, 3);
         assert!(!grid.join("").contains(CURSOR));
     }
 
@@ -1307,7 +1307,7 @@ mod tests {
     #[test]
     fn a_plain_box_emits_no_escapes() {
         let placements = vec![
-            box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 5, 3),
+            box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
@@ -1317,7 +1317,7 @@ mod tests {
 
     #[test]
     fn a_coloured_box_puts_no_colour_in_the_grid() {
-        let grid = renderer(1, 1).grid(&[box_placement(box_node(2, crate::PLAIN, false), 0, 0, 5, 3)], 5, 3);
+        let grid = renderer(1, 1).grid(&[box_placement(box_node(2, crate::state::PLAIN, false), 0, 0, 5, 3)], 5, 3);
         assert_eq!(grid, vec!["     ".to_string(); 3]);
     }
 
@@ -1333,14 +1333,14 @@ mod tests {
     #[test]
     fn a_box_off_screen_has_no_sprite() {
         let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 10, 0, 4, 3)], 5, 20);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 10, 0, 4, 3)], 5, 20);
         assert!(sprites.is_empty());
     }
 
     #[test]
     fn a_box_overhanging_the_left_is_cropped() {
         let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), -2, 1, 5, 3)], 40, 20);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), -2, 1, 5, 3)], 40, 20);
         assert_eq!(sprites.len(), 1);
         assert_eq!(sprites[0].col, 0);
         assert_eq!(sprites[0].width, 3 * 4);
@@ -1349,7 +1349,7 @@ mod tests {
     #[test]
     fn a_box_overhanging_the_top_is_cropped() {
         let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, -2, 4, 5)], 40, 20);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 1, -2, 4, 5)], 40, 20);
         assert_eq!(sprites[0].row, 0);
         assert_eq!(sprites[0].height, 3 * 4);
     }
@@ -1357,7 +1357,7 @@ mod tests {
     #[test]
     fn a_box_overhanging_the_right_is_cropped() {
         let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, 0, 6, 3)], 4, 20);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 1, 0, 6, 3)], 4, 20);
         assert_eq!(sprites[0].col, 1);
         assert_eq!(sprites[0].width, 3 * 4);
     }
@@ -1365,7 +1365,7 @@ mod tests {
     #[test]
     fn a_box_overhanging_the_bottom_is_cropped() {
         let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 1, 3, 6)], 40, 4);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 1, 3, 6)], 40, 4);
         assert_eq!(sprites[0].row, 1);
         assert_eq!(sprites[0].height, 3 * 4);
     }
@@ -1373,7 +1373,7 @@ mod tests {
     #[test]
     fn a_box_sprite_sits_at_the_placement_cell() {
         let mut r = renderer(6, 12);
-        let sprites = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 1, 2, 4, 3)], 40, 20);
+        let sprites = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 1, 2, 4, 3)], 40, 20);
         assert_eq!((sprites[0].col, sprites[0].row), (1, 2));
         assert_eq!((sprites[0].width, sprites[0].height), (24, 36));
     }
@@ -1382,7 +1382,7 @@ mod tests {
     fn a_border_takes_the_colour_of_its_palette_index() {
         for index in 0..PALETTE.len() as i64 {
             let mut r = renderer(2, 4);
-            let sprites = r.sprites(&[box_placement(box_node(index, crate::PLAIN, false), 0, 0, 2, 2)], 40, 20);
+            let sprites = r.sprites(&[box_placement(box_node(index, crate::state::PLAIN, false), 0, 0, 2, 2)], 40, 20);
             let (px, py, pz) = colour(index);
             assert_eq!(&sprites[0].pixels[0..4], &[px, py, pz, OPAQUE]);
         }
@@ -1404,8 +1404,8 @@ mod tests {
     #[test]
     fn a_recoloured_box_is_redrawn() {
         let mut r = renderer(2, 4);
-        let plain = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
-        let blue = r.sprites(&[box_placement(box_node(4, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let plain = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let blue = r.sprites(&[box_placement(box_node(4, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
         assert_ne!(plain[0].pixels, blue[0].pixels);
         assert_eq!(r.cache.len(), 2);
     }
@@ -1414,7 +1414,7 @@ mod tests {
     fn rounded_and_square_are_cached_distinctly() {
         let mut r = renderer(2, 4);
         for rounded in [false, true] {
-            r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, rounded), 0, 0, 4, 3)], 40, 20);
+            r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, rounded), 0, 0, 4, 3)], 40, 20);
         }
         assert_eq!(r.cache.len(), 2);
     }
@@ -1424,8 +1424,8 @@ mod tests {
         let mut r = renderer(2, 4);
         // The cache only keys on shape/crop, never the label, since the
         // label is drawn on the character grid, not the sprite.
-        let first = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
-        let second = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let first = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let second = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
         assert_eq!(first[0].pixels, second[0].pixels);
         assert_eq!(r.cache.len(), 1);
     }
@@ -1433,16 +1433,16 @@ mod tests {
     #[test]
     fn a_cached_sprite_moves_to_its_own_position() {
         let mut r = renderer(2, 4);
-        r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
-        let moved = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 5, 2, 4, 3)], 40, 20);
+        r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let moved = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 5, 2, 4, 3)], 40, 20);
         assert_eq!((moved[0].col, moved[0].row), (5, 2));
     }
 
     #[test]
     fn a_differently_cropped_box_is_redrawn() {
         let mut r = renderer(2, 4);
-        let whole = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 40, 20);
-        let cropped = r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, 4, 3)], 2, 20);
+        let whole = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
+        let cropped = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 2, 20);
         assert_ne!(whole[0].width, cropped[0].width);
         assert_eq!(r.cache.len(), 2);
     }
@@ -1459,14 +1459,14 @@ mod tests {
     fn the_cache_is_bounded() {
         let mut r = renderer(2, 4);
         for width in 0..(CACHE_LIMIT as i64 + 2) {
-            r.sprites(&[box_placement(box_node(crate::PLAIN, crate::PLAIN, false), 0, 0, width + 1, 3)], 4000, 20);
+            r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, width + 1, 3)], 4000, 20);
         }
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
 
     // -- TerminalRenderer::outline_box --
 
-    fn box_outline(r: &TerminalRenderer, node: crate::Node, width: i64, height: i64) -> Sprite {
+    fn box_outline(r: &TerminalRenderer, node: crate::state::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
         r.outline_box(&placement, 0, 0, width, height)
     }
@@ -1479,7 +1479,7 @@ mod tests {
     fn plain_fill_renders_transparent_interior_via_outline_box() {
         let r = renderer(1, 1);
         let size = 2 * BORDER + 3;
-        let sprite = box_outline(&r, box_node(crate::PLAIN, crate::PLAIN, false), size, size);
+        let sprite = box_outline(&r, box_node(crate::state::PLAIN, crate::state::PLAIN, false), size, size);
         assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), TRANSPARENT);
     }
 
@@ -1487,7 +1487,7 @@ mod tests {
     fn a_fill_colour_is_composited_over_black_via_outline_box() {
         let r = renderer(1, 1);
         let size = 2 * BORDER + 3;
-        let sprite = box_outline(&r, box_node(crate::PLAIN, 2, false), size, size);
+        let sprite = box_outline(&r, box_node(crate::state::PLAIN, 2, false), size, size);
         assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), fill_colour(2));
     }
 
@@ -1549,7 +1549,7 @@ mod tests {
     #[test]
     fn the_shaft_is_arrow_stroke_pixels_thick() {
         let r = renderer(10, 10);
-        let ink = colour(crate::PLAIN);
+        let ink = colour(crate::state::PLAIN);
         let ink = (ink.0, ink.1, ink.2, OPAQUE);
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let shaft_row = 1 * 10 + 5;
@@ -1564,7 +1564,7 @@ mod tests {
     #[test]
     fn the_trunk_is_arrow_stroke_pixels_thick() {
         let r = renderer(10, 10);
-        let ink = colour(crate::PLAIN);
+        let ink = colour(crate::state::PLAIN);
         let ink = (ink.0, ink.1, ink.2, OPAQUE);
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let midpoint = (4 * 10) / 2;
@@ -1579,7 +1579,7 @@ mod tests {
     #[test]
     fn the_arrowhead_tip_sits_at_the_stop_row() {
         let r = renderer(10, 10);
-        let ink = colour(crate::PLAIN);
+        let ink = colour(crate::state::PLAIN);
         let ink = (ink.0, ink.1, ink.2, OPAQUE);
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let right_edge = 4 * 10 - 1;

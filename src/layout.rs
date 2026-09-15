@@ -1,4 +1,4 @@
-use crate::Node;
+use crate::state::Node;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 // Unused here too in layout.py; kept for parity with the constant set rather than dropped.
@@ -145,22 +145,10 @@ pub(crate) struct Label {
     pub(crate) path: Vec<i64>,
 }
 
-impl Label {
-    fn new(text: String, path: Vec<i64>) -> Self {
-        Label { text, path }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Arrow {
     pub(crate) stops: Vec<i64>,
     pub(crate) shaft: i64,
-}
-
-impl Arrow {
-    fn new(stops: Vec<i64>, shaft: i64) -> Self {
-        Arrow { stops, shaft }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -182,12 +170,6 @@ pub(crate) struct Placement {
     pub(crate) y: i64,
     pub(crate) width: i64,
     pub(crate) height: i64,
-}
-
-impl Placement {
-    fn new(node: PlacementNode, x: i64, y: i64, width: i64, height: i64) -> Self {
-        Placement { node, x, y, width, height }
-    }
 }
 
 fn position(node: &Celled, columns: &[Track], left: i64, top: i64) -> Positioned {
@@ -322,11 +304,11 @@ mod tests {
     use super::*;
 
     fn node(label: &str) -> Node {
-        Node::new(label.to_string(), crate::PLAIN, crate::PLAIN, false, vec![])
+        Node { label: label.to_string(), ..Default::default() }
     }
 
     fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node::new(label.to_string(), crate::PLAIN, crate::PLAIN, false, children)
+        Node { label: label.to_string(), children, ..Default::default() }
     }
 
     #[test]
@@ -659,45 +641,53 @@ mod tests {
 
     #[test]
     fn label_constructor_defaults_path_to_empty() {
-        let label = Label::new("hi".to_string(), vec![]);
+        let label = Label { text: "hi".to_string(), path: vec![] };
         assert_eq!(label.text, "hi");
         assert_eq!(label.path, Vec::<i64>::new());
     }
 
     #[test]
     fn arrow_stores_stops_and_shaft_as_plain_fields() {
-        let arrow = Arrow::new(vec![1, 2, 3], 5);
+        let arrow = Arrow { stops: vec![1, 2, 3], shaft: 5 };
         assert_eq!(arrow.stops, vec![1, 2, 3]);
         assert_eq!(arrow.shaft, 5);
     }
 
     #[test]
     fn placement_node_holds_the_matching_variants_inner_value() {
-        let box_placement = Placement::new(PlacementNode::Node(node("a")), 0, 0, 3, 3);
+        let box_placement = Placement { node: PlacementNode::Node(node("a")), x: 0, y: 0, width: 3, height: 3 };
         match box_placement.node {
             PlacementNode::Node(box_) => assert_eq!(box_, node("a")),
             _ => panic!("expected a Node variant"),
         }
 
-        let label_placement = Placement::new(
-            PlacementNode::Label(Label::new("a".to_string(), vec![0])),
-            0,
-            0,
-            1,
-            1,
-        );
+        let label_placement = Placement {
+            node: PlacementNode::Label(Label { text: "a".to_string(), path: vec![0] }),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
         match label_placement.node {
-            PlacementNode::Label(label) => assert_eq!(label, Label::new("a".to_string(), vec![0])),
+            PlacementNode::Label(label) => {
+                assert_eq!(label, Label { text: "a".to_string(), path: vec![0] })
+            }
             _ => panic!("expected a Label variant"),
         }
 
-        let arrow_placement = Placement::new(PlacementNode::Arrow(Arrow::new(vec![0], 0)), 0, 0, 1, 1);
+        let arrow_placement = Placement {
+            node: PlacementNode::Arrow(Arrow { stops: vec![0], shaft: 0 }),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
         match arrow_placement.node {
-            PlacementNode::Arrow(arrow) => assert_eq!(arrow, Arrow::new(vec![0], 0)),
+            PlacementNode::Arrow(arrow) => assert_eq!(arrow, Arrow { stops: vec![0], shaft: 0 }),
             _ => panic!("expected an Arrow variant"),
         }
 
-        let cursor_placement = Placement::new(PlacementNode::Cursor(Cursor), 0, 0, 1, 1);
+        let cursor_placement = Placement { node: PlacementNode::Cursor(Cursor), x: 0, y: 0, width: 1, height: 1 };
         assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
     }
 }
