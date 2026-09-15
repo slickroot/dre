@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Callable, Literal, Optional, Tuple
 
 PLAIN = -1
@@ -17,6 +18,22 @@ class Box:
 
 Mode = Literal["command", "insert"]
 Path = Tuple[int, ...]
+
+
+class Command(Enum):
+    UNDO = "u"
+    NEW_BOX = "b"
+    SELECT_PARENT = "h"
+    SELECT_CHILD = "l"
+    SELECT_NEXT = "j"
+    SELECT_PREVIOUS = "k"
+    EDIT_LABEL = "i"
+    RENAME_LABEL = "I"
+    CYCLE_COLOUR = "c"
+    CYCLE_SIBLINGS_COLOUR = "C"
+    CYCLE_FILL = "f"
+    TOGGLE_ROUNDED = "r"
+    QUIT = "q"
 
 
 @dataclass(frozen=True)
@@ -73,7 +90,14 @@ def grow(boxes: Tuple[Box, ...], path: Path) -> Tuple[Tuple[Box, ...], Path]:
     return grown, path + (new_index,)
 
 
-UNDOABLE_KEYS = {"b", "c", "f", "r", "C", "I"}
+UNDOABLE_COMMANDS = {
+    Command.NEW_BOX,
+    Command.CYCLE_COLOUR,
+    Command.CYCLE_FILL,
+    Command.TOGGLE_ROUNDED,
+    Command.CYCLE_SIBLINGS_COLOUR,
+    Command.RENAME_LABEL,
+}
 
 
 def enter_insert(state: State, base_label: str) -> State:
@@ -84,24 +108,28 @@ def enter_insert(state: State, base_label: str) -> State:
 
 
 def handle_command(state: State, key: str) -> State:
-    if key in UNDOABLE_KEYS:
+    try:
+        command = Command(key)
+    except ValueError:
+        return state
+    if command in UNDOABLE_COMMANDS:
         state = replace(state, before=replace(state, before=None))
-    if key == "u":
+    if command == Command.UNDO:
         return state.before if state.before is not None else state
-    if key == "b":
+    if command == Command.NEW_BOX:
         boxes, selected = grow(state.boxes, state.selected)
         return replace(state, boxes=boxes, mode="insert", selected=selected)
-    if key == "h":
+    if command == Command.SELECT_PARENT:
         if len(state.selected) <= 1:
             return state
         return replace(state, selected=state.selected[:-1])
-    if key == "l":
+    if command == Command.SELECT_CHILD:
         if not state.selected:
             return state
         if not at(state.boxes, state.selected).children:
             return state
         return replace(state, selected=state.selected + (0,))
-    if key == "j":
+    if command == Command.SELECT_NEXT:
         if not state.selected:
             return state
         parent, index = state.selected[:-1], state.selected[-1]
@@ -109,22 +137,22 @@ def handle_command(state: State, key: str) -> State:
         if index + 1 >= len(siblings):
             return state
         return replace(state, selected=parent + (index + 1,))
-    if key == "k":
+    if command == Command.SELECT_PREVIOUS:
         if not state.selected:
             return state
         parent, index = state.selected[:-1], state.selected[-1]
         if index == 0:
             return state
         return replace(state, selected=parent + (index - 1,))
-    if key == "i":
+    if command == Command.EDIT_LABEL:
         if not state.selected:
             return state
         return enter_insert(state, at(state.boxes, state.selected).label)
-    if key == "I":
+    if command == Command.RENAME_LABEL:
         if not state.selected:
             return state
         return enter_insert(state, "")
-    if key == "c":
+    if command == Command.CYCLE_COLOUR:
         if not state.selected:
             return state
         boxes = rewrite(
@@ -133,11 +161,11 @@ def handle_command(state: State, key: str) -> State:
             lambda box: replace(box, colour=next_colour(box.colour)),
         )
         return replace(state, boxes=boxes)
-    if key == "C":
+    if command == Command.CYCLE_SIBLINGS_COLOUR:
         if len(state.selected) <= 1:
             return state
         return replace(state, boxes=colour_row(state.boxes, state.selected))
-    if key == "f":
+    if command == Command.CYCLE_FILL:
         if not state.selected:
             return state
         boxes = rewrite(
@@ -146,7 +174,7 @@ def handle_command(state: State, key: str) -> State:
             lambda box: replace(box, fill=next_colour(box.fill)),
         )
         return replace(state, boxes=boxes)
-    if key == "r":
+    if command == Command.TOGGLE_ROUNDED:
         if not state.selected:
             return state
         boxes = rewrite(
@@ -155,7 +183,7 @@ def handle_command(state: State, key: str) -> State:
             lambda box: replace(box, rounded=not box.rounded),
         )
         return replace(state, boxes=boxes)
-    if key == "q":
+    if command == Command.QUIT:
         return replace(state, running=False)
     return state
 
