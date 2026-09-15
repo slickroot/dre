@@ -12,6 +12,9 @@ pyo3 = { version = "0.22" }
 base64 = "0.22"
 flate2 = "1"
 
+[dev-dependencies]
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+
 [features]
 extension-module = ["pyo3/extension-module"]
 default = ["extension-module"]
