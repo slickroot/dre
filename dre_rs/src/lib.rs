@@ -5,6 +5,7 @@ use flate2::Compression;
 use std::io::Write;
 
 mod layout;
+mod render;
 use layout::{layout as layout_fn, with_cursor, Arrow, Cursor, Label, Placement};
 
 const CHUNK_SIZE: usize = 4096;
