@@ -18,7 +18,11 @@ fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
     payload
         .as_bytes()
         .chunks(chunk_size)
-        .map(|chunk| std::str::from_utf8(chunk).unwrap().to_owned())
+        .map(|chunk| {
+            std::str::from_utf8(chunk)
+                .expect("base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8")
+                .to_owned()
+        })
         .collect()
 }
 
