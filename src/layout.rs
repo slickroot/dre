@@ -1,4 +1,4 @@
-use crate::Node;
+use crate::state::Node;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 // Unused here too in layout.py; kept for parity with the constant set rather than dropped.

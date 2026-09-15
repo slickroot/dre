@@ -9,7 +9,8 @@ use std::process::ExitCode;
 
 use crate::layout::{layout, with_cursor};
 use crate::render::TerminalRenderer;
-use crate::{handle_key, KittyGraphics, State};
+use crate::state::{handle_key, State};
+use crate::KittyGraphics;
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
