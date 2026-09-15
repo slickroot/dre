@@ -4,7 +4,7 @@ import re
 import unittest
 import zlib
 
-from dre.kitty import CHUNK_SIZE, DELETE_ALL, KittyGraphics
+from dre_rs import CHUNK_SIZE, DELETE_ALL, KittyGraphics
 from dre.render import Sprite
 
 
