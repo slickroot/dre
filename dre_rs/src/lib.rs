@@ -7,7 +7,7 @@ use std::io::Write;
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 
-fn encode(pixels: &[u8]) -> PyResult<String> {
+fn encode(pixels: &[u8]) -> std::io::Result<String> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(pixels)?;
     let compressed = encoder.finish()?;
