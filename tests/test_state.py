@@ -5,6 +5,7 @@ from dre.state import (
     PALETTE_SIZE,
     PLAIN,
     Box,
+    Command,
     State,
     at,
     colour_row,
@@ -121,45 +122,45 @@ class GrowTest(unittest.TestCase):
 
 class HandleKeyBTest(unittest.TestCase):
     def test_b_on_an_empty_canvas_appends_a_box(self):
-        self.assertEqual(handle_key(State(), "b").boxes, (Box(PAD),))
+        self.assertEqual(handle_key(State(), Command.NEW_BOX.value).boxes, (Box(PAD),))
 
     def test_b_on_an_empty_canvas_enters_insert_mode(self):
-        self.assertEqual(handle_key(State(), "b").mode, "insert")
+        self.assertEqual(handle_key(State(), Command.NEW_BOX.value).mode, "insert")
 
     def test_b_on_an_empty_canvas_selects_the_new_box(self):
-        self.assertEqual(handle_key(State(), "b").selected, (0,))
+        self.assertEqual(handle_key(State(), Command.NEW_BOX.value).selected, (0,))
 
     def test_b_on_an_empty_canvas_keeps_the_state_running(self):
-        self.assertIs(handle_key(State(), "b").running, True)
+        self.assertIs(handle_key(State(), Command.NEW_BOX.value).running, True)
 
     def test_b_on_an_empty_canvas_preserves_a_stopped_state(self):
-        state = handle_key(State(), "q")
-        self.assertIs(handle_key(state, "b").running, False)
+        state = handle_key(State(), Command.QUIT.value)
+        self.assertIs(handle_key(state, Command.NEW_BOX.value).running, False)
 
     def test_b_on_an_empty_canvas_does_not_mutate_the_given_state(self):
         state = State()
-        handle_key(state, "b")
+        handle_key(state, Command.NEW_BOX.value)
         self.assertEqual(state.boxes, ())
 
     def test_b_on_a_selected_box_appends_a_child(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        result = handle_key(state, "b")
+        result = handle_key(state, Command.NEW_BOX.value)
         self.assertEqual(result.boxes, (Box("a", children=(Box(PAD),)),))
 
     def test_b_on_a_selected_box_selects_the_new_child(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "b").selected, (0, 0))
+        self.assertEqual(handle_key(state, Command.NEW_BOX.value).selected, (0, 0))
 
     def test_b_on_a_selected_box_enters_insert_mode(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "b").mode, "insert")
+        self.assertEqual(handle_key(state, Command.NEW_BOX.value).mode, "insert")
 
     def test_a_second_b_on_the_same_parent_places_a_second_child(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        state = handle_key(state, "b")
+        state = handle_key(state, Command.NEW_BOX.value)
         state = handle_key(state, "\x1b")
-        state = handle_key(state, "h")
-        state = handle_key(state, "b")
+        state = handle_key(state, Command.SELECT_PARENT.value)
+        state = handle_key(state, Command.NEW_BOX.value)
         self.assertEqual(
             state.boxes, (Box("a", children=(Box(""), Box(PAD))),)
         )
@@ -170,24 +171,24 @@ class HandleKeyBTest(unittest.TestCase):
         self.assertEqual(handle_key(state, "x"), state)
 
     def test_q_stops_the_state(self):
-        self.assertIs(handle_key(State(boxes=(Box("a"),)), "q").running, False)
+        self.assertIs(handle_key(State(boxes=(Box("a"),)), Command.QUIT.value).running, False)
 
     def test_q_preserves_the_boxes(self):
         self.assertEqual(
-            handle_key(State(boxes=(Box("a"),)), "q").boxes, (Box("a"),)
+            handle_key(State(boxes=(Box("a"),)), Command.QUIT.value).boxes, (Box("a"),)
         )
 
     def test_q_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),))
-        handle_key(state, "q")
+        handle_key(state, Command.QUIT.value)
         self.assertIs(state.running, True)
 
     def test_q_preserves_the_selection(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "q").selected, (0,))
+        self.assertEqual(handle_key(state, Command.QUIT.value).selected, (0,))
 
     def test_q_keeps_command_mode(self):
-        self.assertEqual(handle_key(State(), "q").mode, "command")
+        self.assertEqual(handle_key(State(), Command.QUIT.value).mode, "command")
 
     def test_insert_mode_is_dispatched_separately(self):
         state = State(boxes=(Box(PAD),), mode="insert", selected=(0,))
@@ -197,19 +198,19 @@ class HandleKeyBTest(unittest.TestCase):
 class MoveSelectionParentTest(unittest.TestCase):
     def test_h_selects_the_parent(self):
         state = State(boxes=(Box("a", children=(Box("c"),)),), selected=(0, 0))
-        self.assertEqual(handle_key(state, "h").selected, (0,))
+        self.assertEqual(handle_key(state, Command.SELECT_PARENT.value).selected, (0,))
 
     def test_h_on_a_top_level_box_keeps_the_selection(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "h").selected, (0,))
+        self.assertEqual(handle_key(state, Command.SELECT_PARENT.value).selected, (0,))
 
     def test_h_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "h"), state)
+        self.assertEqual(handle_key(state, Command.SELECT_PARENT.value), state)
 
     def test_h_preserves_the_mode_the_running_flag_and_the_boxes(self):
         state = State(boxes=(Box("a", children=(Box("c"),)),), selected=(0, 0))
-        moved = handle_key(state, "h")
+        moved = handle_key(state, Command.SELECT_PARENT.value)
         self.assertEqual(
             (moved.mode, moved.running, moved.boxes),
             (state.mode, state.running, state.boxes),
@@ -217,7 +218,7 @@ class MoveSelectionParentTest(unittest.TestCase):
 
     def test_h_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a", children=(Box("c"),)),), selected=(0, 0))
-        handle_key(state, "h")
+        handle_key(state, Command.SELECT_PARENT.value)
         self.assertEqual(state.selected, (0, 0))
 
     def test_h_in_insert_mode_types_the_letter_h(self):
@@ -229,20 +230,20 @@ class MoveSelectionFirstChildTest(unittest.TestCase):
     def test_l_selects_the_first_child(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0,))
-        self.assertEqual(handle_key(state, "l").selected, (0, 0))
+        self.assertEqual(handle_key(state, Command.SELECT_CHILD.value).selected, (0, 0))
 
     def test_l_with_no_children_keeps_the_selection(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "l").selected, (0,))
+        self.assertEqual(handle_key(state, Command.SELECT_CHILD.value).selected, (0,))
 
     def test_l_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "l"), state)
+        self.assertEqual(handle_key(state, Command.SELECT_CHILD.value), state)
 
     def test_l_preserves_the_mode_the_running_flag_and_the_boxes(self):
         boxes = (Box("a", children=(Box("c"),)),)
         state = State(boxes=boxes, selected=(0,))
-        moved = handle_key(state, "l")
+        moved = handle_key(state, Command.SELECT_CHILD.value)
         self.assertEqual(
             (moved.mode, moved.running, moved.boxes),
             (state.mode, state.running, state.boxes),
@@ -251,7 +252,7 @@ class MoveSelectionFirstChildTest(unittest.TestCase):
     def test_l_does_not_mutate_the_given_state(self):
         boxes = (Box("a", children=(Box("c"),)),)
         state = State(boxes=boxes, selected=(0,))
-        handle_key(state, "l")
+        handle_key(state, Command.SELECT_CHILD.value)
         self.assertEqual(state.selected, (0,))
 
     def test_l_in_insert_mode_types_the_letter_l(self):
@@ -262,24 +263,24 @@ class MoveSelectionFirstChildTest(unittest.TestCase):
 class MoveSelectionSiblingTest(unittest.TestCase):
     def test_j_selects_the_next_top_level_sibling(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        self.assertEqual(handle_key(state, "j").selected, (1,))
+        self.assertEqual(handle_key(state, Command.SELECT_NEXT.value).selected, (1,))
 
     def test_j_with_no_next_sibling_keeps_the_selection(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        self.assertEqual(handle_key(state, "j").selected, (1,))
+        self.assertEqual(handle_key(state, Command.SELECT_NEXT.value).selected, (1,))
 
     def test_j_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "j"), state)
+        self.assertEqual(handle_key(state, Command.SELECT_NEXT.value), state)
 
     def test_j_selects_the_next_child_sibling(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 0))
-        self.assertEqual(handle_key(state, "j").selected, (0, 1))
+        self.assertEqual(handle_key(state, Command.SELECT_NEXT.value).selected, (0, 1))
 
     def test_j_preserves_the_mode_the_running_flag_and_the_boxes(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        moved = handle_key(state, "j")
+        moved = handle_key(state, Command.SELECT_NEXT.value)
         self.assertEqual(
             (moved.mode, moved.running, moved.boxes),
             (state.mode, state.running, state.boxes),
@@ -287,7 +288,7 @@ class MoveSelectionSiblingTest(unittest.TestCase):
 
     def test_j_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        handle_key(state, "j")
+        handle_key(state, Command.SELECT_NEXT.value)
         self.assertEqual(state.selected, (0,))
 
     def test_j_in_insert_mode_types_the_letter_j(self):
@@ -296,24 +297,24 @@ class MoveSelectionSiblingTest(unittest.TestCase):
 
     def test_k_selects_the_previous_top_level_sibling(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        self.assertEqual(handle_key(state, "k").selected, (0,))
+        self.assertEqual(handle_key(state, Command.SELECT_PREVIOUS.value).selected, (0,))
 
     def test_k_on_the_first_sibling_keeps_the_selection(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        self.assertEqual(handle_key(state, "k").selected, (0,))
+        self.assertEqual(handle_key(state, Command.SELECT_PREVIOUS.value).selected, (0,))
 
     def test_k_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "k"), state)
+        self.assertEqual(handle_key(state, Command.SELECT_PREVIOUS.value), state)
 
     def test_k_selects_the_previous_child_sibling(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
-        self.assertEqual(handle_key(state, "k").selected, (0, 0))
+        self.assertEqual(handle_key(state, Command.SELECT_PREVIOUS.value).selected, (0, 0))
 
     def test_k_preserves_the_mode_the_running_flag_and_the_boxes(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        moved = handle_key(state, "k")
+        moved = handle_key(state, Command.SELECT_PREVIOUS.value)
         self.assertEqual(
             (moved.mode, moved.running, moved.boxes),
             (state.mode, state.running, state.boxes),
@@ -321,7 +322,7 @@ class MoveSelectionSiblingTest(unittest.TestCase):
 
     def test_k_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        handle_key(state, "k")
+        handle_key(state, Command.SELECT_PREVIOUS.value)
         self.assertEqual(state.selected, (1,))
 
     def test_k_in_insert_mode_types_the_letter_k(self):
@@ -332,67 +333,67 @@ class MoveSelectionSiblingTest(unittest.TestCase):
 class EnterInsertModeTest(unittest.TestCase):
     def test_i_enters_insert_mode(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "i").mode, "insert")
+        self.assertEqual(handle_key(state, Command.EDIT_LABEL.value).mode, "insert")
 
     def test_i_leaves_the_selection_alone(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        self.assertEqual(handle_key(state, "i").selected, (0,))
+        self.assertEqual(handle_key(state, Command.EDIT_LABEL.value).selected, (0,))
 
     def test_i_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "i"), state)
+        self.assertEqual(handle_key(state, Command.EDIT_LABEL.value), state)
 
     def test_i_appends_pad_to_the_selected_boxs_label(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        self.assertEqual(handle_key(state, "i").boxes, (Box("a"), Box("b" + PAD)))
+        self.assertEqual(handle_key(state, Command.EDIT_LABEL.value).boxes, (Box("a"), Box("b" + PAD)))
 
     def test_i_types_into_the_selected_box(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        typed = handle_key(handle_key(state, "i"), "z")
+        typed = handle_key(handle_key(state, Command.EDIT_LABEL.value), "z")
         self.assertEqual(typed.boxes, (Box("a"), Box("bz" + PAD)))
 
     def test_i_keeps_the_state_running(self):
         state = State(boxes=(Box("hi"),), selected=(0,))
-        self.assertIs(handle_key(state, "i").running, True)
+        self.assertIs(handle_key(state, Command.EDIT_LABEL.value).running, True)
 
     def test_i_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("hi"),), selected=(0,))
-        handle_key(state, "i")
+        handle_key(state, Command.EDIT_LABEL.value)
         self.assertEqual(state.mode, "command")
 
     def test_i_on_an_empty_canvas_leaves_the_mode_as_command(self):
-        self.assertEqual(handle_key(State(), "i").mode, "command")
+        self.assertEqual(handle_key(State(), Command.EDIT_LABEL.value).mode, "command")
 
     def test_i_on_a_nested_box_edits_that_box(self):
         boxes = (Box("a", children=(Box("c"),)),)
         state = State(boxes=boxes, selected=(0, 0))
         self.assertEqual(
-            handle_key(state, "i").boxes,
+            handle_key(state, Command.EDIT_LABEL.value).boxes,
             (Box("a", children=(Box("c" + PAD),)),),
         )
 
     def test_capital_i_enters_insert_mode(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        self.assertEqual(handle_key(state, "I").mode, "insert")
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).mode, "insert")
 
     def test_capital_i_clears_the_selected_boxs_label(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
-        self.assertEqual(handle_key(state, "I").boxes, (Box("a"), Box(PAD)))
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).boxes, (Box("a"), Box(PAD)))
 
     def test_capital_i_on_an_already_empty_label_leaves_it_unchanged(self):
         state = State(boxes=(Box(PAD),), selected=(0,))
-        self.assertEqual(handle_key(state, "I").boxes, (Box(PAD),))
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).boxes, (Box(PAD),))
 
     def test_capital_i_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "I").boxes, state.boxes)
-        self.assertEqual(handle_key(state, "I").selected, state.selected)
-        self.assertEqual(handle_key(state, "I").mode, state.mode)
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).boxes, state.boxes)
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).selected, state.selected)
+        self.assertEqual(handle_key(state, Command.RENAME_LABEL.value).mode, state.mode)
 
 
 class HandleInsertTest(unittest.TestCase):
     def test_a_printable_character_appends_to_the_selected_box_label(self):
-        state = handle_key(State(), "b")
+        state = handle_key(State(), Command.NEW_BOX.value)
         self.assertEqual(handle_key(state, "h").boxes, (Box("h" + PAD),))
 
     def test_letters_bound_in_command_mode_are_ordinary_here(self):
@@ -420,11 +421,11 @@ class HandleInsertTest(unittest.TestCase):
         )
 
     def test_esc_then_i_resumes_the_existing_label(self):
-        state = handle_key(State(), "b")
+        state = handle_key(State(), Command.NEW_BOX.value)
         state = handle_key(state, "h")
         state = handle_key(state, "i")
         state = handle_key(state, "\x1b")
-        state = handle_key(state, "i")
+        state = handle_key(state, Command.EDIT_LABEL.value)
         self.assertEqual(handle_key(state, "!").boxes, (Box("hi!" + PAD),))
 
     def test_typing_does_not_mutate_the_given_state(self):
@@ -517,97 +518,97 @@ class CycleColourTest(unittest.TestCase):
     def test_c_advances_the_selected_box_from_plain(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         self.assertEqual(
-            handle_key(state, "c").boxes, (Box("a", colour=next_colour(PLAIN)),)
+            handle_key(state, Command.CYCLE_COLOUR.value).boxes, (Box("a", colour=next_colour(PLAIN)),)
         )
 
     def test_c_advances_the_selected_box_through_the_cycle(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         for _ in range(PALETTE_SIZE):
-            state = handle_key(state, "c")
+            state = handle_key(state, Command.CYCLE_COLOUR.value)
         self.assertNotEqual(state.boxes[0].colour, PLAIN)
-        state = handle_key(state, "c")
+        state = handle_key(state, Command.CYCLE_COLOUR.value)
         self.assertEqual(state.boxes[0].colour, PLAIN)
 
     def test_c_changes_only_the_selected_box(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
         self.assertEqual(
-            handle_key(state, "c").boxes,
+            handle_key(state, Command.CYCLE_COLOUR.value).boxes,
             (Box("a"), Box("b", colour=next_colour(PLAIN))),
         )
 
     def test_c_preserves_the_label(self):
         state = State(boxes=(Box("hi"),), selected=(0,))
-        self.assertEqual(handle_key(state, "c").boxes[0].label, "hi")
+        self.assertEqual(handle_key(state, Command.CYCLE_COLOUR.value).boxes[0].label, "hi")
 
     def test_c_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        result = handle_key(state, "c")
+        result = handle_key(state, Command.CYCLE_COLOUR.value)
         self.assertEqual(result.boxes, state.boxes)
         self.assertEqual(result.selected, state.selected)
 
     def test_c_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        handle_key(state, "c")
+        handle_key(state, Command.CYCLE_COLOUR.value)
         self.assertEqual(state.boxes, (Box("a"),))
 
     def test_c_on_a_nested_box_changes_only_that_box(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
         self.assertEqual(
-            handle_key(state, "c").boxes,
+            handle_key(state, Command.CYCLE_COLOUR.value).boxes,
             (Box("a", children=(Box("c"), Box("d", colour=next_colour(PLAIN)))),),
         )
 
     def test_c_does_not_change_fill(self):
         state = State(boxes=(Box("a", colour=next_colour(PLAIN)),), selected=(0,))
-        self.assertEqual(handle_key(state, "c").boxes[0].fill, PLAIN)
+        self.assertEqual(handle_key(state, Command.CYCLE_COLOUR.value).boxes[0].fill, PLAIN)
 
 
 class CycleFillTest(unittest.TestCase):
     def test_f_advances_the_selected_box_from_plain(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         self.assertEqual(
-            handle_key(state, "f").boxes, (Box("a", fill=next_colour(PLAIN)),)
+            handle_key(state, Command.CYCLE_FILL.value).boxes, (Box("a", fill=next_colour(PLAIN)),)
         )
 
     def test_f_advances_the_selected_box_through_the_cycle(self):
         state = State(boxes=(Box("a"),), selected=(0,))
         for _ in range(PALETTE_SIZE):
-            state = handle_key(state, "f")
+            state = handle_key(state, Command.CYCLE_FILL.value)
         self.assertNotEqual(state.boxes[0].fill, PLAIN)
-        state = handle_key(state, "f")
+        state = handle_key(state, Command.CYCLE_FILL.value)
         self.assertEqual(state.boxes[0].fill, PLAIN)
 
     def test_f_changes_only_the_selected_box(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
         self.assertEqual(
-            handle_key(state, "f").boxes,
+            handle_key(state, Command.CYCLE_FILL.value).boxes,
             (Box("a"), Box("b", fill=next_colour(PLAIN))),
         )
 
     def test_f_preserves_the_label(self):
         state = State(boxes=(Box("hi"),), selected=(0,))
-        self.assertEqual(handle_key(state, "f").boxes[0].label, "hi")
+        self.assertEqual(handle_key(state, Command.CYCLE_FILL.value).boxes[0].label, "hi")
 
     def test_f_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        result = handle_key(state, "f")
+        result = handle_key(state, Command.CYCLE_FILL.value)
         self.assertEqual(result.boxes, state.boxes)
         self.assertEqual(result.selected, state.selected)
 
     def test_f_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        handle_key(state, "f")
+        handle_key(state, Command.CYCLE_FILL.value)
         self.assertEqual(state.boxes, (Box("a"),))
 
     def test_f_does_not_change_colour(self):
         state = State(boxes=(Box("a", fill=next_colour(PLAIN)),), selected=(0,))
-        self.assertEqual(handle_key(state, "f").boxes[0].colour, PLAIN)
+        self.assertEqual(handle_key(state, Command.CYCLE_FILL.value).boxes[0].colour, PLAIN)
 
     def test_colour_and_fill_are_independent(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        state = handle_key(state, "c")
-        state = handle_key(state, "f")
+        state = handle_key(state, Command.CYCLE_COLOUR.value)
+        state = handle_key(state, Command.CYCLE_FILL.value)
         self.assertEqual(
             state.boxes,
             (Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
@@ -620,38 +621,38 @@ class ToggleRoundedTest(unittest.TestCase):
 
     def test_r_toggles_the_selected_box_to_rounded_corners(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        state = handle_key(state, "r")
+        state = handle_key(state, Command.TOGGLE_ROUNDED.value)
         self.assertEqual(state.boxes, (Box("a", rounded=True),))
 
     def test_r_toggles_back_to_square_corners_with_no_intermediate_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        state = handle_key(state, "r")
-        state = handle_key(state, "r")
+        state = handle_key(state, Command.TOGGLE_ROUNDED.value)
+        state = handle_key(state, Command.TOGGLE_ROUNDED.value)
         self.assertEqual(state.boxes, (Box("a", rounded=False),))
 
     def test_r_changes_only_the_selected_box(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(1,))
         self.assertEqual(
-            handle_key(state, "r").boxes,
+            handle_key(state, Command.TOGGLE_ROUNDED.value).boxes,
             (Box("a"), Box("b", rounded=True)),
         )
 
     def test_r_on_an_empty_canvas_returns_the_state_unchanged(self):
         state = State()
-        result = handle_key(state, "r")
+        result = handle_key(state, Command.TOGGLE_ROUNDED.value)
         self.assertEqual(result.boxes, state.boxes)
         self.assertEqual(result.selected, state.selected)
 
     def test_r_does_not_mutate_the_given_state(self):
         state = State(boxes=(Box("a"),), selected=(0,))
-        handle_key(state, "r")
+        handle_key(state, Command.TOGGLE_ROUNDED.value)
         self.assertEqual(state.boxes, (Box("a"),))
 
     def test_r_on_a_nested_box_changes_only_that_box(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
         self.assertEqual(
-            handle_key(state, "r").boxes,
+            handle_key(state, Command.TOGGLE_ROUNDED.value).boxes,
             (Box("a", children=(Box("c"), Box("d", rounded=True))),),
         )
 
@@ -660,7 +661,7 @@ class ToggleRoundedTest(unittest.TestCase):
             boxes=(Box("a", colour=next_colour(PLAIN), fill=next_colour(PLAIN)),),
             selected=(0,),
         )
-        result = handle_key(state, "r").boxes[0]
+        result = handle_key(state, Command.TOGGLE_ROUNDED.value).boxes[0]
         self.assertEqual(result.colour, next_colour(PLAIN))
         self.assertEqual(result.fill, next_colour(PLAIN))
 
@@ -731,13 +732,13 @@ class ColourRowTest(unittest.TestCase):
 class ColourRowKeyTest(unittest.TestCase):
     def test_capital_c_on_a_top_level_box_does_nothing(self):
         state = State(boxes=(Box("a"), Box("b")), selected=(0,))
-        result = handle_key(state, "C")
+        result = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
         self.assertEqual(result.boxes, state.boxes)
         self.assertEqual(result.selected, state.selected)
 
     def test_capital_c_with_nothing_selected_does_nothing(self):
         state = State(boxes=(Box("a"),), selected=())
-        result = handle_key(state, "C")
+        result = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
         self.assertEqual(result.boxes, state.boxes)
         self.assertEqual(result.selected, state.selected)
 
@@ -745,7 +746,7 @@ class ColourRowKeyTest(unittest.TestCase):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
         self.assertEqual(
-            handle_key(state, "C").boxes,
+            handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value).boxes,
             (
                 Box(
                     "a",
@@ -761,7 +762,7 @@ class ColourRowKeyTest(unittest.TestCase):
         boxes = (Box("a", children=(Box("c", colour=0), Box("d", colour=1))),)
         state = State(boxes=boxes, selected=(0, 1))
         self.assertEqual(
-            handle_key(state, "C").boxes,
+            handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value).boxes,
             (Box("a", children=(Box("c", colour=0), Box("d", colour=0))),),
         )
 
@@ -769,9 +770,9 @@ class ColourRowKeyTest(unittest.TestCase):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
         for _ in range(PALETTE_SIZE):
-            state = handle_key(state, "C")
+            state = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
         self.assertNotEqual(state.boxes[0].children[0].colour, PLAIN)
-        state = handle_key(state, "C")
+        state = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
         self.assertEqual(state.boxes[0].children[0].colour, PLAIN)
         self.assertEqual(state.boxes[0].children[1].colour, PLAIN)
 
@@ -781,13 +782,13 @@ class ColourRowKeyTest(unittest.TestCase):
             Box("e", children=(Box("f"),)),
         )
         state = State(boxes=boxes, selected=(0, 0))
-        result = handle_key(state, "C").boxes
+        result = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value).boxes
         self.assertEqual(result[1], Box("e", children=(Box("f"),)))
 
     def test_capital_c_does_not_mutate_the_given_state(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 0))
-        handle_key(state, "C")
+        handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
         self.assertEqual(
             state.boxes, (Box("a", children=(Box("c"), Box("d"))),)
         )
@@ -797,92 +798,92 @@ class UndoKeyTest(unittest.TestCase):
     def test_u_after_b_restores_boxes_and_selected(self):
         state = State()
         before = state
-        after = handle_key(state, "b")
+        after = handle_key(state, Command.NEW_BOX.value)
         after_escape = handle_key(after, "\x1b")
-        self.assertEqual(handle_key(after_escape, "u"), before)
+        self.assertEqual(handle_key(after_escape, Command.UNDO.value), before)
 
     def test_u_after_c_restores_boxes(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
         before = state
-        after = handle_key(state, "c")
-        self.assertEqual(handle_key(after, "u"), before)
+        after = handle_key(state, Command.CYCLE_COLOUR.value)
+        self.assertEqual(handle_key(after, Command.UNDO.value), before)
 
     def test_u_after_c_with_nothing_selected_is_a_no_op(self):
         state = State(boxes=(Box("a"),), selected=())
-        after = handle_key(state, "c")
-        self.assertEqual(handle_key(after, "u").boxes, state.boxes)
-        self.assertEqual(handle_key(after, "u").selected, state.selected)
+        after = handle_key(state, Command.CYCLE_COLOUR.value)
+        self.assertEqual(handle_key(after, Command.UNDO.value).boxes, state.boxes)
+        self.assertEqual(handle_key(after, Command.UNDO.value).selected, state.selected)
 
     def test_u_after_f_restores_boxes(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
         before = state
-        after = handle_key(state, "f")
-        self.assertEqual(handle_key(after, "u"), before)
+        after = handle_key(state, Command.CYCLE_FILL.value)
+        self.assertEqual(handle_key(after, Command.UNDO.value), before)
 
     def test_u_after_r_restores_boxes(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
         before = state
-        after = handle_key(state, "r")
-        self.assertEqual(handle_key(after, "u"), before)
+        after = handle_key(state, Command.TOGGLE_ROUNDED.value)
+        self.assertEqual(handle_key(after, Command.UNDO.value), before)
 
     def test_u_after_capital_c_restores_boxes(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 1))
         before = state
-        after = handle_key(state, "C")
-        self.assertEqual(handle_key(after, "u"), before)
+        after = handle_key(state, Command.CYCLE_SIBLINGS_COLOUR.value)
+        self.assertEqual(handle_key(after, Command.UNDO.value), before)
 
     def test_u_with_no_previous_action_leaves_state_unchanged(self):
         state = State()
-        self.assertEqual(handle_key(state, "u"), state)
+        self.assertEqual(handle_key(state, Command.UNDO.value), state)
 
     def test_u_twice_in_a_row_does_not_redo(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
-        after_command = handle_key(state, "c")
-        after_first_undo = handle_key(after_command, "u")
-        after_second_undo = handle_key(after_first_undo, "u")
+        after_command = handle_key(state, Command.CYCLE_COLOUR.value)
+        after_first_undo = handle_key(after_command, Command.UNDO.value)
+        after_second_undo = handle_key(after_first_undo, Command.UNDO.value)
         self.assertEqual(after_second_undo, after_first_undo)
 
     def test_movement_keys_do_not_clobber_an_existing_undo_snapshot(self):
         boxes = (Box("a", children=(Box("c"), Box("d"))),)
         state = State(boxes=boxes, selected=(0, 0))
         before = state
-        after_command = handle_key(state, "c")
-        navigated = handle_key(after_command, "j")
-        navigated = handle_key(navigated, "h")
-        navigated = handle_key(navigated, "l")
-        navigated = handle_key(navigated, "k")
-        self.assertEqual(handle_key(navigated, "u"), before)
+        after_command = handle_key(state, Command.CYCLE_COLOUR.value)
+        navigated = handle_key(after_command, Command.SELECT_NEXT.value)
+        navigated = handle_key(navigated, Command.SELECT_PARENT.value)
+        navigated = handle_key(navigated, Command.SELECT_CHILD.value)
+        navigated = handle_key(navigated, Command.SELECT_PREVIOUS.value)
+        self.assertEqual(handle_key(navigated, Command.UNDO.value), before)
 
     def test_q_does_not_clobber_an_existing_undo_snapshot(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
         before = state
-        after_command = handle_key(state, "c")
-        after_quit = handle_key(after_command, "q")
-        self.assertEqual(handle_key(after_quit, "u").boxes, before.boxes)
-        self.assertEqual(handle_key(after_quit, "u").selected, before.selected)
+        after_command = handle_key(state, Command.CYCLE_COLOUR.value)
+        after_quit = handle_key(after_command, Command.QUIT.value)
+        self.assertEqual(handle_key(after_quit, Command.UNDO.value).boxes, before.boxes)
+        self.assertEqual(handle_key(after_quit, Command.UNDO.value).selected, before.selected)
 
     def test_u_after_an_insert_session_undoes_the_b_that_started_it(self):
         state = State()
         before = state
-        after_b = handle_key(state, "b")
+        after_b = handle_key(state, Command.NEW_BOX.value)
         after_typing = handle_key(after_b, "h")
         after_typing = handle_key(after_typing, "i")
         after_escape = handle_key(after_typing, "\x1b")
-        self.assertEqual(handle_key(after_escape, "u"), before)
+        self.assertEqual(handle_key(after_escape, Command.UNDO.value), before)
 
     def test_u_after_capital_i_restores_the_boxs_previous_label(self):
         boxes = (Box("a"),)
         state = State(boxes=boxes, selected=(0,))
         before = state
-        after = handle_key(state, "I")
+        after = handle_key(state, Command.RENAME_LABEL.value)
         after_escape = handle_key(after, "\x1b")
-        self.assertEqual(handle_key(after_escape, "u"), before)
+        self.assertEqual(handle_key(after_escape, Command.UNDO.value), before)
 
 
 if __name__ == "__main__":
