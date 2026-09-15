@@ -1,8 +1,8 @@
 import unittest
 from math import cos, radians, tan
 
-from dre.layout import Arrow as LayoutArrow
-from dre.layout import Cursor, Label, Placement
+from dre_rs import Arrow as LayoutArrow
+from dre_rs import Cursor, Label, Placement
 from dre.render import (
     ARROW_STROKE,
     ARROWHEAD_ANGLE_DEG,

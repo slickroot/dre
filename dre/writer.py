@@ -8,8 +8,7 @@ import tty
 from contextlib import contextmanager
 from typing import Iterator, List, TextIO, Tuple
 
-from dre_rs import KittyGraphics, State, handle_key
-from .layout import layout, with_cursor
+from dre_rs import KittyGraphics, State, handle_key, layout, with_cursor
 from .render import Renderer, TerminalRenderer
 
 ENTER_ALTERNATE_SCREEN = "\x1b[?1049h"
@@ -74,7 +73,7 @@ def paint(stream: TextIO, lines: List[str]) -> None:
 
 def frame(state: State, renderer: Renderer, stream: TextIO) -> None:
     cols, rows = os.get_terminal_size()
-    placements = with_cursor(layout(state.boxes, cols, rows), tuple(state.selected))
+    placements = with_cursor(layout(state.boxes, cols, rows), state.selected)
     paint(stream, renderer.render(placements, cols, rows))
 
 
