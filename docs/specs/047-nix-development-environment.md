@@ -10,7 +10,7 @@ As a maintainer, I want this project's development environment (Python and Rust 
 - `nix develop` alone puts Python 3.12, `uv`, and a full stable Rust toolchain (`rustc`, `cargo`, `clippy`, `rustfmt`, via `rust-overlay`'s `default` profile, tracking latest stable) on `PATH` — no reliance on system Python or a system Rust install.
 - The `nixpkgs` input tracks `nixpkgs-unstable`.
 - A minimal `pyproject.toml` declares `maturin` and `pytest` as dependencies, with a committed `uv.lock`.
-- The shell's `shellHook` runs `uv sync` to create/update `.venv` against the Nix-provided Python 3.12, and exports `CARGO_TARGET_DIR=$HOME/.cache/sketch-cargo-target` so every git worktree shares one Rust build cache instead of recompiling `dre_rs`'s dependency tree from scratch.
+- The shell's `shellHook` runs `uv sync` to create/update `.venv` against the Nix-provided Python 3.12, and exports `CARGO_TARGET_DIR=$HOME/.cache/dre-cargo-target` so every git worktree shares one Rust build cache instead of recompiling `dre_rs`'s dependency tree from scratch.
 - Building `dre_rs` (`maturin develop`) and running the Python test suite (`pytest`) both remain manual steps a developer runs inside `nix develop` — the hook does not auto-build Rust on every shell entry.
 - This is dev-environment-only: no Nix package/derivation builds or distributes `dre` or `dre_rs` for end users.
 
@@ -51,7 +51,7 @@ Nix's Python 3.12 package lives in the read-only `/nix/store`, so `maturin devel
 `.claude/worktrees/<n>/` checkouts each currently get their own gitignored `dre_rs/target/`, so every new worktree recompiles `pyo3`, `base64`, `flate2`, and their transitive dependency trees from zero. The `shellHook` exports:
 
 ```
-CARGO_TARGET_DIR=$HOME/.cache/sketch-cargo-target
+CARGO_TARGET_DIR=$HOME/.cache/dre-cargo-target
 ```
 
 All worktrees of this repo then build into the same target directory. Cargo's own per-crate file locking makes concurrent builds from different worktrees into one target dir safe, so only code that actually changed gets recompiled, regardless of which worktree triggered the build. (Cargo's registry/download cache at `~/.cargo/registry` is already process-global and unaffected by worktrees, so no change is needed there.)
@@ -60,5 +60,5 @@ All worktrees of this repo then build into the same target directory. Cargo's ow
 
 - `flake.nix`, `flake.lock` — repo root, committed.
 - `pyproject.toml`, `uv.lock` — repo root, committed.
-- `.venv/`, `dre_rs/target/` — stay gitignored (target is now largely empty/unused locally since builds redirect to `$HOME/.cache/sketch-cargo-target`, but is left in `.gitignore` in case `CARGO_TARGET_DIR` is ever unset).
+- `.venv/`, `dre_rs/target/` — stay gitignored (target is now largely empty/unused locally since builds redirect to `$HOME/.cache/dre-cargo-target`, but is left in `.gitignore` in case `CARGO_TARGET_DIR` is ever unset).
 
