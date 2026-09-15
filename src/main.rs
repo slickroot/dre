@@ -168,8 +168,6 @@ mod tests {
 
     #[test]
     fn transmission_multi_chunk_splits_and_sets_more_flag() {
-        // Build pixel data large enough that the base64-encoded, zlib-compressed
-        // payload spans more than one CHUNK_SIZE chunk.
         let mut state: u32 = 0x9E3779B9;
         let pixels: Vec<u8> = (0..200_000u32)
             .map(|_| {
@@ -194,11 +192,8 @@ mod tests {
         }
 
         assert_eq!(result, expected);
-        // first chunk should be marked "more data coming" (m=1)
         assert!(result.contains(",m=1;"));
-        // and the transmission should end with the final escape terminator
         assert!(result.ends_with("\x1b\\"));
-        // there should be more than one escape sequence emitted
         assert!(result.matches("\x1b_G").count() > 1);
     }
 }

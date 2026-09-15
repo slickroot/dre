@@ -1,7 +1,6 @@
 use crate::state::Node;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
-// Unused here too in layout.py; kept for parity with the constant set rather than dropped.
 #[allow(dead_code)]
 pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
@@ -45,7 +44,6 @@ pub(crate) fn width(box_: &Node) -> i64 {
     interior(&box_.label) + BORDERS
 }
 
-// Unused here too in layout.py; kept for parity with the helper set rather than dropped.
 #[allow(dead_code)]
 pub(crate) fn height(_box_: &Node) -> i64 {
     BOX_HEIGHT
@@ -154,7 +152,6 @@ pub(crate) struct Arrow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Cursor;
 
-// Named Node, not Box, to avoid the std::boxed::Box collision.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode {
     Node(Node),
@@ -234,8 +231,6 @@ fn emit_tree(here: &Positioned) -> Vec<Placement> {
     placements
 }
 
-// Doubles column index into track index, with a gap track after every
-// column that has a parent, so an arrow has somewhere to draw.
 fn column_tracks(nodes: &[Celled]) -> Vec<Track> {
     let parents: Vec<&Celled> = nodes.iter().filter(|node| !node.children.is_empty()).collect();
 
@@ -265,8 +260,6 @@ pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
         .flat_map(|tree| emit_tree(&position(tree, &columns, left, top)))
         .collect();
 
-    // Boxes are opaque, so they are drawn before the arrows and cursor that
-    // must show on top of them.
     let mut boxes_first: Vec<Placement> = placements
         .iter()
         .filter(|placement| matches!(placement.node, PlacementNode::Node(_)))

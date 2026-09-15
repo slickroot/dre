@@ -26,9 +26,6 @@ const CLEAR_LINE: &str = "\r\x1b[K";
 
 nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
 
-/// RAII replacement for Python's `terminal_session` context manager. `Drop`
-/// can't propagate I/O errors the way `finally` could re-raise, so the
-/// restore writes here are best-effort (`let _ = ...`).
 struct RawModeGuard<'a, W: Write> {
     fd: RawFd,
     saved: Termios,
@@ -181,8 +178,6 @@ mod tests {
 
     #[test]
     fn the_stream_is_flushed() {
-        // Cursor<Vec<u8>>'s flush is a no-op that always succeeds; this
-        // asserts paint calls it rather than that flushing has an effect.
         let mut stream = Cursor::new(Vec::new());
         assert!(paint(&mut stream, &["ab".to_string()]).is_ok());
     }

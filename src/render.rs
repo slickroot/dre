@@ -1,15 +1,9 @@
-//! Colour/cell helpers and the `Canvas` pixel-buffer primitive, ported from
-//! `dre/render.py`. Later slices add `Sprite`/`TerminalRenderer`,
-//! `RoundedBox`, and the arrow/box pixel generators.
-
 pub(crate) const BLANK: char = ' ';
 pub(crate) const CURSOR: char = '\u{2588}';
 
 pub(crate) const ARROW_STROKE: i64 = 4;
 pub(crate) const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
 pub(crate) const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
-// The arrowhead is a fixed shape, so its depth and slope are constants rather
-// than trigonometry repeated for every pixel.
 pub(crate) fn arrowhead_depth() -> f64 {
     ARROWHEAD_EDGE_LENGTH * ARROWHEAD_ANGLE_DEG.to_radians().cos()
 }
@@ -18,12 +12,10 @@ pub(crate) fn arrowhead_slope() -> f64 {
 }
 pub(crate) const RESET: &str = "\x1b[0m";
 
-// Distinct shapes on a board are few; this only bounds a pathological run.
 #[allow(dead_code)]
 pub(crate) const CACHE_LIMIT: usize = 512;
 
 pub(crate) const ROUNDED_RADIUS: i64 = 20;
-// Boxes always have a bold border; thickness is fixed, not configurable.
 pub(crate) const BORDER: i64 = 4;
 
 pub(crate) const OPAQUE: u8 = 255;
@@ -38,14 +30,11 @@ pub(crate) const PALETTE: [(u8, u8, u8); 5] = [
     (58, 134, 255),
 ];
 
-/// Range of `width` integers centred on `c`, matching Python's
-/// `_centered_span`.
 pub(crate) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
 }
 
-/// Resolves a palette index (or `PLAIN`) to an RGB colour.
 pub(crate) fn colour(colour: i64) -> (u8, u8, u8) {
     if colour == crate::state::PLAIN {
         PLAIN_COLOUR
@@ -54,9 +43,6 @@ pub(crate) fn colour(colour: i64) -> (u8, u8, u8) {
     }
 }
 
-/// Resolves a palette index (or `PLAIN`) to a fill RGBA colour: `PLAIN` is
-/// fully transparent, any other index is the palette colour alpha-composited
-/// at `FILL_ALPHA` and reported fully opaque.
 pub(crate) fn fill_colour(fill: i64) -> (u8, u8, u8, u8) {
     if fill == crate::state::PLAIN {
         TRANSPARENT
@@ -68,8 +54,6 @@ pub(crate) fn fill_colour(fill: i64) -> (u8, u8, u8, u8) {
     }
 }
 
-/// Builds the SGR-escaped grid cell for `character`, `colour`, and `fill`,
-/// matching Python's `_cell`.
 pub(crate) fn cell(character: char, colour: i64, fill: i64) -> String {
     let mut codes = Vec::new();
     if colour != crate::state::PLAIN {
@@ -89,7 +73,6 @@ pub(crate) fn cell(character: char, colour: i64, fill: i64) -> String {
     format!("\x1b[{joined}m{character}{RESET}")
 }
 
-/// A clipped, transparent pixel field that lines are stroked onto.
 pub(crate) struct Canvas {
     pub(crate) first_x: i64,
     pub(crate) last_x: i64,
@@ -165,9 +148,6 @@ impl Canvas {
     }
 }
 
-/// Rounds like Python's `round`: half-to-even, rather than Rust's
-/// half-away-from-zero. Values here are always small and non-negative, so a
-/// simple floor-based implementation is sufficient.
 fn python_round(value: f64) -> f64 {
     let floor = value.floor();
     let diff = value - floor;
@@ -182,9 +162,6 @@ fn python_round(value: f64) -> f64 {
     }
 }
 
-/// Builds one row of a box's flat body: edge pixels on the left/right where
-/// the border overlaps this span, fill pixels in between. Matches Python's
-/// `_body_row`.
 pub(crate) fn body_row(
     width: i64,
     border: i64,
@@ -209,9 +186,6 @@ pub(crate) fn body_row(
     row
 }
 
-/// Builds the pixels of a square (non-rounded) box: only two kinds of row
-/// exist, so each is built once and repeated. Matches Python's
-/// `_square_pixels`.
 pub(crate) fn square_pixels(
     width: i64,
     height: i64,
@@ -240,8 +214,6 @@ pub(crate) fn square_pixels(
     pixels
 }
 
-/// A box whose corners are cut from a rounded-rectangle distance field.
-/// Matches Python's `RoundedBox`.
 pub(crate) struct RoundedBox {
     width: i64,
     height: i64,
@@ -344,10 +316,6 @@ impl RoundedBox {
     }
 }
 
-/// The cache key for a box/arrow sprite: the shape and crop that determine
-/// its pixels, independent of the placement's on-screen position. Matches
-/// Python's `_key`. `HashMap`-suitable (`Eq` + `Hash`), unlike Python's tuple
-/// key only because Rust requires the trait bound to be explicit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SpriteKey {
     Box {
@@ -373,9 +341,6 @@ pub(crate) enum SpriteKey {
     },
 }
 
-/// Builds the sprite cache key for a placement's crop. Only meaningful for
-/// `Box`/`Arrow` placements, mirroring the only placements `TerminalRenderer`
-/// ever sprites.
 pub(crate) fn sprite_key(
     placement: &crate::layout::Placement,
     left: i64,
@@ -412,8 +377,6 @@ pub(crate) fn sprite_key(
 
 pub(crate) const BLANK_CELL: (char, i64, i64) = (BLANK, crate::state::PLAIN, crate::state::PLAIN);
 
-/// A cropped, positioned pixel buffer ready for the Kitty graphics protocol.
-/// Matches Python's `Sprite` dataclass.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Sprite {
     pub(crate) pixels: Vec<u8>,
@@ -423,9 +386,6 @@ pub(crate) struct Sprite {
     pub(crate) row: i64,
 }
 
-/// Matches Python's `TerminalRenderer`: draws the character grid and
-/// collects the box/arrow sprites, composing with a `KittyGraphics`
-/// collaborator held as a plain field.
 pub(crate) struct TerminalRenderer {
     pub(crate) graphics: crate::KittyGraphics,
     pub(crate) cell_width: i64,
@@ -536,9 +496,6 @@ impl TerminalRenderer {
         sprites
     }
 
-    // A keystroke changes one box, so most sprites are pixel for pixel what
-    // they were last frame. Only the shape and the colours reach the pixels,
-    // never the label or the position on screen.
     fn sprite(
         &mut self,
         placement: &crate::layout::Placement,
@@ -605,8 +562,6 @@ impl TerminalRenderer {
         Sprite { pixels, width: span, height: last_y - first_y, col: left, row: top }
     }
 
-    // The arrow is a handful of lines on a transparent field, so lay the
-    // field down once and stroke only the lit pixels.
     fn outline_arrow(
         &self,
         placement: &crate::layout::Placement,
@@ -622,9 +577,6 @@ impl TerminalRenderer {
             _ => unreachable!("outline_arrow is only called for Arrow placements"),
         };
         let width = placement.width * self.cell_width;
-        // A stop is a child centre-row relative to the sprite's top, in the
-        // same row units as box placements; the pixel row of its centre is
-        // the row's own midpoint.
         let stop_rows: Vec<i64> = arrow
             .stops
             .iter()
@@ -850,9 +802,6 @@ mod tests {
         (pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3])
     }
 
-    // -- square_pixels / body_row: fill compositing (mirrors
-    // TerminalRendererFillTest, cell_width=cell_height=1) --
-
     #[test]
     fn plain_fill_renders_transparent_interior() {
         let size = 2 * BORDER + 3;
@@ -881,9 +830,6 @@ mod tests {
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(2));
     }
 
-    // -- square_pixels / body_row: border thickness (mirrors
-    // TerminalRendererBorderTest, cell_width=cell_height=4) --
-
     #[test]
     fn a_border_is_bold_at_every_edge() {
         let size = 3 * 4;
@@ -903,9 +849,6 @@ mod tests {
         assert_eq!(pixel_at(&pixels, size, BORDER, 5), fill);
         assert_eq!(pixel_at(&pixels, size, size - 1 - BORDER, 5), fill);
     }
-
-    // -- RoundedBox: corner radius (mirrors TerminalRendererCornerRadiusTest,
-    // cell_width=cell_height=2*ROUNDED_RADIUS/5=8, box is 10x10 cells) --
 
     const CORNER_SIZE: i64 = 80;
 
@@ -1052,10 +995,6 @@ mod tests {
         }
     }
 
-    // -- RoundedBox: small box where corner bands overlap (mirrors
-    // TerminalRendererSmallBoxTest, cell = ROUNDED_RADIUS/2 = 10, box is 2x2
-    // cells) --
-
     const SMALL_SIZE: i64 = 20;
 
     #[test]
@@ -1088,8 +1027,6 @@ mod tests {
             }
         }
     }
-
-    // -- sprite_key --
 
     fn box_node(colour: i64, fill: i64, rounded: bool) -> crate::state::Node {
         crate::state::Node { label: String::new(), colour, fill, rounded, children: vec![] }
@@ -1170,8 +1107,6 @@ mod tests {
         assert_eq!(sprite_key(&a, 0, 0, 4, 3), sprite_key(&b, 0, 0, 4, 3));
     }
 
-    // -- TerminalRenderer::grid --
-
     fn renderer(cell_width: i64, cell_height: i64) -> TerminalRenderer {
         TerminalRenderer::new(crate::KittyGraphics::new(), cell_width, cell_height)
     }
@@ -1199,8 +1134,6 @@ mod tests {
         }
     }
 
-    // -- TerminalRenderer::render (grid + graphics payload) --
-
     #[test]
     fn line_count_is_unchanged() {
         let mut r = renderer(2, 4);
@@ -1211,8 +1144,6 @@ mod tests {
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
         let mut r = renderer(2, 4);
         let lines = r.render(&[], 3, 2);
-        // No sprites, so the payload is exactly KittyGraphics's delete-all
-        // preamble.
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), crate::DELETE_ALL));
     }
@@ -1321,8 +1252,6 @@ mod tests {
         assert_eq!(grid, vec!["     ".to_string(); 3]);
     }
 
-    // -- TerminalRenderer::sprites: collection and clipping --
-
     #[test]
     fn a_cursor_has_no_sprite() {
         let mut r = renderer(2, 4);
@@ -1388,8 +1317,6 @@ mod tests {
         }
     }
 
-    // -- TerminalRenderer::sprite (cache) --
-
     #[test]
     fn an_unchanged_box_is_not_redrawn() {
         let mut r = renderer(2, 4);
@@ -1422,8 +1349,6 @@ mod tests {
     #[test]
     fn a_relabelled_box_of_the_same_size_reuses_its_pixels() {
         let mut r = renderer(2, 4);
-        // The cache only keys on shape/crop, never the label, since the
-        // label is drawn on the character grid, not the sprite.
         let first = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
         let second = r.sprites(&[box_placement(box_node(crate::state::PLAIN, crate::state::PLAIN, false), 0, 0, 4, 3)], 40, 20);
         assert_eq!(first[0].pixels, second[0].pixels);
@@ -1463,8 +1388,6 @@ mod tests {
         }
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
-
-    // -- TerminalRenderer::outline_box --
 
     fn box_outline(r: &TerminalRenderer, node: crate::state::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
@@ -1532,8 +1455,6 @@ mod tests {
             }
         }
     }
-
-    // -- TerminalRenderer::outline_arrow --
 
     fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Sprite {
         let placement = crate::layout::Placement {
