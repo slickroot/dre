@@ -34,7 +34,7 @@ fn escape(keys: &str, payload: &str) -> String {
     format!("\x1b_G{keys};{payload}\x1b\\")
 }
 
-fn transmission(pixels: &[u8], width: i64, height: i64) -> PyResult<String> {
+fn transmission(pixels: &[u8], width: i64, height: i64) -> String {
     let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
@@ -46,7 +46,7 @@ fn transmission(pixels: &[u8], width: i64, height: i64) -> PyResult<String> {
         let keys = format!("m={}", more(&chunk_list, index));
         escapes.push(escape(&keys, chunk));
     }
-    Ok(escapes.join(""))
+    escapes.join("")
 }
 
 #[pyclass]
@@ -68,7 +68,7 @@ impl KittyGraphics {
             let height: i64 = sprite.getattr("height")?.extract()?;
             let pixels: Vec<u8> = sprite.getattr("pixels")?.extract()?;
             out.push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
-            out.push_str(&transmission(&pixels, width, height)?);
+            out.push_str(&transmission(&pixels, width, height));
         }
         Ok(out)
     }
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn transmission_single_chunk_has_expected_header_and_m0() {
         let pixels = vec![1u8, 2, 3, 4];
-        let result = transmission(&pixels, 2, 1).unwrap();
+        let result = transmission(&pixels, 2, 1);
 
         let expected_payload = encode(&pixels);
         let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0".to_string();
@@ -169,7 +169,7 @@ mod tests {
                 (state >> 16) as u8
             })
             .collect();
-        let result = transmission(&pixels, 100, 100).unwrap();
+        let result = transmission(&pixels, 100, 100);
 
         let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
