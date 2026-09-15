@@ -5,6 +5,7 @@ use flate2::Compression;
 use std::io::Write;
 
 mod layout;
+use layout::{layout as layout_fn, with_cursor, Arrow, Cursor, Label, Placement};
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
@@ -479,7 +480,13 @@ fn dre_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KittyGraphics>()?;
     m.add_class::<Node>()?;
     m.add_class::<State>()?;
+    m.add_class::<Label>()?;
+    m.add_class::<Arrow>()?;
+    m.add_class::<Cursor>()?;
+    m.add_class::<Placement>()?;
     m.add_function(wrap_pyfunction!(handle_key, m)?)?;
+    m.add_function(wrap_pyfunction!(layout_fn, m)?)?;
+    m.add_function(wrap_pyfunction!(with_cursor, m)?)?;
     m.add("CHUNK_SIZE", CHUNK_SIZE)?;
     m.add("DELETE_ALL", DELETE_ALL)?;
     m.add("PLAIN", PLAIN)?;
