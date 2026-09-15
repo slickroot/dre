@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.22" }
 base64 = "0.22"
 flate2 = "1"
+miniz_oxide = "0.9"
 
 [features]
 extension-module = ["pyo3/extension-module"]
