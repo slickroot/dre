@@ -7,18 +7,31 @@ use std::io::Write;
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 
-fn encode(pixels: &[u8]) -> std::io::Result<String> {
+fn zlib(pixels: &[u8]) -> Vec<u8> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(pixels)?;
-    let compressed = encoder.finish()?;
-    Ok(STANDARD.encode(compressed))
+    encoder
+        .write_all(pixels)
+        .and_then(|_| encoder.finish())
+        .expect("writes to an in-memory Vec<u8> can't fail")
+}
+
+fn base64(bytes: Vec<u8>) -> String {
+    STANDARD.encode(bytes)
+}
+
+fn encode(pixels: &[u8]) -> String {
+    base64(zlib(pixels))
 }
 
 fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
     payload
         .as_bytes()
         .chunks(chunk_size)
-        .map(|chunk| std::str::from_utf8(chunk).unwrap().to_owned())
+        .map(|chunk| {
+            std::str::from_utf8(chunk)
+                .expect("base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -30,8 +43,8 @@ fn escape(keys: &str, payload: &str) -> String {
     format!("\x1b_G{keys};{payload}\x1b\\")
 }
 
-fn transmission(pixels: &[u8], width: i64, height: i64) -> PyResult<String> {
-    let payload = encode(pixels)?;
+fn transmission(pixels: &[u8], width: i64, height: i64) -> String {
+    let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
         "a=T,f=32,s={width},v={height},o=z,q=2,z=-1,m={}",
@@ -42,7 +55,7 @@ fn transmission(pixels: &[u8], width: i64, height: i64) -> PyResult<String> {
         let keys = format!("m={}", more(&chunk_list, index));
         escapes.push(escape(&keys, chunk));
     }
-    Ok(escapes.join(""))
+    escapes.join("")
 }
 
 #[pyclass]
@@ -64,7 +77,7 @@ impl KittyGraphics {
             let height: i64 = sprite.getattr("height")?.extract()?;
             let pixels: Vec<u8> = sprite.getattr("pixels")?.extract()?;
             out.push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
-            out.push_str(&transmission(&pixels, width, height)?);
+            out.push_str(&transmission(&pixels, width, height));
         }
         Ok(out)
     }
@@ -133,7 +146,7 @@ mod tests {
     #[test]
     fn encode_round_trips_through_zlib_and_base64() {
         let pixels: Vec<u8> = (0..=255).collect();
-        let encoded = encode(&pixels).unwrap();
+        let encoded = encode(&pixels);
         let compressed = STANDARD.decode(&encoded).unwrap();
         let mut decoder = ZlibDecoder::new(&compressed[..]);
         let mut decompressed = Vec::new();
@@ -144,9 +157,9 @@ mod tests {
     #[test]
     fn transmission_single_chunk_has_expected_header_and_m0() {
         let pixels = vec![1u8, 2, 3, 4];
-        let result = transmission(&pixels, 2, 1).unwrap();
+        let result = transmission(&pixels, 2, 1);
 
-        let expected_payload = encode(&pixels).unwrap();
+        let expected_payload = encode(&pixels);
         let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0".to_string();
         let expected = escape(&expected_header, &expected_payload);
         assert_eq!(result, expected);
@@ -165,9 +178,9 @@ mod tests {
                 (state >> 16) as u8
             })
             .collect();
-        let result = transmission(&pixels, 100, 100).unwrap();
+        let result = transmission(&pixels, 100, 100);
 
-        let payload = encode(&pixels).unwrap();
+        let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
         assert!(chunk_list.len() > 1, "expected payload to span multiple chunks");
 
