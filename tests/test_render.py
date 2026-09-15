@@ -26,7 +26,7 @@ from dre.render import (
     _colour,
     _fill_colour,
 )
-from dre.state import PLAIN, Box
+from dre_rs import PLAIN, Box
 
 
 class FakeGraphics:

@@ -3,7 +3,7 @@ from math import cos, hypot, radians, tan
 from typing import Dict, List, Protocol, Tuple
 
 from .layout import Arrow, Cursor, Label, Placement
-from .state import PLAIN, Box
+from dre_rs import PLAIN, Box
 
 BLANK = " "
 CURSOR = "\u2588"
