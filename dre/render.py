@@ -2,8 +2,7 @@ from dataclasses import dataclass, replace
 from math import cos, hypot, radians, tan
 from typing import Dict, List, Protocol, Tuple
 
-from .layout import Arrow, Cursor, Label, Placement
-from dre_rs import PLAIN, Box
+from dre_rs import PLAIN, Arrow, Box, Cursor, Label, Placement
 
 BLANK = " "
 CURSOR = "\u2588"
