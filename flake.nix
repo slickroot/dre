@@ -1,5 +1,5 @@
 {
-  description = "Development environment for sketch";
+  description = "Development environment for dre";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -28,7 +28,7 @@
           ];
 
           shellHook = ''
-            export CARGO_TARGET_DIR=$HOME/.cache/sketch-cargo-target
+            export CARGO_TARGET_DIR=$HOME/.cache/dre-cargo-target
             uv sync
           '';
         };
