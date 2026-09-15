@@ -23,7 +23,7 @@ from dre.layout import (
     width,
     with_cursor,
 )
-from dre.state import PAD, Box, State
+from dre_rs import PAD, Box, State
 
 
 def boxes(placements):
@@ -133,7 +133,7 @@ class CursorTest(unittest.TestCase):
 
     def test_command_mode_cursor_sits_on_the_last_character(self):
         state = State((Box("hi"),), selected=(0,))
-        placements = with_cursor(layout(state.boxes, 11, 11), state.selected)
+        placements = with_cursor(layout(state.boxes, 11, 11), tuple(state.selected))
         box = boxes(placements)[0]
         cursor = cursors(placements)[0]
         interior = box.x + BORDERS // 2
@@ -142,7 +142,7 @@ class CursorTest(unittest.TestCase):
 
     def test_insert_mode_cursor_sits_one_past_the_last_character(self):
         state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
-        placements = with_cursor(layout(state.boxes, 11, 11), state.selected)
+        placements = with_cursor(layout(state.boxes, 11, 11), tuple(state.selected))
         box = boxes(placements)[0]
         cursor = cursors(placements)[0]
         interior = box.x + BORDERS // 2
@@ -152,7 +152,7 @@ class CursorTest(unittest.TestCase):
     def test_cursor_follows_a_selected_child(self):
         state = State((Box("a", children=(Box("bb"),)),), selected=(0, 0))
         placements = with_cursor(
-            layout(state.boxes, cols=21, rows=11), state.selected
+            layout(state.boxes, cols=21, rows=11), tuple(state.selected)
         )
         child = find(placements, "bb")
         cursor = cursors(placements)[0]
@@ -235,7 +235,7 @@ class LabelLayoutTest(unittest.TestCase):
     def test_the_cursor_sits_on_the_last_cell_of_the_label(self):
         state = State((Box("hi" + PAD),), mode="insert", selected=(0,))
         placements = with_cursor(
-            layout(state.boxes, cols=11, rows=11), state.selected
+            layout(state.boxes, cols=11, rows=11), tuple(state.selected)
         )
         label = labels(placements)[0]
         cursor = cursors(placements)[0]
@@ -245,7 +245,7 @@ class LabelLayoutTest(unittest.TestCase):
     def test_the_cursor_sits_in_the_middle_of_a_widened_empty_box(self):
         state = State((Box(""), Box("wide")), selected=(0,))
         placements = with_cursor(
-            layout(state.boxes, cols=31, rows=21), state.selected
+            layout(state.boxes, cols=31, rows=21), tuple(state.selected)
         )
         empty = [p for p in boxes(placements) if p.node.label == ""][0]
         cursor = cursors(placements)[0]

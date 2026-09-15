@@ -2,7 +2,9 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import Iterator, List, Tuple
 
-from .state import Box, Path
+from dre_rs import Box
+
+Path = Tuple[int, ...]
 
 BOX_HEIGHT = 3
 GAP_HEIGHT = 3
