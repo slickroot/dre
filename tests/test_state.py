@@ -195,6 +195,44 @@ class HandleKeyBTest(unittest.TestCase):
         self.assertIs(handle_key(state, "q").running, True)
 
 
+class HandleKeySTest(unittest.TestCase):
+    def test_s_on_a_top_level_box_appends_a_top_level_sibling(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        result = handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(result.boxes, (Box("a"), Box(PAD)))
+
+    def test_s_on_a_top_level_box_selects_the_new_sibling(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        result = handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(result.selected, (1,))
+
+    def test_s_on_a_top_level_box_enters_insert_mode(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        result = handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(result.mode, "insert")
+
+    def test_s_on_a_child_box_appends_a_sibling_to_the_parents_children(self):
+        state = State(boxes=(Box("a", children=(Box("b"),)),), selected=(0, 0))
+        result = handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(
+            result.boxes, (Box("a", children=(Box("b"), Box(PAD))),)
+        )
+
+    def test_s_on_a_child_box_selects_the_new_sibling(self):
+        state = State(boxes=(Box("a", children=(Box("b"),)),), selected=(0, 0))
+        result = handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(result.selected, (0, 1))
+
+    def test_s_with_no_selection_returns_the_state_unchanged(self):
+        state = State(boxes=(Box("a"),))
+        self.assertEqual(handle_key(state, Command.NEW_SIBLING.value), state)
+
+    def test_s_does_not_mutate_the_given_state(self):
+        state = State(boxes=(Box("a"),), selected=(0,))
+        handle_key(state, Command.NEW_SIBLING.value)
+        self.assertEqual(state.boxes, (Box("a"),))
+
+
 class MoveSelectionParentTest(unittest.TestCase):
     def test_h_selects_the_parent(self):
         state = State(boxes=(Box("a", children=(Box("c"),)),), selected=(0, 0))

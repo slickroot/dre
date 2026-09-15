@@ -23,6 +23,7 @@ Path = Tuple[int, ...]
 class Command(Enum):
     UNDO = "u"
     NEW_BOX = "b"
+    NEW_SIBLING = "s"
     SELECT_PARENT = "h"
     SELECT_CHILD = "l"
     SELECT_NEXT = "j"
@@ -118,6 +119,11 @@ def handle_command(state: State, key: str) -> State:
         return state.before if state.before is not None else state
     if command == Command.NEW_BOX:
         boxes, selected = grow(state.boxes, state.selected)
+        return replace(state, boxes=boxes, mode="insert", selected=selected)
+    if command == Command.NEW_SIBLING:
+        if not state.selected:
+            return state
+        boxes, selected = grow(state.boxes, state.selected[:-1])
         return replace(state, boxes=boxes, mode="insert", selected=selected)
     if command == Command.SELECT_PARENT:
         if len(state.selected) <= 1:
