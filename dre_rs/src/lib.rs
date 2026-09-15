@@ -7,11 +7,11 @@ use std::io::Write;
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 
-fn encode(pixels: &[u8]) -> std::io::Result<String> {
+fn encode(pixels: &[u8]) -> String {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(pixels)?;
-    let compressed = encoder.finish()?;
-    Ok(STANDARD.encode(compressed))
+    encoder.write_all(pixels).expect("writes to an in-memory Vec<u8> can't fail");
+    let compressed = encoder.finish().expect("writes to an in-memory Vec<u8> can't fail");
+    STANDARD.encode(compressed)
 }
 
 fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
@@ -31,7 +31,7 @@ fn escape(keys: &str, payload: &str) -> String {
 }
 
 fn transmission(pixels: &[u8], width: i64, height: i64) -> PyResult<String> {
-    let payload = encode(pixels)?;
+    let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
         "a=T,f=32,s={width},v={height},o=z,q=2,z=-1,m={}",
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn encode_round_trips_through_zlib_and_base64() {
         let pixels: Vec<u8> = (0..=255).collect();
-        let encoded = encode(&pixels).unwrap();
+        let encoded = encode(&pixels);
         let compressed = STANDARD.decode(&encoded).unwrap();
         let mut decoder = ZlibDecoder::new(&compressed[..]);
         let mut decompressed = Vec::new();
@@ -146,7 +146,7 @@ mod tests {
         let pixels = vec![1u8, 2, 3, 4];
         let result = transmission(&pixels, 2, 1).unwrap();
 
-        let expected_payload = encode(&pixels).unwrap();
+        let expected_payload = encode(&pixels);
         let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0".to_string();
         let expected = escape(&expected_header, &expected_payload);
         assert_eq!(result, expected);
@@ -167,7 +167,7 @@ mod tests {
             .collect();
         let result = transmission(&pixels, 100, 100).unwrap();
 
-        let payload = encode(&pixels).unwrap();
+        let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
         assert!(chunk_list.len() > 1, "expected payload to span multiple chunks");
 
