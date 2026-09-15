@@ -4,6 +4,8 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
 
+mod layout;
+
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 
