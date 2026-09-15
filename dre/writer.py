@@ -8,7 +8,7 @@ import tty
 from contextlib import contextmanager
 from typing import Iterator, List, TextIO, Tuple
 
-from .kitty import KittyGraphics
+from dre_rs import KittyGraphics
 from .layout import layout, with_cursor
 from .render import Renderer, TerminalRenderer
 from .state import State, handle_key

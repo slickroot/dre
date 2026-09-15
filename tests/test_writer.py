@@ -10,7 +10,7 @@ import unittest
 from contextlib import contextmanager, redirect_stdout
 
 from dre import writer
-from dre.kitty import KittyGraphics
+from dre_rs import KittyGraphics
 from dre.render import TerminalRenderer
 from dre.writer import (
     HOME_CURSOR,
