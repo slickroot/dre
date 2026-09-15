@@ -5,7 +5,8 @@ use flate2::Compression;
 use std::io::Write;
 
 mod layout;
-use layout::{layout as layout_fn, with_cursor, Arrow, Cursor, Label, Placement};
+mod render;
+mod writer;
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
@@ -61,28 +62,20 @@ fn transmission(pixels: &[u8], width: i64, height: i64) -> String {
     escapes.join("")
 }
 
-#[pyclass]
 struct KittyGraphics;
 
-#[pymethods]
 impl KittyGraphics {
-    #[new]
     fn new() -> Self {
         KittyGraphics
     }
 
-    fn draw(&self, sprites: Vec<Bound<'_, PyAny>>) -> PyResult<String> {
+    fn draw(&self, sprites: Vec<render::Sprite>) -> String {
         let mut out = DELETE_ALL.to_string();
         for sprite in sprites {
-            let row: i64 = sprite.getattr("row")?.extract()?;
-            let col: i64 = sprite.getattr("col")?.extract()?;
-            let width: i64 = sprite.getattr("width")?.extract()?;
-            let height: i64 = sprite.getattr("height")?.extract()?;
-            let pixels: Vec<u8> = sprite.getattr("pixels")?.extract()?;
-            out.push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
-            out.push_str(&transmission(&pixels, width, height));
+            out.push_str(&format!("\x1b[{};{}H", sprite.row + 1, sprite.col + 1));
+            out.push_str(&transmission(&sprite.pixels, sprite.width, sprite.height));
         }
-        Ok(out)
+        out
     }
 }
 
@@ -90,7 +83,6 @@ const PLAIN: i64 = -1;
 const PALETTE_SIZE: i64 = 5;
 const PAD: &str = " ";
 
-#[pyclass(name = "Box", get_all, eq)]
 #[derive(Clone, Debug, PartialEq)]
 struct Node {
     label: String,
@@ -112,33 +104,22 @@ impl Default for Node {
     }
 }
 
-#[pymethods]
 impl Node {
-    #[new]
-    #[pyo3(signature = (label="".to_string(), colour=PLAIN, fill=PLAIN, rounded=false, children=vec![]))]
     fn new(label: String, colour: i64, fill: i64, rounded: bool, children: Vec<Node>) -> Self {
         Node { label, colour, fill, rounded, children }
     }
 }
 
-#[pyclass]
 #[derive(Clone)]
 struct State {
-    #[pyo3(get)]
     boxes: Vec<Node>,
-    #[pyo3(get)]
     running: bool,
-    #[pyo3(get)]
     mode: String,
-    #[pyo3(get)]
     selected: Vec<i64>,
     before: Option<Box<State>>,
 }
 
-#[pymethods]
 impl State {
-    #[new]
-    #[pyo3(signature = (boxes=vec![], running=true, mode="command".to_string(), selected=vec![], before=None))]
     fn new(boxes: Vec<Node>, running: bool, mode: String, selected: Vec<i64>, before: Option<State>) -> Self {
         State { boxes, running, mode, selected, before: before.map(Box::new) }
     }
@@ -466,8 +447,7 @@ fn handle_insert(state: &State, key: &str) -> State {
     state
 }
 
-#[pyfunction]
-fn handle_key(state: &State, key: &str) -> State {
+pub(crate) fn handle_key(state: &State, key: &str) -> State {
     if state.mode == "insert" {
         handle_insert(state, key)
     } else {
@@ -475,22 +455,10 @@ fn handle_key(state: &State, key: &str) -> State {
     }
 }
 
+// `main` is the sole symbol that still crosses the PyO3 boundary.
 #[pymodule]
 fn dre_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<KittyGraphics>()?;
-    m.add_class::<Node>()?;
-    m.add_class::<State>()?;
-    m.add_class::<Label>()?;
-    m.add_class::<Arrow>()?;
-    m.add_class::<Cursor>()?;
-    m.add_class::<Placement>()?;
-    m.add_function(wrap_pyfunction!(handle_key, m)?)?;
-    m.add_function(wrap_pyfunction!(layout_fn, m)?)?;
-    m.add_function(wrap_pyfunction!(with_cursor, m)?)?;
-    m.add("CHUNK_SIZE", CHUNK_SIZE)?;
-    m.add("DELETE_ALL", DELETE_ALL)?;
-    m.add("PLAIN", PLAIN)?;
-    m.add("PAD", PAD)?;
+    m.add_function(wrap_pyfunction!(writer::main, m)?)?;
     Ok(())
 }
 
@@ -783,501 +751,396 @@ mod tests {
         assert_eq!(boxes, vec![node("a"), node("b")]);
     }
 
-    fn new_state<'py>(
-        py: Python<'py>,
-        boxes: Vec<Node>,
-        mode: &str,
-        selected: Vec<i64>,
-    ) -> Bound<'py, State> {
-        Bound::new(
-            py,
-            State {
-                boxes,
-                running: true,
-                mode: mode.to_string(),
-                selected,
-                before: None,
-            },
-        )
-        .unwrap()
+    fn new_state(boxes: Vec<Node>, mode: &str, selected: Vec<i64>) -> State {
+        State {
+            boxes,
+            running: true,
+            mode: mode.to_string(),
+            selected,
+            before: None,
+        }
     }
 
     #[test]
     fn state_starts_running() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            assert!(state.borrow().running);
-        });
+        let state = new_state(vec![], "command", vec![]);
+        assert!(state.running);
     }
 
     #[test]
     fn state_starts_in_command_mode() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            assert_eq!(state.borrow().mode, "command");
-        });
+        let state = new_state(vec![], "command", vec![]);
+        assert_eq!(state.mode, "command");
     }
 
     #[test]
     fn b_on_an_empty_canvas_appends_a_box_enters_insert_and_selects_it() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            let result: State = handle_key(&state.borrow(), "b");
-            assert_eq!(result.boxes, vec![node(PAD)]);
-            assert_eq!(result.mode, "insert");
-            assert_eq!(result.selected, vec![0]);
-            assert!(result.running);
-        });
+        let state = new_state(vec![], "command", vec![]);
+        let result: State = handle_key(&state, "b");
+        assert_eq!(result.boxes, vec![node(PAD)]);
+        assert_eq!(result.mode, "insert");
+        assert_eq!(result.selected, vec![0]);
+        assert!(result.running);
     }
 
     #[test]
     fn b_on_an_empty_canvas_does_not_mutate_the_given_state() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            handle_key(&state.borrow(), "b");
-            assert_eq!(state.borrow().boxes, Vec::<Node>::new());
-        });
+        let state = new_state(vec![], "command", vec![]);
+        handle_key(&state, "b");
+        assert_eq!(state.boxes, Vec::<Node>::new());
     }
 
     #[test]
     fn b_on_a_selected_box_appends_and_selects_a_child() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "b");
-            assert_eq!(result.boxes, vec![node_with_children("a", vec![node(PAD)])]);
-            assert_eq!(result.selected, vec![0, 0]);
-            assert_eq!(result.mode, "insert");
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "b");
+        assert_eq!(result.boxes, vec![node_with_children("a", vec![node(PAD)])]);
+        assert_eq!(result.selected, vec![0, 0]);
+        assert_eq!(result.mode, "insert");
     }
 
     #[test]
     fn a_second_b_on_the_same_parent_places_a_second_child() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let state = Bound::new(py, handle_key(&state.borrow(), "b")).unwrap();
-            let state = Bound::new(py, handle_key(&state.borrow(), "\x1b")).unwrap();
-            let state = Bound::new(py, handle_key(&state.borrow(), "h")).unwrap();
-            let result = handle_key(&state.borrow(), "b");
-            assert_eq!(
-                result.boxes,
-                vec![node_with_children("a", vec![node(""), node(PAD)])]
-            );
-            assert_eq!(result.selected, vec![0, 1]);
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let state = handle_key(&state, "b");
+        let state = handle_key(&state, "\x1b");
+        let state = handle_key(&state, "h");
+        let result = handle_key(&state, "b");
+        assert_eq!(
+            result.boxes,
+            vec![node_with_children("a", vec![node(""), node(PAD)])]
+        );
+        assert_eq!(result.selected, vec![0, 1]);
     }
 
     #[test]
     fn unknown_key_returns_the_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![]);
-            let result = handle_key(&state.borrow(), "x");
-            assert_eq!(result.boxes, state.borrow().boxes);
-            assert_eq!(result.selected, state.borrow().selected);
-            assert_eq!(result.mode, state.borrow().mode);
-            assert_eq!(result.running, state.borrow().running);
-        });
+        let state = new_state(vec![node("a")], "command", vec![]);
+        let result = handle_key(&state, "x");
+        assert_eq!(result.boxes, state.boxes);
+        assert_eq!(result.selected, state.selected);
+        assert_eq!(result.mode, state.mode);
+        assert_eq!(result.running, state.running);
     }
 
     #[test]
     fn q_stops_the_state_and_preserves_boxes_and_selection() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "q");
-            assert!(!result.running);
-            assert_eq!(result.boxes, vec![node("a")]);
-            assert_eq!(result.selected, vec![0]);
-            assert_eq!(result.mode, "command");
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "q");
+        assert!(!result.running);
+        assert_eq!(result.boxes, vec![node("a")]);
+        assert_eq!(result.selected, vec![0]);
+        assert_eq!(result.mode, "command");
     }
 
     #[test]
     fn insert_mode_is_dispatched_separately() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(PAD)], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "q");
-            assert!(result.running);
-        });
+        let state = new_state(vec![node(PAD)], "insert", vec![0]);
+        let result = handle_key(&state, "q");
+        assert!(result.running);
     }
 
     #[test]
     fn s_on_a_top_level_box_appends_a_sibling() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "s");
-            assert_eq!(result.boxes, vec![node("a"), node(PAD)]);
-            assert_eq!(result.selected, vec![1]);
-            assert_eq!(result.mode, "insert");
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "s");
+        assert_eq!(result.boxes, vec![node("a"), node(PAD)]);
+        assert_eq!(result.selected, vec![1]);
+        assert_eq!(result.mode, "insert");
     }
 
     #[test]
     fn s_on_a_child_box_appends_a_sibling_to_the_parents_children() {
-        Python::with_gil(|py| {
-            let boxes = vec![node_with_children("a", vec![node("b")])];
-            let state = new_state(py, boxes, "command", vec![0, 0]);
-            let result = handle_key(&state.borrow(), "s");
-            assert_eq!(
-                result.boxes,
-                vec![node_with_children("a", vec![node("b"), node(PAD)])]
-            );
-            assert_eq!(result.selected, vec![0, 1]);
-        });
+        let boxes = vec![node_with_children("a", vec![node("b")])];
+        let state = new_state(boxes, "command", vec![0, 0]);
+        let result = handle_key(&state, "s");
+        assert_eq!(
+            result.boxes,
+            vec![node_with_children("a", vec![node("b"), node(PAD)])]
+        );
+        assert_eq!(result.selected, vec![0, 1]);
     }
 
     #[test]
     fn s_with_no_selection_returns_the_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![]);
-            let result = handle_key(&state.borrow(), "s");
-            assert_eq!(result.boxes, vec![node("a")]);
-            assert_eq!(result.selected, Vec::<i64>::new());
-        });
+        let state = new_state(vec![node("a")], "command", vec![]);
+        let result = handle_key(&state, "s");
+        assert_eq!(result.boxes, vec![node("a")]);
+        assert_eq!(result.selected, Vec::<i64>::new());
     }
 
     #[test]
     fn h_selects_the_parent_and_is_a_no_op_at_the_top() {
-        Python::with_gil(|py| {
-            let boxes = vec![node_with_children("a", vec![node("c")])];
-            let state = new_state(py, boxes, "command", vec![0, 0]);
-            let result = handle_key(&state.borrow(), "h");
-            assert_eq!(result.selected, vec![0]);
+        let boxes = vec![node_with_children("a", vec![node("c")])];
+        let state = new_state(boxes, "command", vec![0, 0]);
+        let result = handle_key(&state, "h");
+        assert_eq!(result.selected, vec![0]);
 
-            let result = Bound::new(py, result).unwrap();
-            let result = handle_key(&result.borrow(), "h");
-            assert_eq!(result.selected, vec![0]);
-        });
+        let result = handle_key(&result, "h");
+        assert_eq!(result.selected, vec![0]);
     }
 
     #[test]
     fn h_on_an_empty_canvas_returns_the_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            let result = handle_key(&state.borrow(), "h");
-            assert_eq!(result.selected, Vec::<i64>::new());
-        });
+        let state = new_state(vec![], "command", vec![]);
+        let result = handle_key(&state, "h");
+        assert_eq!(result.selected, Vec::<i64>::new());
     }
 
     #[test]
     fn h_in_insert_mode_types_the_letter_h() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("a{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "h");
-            assert_eq!(result.boxes, vec![node(&format!("ah{PAD}"))]);
-        });
+        let state = new_state(vec![node(&format!("a{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, "h");
+        assert_eq!(result.boxes, vec![node(&format!("ah{PAD}"))]);
     }
 
     #[test]
     fn l_selects_the_first_child_or_keeps_selection_with_none() {
-        Python::with_gil(|py| {
-            let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-            let state = new_state(py, boxes, "command", vec![0]);
-            let result = handle_key(&state.borrow(), "l");
-            assert_eq!(result.selected, vec![0, 0]);
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let state = new_state(boxes, "command", vec![0]);
+        let result = handle_key(&state, "l");
+        assert_eq!(result.selected, vec![0, 0]);
 
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "l");
-            assert_eq!(result.selected, vec![0]);
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "l");
+        assert_eq!(result.selected, vec![0]);
     }
 
     #[test]
     fn j_and_k_move_between_siblings_with_bounds() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "j");
-            assert_eq!(result.selected, vec![1]);
+        let state = new_state(vec![node("a"), node("b")], "command", vec![0]);
+        let result = handle_key(&state, "j");
+        assert_eq!(result.selected, vec![1]);
 
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![1]);
-            let result = handle_key(&state.borrow(), "j");
-            assert_eq!(result.selected, vec![1]);
+        let state = new_state(vec![node("a"), node("b")], "command", vec![1]);
+        let result = handle_key(&state, "j");
+        assert_eq!(result.selected, vec![1]);
 
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![1]);
-            let result = handle_key(&state.borrow(), "k");
-            assert_eq!(result.selected, vec![0]);
+        let state = new_state(vec![node("a"), node("b")], "command", vec![1]);
+        let result = handle_key(&state, "k");
+        assert_eq!(result.selected, vec![0]);
 
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "k");
-            assert_eq!(result.selected, vec![0]);
-        });
+        let state = new_state(vec![node("a"), node("b")], "command", vec![0]);
+        let result = handle_key(&state, "k");
+        assert_eq!(result.selected, vec![0]);
     }
 
     #[test]
     fn i_enters_insert_and_appends_pad_to_the_selected_boxs_label() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![1]);
-            let result = handle_key(&state.borrow(), "i");
-            assert_eq!(result.mode, "insert");
-            assert_eq!(result.selected, vec![1]);
-            assert_eq!(result.boxes, vec![node("a"), node(&format!("b{PAD}"))]);
-        });
+        let state = new_state(vec![node("a"), node("b")], "command", vec![1]);
+        let result = handle_key(&state, "i");
+        assert_eq!(result.mode, "insert");
+        assert_eq!(result.selected, vec![1]);
+        assert_eq!(result.boxes, vec![node("a"), node(&format!("b{PAD}"))]);
     }
 
     #[test]
     fn i_on_an_empty_canvas_returns_the_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            let result = handle_key(&state.borrow(), "i");
-            assert_eq!(result.mode, "command");
-            assert_eq!(result.boxes, Vec::<Node>::new());
-        });
+        let state = new_state(vec![], "command", vec![]);
+        let result = handle_key(&state, "i");
+        assert_eq!(result.mode, "command");
+        assert_eq!(result.boxes, Vec::<Node>::new());
     }
 
     #[test]
     fn capital_i_clears_the_selected_boxs_label() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![1]);
-            let result = handle_key(&state.borrow(), "I");
-            assert_eq!(result.mode, "insert");
-            assert_eq!(result.boxes, vec![node("a"), node(PAD)]);
-        });
+        let state = new_state(vec![node("a"), node("b")], "command", vec![1]);
+        let result = handle_key(&state, "I");
+        assert_eq!(result.mode, "insert");
+        assert_eq!(result.boxes, vec![node("a"), node(PAD)]);
     }
 
     #[test]
     fn typing_appends_to_the_selected_box_label() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("h{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "i");
-            assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
-        });
+        let state = new_state(vec![node(&format!("h{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, "i");
+        assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
     fn space_and_tilde_are_printable() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("a{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), " ");
-            assert_eq!(result.boxes, vec![node(&format!("a {PAD}"))]);
+        let state = new_state(vec![node(&format!("a{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, " ");
+        assert_eq!(result.boxes, vec![node(&format!("a {PAD}"))]);
 
-            let state = new_state(py, vec![node(PAD)], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "~");
-            assert_eq!(result.boxes, vec![node(&format!("~{PAD}"))]);
-        });
+        let state = new_state(vec![node(PAD)], "insert", vec![0]);
+        let result = handle_key(&state, "~");
+        assert_eq!(result.boxes, vec![node(&format!("~{PAD}"))]);
     }
 
     #[test]
     fn backspace_drops_the_last_character_and_is_a_no_op_when_empty() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "\x7f");
-            assert_eq!(result.boxes, vec![node(&format!("h{PAD}"))]);
+        let state = new_state(vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, "\x7f");
+        assert_eq!(result.boxes, vec![node(&format!("h{PAD}"))]);
 
-            let state = new_state(py, vec![node(PAD)], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "\x7f");
-            assert_eq!(result.boxes, vec![node(PAD)]);
-        });
+        let state = new_state(vec![node(PAD)], "insert", vec![0]);
+        let result = handle_key(&state, "\x7f");
+        assert_eq!(result.boxes, vec![node(PAD)]);
     }
 
     #[test]
     fn esc_returns_to_command_mode_and_trims_pad() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "\x1b");
-            assert_eq!(result.mode, "command");
-            assert_eq!(result.boxes, vec![node("hi")]);
-        });
+        let state = new_state(vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, "\x1b");
+        assert_eq!(result.mode, "command");
+        assert_eq!(result.boxes, vec![node("hi")]);
     }
 
     #[test]
     fn control_and_non_ascii_characters_return_the_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
-            let result = handle_key(&state.borrow(), "\x01");
-            assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
+        let state = new_state(vec![node(&format!("hi{PAD}"))], "insert", vec![0]);
+        let result = handle_key(&state, "\x01");
+        assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
 
-            let result = handle_key(&state.borrow(), "é");
-            assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
-        });
+        let result = handle_key(&state, "é");
+        assert_eq!(result.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
     fn cycle_colour_and_fill_advance_independently_and_cycle_back_to_plain() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "c");
-            let mut expected = node("a");
-            expected.colour = next_colour(PLAIN);
-            assert_eq!(result.boxes, vec![expected]);
-            assert_eq!(result.boxes[0].label, "a");
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "c");
+        let mut expected = node("a");
+        expected.colour = next_colour(PLAIN);
+        assert_eq!(result.boxes, vec![expected]);
+        assert_eq!(result.boxes[0].label, "a");
 
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "f");
-            let mut expected = node("a");
-            expected.fill = next_colour(PLAIN);
-            assert_eq!(result.boxes, vec![expected]);
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "f");
+        let mut expected = node("a");
+        expected.fill = next_colour(PLAIN);
+        assert_eq!(result.boxes, vec![expected]);
 
-            let mut state_boxed = vec![node("a")];
-            let mut colour = PLAIN;
-            for _ in 0..=PALETTE_SIZE {
-                let s = new_state(py, state_boxed.clone(), "command", vec![0]);
-                let result = handle_key(&s.borrow(), "c");
-                state_boxed = result.boxes;
-                colour = state_boxed[0].colour;
-            }
-            assert_eq!(colour, PLAIN);
-        });
+        let mut state_boxed = vec![node("a")];
+        let mut colour = PLAIN;
+        for _ in 0..=PALETTE_SIZE {
+            let s = new_state(state_boxed.clone(), "command", vec![0]);
+            let result = handle_key(&s, "c");
+            state_boxed = result.boxes;
+            colour = state_boxed[0].colour;
+        }
+        assert_eq!(colour, PLAIN);
     }
 
     #[test]
     fn toggle_rounded_flips_and_flips_back() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "r");
-            assert_eq!(result.boxes[0].rounded, true);
-            let state = new_state(py, result.boxes.clone(), "command", vec![0]);
-            let result = handle_key(&state.borrow(), "r");
-            assert_eq!(result.boxes[0].rounded, false);
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let result = handle_key(&state, "r");
+        assert_eq!(result.boxes[0].rounded, true);
+        let state = new_state(result.boxes.clone(), "command", vec![0]);
+        let result = handle_key(&state, "r");
+        assert_eq!(result.boxes[0].rounded, false);
     }
 
     #[test]
     fn capital_c_on_a_top_level_box_does_nothing() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a"), node("b")], "command", vec![0]);
-            let result = handle_key(&state.borrow(), "C");
-            assert_eq!(result.boxes, state.borrow().boxes);
-            assert_eq!(result.selected, state.borrow().selected);
-        });
+        let state = new_state(vec![node("a"), node("b")], "command", vec![0]);
+        let result = handle_key(&state, "C");
+        assert_eq!(result.boxes, state.boxes);
+        assert_eq!(result.selected, state.selected);
     }
 
     #[test]
     fn capital_c_advances_uniformly_coloured_siblings() {
-        Python::with_gil(|py| {
-            let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-            let state = new_state(py, boxes, "command", vec![0, 1]);
-            let result = handle_key(&state.borrow(), "C");
-            let mut c = node("c");
-            c.colour = next_colour(PLAIN);
-            let mut d = node("d");
-            d.colour = next_colour(PLAIN);
-            assert_eq!(result.boxes, vec![node_with_children("a", vec![c, d])]);
-        });
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let state = new_state(boxes, "command", vec![0, 1]);
+        let result = handle_key(&state, "C");
+        let mut c = node("c");
+        c.colour = next_colour(PLAIN);
+        let mut d = node("d");
+        d.colour = next_colour(PLAIN);
+        assert_eq!(result.boxes, vec![node_with_children("a", vec![c, d])]);
     }
 
     #[test]
     fn u_after_b_restores_boxes_and_selected() {
-        Python::with_gil(|py| {
-            let before = new_state(py, vec![], "command", vec![]);
-            let after = handle_key(&before.borrow(), "b");
-            let after = Bound::new(py, after).unwrap();
-            let after_escape = handle_key(&after.borrow(), "\x1b");
-            let after_escape = Bound::new(py, after_escape).unwrap();
-            let undone = handle_key(&after_escape.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-            assert_eq!(undone.selected, before.borrow().selected);
-            assert_eq!(undone.mode, before.borrow().mode);
-        });
+        let before = new_state(vec![], "command", vec![]);
+        let after = handle_key(&before, "b");
+        let after_escape = handle_key(&after, "\x1b");
+        let undone = handle_key(&after_escape, "u");
+        assert_eq!(undone.boxes, before.boxes);
+        assert_eq!(undone.selected, before.selected);
+        assert_eq!(undone.mode, before.mode);
     }
 
     #[test]
     fn u_after_c_restores_boxes() {
-        Python::with_gil(|py| {
-            let before = new_state(py, vec![node("a")], "command", vec![0]);
-            let after = handle_key(&before.borrow(), "c");
-            let after = Bound::new(py, after).unwrap();
-            let undone = handle_key(&after.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-        });
+        let before = new_state(vec![node("a")], "command", vec![0]);
+        let after = handle_key(&before, "c");
+        let undone = handle_key(&after, "u");
+        assert_eq!(undone.boxes, before.boxes);
     }
 
     #[test]
     fn u_after_c_with_nothing_selected_is_a_no_op() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![]);
-            let after = handle_key(&state.borrow(), "c");
-            let after = Bound::new(py, after).unwrap();
-            let undone = handle_key(&after.borrow(), "u");
-            assert_eq!(undone.boxes, state.borrow().boxes);
-            assert_eq!(undone.selected, state.borrow().selected);
-        });
+        let state = new_state(vec![node("a")], "command", vec![]);
+        let after = handle_key(&state, "c");
+        let undone = handle_key(&after, "u");
+        assert_eq!(undone.boxes, state.boxes);
+        assert_eq!(undone.selected, state.selected);
     }
 
     #[test]
     fn u_with_no_previous_action_leaves_state_unchanged() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![], "command", vec![]);
-            let result = handle_key(&state.borrow(), "u");
-            assert_eq!(result.boxes, Vec::<Node>::new());
-            assert_eq!(result.selected, Vec::<i64>::new());
-        });
+        let state = new_state(vec![], "command", vec![]);
+        let result = handle_key(&state, "u");
+        assert_eq!(result.boxes, Vec::<Node>::new());
+        assert_eq!(result.selected, Vec::<i64>::new());
     }
 
     #[test]
     fn u_twice_in_a_row_does_not_redo() {
-        Python::with_gil(|py| {
-            let state = new_state(py, vec![node("a")], "command", vec![0]);
-            let after_command = handle_key(&state.borrow(), "c");
-            let after_command = Bound::new(py, after_command).unwrap();
-            let after_first_undo = handle_key(&after_command.borrow(), "u");
-            let after_first_undo = Bound::new(py, after_first_undo).unwrap();
-            let after_second_undo = handle_key(&after_first_undo.borrow(), "u");
-            assert_eq!(after_second_undo.boxes, after_first_undo.borrow().boxes);
-            assert_eq!(after_second_undo.selected, after_first_undo.borrow().selected);
-        });
+        let state = new_state(vec![node("a")], "command", vec![0]);
+        let after_command = handle_key(&state, "c");
+        let after_first_undo = handle_key(&after_command, "u");
+        let after_second_undo = handle_key(&after_first_undo, "u");
+        assert_eq!(after_second_undo.boxes, after_first_undo.boxes);
+        assert_eq!(after_second_undo.selected, after_first_undo.selected);
     }
 
     #[test]
     fn movement_keys_do_not_clobber_an_existing_undo_snapshot() {
-        Python::with_gil(|py| {
-            let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-            let before = new_state(py, boxes, "command", vec![0, 0]);
-            let after_command = handle_key(&before.borrow(), "c");
-            let after_command = Bound::new(py, after_command).unwrap();
-            let navigated = handle_key(&after_command.borrow(), "j");
-            let navigated = Bound::new(py, navigated).unwrap();
-            let navigated = handle_key(&navigated.borrow(), "h");
-            let navigated = Bound::new(py, navigated).unwrap();
-            let navigated = handle_key(&navigated.borrow(), "l");
-            let navigated = Bound::new(py, navigated).unwrap();
-            let navigated = handle_key(&navigated.borrow(), "k");
-            let navigated = Bound::new(py, navigated).unwrap();
-            let undone = handle_key(&navigated.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-            assert_eq!(undone.selected, before.borrow().selected);
-        });
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let before = new_state(boxes, "command", vec![0, 0]);
+        let after_command = handle_key(&before, "c");
+        let navigated = handle_key(&after_command, "j");
+        let navigated = handle_key(&navigated, "h");
+        let navigated = handle_key(&navigated, "l");
+        let navigated = handle_key(&navigated, "k");
+        let undone = handle_key(&navigated, "u");
+        assert_eq!(undone.boxes, before.boxes);
+        assert_eq!(undone.selected, before.selected);
     }
 
     #[test]
     fn q_does_not_clobber_an_existing_undo_snapshot() {
-        Python::with_gil(|py| {
-            let before = new_state(py, vec![node("a")], "command", vec![0]);
-            let after_command = handle_key(&before.borrow(), "c");
-            let after_command = Bound::new(py, after_command).unwrap();
-            let after_quit = handle_key(&after_command.borrow(), "q");
-            let after_quit = Bound::new(py, after_quit).unwrap();
-            let undone = handle_key(&after_quit.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-            assert_eq!(undone.selected, before.borrow().selected);
-        });
+        let before = new_state(vec![node("a")], "command", vec![0]);
+        let after_command = handle_key(&before, "c");
+        let after_quit = handle_key(&after_command, "q");
+        let undone = handle_key(&after_quit, "u");
+        assert_eq!(undone.boxes, before.boxes);
+        assert_eq!(undone.selected, before.selected);
     }
 
     #[test]
     fn u_after_an_insert_session_undoes_the_b_that_started_it() {
-        Python::with_gil(|py| {
-            let before = new_state(py, vec![], "command", vec![]);
-            let after_b = handle_key(&before.borrow(), "b");
-            let after_b = Bound::new(py, after_b).unwrap();
-            let after_typing = handle_key(&after_b.borrow(), "h");
-            let after_typing = Bound::new(py, after_typing).unwrap();
-            let after_typing = handle_key(&after_typing.borrow(), "i");
-            let after_typing = Bound::new(py, after_typing).unwrap();
-            let after_escape = handle_key(&after_typing.borrow(), "\x1b");
-            let after_escape = Bound::new(py, after_escape).unwrap();
-            let undone = handle_key(&after_escape.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-            assert_eq!(undone.selected, before.borrow().selected);
-        });
+        let before = new_state(vec![], "command", vec![]);
+        let after_b = handle_key(&before, "b");
+        let after_typing = handle_key(&after_b, "h");
+        let after_typing = handle_key(&after_typing, "i");
+        let after_escape = handle_key(&after_typing, "\x1b");
+        let undone = handle_key(&after_escape, "u");
+        assert_eq!(undone.boxes, before.boxes);
+        assert_eq!(undone.selected, before.selected);
     }
 
     #[test]
     fn u_after_capital_i_restores_the_boxs_previous_label() {
-        Python::with_gil(|py| {
-            let before = new_state(py, vec![node("a")], "command", vec![0]);
-            let after = handle_key(&before.borrow(), "I");
-            let after = Bound::new(py, after).unwrap();
-            let after_escape = handle_key(&after.borrow(), "\x1b");
-            let after_escape = Bound::new(py, after_escape).unwrap();
-            let undone = handle_key(&after_escape.borrow(), "u");
-            assert_eq!(undone.boxes, before.borrow().boxes);
-        });
+        let before = new_state(vec![node("a")], "command", vec![0]);
+        let after = handle_key(&before, "I");
+        let after_escape = handle_key(&after, "\x1b");
+        let undone = handle_key(&after_escape, "u");
+        assert_eq!(undone.boxes, before.boxes);
     }
 }

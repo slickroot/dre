@@ -1,7 +1,4 @@
 use crate::Node;
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use pyo3::types::PyTuple;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 // Unused here too in layout.py; kept for parity with the constant set rather than dropped.
@@ -142,57 +139,32 @@ pub(crate) struct Positioned {
     pub(crate) children: Vec<Positioned>,
 }
 
-#[pyclass(get_all)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Label {
     pub(crate) text: String,
     pub(crate) path: Vec<i64>,
 }
 
-#[pymethods]
 impl Label {
-    #[new]
-    #[pyo3(signature = (text, path=vec![]))]
     fn new(text: String, path: Vec<i64>) -> Self {
         Label { text, path }
     }
 }
 
-// stops is exposed via a custom tuple getter, not get_all: render.py's
-// sprite cache keys a dict on (node.stops, node.shaft), and a list there
-// would be unhashable.
-#[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Arrow {
     pub(crate) stops: Vec<i64>,
-    #[pyo3(get)]
     pub(crate) shaft: i64,
 }
 
-#[pymethods]
 impl Arrow {
-    #[new]
     fn new(stops: Vec<i64>, shaft: i64) -> Self {
         Arrow { stops, shaft }
     }
-
-    #[getter]
-    fn stops(&self, py: Python<'_>) -> Py<PyTuple> {
-        PyTuple::new_bound(py, &self.stops).unbind()
-    }
 }
 
-#[pyclass]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Cursor;
-
-#[pymethods]
-impl Cursor {
-    #[new]
-    fn new() -> Self {
-        Cursor
-    }
-}
 
 // Named Node, not Box, to avoid the std::boxed::Box collision.
 #[derive(Debug, Clone, PartialEq)]
@@ -203,38 +175,6 @@ pub(crate) enum PlacementNode {
     Cursor(Cursor),
 }
 
-impl IntoPy<PyObject> for PlacementNode {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        match self {
-            PlacementNode::Node(box_) => box_.into_py(py),
-            PlacementNode::Label(label) => label.into_py(py),
-            PlacementNode::Arrow(arrow) => arrow.into_py(py),
-            PlacementNode::Cursor(cursor) => cursor.into_py(py),
-        }
-    }
-}
-
-impl<'py> FromPyObject<'py> for PlacementNode {
-    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
-        if let Ok(box_) = ob.extract::<Node>() {
-            return Ok(PlacementNode::Node(box_));
-        }
-        if let Ok(label) = ob.extract::<Label>() {
-            return Ok(PlacementNode::Label(label));
-        }
-        if let Ok(arrow) = ob.extract::<Arrow>() {
-            return Ok(PlacementNode::Arrow(arrow));
-        }
-        if let Ok(cursor) = ob.extract::<Cursor>() {
-            return Ok(PlacementNode::Cursor(cursor));
-        }
-        Err(PyValueError::new_err(
-            "Placement.node must be a Box, Label, Arrow, or Cursor",
-        ))
-    }
-}
-
-#[pyclass(get_all)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Placement {
     pub(crate) node: PlacementNode,
@@ -244,9 +184,7 @@ pub(crate) struct Placement {
     pub(crate) height: i64,
 }
 
-#[pymethods]
 impl Placement {
-    #[new]
     fn new(node: PlacementNode, x: i64, y: i64, width: i64, height: i64) -> Self {
         Placement { node, x, y, width, height }
     }
@@ -328,7 +266,6 @@ fn column_tracks(nodes: &[Celled]) -> Vec<Track> {
     tracks(&extents, &indices)
 }
 
-#[pyfunction]
 pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
     let trees = forest(&boxes);
     let nodes = walk(&trees);
@@ -361,7 +298,6 @@ pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
     boxes_first
 }
 
-#[pyfunction]
 pub(crate) fn with_cursor(placements: Vec<Placement>, selected: Vec<i64>) -> Vec<Placement> {
     for placement in &placements {
         if let PlacementNode::Label(label) = &placement.node {
@@ -723,112 +659,45 @@ mod tests {
 
     #[test]
     fn label_constructor_defaults_path_to_empty() {
-        Python::with_gil(|py| {
-            let label = Bound::new(py, Label::new("hi".to_string(), vec![])).unwrap();
-            assert_eq!(label.borrow().text, "hi");
-            assert_eq!(label.borrow().path, Vec::<i64>::new());
-        });
+        let label = Label::new("hi".to_string(), vec![]);
+        assert_eq!(label.text, "hi");
+        assert_eq!(label.path, Vec::<i64>::new());
     }
 
     #[test]
-    fn label_can_be_constructed_from_python_with_keyword_text_only() {
-        Python::with_gil(|py| {
-            let dre_rs = PyModule::new_bound(py, "dre_rs").unwrap();
-            dre_rs.add_class::<Label>().unwrap();
-            let label = dre_rs
-                .getattr("Label")
-                .unwrap()
-                .call1(("hi",))
-                .unwrap();
-            let label = label.downcast::<Label>().unwrap();
-            assert_eq!(label.borrow().text, "hi");
-            assert_eq!(label.borrow().path, Vec::<i64>::new());
-
-            let with_path = dre_rs
-                .getattr("Label")
-                .unwrap()
-                .call1(("hi", vec![1i64, 2]))
-                .unwrap();
-            let with_path = with_path.downcast::<Label>().unwrap();
-            assert_eq!(with_path.borrow().path, vec![1, 2]);
-        });
+    fn arrow_stores_stops_and_shaft_as_plain_fields() {
+        let arrow = Arrow::new(vec![1, 2, 3], 5);
+        assert_eq!(arrow.stops, vec![1, 2, 3]);
+        assert_eq!(arrow.shaft, 5);
     }
 
     #[test]
-    fn arrow_stops_getter_produces_a_hashable_python_tuple() {
-        Python::with_gil(|py| {
-            let arrow = Bound::new(py, Arrow::new(vec![1, 2, 3], 5)).unwrap();
-            let stops = arrow.getattr("stops").unwrap();
-            assert!(stops.is_instance_of::<PyTuple>());
-            let stops: Vec<i64> = stops.extract().unwrap();
-            assert_eq!(stops, vec![1, 2, 3]);
-            assert_eq!(arrow.borrow().shaft, 5);
+    fn placement_node_holds_the_matching_variants_inner_value() {
+        let box_placement = Placement::new(PlacementNode::Node(node("a")), 0, 0, 3, 3);
+        match box_placement.node {
+            PlacementNode::Node(box_) => assert_eq!(box_, node("a")),
+            _ => panic!("expected a Node variant"),
+        }
 
-            // hashability is exactly what render.py's sprite cache needs
-            let shape = PyTuple::new_bound(py, [arrow.getattr("stops").unwrap(), arrow.getattr("shaft").unwrap().into_any()]);
-            py.import_bound("builtins").unwrap().getattr("hash").unwrap().call1((shape,)).unwrap();
-        });
-    }
+        let label_placement = Placement::new(
+            PlacementNode::Label(Label::new("a".to_string(), vec![0])),
+            0,
+            0,
+            1,
+            1,
+        );
+        match label_placement.node {
+            PlacementNode::Label(label) => assert_eq!(label, Label::new("a".to_string(), vec![0])),
+            _ => panic!("expected a Label variant"),
+        }
 
-    #[test]
-    fn placement_node_round_trips_each_variant_through_python() {
-        Python::with_gil(|py| {
-            let box_placement = Bound::new(
-                py,
-                Placement::new(PlacementNode::Node(node("a")), 0, 0, 3, 3),
-            )
-            .unwrap();
-            let node_attr = box_placement.getattr("node").unwrap();
-            assert!(node_attr.is_instance_of::<Node>());
+        let arrow_placement = Placement::new(PlacementNode::Arrow(Arrow::new(vec![0], 0)), 0, 0, 1, 1);
+        match arrow_placement.node {
+            PlacementNode::Arrow(arrow) => assert_eq!(arrow, Arrow::new(vec![0], 0)),
+            _ => panic!("expected an Arrow variant"),
+        }
 
-            let label_placement = Bound::new(
-                py,
-                Placement::new(PlacementNode::Label(Label::new("a".to_string(), vec![0])), 0, 0, 1, 1),
-            )
-            .unwrap();
-            assert!(label_placement.getattr("node").unwrap().is_instance_of::<Label>());
-
-            let arrow_placement = Bound::new(
-                py,
-                Placement::new(PlacementNode::Arrow(Arrow::new(vec![0], 0)), 0, 0, 1, 1),
-            )
-            .unwrap();
-            assert!(arrow_placement.getattr("node").unwrap().is_instance_of::<Arrow>());
-
-            let cursor_placement =
-                Bound::new(py, Placement::new(PlacementNode::Cursor(Cursor), 0, 0, 1, 1)).unwrap();
-            assert!(cursor_placement.getattr("node").unwrap().is_instance_of::<Cursor>());
-        });
-    }
-
-    #[test]
-    fn placement_constructor_accepts_any_of_the_four_node_types_from_python() {
-        Python::with_gil(|py| {
-            let dre_rs = PyModule::new_bound(py, "dre_rs").unwrap();
-            dre_rs.add_class::<Node>().unwrap();
-            dre_rs.add_class::<Label>().unwrap();
-            dre_rs.add_class::<Arrow>().unwrap();
-            dre_rs.add_class::<Cursor>().unwrap();
-            dre_rs.add_class::<Placement>().unwrap();
-
-            let box_ = dre_rs.getattr("Box").unwrap().call0().unwrap();
-            let placement = dre_rs
-                .getattr("Placement")
-                .unwrap()
-                .call1((box_, 4, 4, 3, 3))
-                .unwrap();
-            assert!(placement.getattr("node").unwrap().is_instance_of::<Node>());
-
-            let cursor = dre_rs.getattr("Cursor").unwrap().call0().unwrap();
-            let placement_kw = dre_rs.getattr("Placement").unwrap();
-            let kwargs = pyo3::types::PyDict::new_bound(py);
-            kwargs.set_item("node", &cursor).unwrap();
-            kwargs.set_item("x", 0).unwrap();
-            kwargs.set_item("y", 0).unwrap();
-            kwargs.set_item("width", 1).unwrap();
-            kwargs.set_item("height", 1).unwrap();
-            let placement = placement_kw.call((), Some(&kwargs)).unwrap();
-            assert!(placement.getattr("node").unwrap().is_instance_of::<Cursor>());
-        });
+        let cursor_placement = Placement::new(PlacementNode::Cursor(Cursor), 0, 0, 1, 1);
+        assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
     }
 }
