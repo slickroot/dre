@@ -1,8 +1,8 @@
-use pyo3::prelude::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
+use std::process::ExitCode;
 
 mod layout;
 mod render;
@@ -455,11 +455,14 @@ pub(crate) fn handle_key(state: &State, key: &str) -> State {
     }
 }
 
-// `main` is the sole symbol that still crosses the PyO3 boundary.
-#[pymodule]
-fn dre_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(writer::main, m)?)?;
-    Ok(())
+fn main() -> ExitCode {
+    match writer::write() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

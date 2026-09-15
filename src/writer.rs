@@ -3,9 +3,9 @@ use nix::sys::select::{select, FdSet};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
-use pyo3::prelude::*;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::process::ExitCode;
 
 use crate::layout::{layout, with_cursor};
 use crate::render::TerminalRenderer;
@@ -142,18 +142,17 @@ fn terminal_size(stdin_fd: RawFd) -> io::Result<(i64, i64)> {
     Ok((winsize.ws_col as i64, winsize.ws_row as i64))
 }
 
-#[pyfunction]
-pub(crate) fn main() {
+pub fn write() -> io::Result<ExitCode> {
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
-    let supported = supports_kitty_graphics(&mut stdout, stdin_fd)
-        .expect("querying Kitty graphics support failed");
+    let supported = supports_kitty_graphics(&mut stdout, stdin_fd)?;
     if !supported {
         let _ = stdout.write_all(CLEAR_LINE.as_bytes());
         println!("{NOT_SUPPORTED_MESSAGE}");
-        std::process::exit(1);
+        return Ok(ExitCode::FAILURE);
     }
-    run(&mut stdout, stdin_fd).expect("terminal I/O failed");
+    run(&mut stdout, stdin_fd)?;
+    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]

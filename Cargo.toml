@@ -1,0 +1,9 @@
+[package]
+name = "dre"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1"
+nix = { version = "0.31.3", features = ["term", "ioctl", "poll"] }
