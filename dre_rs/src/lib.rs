@@ -6,6 +6,7 @@ use std::io::Write;
 
 mod layout;
 mod render;
+mod writer;
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
@@ -119,9 +120,6 @@ struct State {
 }
 
 impl State {
-    // Unused until writer.rs's `run`/`main` construct the initial State in a
-    // later slice; kept as the plain constructor for that call site.
-    #[allow(dead_code)]
     fn new(boxes: Vec<Node>, running: bool, mode: String, selected: Vec<i64>, before: Option<State>) -> Self {
         State { boxes, running, mode, selected, before: before.map(Box::new) }
     }
@@ -457,10 +455,10 @@ pub(crate) fn handle_key(state: &State, key: &str) -> State {
     }
 }
 
-// `main` is registered here in a later slice, once writer.rs exists; it is
-// the only symbol that still crosses the PyO3 boundary.
+// `main` is the sole symbol that still crosses the PyO3 boundary.
 #[pymodule]
-fn dre_rs(_m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn dre_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(writer::main, m)?)?;
     Ok(())
 }
 
