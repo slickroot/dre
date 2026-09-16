@@ -53,12 +53,7 @@ pub(crate) fn measure_columns(nodes: &[Node]) -> Vec<i64> {
     widths
 }
 
-/// Recurses depth-first over `nodes`, assigning each node a row (a leaf claims
-/// the next free row; a parent's row is the median of its children's rows) and
-/// an x position from `offsets[col]`, where `col` follows the same
-/// column-plus-reserved-gap progression as `measure_columns`. `offsets` must
-/// have one more entry than there are columns, so that `offsets[col + 1] -
-/// offsets[col]` gives column `col`'s width.
+// `offsets` has one more entry than there are columns, so `offsets[col + 1] - offsets[col]` gives column `col`'s width.
 pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>> {
     fn median(rows: &[usize]) -> usize {
         let middle = rows.len() / 2;
