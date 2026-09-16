@@ -130,7 +130,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
         if key == INTERRUPT {
             return Ok(());
         }
-        state = handle_key(&state, &key);
+        state = handle_key(state, &key);
     }
     Ok(())
 }
