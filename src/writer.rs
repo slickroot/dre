@@ -3,13 +3,15 @@ use nix::sys::select::{select, FdSet};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
+use std::fs;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
+use crate::dre_format;
 use crate::layout::{layout, with_cursor};
-use crate::render::TerminalRenderer;
-use crate::state::{handle_key, State};
+use crate::render::{TerminalRenderer, CURSOR};
+use crate::state::{handle_key, Mode, State};
 use crate::KittyGraphics;
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
@@ -111,8 +113,20 @@ fn frame<W: Write>(
 ) -> io::Result<()> {
     let selected = state.doc.selected.clone();
     let placements = with_cursor(layout(&state.doc.boxes, cols, rows), selected);
-    let lines = renderer.render(&placements, cols, rows);
+    let mut lines = renderer.render(&placements, cols, rows);
+    if let Mode::SavePrompt { filename } = &state.mode {
+        let last = lines.len() - 1;
+        lines[last] = prompt_line(filename, cols);
+    }
     paint(stream, &lines)
+}
+
+fn prompt_line(filename: &str, cols: i64) -> String {
+    format!("Save as: {filename}{CURSOR}")
+        .chars()
+        .chain(std::iter::repeat(' '))
+        .take(cols as usize)
+        .collect()
 }
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
@@ -131,6 +145,9 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
             return Ok(());
         }
         state = handle_key(state, &key);
+        if let Some(path) = &state.save_to {
+            fs::write(path, dre_format::serialize(&state.doc.boxes))?;
+        }
     }
     Ok(())
 }
@@ -157,6 +174,7 @@ pub fn write() -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::new_state;
     use std::io::Cursor;
 
     fn written(buffer: &Cursor<Vec<u8>>) -> String {
@@ -202,5 +220,41 @@ mod tests {
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
         assert!(written(&stream).starts_with(HOME_CURSOR));
+    }
+
+    #[test]
+    fn the_prompt_shows_the_filename_followed_by_the_cursor() {
+        assert_eq!(prompt_line("a.dre", 15), format!("Save as: a.dre{CURSOR}"));
+    }
+
+    #[test]
+    fn the_prompt_is_padded_to_the_terminal_width() {
+        assert_eq!(prompt_line("a", 14), format!("Save as: a{CURSOR}   "));
+    }
+
+    #[test]
+    fn the_prompt_is_cut_to_the_terminal_width() {
+        assert_eq!(prompt_line("abc", 10), "Save as: a");
+    }
+
+    #[test]
+    fn the_prompt_replaces_the_last_row_in_save_prompt_mode() {
+        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, vec![]);
+        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut stream = Cursor::new(Vec::new());
+        frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
+        assert_eq!(
+            written(&stream),
+            format!("{HOME_CURSOR}{}\r\n{}", " ".repeat(11), prompt_line("a", 11))
+        );
+    }
+
+    #[test]
+    fn no_prompt_is_shown_in_command_mode() {
+        let state = new_state(vec![], Mode::Command, vec![]);
+        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut stream = Cursor::new(Vec::new());
+        frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
+        assert!(!written(&stream).contains("Save as:"));
     }
 }
