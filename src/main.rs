@@ -8,6 +8,7 @@ mod command_mode;
 mod insert_mode;
 mod layout;
 mod render;
+mod save_prompt_mode;
 mod state;
 mod writer;
 
