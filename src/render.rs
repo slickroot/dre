@@ -527,6 +527,14 @@ impl TerminalRenderer {
         }
     }
 
+    fn cells_to_pixels_x(&self, cells: i64) -> i64 {
+        cells * self.cell_width
+    }
+
+    fn cells_to_pixels_y(&self, cells: i64) -> i64 {
+        cells * self.cell_height
+    }
+
     fn outline_box(
         &self,
         placement: &crate::layout::Placement,
@@ -541,16 +549,16 @@ impl TerminalRenderer {
             PlacementNode::Node(node) => node,
             _ => unreachable!("outline_box is only called for Box placements"),
         };
-        let width = placement.width * self.cell_width;
-        let height = placement.height * self.cell_height;
+        let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
         let border = BORDER;
         let (r, g, b) = colour(node.colour);
         let edge = (r, g, b, OPAQUE);
         let fill = fill_colour(node.fill);
-        let first_x = (left - placement.x) * self.cell_width;
-        let last_x = (right - placement.x) * self.cell_width;
-        let first_y = (top - placement.y) * self.cell_height;
-        let last_y = (bottom - placement.y) * self.cell_height;
+        let first_x = self.cells_to_pixels_x(left - placement.x);
+        let last_x = self.cells_to_pixels_x(right - placement.x);
+        let first_y = self.cells_to_pixels_y(top - placement.y);
+        let last_y = self.cells_to_pixels_y(bottom - placement.y);
         let span = last_x - first_x;
         let radius = if node.rounded { ROUNDED_RADIUS } else { 0 };
         let pixels = if radius != 0 {
@@ -576,22 +584,22 @@ impl TerminalRenderer {
             PlacementNode::Arrow(arrow) => arrow,
             _ => unreachable!("outline_arrow is only called for Arrow placements"),
         };
-        let width = placement.width * self.cell_width;
+        let width = self.cells_to_pixels_x(placement.width);
         let stop_rows: Vec<i64> = arrow
             .stops
             .iter()
-            .map(|stop| stop * self.cell_height + self.cell_height / 2)
+            .map(|stop| self.cells_to_pixels_y(*stop) + self.cell_height / 2)
             .collect();
-        let shaft_row = arrow.shaft * self.cell_height + self.cell_height / 2;
+        let shaft_row = self.cells_to_pixels_y(arrow.shaft) + self.cell_height / 2;
         let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
         let midpoint = width / 2;
         let (r, g, b) = colour(None);
         let ink = [r, g, b, OPAQUE];
-        let first_x = (left - placement.x) * self.cell_width;
-        let last_x = (right - placement.x) * self.cell_width;
-        let first_y = (top - placement.y) * self.cell_height;
-        let last_y = (bottom - placement.y) * self.cell_height;
+        let first_x = self.cells_to_pixels_x(left - placement.x);
+        let last_x = self.cells_to_pixels_x(right - placement.x);
+        let first_y = self.cells_to_pixels_y(top - placement.y);
+        let last_y = self.cells_to_pixels_y(bottom - placement.y);
         let mut canvas = Canvas::new(first_x, last_x, first_y, last_y, ink);
         canvas.horizontal(shaft_row, 0, midpoint, ARROW_STROKE);
         canvas.vertical(midpoint, trunk_top, trunk_bottom, ARROW_STROKE);
