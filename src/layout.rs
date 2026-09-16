@@ -10,42 +10,16 @@ pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
 pub(crate) const LEAF_STRIDE: i64 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Track {
-    pub(crate) offset: i64,
-    pub(crate) extent: i64,
-}
-
-pub(crate) fn tracks(extents: &[i64], indices: &[i64]) -> Vec<Track> {
-    let column_count = *indices.iter().max().expect("indices must not be empty") as usize + 1;
-    let mut sizes = vec![0i64; column_count];
-    for (&extent, &index) in extents.iter().zip(indices.iter()) {
-        let slot = &mut sizes[index as usize];
-        *slot = (*slot).max(extent);
-    }
-    let mut offset = 0;
-    let mut laid = Vec::with_capacity(sizes.len());
-    for size in sizes {
-        laid.push(Track { offset, extent: size });
-        offset += size;
-    }
-    laid
-}
-
-pub(crate) fn span(laid: &[Track]) -> i64 {
-    laid.iter().map(|track| track.extent).sum()
-}
-
 pub(crate) fn interior(label: &str) -> i64 {
     (label.chars().count() as i64).max(1)
 }
 
-pub(crate) fn width(box_: &Node) -> i64 {
-    interior(&box_.label) + BORDERS
+pub(crate) fn width(node: &Node) -> i64 {
+    interior(&node.label) + BORDERS
 }
 
 #[allow(dead_code)]
-pub(crate) fn height(_box_: &Node) -> i64 {
+pub(crate) fn height(_node: &Node) -> i64 {
     BOX_HEIGHT
 }
 
@@ -54,93 +28,132 @@ pub(crate) fn centre(width: i64, label: &str) -> i64 {
     1 + leftover - leftover.div_euclid(2)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Celled {
-    pub(crate) box_: Node,
-    pub(crate) width: i64,
-    pub(crate) column: i64,
-    pub(crate) row: i64,
-    pub(crate) path: Vec<i64>,
-    pub(crate) children: Vec<Celled>,
-}
-
-pub(crate) fn anchor(children: &[Celled]) -> i64 {
-    let middle = children.len() / 2;
-    if children.len() % 2 == 1 {
-        children[middle].row
-    } else {
-        children[middle - 1].row + 1
+pub(crate) fn measure_columns(nodes: &[Node]) -> Vec<i64> {
+    fn visit(node: &Node, col: usize, widths: &mut Vec<i64>) {
+        if widths.len() <= col {
+            widths.resize(col + 1, 0);
+        }
+        widths[col] = widths[col].max(width(node));
+        if !node.children.is_empty() {
+            let gap_col = col + 1;
+            if widths.len() <= gap_col {
+                widths.resize(gap_col + 1, 0);
+            }
+            widths[gap_col] = widths[gap_col].max(GAP_WIDTH);
+            for child in &node.children {
+                visit(child, gap_col + 1, widths);
+            }
+        }
     }
-}
 
-pub(crate) fn assign(box_: &Node, column: i64, path: Vec<i64>, free: i64) -> (Celled, i64) {
-    if box_.children.is_empty() {
-        let node = Celled {
-            box_: box_.clone(),
-            width: width(box_),
-            column,
-            row: free,
-            path,
-            children: Vec::new(),
-        };
-        return (node, free + LEAF_STRIDE);
-    }
-    let mut children = Vec::with_capacity(box_.children.len());
-    let mut free = free;
-    for (index, child) in box_.children.iter().enumerate() {
-        let mut child_path = path.clone();
-        child_path.push(index as i64);
-        let (node, next_free) = assign(child, column + 1, child_path, free);
-        children.push(node);
-        free = next_free;
-    }
-    let row = anchor(&children);
-    let node = Celled {
-        box_: box_.clone(),
-        width: width(box_),
-        column,
-        row,
-        path,
-        children,
-    };
-    (node, free)
-}
-
-pub(crate) fn forest(boxes: &[Node]) -> Vec<Celled> {
-    let mut trees = Vec::with_capacity(boxes.len());
-    let mut free = 0;
-    for (index, box_) in boxes.iter().enumerate() {
-        let (tree, next_free) = assign(box_, 0, vec![index as i64], free);
-        trees.push(tree);
-        free = next_free;
-    }
-    trees
-}
-
-pub(crate) fn walk(nodes: &[Celled]) -> Vec<Celled> {
-    let mut out = Vec::new();
+    let mut widths = Vec::new();
     for node in nodes {
-        out.push(node.clone());
-        out.extend(walk(&node.children));
+        visit(node, 0, &mut widths);
     }
-    out
+    widths
+}
+
+// `offsets` has one more entry than there are columns, so `offsets[col + 1] - offsets[col]` gives column `col`'s width.
+pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>> {
+    fn median(rows: &[usize]) -> usize {
+        let middle = rows.len() / 2;
+        if rows.len() % 2 == 1 {
+            rows[middle]
+        } else {
+            rows[middle - 1] + 1
+        }
+    }
+
+    fn emit<'a>(
+        node: &'a Node,
+        x: i64,
+        row: usize,
+        width: i64,
+        path: &[usize],
+        child_rows: &[usize],
+    ) -> Vec<Placement<'a>> {
+        let y = row as i64 * HALF_PITCH;
+        let mut placements = vec![Placement {
+            node: PlacementNode::Node(node),
+            x,
+            y,
+            width,
+            height: BOX_HEIGHT,
+        }];
+
+        let start = x + centre(width, &node.label);
+        let middle = y + BOX_HEIGHT / 2;
+        placements.push(Placement {
+            node: PlacementNode::Label(Label { text: &node.label, path: path.to_vec() }),
+            x: start,
+            y: middle,
+            width: interior(&node.label),
+            height: 1,
+        });
+
+        if !child_rows.is_empty() {
+            let child_ys: Vec<i64> = child_rows.iter().map(|&row| row as i64 * HALF_PITCH).collect();
+            let origin = child_ys[0] + BOX_HEIGHT / 2;
+            let stops: Vec<i64> = child_ys.iter().map(|&child_y| child_y + BOX_HEIGHT / 2 - origin).collect();
+            let shaft = y + BOX_HEIGHT / 2 - origin;
+            placements.push(Placement {
+                node: PlacementNode::Arrow(Arrow { stops: stops.clone(), shaft }),
+                x: x + width,
+                y: origin,
+                width: GAP_WIDTH,
+                height: stops[stops.len() - 1] - stops[0] + 1,
+            });
+        }
+
+        placements
+    }
+
+    fn visit<'a>(
+        node: &'a Node,
+        col: usize,
+        path: Vec<usize>,
+        offsets: &[i64],
+        free: &mut usize,
+    ) -> (Vec<Placement<'a>>, usize) {
+        let x = offsets[col];
+        let width = offsets[col + 1] - offsets[col];
+
+        if node.children.is_empty() {
+            let row = *free;
+            *free += LEAF_STRIDE as usize;
+            let placements = emit(node, x, row, width, &path, &[]);
+            return (placements, row);
+        }
+
+        let child_col = col + 2;
+        let mut child_placements = Vec::new();
+        let mut child_rows = Vec::new();
+        for (index, child) in node.children.iter().enumerate() {
+            let mut child_path = path.clone();
+            child_path.push(index);
+            let (placements, row) = visit(child, child_col, child_path, offsets, free);
+            child_placements.extend(placements);
+            child_rows.push(row);
+        }
+        let row = median(&child_rows);
+        let mut placements = emit(node, x, row, width, &path, &child_rows);
+        placements.extend(child_placements);
+        (placements, row)
+    }
+
+    let mut placements = Vec::new();
+    let mut free = 0usize;
+    for (index, node) in nodes.iter().enumerate() {
+        let (node_placements, _) = visit(node, 0, vec![index], offsets, &mut free);
+        placements.extend(node_placements);
+    }
+    placements
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Positioned {
-    pub(crate) box_: Node,
-    pub(crate) path: Vec<i64>,
-    pub(crate) x: i64,
-    pub(crate) y: i64,
-    pub(crate) width: i64,
-    pub(crate) height: i64,
-    pub(crate) children: Vec<Positioned>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Label {
-    pub(crate) text: String,
-    pub(crate) path: Vec<i64>,
+pub(crate) struct Label<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) path: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,119 +166,59 @@ pub(crate) struct Arrow {
 pub(crate) struct Cursor;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PlacementNode {
-    Node(Node),
-    Label(Label),
+pub(crate) enum PlacementNode<'a> {
+    Node(&'a Node),
+    Label(Label<'a>),
     Arrow(Arrow),
     Cursor(Cursor),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Placement {
-    pub(crate) node: PlacementNode,
+pub(crate) struct Placement<'a> {
+    pub(crate) node: PlacementNode<'a>,
     pub(crate) x: i64,
     pub(crate) y: i64,
     pub(crate) width: i64,
     pub(crate) height: i64,
 }
 
-fn position(node: &Celled, columns: &[Track], left: i64, top: i64) -> Positioned {
-    let track = columns[(2 * node.column) as usize];
-    let x = left + track.offset;
-    let y = top + node.row * HALF_PITCH;
-    Positioned {
-        box_: node.box_.clone(),
-        path: node.path.clone(),
-        x,
-        y,
-        width: track.extent,
-        height: BOX_HEIGHT,
-        children: node
-            .children
-            .iter()
-            .map(|child| position(child, columns, left, top))
-            .collect(),
-    }
-}
-
-fn emit(here: &Positioned, children: &[Positioned]) -> Vec<Placement> {
-    let mut placements = vec![Placement {
-        node: PlacementNode::Node(here.box_.clone()),
-        x: here.x,
-        y: here.y,
-        width: here.width,
-        height: here.height,
-    }];
-
-    let start = here.x + centre(here.width, &here.box_.label);
-    let middle = here.y + here.height / 2;
-    placements.push(Placement {
-        node: PlacementNode::Label(Label { text: here.box_.label.clone(), path: here.path.clone() }),
-        x: start,
-        y: middle,
-        width: interior(&here.box_.label),
-        height: 1,
-    });
-
-    if !children.is_empty() {
-        let origin = children[0].y + children[0].height / 2;
-        let stops: Vec<i64> = children.iter().map(|child| child.y + child.height / 2 - origin).collect();
-        let shaft = here.y + here.height / 2 - origin;
-        placements.push(Placement {
-            node: PlacementNode::Arrow(Arrow { stops: stops.clone(), shaft }),
-            x: here.x + here.width,
-            y: origin,
-            width: GAP_WIDTH,
-            height: stops[stops.len() - 1] - stops[0] + 1,
-        });
-    }
-
-    placements
-}
-
-fn emit_tree(here: &Positioned) -> Vec<Placement> {
-    let mut placements = emit(here, &here.children);
-    for child in &here.children {
-        placements.extend(emit_tree(child));
-    }
-    placements
-}
-
-fn column_tracks(nodes: &[Celled]) -> Vec<Track> {
-    let parents: Vec<&Celled> = nodes.iter().filter(|node| !node.children.is_empty()).collect();
-
-    let mut extents: Vec<i64> = nodes.iter().map(|node| node.width).collect();
-    extents.extend(parents.iter().map(|_| GAP_WIDTH));
-
-    let mut indices: Vec<i64> = nodes.iter().map(|node| 2 * node.column).collect();
-    indices.extend(parents.iter().map(|node| 2 * node.column + 1));
-
-    tracks(&extents, &indices)
-}
-
-pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
-    let trees = forest(&boxes);
-    let nodes = walk(&trees);
+pub(crate) fn layout<'a>(nodes: &'a [Node], cols: i64, rows: i64) -> Vec<Placement<'a>> {
     if nodes.is_empty() {
         return Vec::new();
     }
 
-    let columns = column_tracks(&nodes);
-    let total_height = nodes.iter().map(|node| node.row).max().expect("nodes is non-empty") * HALF_PITCH + BOX_HEIGHT;
-    let left = (cols - span(&columns)).div_euclid(2);
-    let top = (rows - total_height).div_euclid(2);
+    let widths = measure_columns(nodes);
+    let span: i64 = widths.iter().sum();
+    let left = (cols - span).div_euclid(2);
 
-    let placements: Vec<Placement> = trees
+    let mut offsets = Vec::with_capacity(widths.len() + 1);
+    let mut offset = left;
+    for w in &widths {
+        offsets.push(offset);
+        offset += w;
+    }
+    offsets.push(offset);
+
+    let mut placements = place(nodes, &offsets);
+
+    let max_row_y = placements
         .iter()
-        .flat_map(|tree| emit_tree(&position(tree, &columns, left, top)))
-        .collect();
+        .filter(|placement| matches!(placement.node, PlacementNode::Node(_)))
+        .map(|placement| placement.y)
+        .max()
+        .unwrap_or(0);
+    let total_height = max_row_y + BOX_HEIGHT;
+    let top = (rows - total_height).div_euclid(2);
+    for placement in &mut placements {
+        placement.y += top;
+    }
 
-    let mut boxes_first: Vec<Placement> = placements
+    let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
         .filter(|placement| matches!(placement.node, PlacementNode::Node(_)))
         .cloned()
         .collect();
-    let mut rest: Vec<Placement> = placements
+    let mut rest: Vec<Placement<'a>> = placements
         .into_iter()
         .filter(|placement| !matches!(placement.node, PlacementNode::Node(_)))
         .collect();
@@ -273,7 +226,7 @@ pub(crate) fn layout(boxes: Vec<Node>, cols: i64, rows: i64) -> Vec<Placement> {
     boxes_first
 }
 
-pub(crate) fn with_cursor(placements: Vec<Placement>, selected: Vec<i64>) -> Vec<Placement> {
+pub(crate) fn with_cursor<'a>(placements: Vec<Placement<'a>>, selected: Vec<usize>) -> Vec<Placement<'a>> {
     for placement in &placements {
         if let PlacementNode::Label(label) = &placement.node {
             if label.path == selected {
@@ -304,37 +257,48 @@ mod tests {
         Node { label: label.to_string(), children, ..Default::default() }
     }
 
-    #[test]
-    fn tracks_distributes_max_extent_per_column_index() {
-        let laid = tracks(&[3, 5, 2], &[0, 0, 1]);
-        assert_eq!(
-            laid,
-            vec![Track { offset: 0, extent: 5 }, Track { offset: 5, extent: 2 }]
-        );
+    fn offsets_for(nodes: &[Node]) -> Vec<i64> {
+        let widths = measure_columns(nodes);
+        let mut offsets = Vec::with_capacity(widths.len() + 1);
+        let mut offset = 0;
+        for w in &widths {
+            offsets.push(offset);
+            offset += w;
+        }
+        offsets.push(offset);
+        offsets
     }
 
     #[test]
-    fn tracks_leaves_untouched_columns_at_zero_extent() {
-        let laid = tracks(&[4], &[2]);
-        assert_eq!(
-            laid,
-            vec![
-                Track { offset: 0, extent: 0 },
-                Track { offset: 0, extent: 0 },
-                Track { offset: 0, extent: 4 },
-            ]
-        );
+    fn measure_columns_of_leaf_only_forest_is_one_column_of_the_max_width() {
+        let nodes = vec![node("aa"), node("b")];
+        let widths = measure_columns(&nodes);
+        assert_eq!(widths, vec![width(&node("aa"))]);
     }
 
     #[test]
-    fn span_sums_track_extents() {
-        let laid = vec![Track { offset: 0, extent: 3 }, Track { offset: 3, extent: 5 }];
-        assert_eq!(span(&laid), 8);
+    fn measure_columns_of_a_parent_and_child_has_parent_gap_child_widths() {
+        let nodes = vec![node_with_children("parent", vec![node("a")])];
+        let widths = measure_columns(&nodes);
+        assert_eq!(widths, vec![width(&node("parent")), GAP_WIDTH, width(&node("a"))]);
     }
 
     #[test]
-    fn span_of_no_tracks_is_zero() {
-        assert_eq!(span(&[]), 0);
+    fn measure_columns_aligns_columns_across_multiple_top_level_trees() {
+        let nodes = vec![
+            node("a"),
+            node_with_children("bb", vec![node("ccc")]),
+            node("d"),
+        ];
+        let widths = measure_columns(&nodes);
+        let expected_col0 = width(&node("a")).max(width(&node("bb"))).max(width(&node("d")));
+        assert_eq!(widths, vec![expected_col0, GAP_WIDTH, width(&node("ccc"))]);
+    }
+
+    #[test]
+    fn measure_columns_of_no_nodes_is_empty() {
+        let widths = measure_columns(&[]);
+        assert_eq!(widths, Vec::<i64>::new());
     }
 
     #[test]
@@ -374,171 +338,50 @@ mod tests {
     }
 
     #[test]
-    fn anchor_of_odd_children_is_the_middle_childs_row() {
-        let children = vec![
-            Celled { row: 0, ..leaf_at(0) },
-            Celled { row: 2, ..leaf_at(0) },
-            Celled { row: 4, ..leaf_at(0) },
-        ];
-        assert_eq!(anchor(&children), 2);
+    fn place_places_a_node_using_its_offset_and_row() {
+        let hi = node("hi");
+        let nodes = vec![hi.clone()];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
+
+        let box_placement = &placements[0];
+        match &box_placement.node {
+            PlacementNode::Node(n) => assert_eq!(*n, &hi),
+            _ => panic!("expected the first placement to wrap the node"),
+        }
+        assert_eq!(box_placement.x, offsets[0]);
+        assert_eq!(box_placement.y, 0);
+        assert_eq!(box_placement.width, offsets[1] - offsets[0]);
+        assert_eq!(box_placement.height, BOX_HEIGHT);
     }
 
     #[test]
-    fn anchor_of_even_children_is_one_past_the_row_before_the_middle() {
-        let children = vec![
-            Celled { row: 0, ..leaf_at(0) },
-            Celled { row: 2, ..leaf_at(0) },
-        ];
-        assert_eq!(anchor(&children), 1);
-    }
+    fn place_recurses_into_children_building_correct_paths() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
 
-    fn leaf_at(row: i64) -> Celled {
-        Celled { box_: node(""), width: 0, column: 0, row, path: vec![], children: vec![] }
-    }
-
-    #[test]
-    fn assign_of_a_leaf_places_it_at_the_free_row_and_advances_by_leaf_stride() {
-        let (cell, next_free) = assign(&node("hi"), 0, vec![0], 5);
-        assert_eq!(cell.box_, node("hi"));
-        assert_eq!(cell.width, width(&node("hi")));
-        assert_eq!(cell.column, 0);
-        assert_eq!(cell.row, 5);
-        assert_eq!(cell.path, vec![0]);
-        assert!(cell.children.is_empty());
-        assert_eq!(next_free, 5 + LEAF_STRIDE);
-    }
-
-    #[test]
-    fn assign_of_a_parent_places_children_in_the_next_column_with_indexed_paths() {
-        let tree = node_with_children("parent", vec![node("a"), node("b")]);
-        let (cell, next_free) = assign(&tree, 0, vec![3], 0);
-
-        assert_eq!(cell.column, 0);
-        assert_eq!(cell.path, vec![3]);
-        assert_eq!(cell.children.len(), 2);
-
-        assert_eq!(cell.children[0].column, 1);
-        assert_eq!(cell.children[0].path, vec![3, 0]);
-        assert_eq!(cell.children[0].row, 0);
-
-        assert_eq!(cell.children[1].column, 1);
-        assert_eq!(cell.children[1].path, vec![3, 1]);
-        assert_eq!(cell.children[1].row, LEAF_STRIDE);
-
-        assert_eq!(next_free, 2 * LEAF_STRIDE);
-        assert_eq!(cell.row, anchor(&cell.children));
-    }
-
-    #[test]
-    fn forest_threads_the_free_row_counter_across_top_level_trees() {
-        let boxes = vec![node("a"), node("b")];
-        let trees = forest(&boxes);
-
-        assert_eq!(trees.len(), 2);
-        assert_eq!(trees[0].path, vec![0]);
-        assert_eq!(trees[0].row, 0);
-        assert_eq!(trees[1].path, vec![1]);
-        assert_eq!(trees[1].row, LEAF_STRIDE);
-    }
-
-    #[test]
-    fn forest_threads_free_across_a_multi_child_tree_and_a_following_leaf() {
-        let boxes = vec![node_with_children("parent", vec![node("a"), node("b")]), node("c")];
-        let trees = forest(&boxes);
-
-        assert_eq!(trees.len(), 2);
-        assert_eq!(trees[1].row, 2 * LEAF_STRIDE);
-    }
-
-    #[test]
-    fn walk_flattens_a_forest_in_pre_order() {
-        let boxes = vec![node_with_children("parent", vec![node("a"), node("b")])];
-        let trees = forest(&boxes);
-        let flat = walk(&trees);
-
-        let paths: Vec<Vec<i64>> = flat.iter().map(|cell| cell.path.clone()).collect();
+        let paths: Vec<Vec<usize>> = placements
+            .iter()
+            .filter_map(|placement| match &placement.node {
+                PlacementNode::Label(label) => Some(label.path.clone()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(paths, vec![vec![0], vec![0, 0], vec![0, 1]]);
     }
 
     #[test]
-    fn walk_of_multiple_top_level_trees_visits_each_tree_before_its_next_sibling_tree() {
-        let boxes = vec![node("a"), node_with_children("b", vec![node("c")])];
-        let trees = forest(&boxes);
-        let flat = walk(&trees);
-
-        let paths: Vec<Vec<i64>> = flat.iter().map(|cell| cell.path.clone()).collect();
-        assert_eq!(paths, vec![vec![0], vec![1], vec![1, 0]]);
-    }
-
-    fn columns_for(boxes: &[Node]) -> Vec<Track> {
-        let trees = forest(boxes);
-        let nodes = walk(&trees);
-        column_tracks(&nodes)
-    }
-
-    #[test]
-    fn column_tracks_has_no_gap_track_for_a_leaf_only_forest() {
-        let boxes = vec![node("aa"), node("b")];
-        let columns = columns_for(&boxes);
-        assert_eq!(columns.len(), 1);
-        assert_eq!(columns[0].extent, width(&node("aa")));
-    }
-
-    #[test]
-    fn column_tracks_adds_a_gap_track_after_a_parent_column() {
-        let boxes = vec![node_with_children("parent", vec![node("a")])];
-        let columns = columns_for(&boxes);
-        assert_eq!(columns.len(), 3);
-        assert_eq!(columns[1].extent, GAP_WIDTH);
-    }
-
-    #[test]
-    fn position_places_the_box_using_its_track_and_row() {
-        let boxes = vec![node("hi")];
-        let trees = forest(&boxes);
-        let columns = columns_for(&boxes);
-        let positioned = position(&trees[0], &columns, 10, 20);
-
-        assert_eq!(positioned.box_, node("hi"));
-        assert_eq!(positioned.path, vec![0]);
-        assert_eq!(positioned.x, 10 + columns[0].offset);
-        assert_eq!(positioned.y, 20);
-        assert_eq!(positioned.width, columns[0].extent);
-        assert_eq!(positioned.height, BOX_HEIGHT);
-        assert!(positioned.children.is_empty());
-    }
-
-    #[test]
-    fn position_recurses_into_children() {
-        let boxes = vec![node_with_children("parent", vec![node("a"), node("b")])];
-        let trees = forest(&boxes);
-        let columns = columns_for(&boxes);
-        let positioned = position(&trees[0], &columns, 0, 0);
-
-        assert_eq!(positioned.children.len(), 2);
-        assert_eq!(positioned.children[0].path, vec![0, 0]);
-        assert_eq!(positioned.children[1].path, vec![0, 1]);
-    }
-
-    fn leaf_positioned(label: &str, path: Vec<i64>, x: i64, y: i64, width: i64) -> Positioned {
-        Positioned { box_: node(label), path, x, y, width, height: BOX_HEIGHT, children: vec![] }
-    }
-
-    #[test]
-    fn emit_of_a_leaf_yields_only_a_box_and_a_label_placement() {
-        let here = leaf_positioned("hi", vec![0], 5, 5, 10);
-        let placements = emit(&here, &[]);
+    fn place_of_a_leaf_yields_only_a_box_and_a_label_placement() {
+        let nodes = vec![node("hi")];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
 
         assert_eq!(placements.len(), 2);
         match &placements[0].node {
-            PlacementNode::Node(box_) => assert_eq!(box_, &node("hi")),
-            _ => panic!("expected the first placement to wrap the box"),
+            PlacementNode::Node(n) => assert_eq!(*n, &node("hi")),
+            _ => panic!("expected the first placement to wrap the node"),
         }
-        assert_eq!(placements[0].x, 5);
-        assert_eq!(placements[0].y, 5);
-        assert_eq!(placements[0].width, 10);
-        assert_eq!(placements[0].height, BOX_HEIGHT);
-
         match &placements[1].node {
             PlacementNode::Label(label) => {
                 assert_eq!(label.text, "hi");
@@ -549,39 +392,68 @@ mod tests {
     }
 
     #[test]
-    fn emit_of_a_parent_yields_a_third_arrow_placement_with_stops_and_shaft() {
-        let here = leaf_positioned("parent", vec![0], 0, 3, 10);
-        let child_a = leaf_positioned("a", vec![0, 0], 20, 0, 5);
-        let child_b = leaf_positioned("b", vec![0, 1], 20, 6, 5);
-        let placements = emit(&here, &[child_a.clone(), child_b.clone()]);
+    fn place_of_a_parent_yields_a_third_arrow_placement_with_stops_and_shaft() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
 
-        assert_eq!(placements.len(), 3);
-        let origin = child_a.y + child_a.height / 2;
-        let expected_stops = vec![
-            child_a.y + child_a.height / 2 - origin,
-            child_b.y + child_b.height / 2 - origin,
-        ];
-        let expected_shaft = here.y + here.height / 2 - origin;
-        match &placements[2].node {
-            PlacementNode::Arrow(arrow) => {
-                assert_eq!(arrow.stops, expected_stops);
-                assert_eq!(arrow.shaft, expected_shaft);
-            }
-            _ => panic!("expected the third placement to be an arrow"),
-        }
-        assert_eq!(placements[2].x, here.x + here.width);
-        assert_eq!(placements[2].y, origin);
-        assert_eq!(placements[2].width, GAP_WIDTH);
+        assert_eq!(placements.len(), 7);
+
+        let child_a_y = 0;
+        let child_b_y = LEAF_STRIDE * HALF_PITCH;
+        let origin = child_a_y + BOX_HEIGHT / 2;
+        let parent_row: i64 = 1;
+        let parent_y = parent_row * HALF_PITCH;
+        let expected_stops =
+            vec![child_a_y + BOX_HEIGHT / 2 - origin, child_b_y + BOX_HEIGHT / 2 - origin];
+        let expected_shaft = parent_y + BOX_HEIGHT / 2 - origin;
+
+        let arrow = placements
+            .iter()
+            .find_map(|placement| match &placement.node {
+                PlacementNode::Arrow(arrow) => Some(arrow.clone()),
+                _ => None,
+            })
+            .expect("a parent yields an arrow placement");
+        assert_eq!(arrow.stops, expected_stops);
+        assert_eq!(arrow.shaft, expected_shaft);
+    }
+
+    #[test]
+    fn place_assigns_a_parents_row_as_the_middle_childs_row_when_odd() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("b"), node("c")])];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
+
+        let parent_box = placements
+            .iter()
+            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label == "parent"))
+            .expect("the parent has a box placement");
+        assert_eq!(parent_box.y, LEAF_STRIDE * HALF_PITCH);
+    }
+
+    #[test]
+    fn place_assigns_a_parents_row_one_past_the_row_before_the_middle_when_even() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
+
+        let parent_box = placements
+            .iter()
+            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label == "parent"))
+            .expect("the parent has a box placement");
+        assert_eq!(parent_box.y, HALF_PITCH);
     }
 
     #[test]
     fn layout_of_no_boxes_is_empty() {
-        assert_eq!(layout(vec![], 80, 24), vec![]);
+        assert_eq!(layout(&[], 80, 24), vec![]);
     }
 
     #[test]
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
-        let placements = layout(vec![node("hi")], 80, 24);
+        let nodes = vec![node("hi")];
+        let placements = layout(&nodes, 80, 24);
         assert!(placements.iter().all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Node(_))));
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Label(_))));
@@ -590,14 +462,14 @@ mod tests {
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
-        let placements = layout(boxes, 80, 24);
+        let placements = layout(&boxes, 80, 24);
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Arrow(_))));
     }
 
     #[test]
     fn layout_draws_boxes_before_labels_and_arrows() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
-        let placements = layout(boxes, 80, 24);
+        let placements = layout(&boxes, 80, 24);
 
         let first_non_box = placements
             .iter()
@@ -610,7 +482,8 @@ mod tests {
 
     #[test]
     fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
-        let placements = layout(vec![node("hi")], 80, 24);
+        let nodes = vec![node("hi")];
+        let placements = layout(&nodes, 80, 24);
         let label = placements
             .iter()
             .find(|p| matches!(p.node, PlacementNode::Label(_)))
@@ -627,16 +500,17 @@ mod tests {
 
     #[test]
     fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
-        let placements = layout(vec![node("hi")], 80, 24);
+        let nodes = vec![node("hi")];
+        let placements = layout(&nodes, 80, 24);
         let result = with_cursor(placements.clone(), vec![99]);
         assert_eq!(result, placements);
     }
 
     #[test]
     fn label_constructor_defaults_path_to_empty() {
-        let label = Label { text: "hi".to_string(), path: vec![] };
+        let label = Label { text: "hi", path: vec![] };
         assert_eq!(label.text, "hi");
-        assert_eq!(label.path, Vec::<i64>::new());
+        assert_eq!(label.path, Vec::<usize>::new());
     }
 
     #[test]
@@ -648,14 +522,15 @@ mod tests {
 
     #[test]
     fn placement_node_holds_the_matching_variants_inner_value() {
-        let box_placement = Placement { node: PlacementNode::Node(node("a")), x: 0, y: 0, width: 3, height: 3 };
+        let a = node("a");
+        let box_placement = Placement { node: PlacementNode::Node(&a), x: 0, y: 0, width: 3, height: 3 };
         match box_placement.node {
-            PlacementNode::Node(box_) => assert_eq!(box_, node("a")),
+            PlacementNode::Node(n) => assert_eq!(n, &a),
             _ => panic!("expected a Node variant"),
         }
 
         let label_placement = Placement {
-            node: PlacementNode::Label(Label { text: "a".to_string(), path: vec![0] }),
+            node: PlacementNode::Label(Label { text: "a", path: vec![0] }),
             x: 0,
             y: 0,
             width: 1,
@@ -663,7 +538,7 @@ mod tests {
         };
         match label_placement.node {
             PlacementNode::Label(label) => {
-                assert_eq!(label, Label { text: "a".to_string(), path: vec![0] })
+                assert_eq!(label, Label { text: "a", path: vec![0] })
             }
             _ => panic!("expected a Label variant"),
         }
