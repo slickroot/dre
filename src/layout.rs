@@ -54,6 +54,32 @@ pub(crate) fn centre(width: i64, label: &str) -> i64 {
     1 + leftover - leftover.div_euclid(2)
 }
 
+#[allow(dead_code)]
+pub(crate) fn measure_columns(nodes: &[Node]) -> Vec<i64> {
+    fn visit(node: &Node, col: usize, widths: &mut Vec<i64>) {
+        if widths.len() <= col {
+            widths.resize(col + 1, 0);
+        }
+        widths[col] = widths[col].max(width(node));
+        if !node.children.is_empty() {
+            let gap_col = col + 1;
+            if widths.len() <= gap_col {
+                widths.resize(gap_col + 1, 0);
+            }
+            widths[gap_col] = widths[gap_col].max(GAP_WIDTH);
+            for child in &node.children {
+                visit(child, gap_col + 1, widths);
+            }
+        }
+    }
+
+    let mut widths = Vec::new();
+    for node in nodes {
+        visit(node, 0, &mut widths);
+    }
+    widths
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Celled {
     pub(crate) box_: Node,
@@ -302,6 +328,38 @@ mod tests {
 
     fn node_with_children(label: &str, children: Vec<Node>) -> Node {
         Node { label: label.to_string(), children, ..Default::default() }
+    }
+
+    #[test]
+    fn measure_columns_of_leaf_only_forest_is_one_column_of_the_max_width() {
+        let nodes = vec![node("aa"), node("b")];
+        let widths = measure_columns(&nodes);
+        assert_eq!(widths, vec![width(&node("aa"))]);
+    }
+
+    #[test]
+    fn measure_columns_of_a_parent_and_child_has_parent_gap_child_widths() {
+        let nodes = vec![node_with_children("parent", vec![node("a")])];
+        let widths = measure_columns(&nodes);
+        assert_eq!(widths, vec![width(&node("parent")), GAP_WIDTH, width(&node("a"))]);
+    }
+
+    #[test]
+    fn measure_columns_aligns_columns_across_multiple_top_level_trees() {
+        let nodes = vec![
+            node("a"),
+            node_with_children("bb", vec![node("ccc")]),
+            node("d"),
+        ];
+        let widths = measure_columns(&nodes);
+        let expected_col0 = width(&node("a")).max(width(&node("bb"))).max(width(&node("d")));
+        assert_eq!(widths, vec![expected_col0, GAP_WIDTH, width(&node("ccc"))]);
+    }
+
+    #[test]
+    fn measure_columns_of_no_nodes_is_empty() {
+        let widths = measure_columns(&[]);
+        assert_eq!(widths, Vec::<i64>::new());
     }
 
     #[test]
