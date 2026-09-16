@@ -1,15 +1,14 @@
 use crate::command_mode;
 use crate::insert_mode;
 
-pub(crate) const PLAIN: i64 = -1;
-pub(crate) const PALETTE_SIZE: i64 = 5;
+pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
     pub(crate) label: String,
-    pub(crate) colour: i64,
-    pub(crate) fill: i64,
+    pub(crate) colour: Option<u8>,
+    pub(crate) fill: Option<u8>,
     pub(crate) rounded: bool,
     pub(crate) children: Vec<Node>,
 }
@@ -18,8 +17,8 @@ impl Default for Node {
     fn default() -> Self {
         Node {
             label: String::new(),
-            colour: PLAIN,
-            fill: PLAIN,
+            colour: None,
+            fill: None,
             rounded: false,
             children: Vec::new(),
         }
@@ -76,8 +75,12 @@ pub(crate) fn undo(mut state: State) -> State {
     state
 }
 
-pub(crate) fn next_colour(colour: i64) -> i64 {
-    (colour + 2).rem_euclid(PALETTE_SIZE + 1) - 1
+pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
+    match colour {
+        None => Some(0),
+        Some(i) if i + 1 < PALETTE_SIZE => Some(i + 1),
+        Some(_) => None,
+    }
 }
 
 pub(crate) fn at<'a>(boxes: &'a mut [Node], path: &Path) -> &'a mut Node {
@@ -102,7 +105,7 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     };
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
-    let new_colour = if uniform { next_colour(first_colour) } else { 0 };
+    let new_colour = if uniform { next_colour(first_colour) } else { Some(0) };
     for sibling in siblings.iter_mut() {
         sibling.colour = new_colour;
     }
@@ -162,12 +165,12 @@ mod tests {
 
     #[test]
     fn boxes_default_to_the_plain_colour() {
-        assert_eq!(Node::default().colour, PLAIN);
+        assert_eq!(Node::default().colour, None);
     }
 
     #[test]
     fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().fill, PLAIN);
+        assert_eq!(Node::default().fill, None);
     }
 
     #[test]
@@ -256,22 +259,22 @@ mod tests {
 
     #[test]
     fn next_colour_cycles_through_the_palette_and_back_to_plain() {
-        let mut colour = PLAIN;
+        let mut colour = None;
         for _ in 0..PALETTE_SIZE {
             colour = next_colour(colour);
         }
-        assert_ne!(colour, PLAIN);
+        assert_ne!(colour, None);
         colour = next_colour(colour);
-        assert_eq!(colour, PLAIN);
+        assert_eq!(colour, None);
     }
 
     #[test]
     fn colour_row_advances_uniformly_coloured_siblings() {
         let mut boxes = vec![node("a"), node("b")];
         let mut a = node("a");
-        a.colour = next_colour(PLAIN);
+        a.colour = next_colour(None);
         let mut b = node("b");
-        b.colour = next_colour(PLAIN);
+        b.colour = next_colour(None);
         colour_row(&mut boxes, &Path { head: 0, tail: vec![] });
         assert_eq!(boxes, vec![a, b]);
     }
@@ -279,14 +282,14 @@ mod tests {
     #[test]
     fn colour_row_sets_mixed_siblings_to_the_first_palette_colour() {
         let mut a = node("a");
-        a.colour = 0;
+        a.colour = Some(0);
         let mut b = node("b");
-        b.colour = 1;
+        b.colour = Some(1);
         let mut boxes = vec![a, b];
         let mut expected_a = node("a");
-        expected_a.colour = 0;
+        expected_a.colour = Some(0);
         let mut expected_b = node("b");
-        expected_b.colour = 0;
+        expected_b.colour = Some(0);
         colour_row(&mut boxes, &Path { head: 0, tail: vec![] });
         assert_eq!(boxes, vec![expected_a, expected_b]);
     }

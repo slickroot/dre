@@ -214,7 +214,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Node, PALETTE_SIZE, PLAIN};
+    use crate::state::{handle_key, new_state, Node, PALETTE_SIZE};
 
     fn node(label: &str) -> Node {
         Node { label: label.to_string(), ..Default::default() }
@@ -442,25 +442,25 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { head: 0, tail: vec![] }));
         let result = handle_key(state, "c");
         let mut expected = node("a");
-        expected.colour = next_colour(PLAIN);
+        expected.colour = next_colour(None);
         assert_eq!(result.doc.boxes, vec![expected]);
         assert_eq!(result.doc.boxes[0].label, "a");
 
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { head: 0, tail: vec![] }));
         let result = handle_key(state, "f");
         let mut expected = node("a");
-        expected.fill = next_colour(PLAIN);
+        expected.fill = next_colour(None);
         assert_eq!(result.doc.boxes, vec![expected]);
 
         let mut state_boxed = vec![node("a")];
-        let mut colour = PLAIN;
+        let mut colour: Option<u8> = None;
         for _ in 0..=PALETTE_SIZE {
             let s = new_state(state_boxed.clone(), Mode::Command, Some(Path { head: 0, tail: vec![] }));
             let result = handle_key(s, "c");
             state_boxed = result.doc.boxes;
             colour = state_boxed[0].colour;
         }
-        assert_eq!(colour, PLAIN);
+        assert_eq!(colour, None);
     }
 
     #[test]
@@ -487,9 +487,9 @@ mod tests {
         let state = new_state(boxes, Mode::Command, Some(Path { head: 0, tail: vec![1] }));
         let result = handle_key(state, "C");
         let mut c = node("c");
-        c.colour = next_colour(PLAIN);
+        c.colour = next_colour(None);
         let mut d = node("d");
-        d.colour = next_colour(PLAIN);
+        d.colour = next_colour(None);
         assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![c, d])]);
     }
 
