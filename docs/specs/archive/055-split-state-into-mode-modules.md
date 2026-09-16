@@ -42,7 +42,7 @@ What distinguishes a mode from a mere command set is that it is a *total* interp
 | Command | fourteen named verbs, each with a depth requirement and an undoability | none | Insert, via `NewBox`, `NewSibling`, `EditLabel`, `RenameLabel` |
 | Insert | `Commit`, `Backspace`, `Append(char)` | where the text cursor is | Command, via `Commit` |
 
-This spec implements column one — the vocabularies — and moves each into its own module. Column two, the per-mode state, is spec 056.
+This spec implements column one — the vocabularies — and moves each into its own module. Column two, the per-mode state, is spec 057.
 
 ### The three modules
 
@@ -143,7 +143,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
 }
 ```
 
-The `PAD` arithmetic is untouched here deliberately. It is load-bearing: `layout::with_cursor` places the text cursor at `placement.x + placement.width - 1`, the last cell of the selected label, so the trailing space is what reserves a cell for the cursor to occupy. Removing it means giving the cursor a home in `Mode::Insert` and making `with_cursor` conditional, which touches `layout.rs` and `render.rs`. That is spec 056.
+The `PAD` arithmetic is untouched here deliberately. It is load-bearing: `layout::with_cursor` places the text cursor at `placement.x + placement.width - 1`, the last cell of the selected label, so the trailing space is what reserves a cell for the cursor to occupy. Removing it means giving the cursor a home in `Mode::Insert` and making `with_cursor` conditional, which touches `layout.rs` and `render.rs`. That is spec 057.
 
 ### Guards stay with command mode
 
@@ -167,7 +167,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
 
 `history` stays private. `snapshot` and `undo` remain in `state.rs`, and `command_mode::reduce` calls them rather than touching the field, so the undo stack keeps its invariant — it is a stack you push and pop, not a `Vec` anyone can rewrite. This is the one piece of encapsulation the split preserves for free.
 
-Spec 054 recorded that `mode` is private because "nothing outside `state.rs` reads it". That rationale was about `writer.rs`, which still does not read it. Widening it to `pub(crate)` is forced by `command_mode` needing to construct `Mode::Insert`, and is the price of organising by mode. Sealing `Mode` behind a setter function was considered and rejected: it buys a compile-time guard inside a single four-file binary crate, at the cost of an indirection on every mode transition, and spec 056 will move mode transitions into the `Mode` type itself where the invariant can be expressed directly.
+Spec 054 recorded that `mode` is private because "nothing outside `state.rs` reads it". That rationale was about `writer.rs`, which still does not read it. Widening it to `pub(crate)` is forced by `command_mode` needing to construct `Mode::Insert`, and is the price of organising by mode. Sealing `Mode` behind a setter function was considered and rejected: it buys a compile-time guard inside a single four-file binary crate, at the cost of an indirection on every mode transition, and spec 057 will move mode transitions into the `Mode` type itself where the invariant can be expressed directly.
 
 ### Module cycle
 
@@ -198,8 +198,8 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> S
 
 ### Out of scope
 
-Per-mode state — `Mode` as a data-carrying enum, the text cursor moving into `Mode::Insert`, deleting `PAD`, making `with_cursor` conditional, and splitting `Document` into `Diagram { boxes }` and `Snapshot { diagram, selected }` so that saving writes a diagram and not a cursor position — is **spec 056**. It touches `layout.rs` and `render.rs`; this spec touches neither.
+Per-mode state — `Mode` as a data-carrying enum, the text cursor moving into `Mode::Insert`, deleting `PAD`, making `with_cursor` conditional, and splitting `Document` into `Diagram { boxes }` and `Snapshot { diagram, selected }` so that saving writes a diagram and not a cursor position — is **spec 057**. It touches `layout.rs` and `render.rs`; this spec touches neither.
 
-Multi-line labels are planned but are not this spec, and barely touch it: insert mode's `Command` gains a `Newline` variant alongside `Append(char)`, and nothing else in the vocabulary changes. They do constrain one 056 decision, recorded here so it is not made by accident — the text cursor should be stored as a flat character index into the label, not as a column. A flat index is identical to a column for today's single-line labels and keeps working once labels contain newlines. The layout consequences are a separate story again: `layout::height` already takes a `&Node` and ignores it (`layout.rs:48`, currently `#[allow(dead_code)]`), and `layout::interior` counts every character in the label, so a newline would count toward the box's *width*.
+Multi-line labels are planned but are not this spec, and barely touch it: insert mode's `Command` gains a `Newline` variant alongside `Append(char)`, and nothing else in the vocabulary changes. They do constrain one 057 decision, recorded here so it is not made by accident — the text cursor should be stored as a flat character index into the label, not as a column. A flat index is identical to a column for today's single-line labels and keeps working once labels contain newlines. The layout consequences are a separate story again: `layout::height` already takes a `&Node` and ignores it (`layout.rs:48`, currently `#[allow(dead_code)]`), and `layout::interior` counts every character in the label, so a newline would count toward the box's *width*.
 
 Save and open are a later story still, and carry an open question this spec does not prejudge: every command today is a pure `State -> State`, and `writer::run` can only paint a frame and read a key. Writing a file needs either an effect returned as data, a pending-effect field on `State`, or an injected storage dependency. Choosing that is the save story's job.
