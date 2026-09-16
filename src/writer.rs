@@ -117,7 +117,7 @@ fn frame<W: Write>(
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
     let (cell_width, cell_height) = cell_size()?;
     let mut renderer = TerminalRenderer::new(KittyGraphics::new(), cell_width, cell_height);
-    let mut state = State::new(Vec::new(), true, "command".to_string(), Vec::new(), None);
+    let mut state = State::default();
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn the_renderer_is_given_the_terminal_size() {
-        let state = State::new(Vec::new(), true, "command".to_string(), Vec::new(), None);
+        let state = State::default();
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn what_the_renderer_returned_is_painted() {
-        let state = State::new(Vec::new(), true, "command".to_string(), Vec::new(), None);
+        let state = State::default();
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
