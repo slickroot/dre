@@ -125,69 +125,40 @@ fn next_colour(colour: i64) -> i64 {
     (colour + 2).rem_euclid(PALETTE_SIZE + 1) - 1
 }
 
-fn at(boxes: &[Node], path: &[usize]) -> Node {
-    let mut node = boxes[path[0]].clone();
+fn at<'a>(boxes: &'a mut [Node], path: &[usize]) -> &'a mut Node {
+    let mut node = &mut boxes[path[0]];
     for &index in &path[1..] {
-        node = node.children[index].clone();
+        node = &mut node.children[index];
     }
     node
 }
 
-fn rewrite(boxes: &[Node], path: &[usize], f: &dyn Fn(&Node) -> Node) -> Vec<Node> {
-    let index = path[0];
-    let rest = &path[1..];
-    let mut result = boxes.to_vec();
-    let node = &boxes[index];
-    let new_node = if !rest.is_empty() {
-        let mut n = node.clone();
-        n.children = rewrite(&node.children, rest, f);
-        n
-    } else {
-        f(node)
-    };
-    result[index] = new_node;
-    result
-}
-
-fn colour_row(boxes: &[Node], path: &[usize]) -> Vec<Node> {
+fn colour_row(boxes: &mut Vec<Node>, path: &[usize]) {
     let parent = &path[..path.len() - 1];
-    let siblings: Vec<Node> = if !parent.is_empty() {
-        at(boxes, parent).children
+    let siblings = if parent.is_empty() {
+        boxes
     } else {
-        boxes.to_vec()
+        &mut at(boxes, parent).children
     };
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
     let new_colour = if uniform { next_colour(first_colour) } else { 0 };
-    let mut boxes = boxes.to_vec();
-    for i in 0..siblings.len() {
-        let mut sibling_path = parent.to_vec();
-        sibling_path.push(i);
-        boxes = rewrite(&boxes, &sibling_path, &|node: &Node| {
-            let mut n = node.clone();
-            n.colour = new_colour;
-            n
-        });
+    for sibling in siblings.iter_mut() {
+        sibling.colour = new_colour;
     }
-    boxes
 }
 
-fn grow(boxes: &[Node], path: &[usize]) -> (Vec<Node>, Vec<usize>) {
+fn grow(boxes: &mut Vec<Node>, path: &[usize]) -> Vec<usize> {
     if path.is_empty() {
-        let mut boxes = boxes.to_vec();
-        let new_index = boxes.len();
         boxes.push(Node { label: PAD.to_string(), ..Default::default() });
-        (boxes, vec![new_index])
+        vec![boxes.len() - 1]
     } else {
-        let new_index = at(boxes, path).children.len();
-        let grown = rewrite(boxes, path, &|node: &Node| {
-            let mut n = node.clone();
-            n.children.push(Node { label: PAD.to_string(), ..Default::default() });
-            n
-        });
+        let children = &mut at(boxes, path).children;
+        children.push(Node { label: PAD.to_string(), ..Default::default() });
+        let new_index = children.len() - 1;
         let mut new_path = path.to_vec();
         new_path.push(new_index);
-        (grown, new_path)
+        new_path
     }
 }
 
@@ -196,17 +167,10 @@ fn drop_last_chars(s: &str, n: usize) -> String {
     s.chars().take(len.saturating_sub(n)).collect()
 }
 
-fn enter_insert(state: &State, base_label: &str) -> State {
-    let label = format!("{base_label}{PAD}");
-    let boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-        let mut n = node.clone();
-        n.label = label.clone();
-        n
-    });
-    let mut new_state = state.clone();
-    new_state.doc.boxes = boxes;
-    new_state.mode = Mode::Insert;
-    new_state
+fn enter_insert(mut state: State, base_label: &str) -> State {
+    at(&mut state.doc.boxes, &state.doc.selected).label = format!("{base_label}{PAD}");
+    state.mode = Mode::Insert;
+    state
 }
 
 fn handle_command(state: &State, key: &str) -> State {
@@ -221,21 +185,19 @@ fn handle_command(state: &State, key: &str) -> State {
     match command {
         Command::Undo => undo(state),
         Command::NewBox => {
-            let (boxes, selected) = grow(&state.doc.boxes, &state.doc.selected);
-            state.doc.boxes = boxes;
-            state.mode = Mode::Insert;
+            let selected = grow(&mut state.doc.boxes, &state.doc.selected);
             state.doc.selected = selected;
+            state.mode = Mode::Insert;
             state
         }
         Command::NewSibling => {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            let parent = &state.doc.selected[..state.doc.selected.len() - 1];
-            let (boxes, selected) = grow(&state.doc.boxes, parent);
-            state.doc.boxes = boxes;
-            state.mode = Mode::Insert;
+            let parent = state.doc.selected[..state.doc.selected.len() - 1].to_vec();
+            let selected = grow(&mut state.doc.boxes, &parent);
             state.doc.selected = selected;
+            state.mode = Mode::Insert;
             state
         }
         Command::SelectParent => {
@@ -249,12 +211,10 @@ fn handle_command(state: &State, key: &str) -> State {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            if at(&state.doc.boxes, &state.doc.selected).children.is_empty() {
+            if at(&mut state.doc.boxes, &state.doc.selected).children.is_empty() {
                 return state;
             }
-            let mut selected = state.doc.selected.clone();
-            selected.push(0);
-            state.doc.selected = selected;
+            state.doc.selected.push(0);
             state
         }
         Command::SelectNext => {
@@ -263,12 +223,12 @@ fn handle_command(state: &State, key: &str) -> State {
             }
             let parent = &state.doc.selected[..state.doc.selected.len() - 1];
             let index = *state.doc.selected.last().unwrap();
-            let siblings = if !parent.is_empty() {
-                at(&state.doc.boxes, parent).children
+            let count = if !parent.is_empty() {
+                at(&mut state.doc.boxes, parent).children.len()
             } else {
-                state.doc.boxes.clone()
+                state.doc.boxes.len()
             };
-            if index + 1 >= siblings.len() {
+            if index + 1 >= count {
                 return state;
             }
             let mut selected = parent.to_vec();
@@ -294,53 +254,45 @@ fn handle_command(state: &State, key: &str) -> State {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            let label = at(&state.doc.boxes, &state.doc.selected).label;
-            enter_insert(&state, &label)
+            let label = at(&mut state.doc.boxes, &state.doc.selected).label.clone();
+            enter_insert(state, &label)
         }
         Command::RenameLabel => {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            enter_insert(&state, "")
+            enter_insert(state, "")
         }
         Command::CycleColour => {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-                let mut n = node.clone();
-                n.colour = next_colour(n.colour);
-                n
-            });
+            let node = at(&mut state.doc.boxes, &state.doc.selected);
+            node.colour = next_colour(node.colour);
             state
         }
         Command::CycleSiblingsColour => {
             if state.doc.selected.len() <= 1 {
                 return state;
             }
-            state.doc.boxes = colour_row(&state.doc.boxes, &state.doc.selected);
+            let selected = state.doc.selected.clone();
+            colour_row(&mut state.doc.boxes, &selected);
             state
         }
         Command::CycleFill => {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-                let mut n = node.clone();
-                n.fill = next_colour(n.fill);
-                n
-            });
+            let node = at(&mut state.doc.boxes, &state.doc.selected);
+            node.fill = next_colour(node.fill);
             state
         }
         Command::ToggleRounded => {
             if state.doc.selected.is_empty() {
                 return state;
             }
-            state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-                let mut n = node.clone();
-                n.rounded = !n.rounded;
-                n
-            });
+            let node = at(&mut state.doc.boxes, &state.doc.selected);
+            node.rounded = !node.rounded;
             state
         }
         Command::Quit => {
@@ -351,34 +303,20 @@ fn handle_command(state: &State, key: &str) -> State {
 }
 
 fn handle_insert(state: &State, key: &str) -> State {
-    let label = at(&state.doc.boxes, &state.doc.selected).label;
     let mut state = state.clone();
+    let node = at(&mut state.doc.boxes, &state.doc.selected);
+    let label = node.label.clone();
     if key == "\x1b" {
-        let trimmed = drop_last_chars(&label, 1);
-        state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-            let mut n = node.clone();
-            n.label = trimmed.clone();
-            n
-        });
+        node.label = drop_last_chars(&label, 1);
         state.mode = Mode::Command;
         return state;
     }
     if key == "\x7f" {
-        let new_label = format!("{}{PAD}", drop_last_chars(&label, 2));
-        state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-            let mut n = node.clone();
-            n.label = new_label.clone();
-            n
-        });
+        node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
         return state;
     }
     if key >= "\x20" && key <= "\x7e" {
-        let new_label = format!("{}{key}{PAD}", drop_last_chars(&label, 1));
-        state.doc.boxes = rewrite(&state.doc.boxes, &state.doc.selected, &|node: &Node| {
-            let mut n = node.clone();
-            n.label = new_label.clone();
-            n
-        });
+        node.label = format!("{}{key}{PAD}", drop_last_chars(&label, 1));
         return state;
     }
     state
@@ -449,86 +387,58 @@ mod tests {
 
     #[test]
     fn at_a_single_index_returns_the_top_level_box() {
-        let boxes = vec![node("a"), node("b")];
-        assert_eq!(at(&boxes, &[1]), node("b"));
+        let mut boxes = vec![node("a"), node("b")];
+        assert_eq!(*at(&mut boxes, &[1]), node("b"));
     }
 
     #[test]
     fn at_a_longer_path_walks_into_children() {
-        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(at(&boxes, &[0, 1]), node("d"));
+        let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        assert_eq!(*at(&mut boxes, &[0, 1]), node("d"));
     }
 
     #[test]
     fn at_a_deep_path_walks_multiple_levels() {
-        let boxes = vec![node_with_children(
+        let mut boxes = vec![node_with_children(
             "a",
             vec![node_with_children("b", vec![node("c")])],
         )];
-        assert_eq!(at(&boxes, &[0, 0, 0]), node("c"));
-    }
-
-    #[test]
-    fn rewrite_replaces_the_top_level_box() {
-        let boxes = vec![node("a"), node("b")];
-        let result = rewrite(&boxes, &[1], &|_| node("z"));
-        assert_eq!(result, vec![node("a"), node("z")]);
-    }
-
-    #[test]
-    fn rewrite_replaces_a_nested_box_and_rebuilds_the_spine() {
-        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        let result = rewrite(&boxes, &[0, 1], &|_| node("z"));
-        assert_eq!(
-            result,
-            vec![node_with_children("a", vec![node("c"), node("z")])]
-        );
-    }
-
-    #[test]
-    fn rewrite_does_not_mutate_the_given_boxes() {
-        let boxes = vec![node("a")];
-        rewrite(&boxes, &[0], &|_| node("z"));
-        assert_eq!(boxes, vec![node("a")]);
+        assert_eq!(*at(&mut boxes, &[0, 0, 0]), node("c"));
     }
 
     #[test]
     fn grow_on_the_canvas_appends_a_top_level_box() {
-        let (boxes, path) = grow(&[], &[]);
+        let mut boxes = Vec::new();
+        let path = grow(&mut boxes, &[]);
         assert_eq!(boxes, vec![node(PAD)]);
         assert_eq!(path, vec![0]);
     }
 
     #[test]
     fn grow_on_the_canvas_appends_after_existing_boxes() {
-        let (boxes, path) = grow(&[node("a")], &[]);
+        let mut boxes = vec![node("a")];
+        let path = grow(&mut boxes, &[]);
         assert_eq!(boxes, vec![node("a"), node(PAD)]);
         assert_eq!(path, vec![1]);
     }
 
     #[test]
     fn grow_on_a_box_appends_a_child() {
-        let (boxes, path) = grow(&[node("a")], &[0]);
+        let mut boxes = vec![node("a")];
+        let path = grow(&mut boxes, &[0]);
         assert_eq!(boxes, vec![node_with_children("a", vec![node(PAD)])]);
         assert_eq!(path, vec![0, 0]);
     }
 
     #[test]
     fn grow_on_a_box_with_a_child_appends_a_second_child() {
-        let boxes = vec![node_with_children("a", vec![node("c")])];
-        let (boxes, path) = grow(&boxes, &[0]);
+        let mut boxes = vec![node_with_children("a", vec![node("c")])];
+        let path = grow(&mut boxes, &[0]);
         assert_eq!(
             boxes,
             vec![node_with_children("a", vec![node("c"), node(PAD)])]
         );
         assert_eq!(path, vec![0, 1]);
-    }
-
-    #[test]
-    fn grow_does_not_mutate_the_given_boxes() {
-        let boxes = vec![node("a")];
-        grow(&boxes, &[]);
-        assert_eq!(boxes, vec![node("a")]);
     }
 
     #[test]
@@ -544,12 +454,13 @@ mod tests {
 
     #[test]
     fn colour_row_advances_uniformly_coloured_siblings() {
-        let boxes = vec![node("a"), node("b")];
+        let mut boxes = vec![node("a"), node("b")];
         let mut a = node("a");
         a.colour = next_colour(PLAIN);
         let mut b = node("b");
         b.colour = next_colour(PLAIN);
-        assert_eq!(colour_row(&boxes, &[0]), vec![a, b]);
+        colour_row(&mut boxes, &[0]);
+        assert_eq!(boxes, vec![a, b]);
     }
 
     #[test]
@@ -558,19 +469,13 @@ mod tests {
         a.colour = 0;
         let mut b = node("b");
         b.colour = 1;
-        let boxes = vec![a, b];
+        let mut boxes = vec![a, b];
         let mut expected_a = node("a");
         expected_a.colour = 0;
         let mut expected_b = node("b");
         expected_b.colour = 0;
-        assert_eq!(colour_row(&boxes, &[0]), vec![expected_a, expected_b]);
-    }
-
-    #[test]
-    fn colour_row_does_not_mutate_the_given_boxes() {
-        let boxes = vec![node("a"), node("b")];
-        colour_row(&boxes, &[0]);
-        assert_eq!(boxes, vec![node("a"), node("b")]);
+        colour_row(&mut boxes, &[0]);
+        assert_eq!(boxes, vec![expected_a, expected_b]);
     }
 
     fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> State {
