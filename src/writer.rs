@@ -109,8 +109,8 @@ fn frame<W: Write>(
     cols: i64,
     rows: i64,
 ) -> io::Result<()> {
-    let selected = state.selected.iter().map(|&i| i as i64).collect();
-    let placements = with_cursor(layout(state.boxes.clone(), cols, rows), selected);
+    let selected = state.doc.selected.iter().map(|&i| i as i64).collect();
+    let placements = with_cursor(layout(state.doc.boxes.clone(), cols, rows), selected);
     let lines = renderer.render(&placements, cols, rows);
     paint(stream, &lines)
 }
