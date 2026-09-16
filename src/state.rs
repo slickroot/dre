@@ -35,7 +35,7 @@ pub(crate) struct State {
     pub(crate) boxes: Vec<Node>,
     pub(crate) running: bool,
     mode: Mode,
-    pub(crate) selected: Vec<i64>,
+    pub(crate) selected: Vec<usize>,
     before: Option<Box<State>>,
 }
 
@@ -109,16 +109,16 @@ fn next_colour(colour: i64) -> i64 {
     (colour + 2).rem_euclid(PALETTE_SIZE + 1) - 1
 }
 
-fn at(boxes: &[Node], path: &[i64]) -> Node {
-    let mut node = boxes[path[0] as usize].clone();
+fn at(boxes: &[Node], path: &[usize]) -> Node {
+    let mut node = boxes[path[0]].clone();
     for &index in &path[1..] {
-        node = node.children[index as usize].clone();
+        node = node.children[index].clone();
     }
     node
 }
 
-fn rewrite(boxes: &[Node], path: &[i64], f: &dyn Fn(&Node) -> Node) -> Vec<Node> {
-    let index = path[0] as usize;
+fn rewrite(boxes: &[Node], path: &[usize], f: &dyn Fn(&Node) -> Node) -> Vec<Node> {
+    let index = path[0];
     let rest = &path[1..];
     let mut result = boxes.to_vec();
     let node = &boxes[index];
@@ -133,7 +133,7 @@ fn rewrite(boxes: &[Node], path: &[i64], f: &dyn Fn(&Node) -> Node) -> Vec<Node>
     result
 }
 
-fn colour_row(boxes: &[Node], path: &[i64]) -> Vec<Node> {
+fn colour_row(boxes: &[Node], path: &[usize]) -> Vec<Node> {
     let parent = &path[..path.len() - 1];
     let siblings: Vec<Node> = if !parent.is_empty() {
         at(boxes, parent).children
@@ -146,7 +146,7 @@ fn colour_row(boxes: &[Node], path: &[i64]) -> Vec<Node> {
     let mut boxes = boxes.to_vec();
     for i in 0..siblings.len() {
         let mut sibling_path = parent.to_vec();
-        sibling_path.push(i as i64);
+        sibling_path.push(i);
         boxes = rewrite(&boxes, &sibling_path, &|node: &Node| {
             let mut n = node.clone();
             n.colour = new_colour;
@@ -156,14 +156,14 @@ fn colour_row(boxes: &[Node], path: &[i64]) -> Vec<Node> {
     boxes
 }
 
-fn grow(boxes: &[Node], path: &[i64]) -> (Vec<Node>, Vec<i64>) {
+fn grow(boxes: &[Node], path: &[usize]) -> (Vec<Node>, Vec<usize>) {
     if path.is_empty() {
         let mut boxes = boxes.to_vec();
-        let new_index = boxes.len() as i64;
+        let new_index = boxes.len();
         boxes.push(Node { label: PAD.to_string(), ..Default::default() });
         (boxes, vec![new_index])
     } else {
-        let new_index = at(boxes, path).children.len() as i64;
+        let new_index = at(boxes, path).children.len();
         let grown = rewrite(boxes, path, &|node: &Node| {
             let mut n = node.clone();
             n.children.push(Node { label: PAD.to_string(), ..Default::default() });
@@ -257,7 +257,7 @@ fn handle_command(state: &State, key: &str) -> State {
             } else {
                 state.boxes.clone()
             };
-            if index + 1 >= siblings.len() as i64 {
+            if index + 1 >= siblings.len() {
                 return state;
             }
             let mut selected = parent.to_vec();
@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(boxes, vec![node("a"), node("b")]);
     }
 
-    fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<i64>) -> State {
+    fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> State {
         State {
             boxes,
             running: true,
@@ -677,7 +677,7 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, vec![]);
         let result = handle_key(&state, "s");
         assert_eq!(result.boxes, vec![node("a")]);
-        assert_eq!(result.selected, Vec::<i64>::new());
+        assert_eq!(result.selected, Vec::<usize>::new());
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
     fn h_on_an_empty_canvas_returns_the_state_unchanged() {
         let state = new_state(vec![], Mode::Command, vec![]);
         let result = handle_key(&state, "h");
-        assert_eq!(result.selected, Vec::<i64>::new());
+        assert_eq!(result.selected, Vec::<usize>::new());
     }
 
     #[test]
@@ -897,7 +897,7 @@ mod tests {
         let state = new_state(vec![], Mode::Command, vec![]);
         let result = handle_key(&state, "u");
         assert_eq!(result.boxes, Vec::<Node>::new());
-        assert_eq!(result.selected, Vec::<i64>::new());
+        assert_eq!(result.selected, Vec::<usize>::new());
     }
 
     #[test]
