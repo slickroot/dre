@@ -4,6 +4,7 @@ use flate2::Compression;
 use std::io::Write;
 use std::process::ExitCode;
 
+mod command_mode;
 mod insert_mode;
 mod layout;
 mod render;
