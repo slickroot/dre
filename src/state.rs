@@ -1,6 +1,8 @@
+use crate::insert_mode;
+
 pub(crate) const PLAIN: i64 = -1;
 const PALETTE_SIZE: i64 = 5;
-const PAD: &str = " ";
+pub(crate) const PAD: &str = " ";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
@@ -24,7 +26,7 @@ impl Default for Node {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-enum Mode {
+pub(crate) enum Mode {
     #[default]
     Command,
     Insert,
@@ -40,7 +42,7 @@ pub(crate) struct Document {
 pub(crate) struct State {
     pub(crate) doc: Document,
     history: Vec<Document>,
-    mode: Mode,
+    pub(crate) mode: Mode,
     pub(crate) running: bool,
 }
 
@@ -129,7 +131,7 @@ fn next_colour(colour: i64) -> i64 {
     (colour + 2).rem_euclid(PALETTE_SIZE + 1) - 1
 }
 
-fn at<'a>(boxes: &'a mut [Node], path: &[usize]) -> &'a mut Node {
+pub(crate) fn at<'a>(boxes: &'a mut [Node], path: &[usize]) -> &'a mut Node {
     let mut node = &mut boxes[path[0]];
     for &index in &path[1..] {
         node = &mut node.children[index];
@@ -164,11 +166,6 @@ fn grow(boxes: &mut Vec<Node>, path: &[usize]) -> Vec<usize> {
         new_path.push(new_index);
         new_path
     }
-}
-
-fn drop_last_chars(s: &str, n: usize) -> String {
-    let len = s.chars().count();
-    s.chars().take(len.saturating_sub(n)).collect()
 }
 
 fn enter_insert(mut state: State, base_label: &str) -> State {
@@ -287,34 +284,22 @@ fn reduce(state: State, command: Command) -> State {
     }
 }
 
-fn insert(mut state: State, key: &str) -> State {
-    // Insert is only entered by NewBox, NewSibling, EditLabel or RenameLabel, all with a selection.
-    let node = at(&mut state.doc.boxes, &state.doc.selected);
-    let label = node.label.clone();
-    if key == "\x1b" {
-        node.label = drop_last_chars(&label, 1);
-        state.mode = Mode::Command;
-        return state;
-    }
-    if key == "\x7f" {
-        node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
-        return state;
-    }
-    if key >= "\x20" && key <= "\x7e" {
-        node.label = format!("{}{key}{PAD}", drop_last_chars(&label, 1));
-        return state;
-    }
-    state
-}
-
 pub(crate) fn handle_key(state: State, key: &str) -> State {
     match state.mode {
-        Mode::Insert => insert(state, key),
         Mode::Command => match parse(key) {
             Some(command) => reduce(state, command),
             None => state,
         },
+        Mode::Insert => match insert_mode::parse(key) {
+            Some(command) => insert_mode::reduce(state, command),
+            None => state,
+        },
     }
+}
+
+#[cfg(test)]
+pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> State {
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true }
 }
 
 #[cfg(test)]
@@ -507,15 +492,6 @@ mod tests {
         assert_eq!(parse("é"), None);
     }
 
-    fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> State {
-        State {
-            doc: Document { boxes, selected },
-            history: Vec::new(),
-            mode,
-            running: true,
-        }
-    }
-
     #[test]
     fn a_command_below_its_minimum_depth_leaves_the_document_unchanged() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
@@ -603,13 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_mode_is_dispatched_separately() {
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
-        let result = handle_key(state, "q");
-        assert!(result.running);
-    }
-
-    #[test]
     fn s_on_a_top_level_box_appends_a_sibling() {
         let state = new_state(vec![node("a")], Mode::Command, vec![0]);
         let result = handle_key(state, "s");
@@ -654,13 +623,6 @@ mod tests {
         let state = new_state(vec![], Mode::Command, vec![]);
         let result = handle_key(state, "h");
         assert_eq!(result.doc.selected, Vec::<usize>::new());
-    }
-
-    #[test]
-    fn h_in_insert_mode_types_the_letter_h() {
-        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state, "h");
-        assert_eq!(result.doc.boxes, vec![node(&format!("ah{PAD}"))]);
     }
 
     #[test]
@@ -717,53 +679,6 @@ mod tests {
         let result = handle_key(state, "I");
         assert_eq!(result.mode, Mode::Insert);
         assert_eq!(result.doc.boxes, vec![node("a"), node(PAD)]);
-    }
-
-    #[test]
-    fn typing_appends_to_the_selected_box_label() {
-        let state = new_state(vec![node(&format!("h{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state, "i");
-        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
-    }
-
-    #[test]
-    fn space_and_tilde_are_printable() {
-        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state, " ");
-        assert_eq!(result.doc.boxes, vec![node(&format!("a {PAD}"))]);
-
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
-        let result = handle_key(state, "~");
-        assert_eq!(result.doc.boxes, vec![node(&format!("~{PAD}"))]);
-    }
-
-    #[test]
-    fn backspace_drops_the_last_character_and_is_a_no_op_when_empty() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state, "\x7f");
-        assert_eq!(result.doc.boxes, vec![node(&format!("h{PAD}"))]);
-
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
-        let result = handle_key(state, "\x7f");
-        assert_eq!(result.doc.boxes, vec![node(PAD)]);
-    }
-
-    #[test]
-    fn esc_returns_to_command_mode_and_trims_pad() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state, "\x1b");
-        assert_eq!(result.mode, Mode::Command);
-        assert_eq!(result.doc.boxes, vec![node("hi")]);
-    }
-
-    #[test]
-    fn control_and_non_ascii_characters_return_the_state_unchanged() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
-        let result = handle_key(state.clone(), "\x01");
-        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
-
-        let result = handle_key(state, "é");
-        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
