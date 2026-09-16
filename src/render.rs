@@ -1122,7 +1122,10 @@ mod tests {
 
     fn label_placement(text: &str, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
         crate::layout::Placement {
-            node: crate::layout::PlacementNode::Label(crate::layout::Label { text, path: vec![] }),
+            node: crate::layout::PlacementNode::Label(crate::layout::Label {
+                text,
+                path: crate::state::Path { head: 0, tail: vec![] },
+            }),
             x,
             y,
             width,
