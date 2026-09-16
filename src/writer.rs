@@ -3,10 +3,12 @@ use nix::sys::select::{select, FdSet};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
+use std::fs;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
+use crate::dre_format;
 use crate::layout::{layout, with_cursor};
 use crate::render::{TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
@@ -143,6 +145,9 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
             return Ok(());
         }
         state = handle_key(state, &key);
+        if let Some(path) = &state.save_to {
+            fs::write(path, dre_format::serialize(&state.doc.boxes))?;
+        }
     }
     Ok(())
 }
