@@ -24,8 +24,9 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
 }
 
 pub(crate) fn reduce(mut state: State, command: Command) -> State {
-    // Insert mode is only entered by NewBox, NewSibling, EditLabel or RenameLabel,
-    // all of which guarantee a selection.
+    if state.doc.selected.is_empty() {
+        return state;
+    }
     let node = at(&mut state.doc.boxes, &state.doc.selected);
     let label = node.label.clone();
     match command {
