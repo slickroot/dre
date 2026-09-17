@@ -1,3 +1,4 @@
+use crate::state;
 use quick_xml::events::Event;
 use quick_xml::se::Serializer;
 use quick_xml::Reader;
@@ -93,9 +94,18 @@ pub(crate) fn only_a_dre_root(text: &str) -> bool {
     }
 }
 
+pub(crate) fn in_palette(doc: &FileDoc) -> bool {
+    fn box_in_palette(file_box: &FileBox) -> bool {
+        let colour_ok = file_box.colour.is_none_or(|i| i < state::PALETTE_SIZE);
+        let fill_ok = file_box.fill.is_none_or(|i| i < state::PALETTE_SIZE);
+        colour_ok && fill_ok && file_box.children.iter().all(box_in_palette)
+    }
+    doc.boxes.iter().all(box_in_palette)
+}
+
 pub(crate) fn read(text: &str) -> Option<FileDoc> {
     let doc: FileDoc = quick_xml::de::from_str(text).ok()?;
-    if only_a_dre_root(text) {
+    if only_a_dre_root(text) && in_palette(&doc) {
         Some(doc)
     } else {
         None
@@ -263,6 +273,27 @@ mod tests {
     #[test]
     fn reading_junk_after_the_root_gives_nothing() {
         assert_eq!(read("<dre/>junk"), None);
+    }
+
+    #[test]
+    fn reading_a_colour_outside_the_palette_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" colour=\"5\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_fill_outside_the_palette_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" fill=\"99\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_bad_colour_on_a_nested_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\"><box label=\"B\" colour=\"5\"/></box></dre>"), None);
+    }
+
+    #[test]
+    fn reading_accepts_colour_and_fill_at_the_edges_of_the_palette() {
+        let doc = FileDoc { boxes: vec![FileBox { colour: Some(4), fill: Some(0), ..plain("A") }] };
+        assert_eq!(read("<dre><box label=\"A\" colour=\"4\" fill=\"0\"/></dre>"), Some(doc));
     }
 
     #[test]
