@@ -174,7 +174,7 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
         result => result?,
     };
     let doc = dre_format::read(&text).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("{path} is not a valid diagram"))
+        io::Error::new(io::ErrorKind::InvalidData, format!("{path}: not a valid diagram"))
     })?;
     let mut state = file_document::to_state(doc);
     state.save_to = Some(path);
@@ -341,6 +341,15 @@ mod tests {
         let result = load_state(Some(path.clone()));
         fs::remove_file(&path).unwrap();
         assert_eq!(result.err().map(|e| e.kind()), Some(io::ErrorKind::InvalidData));
+    }
+
+    #[test]
+    fn an_invalid_file_has_an_exact_error_message() {
+        let path = temp_file("bad-colour.dre", "<dre><box label=\"A\" colour=\"99\"/></dre>");
+        let result = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let err = result.err().unwrap();
+        assert_eq!(err.to_string(), format!("{path}: not a valid diagram"));
     }
 
     #[test]
