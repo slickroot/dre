@@ -17,3 +17,18 @@ fi
 mv "$tmp" "$DEST"
 
 echo "dre $VERSION installed to ~/.local/bin/dre"
+
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *)
+    case "${SHELL##*/}" in
+      zsh)  config=~/.zshrc; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+      bash) config=~/.bash_profile; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+      fish) config=~/.config/fish/config.fish; line='fish_add_path $HOME/.local/bin' ;;
+      *)    config=~/.bash_profile; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+    esac
+    echo "Warning: ~/.local/bin is not on your PATH."
+    echo "Add this line to $config:"
+    echo "$line"
+    ;;
+esac
