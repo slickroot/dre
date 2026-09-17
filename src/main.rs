@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 mod command_mode;
 mod dre_format;
+mod file_document;
 mod insert_mode;
 mod layout;
 mod render;

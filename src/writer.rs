@@ -9,6 +9,7 @@ use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
 use crate::dre_format;
+use crate::file_document;
 use crate::layout::{layout, with_cursor};
 use crate::render::{TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
@@ -146,7 +147,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
         }
         state = handle_key(state, &key);
         if let Some(path) = &state.save_to {
-            fs::write(path, dre_format::serialize(&state.doc.boxes))?;
+            fs::write(path, dre_format::write(&file_document::from_state(&state)))?;
         }
     }
     Ok(())

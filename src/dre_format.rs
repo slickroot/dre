@@ -1,248 +1,165 @@
-use std::collections::{HashSet, VecDeque};
+use quick_xml::se::Serializer;
+use serde::{Deserialize, Serialize};
 
-use crate::state::Node;
-
-const INDENT: &str = "  ";
-
-pub(crate) fn quote(label: &str) -> String {
-    let escaped = label.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename = "dre")]
+pub(crate) struct FileDoc {
+    #[serde(rename = "box", default)]
+    pub(crate) boxes: Vec<FileBox>,
 }
 
-fn line(node: &Node) -> String {
-    let mut line = quote(&node.label);
-    if let Some(colour) = node.colour {
-        line.push_str(&format!(" colour={colour}"));
-    }
-    if let Some(fill) = node.fill {
-        line.push_str(&format!(" fill={fill}"));
-    }
-    if node.rounded {
-        line.push_str(" rounded");
-    }
-    line
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct FileBox {
+    #[serde(rename = "@label")]
+    pub(crate) label: String,
+    #[serde(rename = "@colour", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) colour: Option<u8>,
+    #[serde(rename = "@fill", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fill: Option<u8>,
+    #[serde(rename = "@rounded", default, skip_serializing_if = "is_false")]
+    pub(crate) rounded: bool,
+    #[serde(rename = "box", default)]
+    pub(crate) children: Vec<FileBox>,
 }
 
-pub(crate) fn slug(label: &str) -> String {
-    let mut slug = String::new();
-    for c in label.chars() {
-        if c.is_ascii_alphanumeric() {
-            slug.push(c.to_ascii_lowercase());
-        } else if !slug.ends_with('-') {
-            slug.push('-');
-        }
-    }
-    let slug = slug.trim_matches('-');
-    if slug.is_empty() { "box".to_string() } else { slug.to_string() }
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
-struct Groups<'a> {
-    used: HashSet<String>,
-    pending: VecDeque<(String, &'a Node)>,
+pub(crate) fn write(doc: &FileDoc) -> String {
+    let mut text = String::new();
+    let mut serializer = Serializer::new(&mut text);
+    serializer.indent(' ', 2);
+    doc.serialize(serializer).expect("a diagram always serialises");
+    text.push('\n');
+    text
 }
 
-impl<'a> Groups<'a> {
-    fn reference(&mut self, node: &'a Node) -> String {
-        let base = slug(&node.label);
-        let mut name = base.clone();
-        let mut n = 2;
-        while self.used.contains(&name) {
-            name = format!("{base}-{n}");
-            n += 1;
-        }
-        self.used.insert(name.clone());
-        self.pending.push_back((name.clone(), node));
-        name
-    }
-}
-
-fn write_tree<'a>(out: &mut String, node: &'a Node, depth: usize, groups: &mut Groups<'a>) {
-    out.push_str(&INDENT.repeat(depth));
-    if depth == 2 && !node.children.is_empty() {
-        out.push('@');
-        out.push_str(&groups.reference(node));
-        out.push('\n');
-        return;
-    }
-    out.push_str(&line(node));
-    out.push('\n');
-    for child in &node.children {
-        write_tree(out, child, depth + 1, groups);
-    }
-}
-
-pub(crate) fn serialize(boxes: &[Node]) -> String {
-    let mut groups = Groups { used: HashSet::new(), pending: VecDeque::new() };
-    let mut blocks: Vec<String> = Vec::new();
-    for node in boxes {
-        let mut block = String::new();
-        write_tree(&mut block, node, 0, &mut groups);
-        blocks.push(block);
-    }
-    while let Some((name, node)) = groups.pending.pop_front() {
-        let mut block = format!("@{name} {}\n", line(node));
-        for child in &node.children {
-            write_tree(&mut block, child, 1, &mut groups);
-        }
-        blocks.push(block);
-    }
-    blocks.join("\n")
+#[allow(dead_code)]
+pub(crate) fn read(text: &str) -> Option<FileDoc> {
+    quick_xml::de::from_str(text).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
+    fn plain(label: &str) -> FileBox {
+        FileBox { label: label.to_string(), colour: None, fill: None, rounded: false, children: vec![] }
     }
 
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
+    fn with_children(file_box: FileBox, children: Vec<FileBox>) -> FileBox {
+        FileBox { children, ..file_box }
     }
 
-    #[test]
-    fn quote_wraps_the_label_in_double_quotes() {
-        assert_eq!(quote("Auth"), "\"Auth\"");
-    }
-
-    #[test]
-    fn quote_escapes_backslashes_and_double_quotes() {
-        assert_eq!(quote(r#"a\b"c"#), r#""a\\b\"c""#);
-    }
-
-    #[test]
-    fn a_plain_box_is_written_as_its_quoted_label_with_a_trailing_newline() {
-        assert_eq!(serialize(&[node("Billing")]), "\"Billing\"\n");
-    }
-
-    #[test]
-    fn labels_are_escaped_when_serialized() {
-        assert_eq!(serialize(&[node(r#"say "hi""#)]), "\"say \\\"hi\\\"\"\n");
-    }
-
-    #[test]
-    fn settings_follow_the_label_in_colour_fill_rounded_order() {
-        let boxed = Node { colour: Some(2), fill: Some(1), rounded: true, ..node("API") };
-        assert_eq!(serialize(&[boxed]), "\"API\" colour=2 fill=1 rounded\n");
-    }
-
-    #[test]
-    fn settings_at_their_defaults_are_left_out() {
-        let colour_only = Node { colour: Some(3), fill: None, rounded: false, ..node("a") };
-        let fill_only = Node { fill: Some(0), ..node("b") };
-        let rounded_only = Node { rounded: true, ..node("c") };
-        assert_eq!(serialize(&[colour_only]), "\"a\" colour=3\n");
-        assert_eq!(serialize(&[fill_only]), "\"b\" fill=0\n");
-        assert_eq!(serialize(&[rounded_only]), "\"c\" rounded\n");
-    }
-
-    #[test]
-    fn each_level_of_nesting_adds_two_spaces_of_indentation() {
-        let tree = node_with_children(
-            "API",
-            vec![node("Auth"), node_with_children("Orders", vec![node("Postgres")])],
-        );
-        assert_eq!(
-            serialize(&[tree]),
-            "\"API\"\n  \"Auth\"\n  \"Orders\"\n    \"Postgres\"\n"
-        );
-    }
-
-    #[test]
-    fn multiple_top_level_boxes_are_separated_by_a_blank_line() {
-        let first = node_with_children("API", vec![node("Auth")]);
-        assert_eq!(
-            serialize(&[first, node("Billing"), node("Search")]),
-            "\"API\"\n  \"Auth\"\n\n\"Billing\"\n\n\"Search\"\n"
-        );
-    }
-
-    #[test]
-    fn slug_lowercases_ascii_letters_and_keeps_digits() {
-        assert_eq!(slug("Postgres14"), "postgres14");
-    }
-
-    #[test]
-    fn slug_turns_runs_of_other_characters_into_a_single_dash() {
-        assert_eq!(slug("API  gateway/v2"), "api-gateway-v2");
-        assert_eq!(slug("café bar"), "caf-bar");
-    }
-
-    #[test]
-    fn slug_trims_dashes_from_both_ends() {
-        assert_eq!(slug("  (Auth) "), "auth");
-    }
-
-    #[test]
-    fn slug_falls_back_to_box_when_empty() {
-        assert_eq!(slug(""), "box");
-        assert_eq!(slug("!!"), "box");
-    }
-
-    #[test]
-    fn a_leaf_at_depth_two_stays_inline() {
-        let tree = node_with_children("A", vec![node_with_children("B", vec![node("C")])]);
-        assert_eq!(serialize(&[tree]), "\"A\"\n  \"B\"\n    \"C\"\n");
-    }
-
-    #[test]
-    fn a_node_at_depth_two_with_children_becomes_a_group_reference_and_block() {
-        let db = Node { rounded: true, ..node_with_children("DB", vec![node("Replica")]) };
-        let tree = node_with_children("A", vec![node_with_children("B", vec![db])]);
-        assert_eq!(
-            serialize(&[tree]),
-            "\"A\"\n  \"B\"\n    @db\n\n@db \"DB\" rounded\n  \"Replica\"\n"
-        );
-    }
-
-    #[test]
-    fn groups_nest_inside_groups_and_blocks_follow_first_reference_order() {
-        let inner = node_with_children("Inner", vec![node("Leaf")]);
-        let deep = node_with_children("X", vec![node_with_children("Y", vec![inner])]);
-        let first = node_with_children("First", vec![deep]);
-        let second = node_with_children("Second", vec![node("S")]);
-        let tree = node_with_children("Root", vec![node_with_children("Mid", vec![first, second])]);
-        assert_eq!(
-            serialize(&[tree]),
-            "\"Root\"\n  \"Mid\"\n    @first\n    @second\n\n\
-             @first \"First\"\n  \"X\"\n    @y\n\n\
-             @second \"Second\"\n  \"S\"\n\n\
-             @y \"Y\"\n  \"Inner\"\n    \"Leaf\"\n"
-        );
-    }
-
-    #[test]
-    fn repeated_slugs_get_numbered_suffixes_in_order() {
-        let group = |label: &str| node_with_children(label, vec![node("x")]);
-        let tree = node_with_children(
-            "A",
-            vec![node_with_children("B", vec![group("DB"), group("db"), group("Db!")])],
-        );
-        assert_eq!(
-            serialize(&[tree]),
-            "\"A\"\n  \"B\"\n    @db\n    @db-2\n    @db-3\n\n\
-             @db \"DB\"\n  \"x\"\n\n@db-2 \"db\"\n  \"x\"\n\n@db-3 \"Db!\"\n  \"x\"\n"
-        );
-    }
-
-    #[test]
-    fn the_spec_format_example_round_trips_to_the_exact_text() {
-        let postgres = node_with_children(
-            "Postgres",
-            vec![node_with_children("Replica", vec![node("Backup")])],
-        );
-        let orders = Node { fill: Some(1), ..node_with_children("Orders", vec![postgres]) };
-        let api = Node {
+    fn spec_example() -> FileDoc {
+        let backup = plain("Backup");
+        let replica = with_children(plain("Replica"), vec![backup]);
+        let postgres = with_children(plain("Postgres"), vec![replica]);
+        let orders = with_children(FileBox { fill: Some(1), ..plain("Orders") }, vec![postgres]);
+        let gateway = FileBox {
             colour: Some(2),
             rounded: true,
-            ..node_with_children("API gateway", vec![node("Auth"), orders])
+            ..with_children(plain("API gateway"), vec![plain("Auth"), orders])
         };
-        assert_eq!(
-            serialize(&[api, node("Billing")]),
-            "\"API gateway\" colour=2 rounded\n  \"Auth\"\n  \"Orders\" fill=1\n    @postgres\n\n\
-             \"Billing\"\n\n\
-             @postgres \"Postgres\"\n  \"Replica\"\n    \"Backup\"\n"
-        );
+        FileDoc { boxes: vec![gateway, plain("Billing")] }
+    }
+
+    const SPEC_EXAMPLE_TEXT: &str = "\
+<dre>
+  <box label=\"API gateway\" colour=\"2\" rounded=\"true\">
+    <box label=\"Auth\"/>
+    <box label=\"Orders\" fill=\"1\">
+      <box label=\"Postgres\">
+        <box label=\"Replica\">
+          <box label=\"Backup\"/>
+        </box>
+      </box>
+    </box>
+  </box>
+  <box label=\"Billing\"/>
+</dre>
+";
+
+    #[test]
+    fn writing_the_spec_example_produces_the_indented_xml() {
+        assert_eq!(write(&spec_example()), SPEC_EXAMPLE_TEXT);
+    }
+
+    #[test]
+    fn writing_a_single_plain_box_leaves_out_every_default_setting() {
+        let doc = FileDoc { boxes: vec![plain("Auth")] };
+        assert_eq!(write(&doc), "<dre>\n  <box label=\"Auth\"/>\n</dre>\n");
+    }
+
+    #[test]
+    fn writing_an_empty_diagram_produces_an_empty_dre_element() {
+        assert_eq!(write(&FileDoc::default()), "<dre/>\n");
+    }
+
+    #[test]
+    fn writing_a_label_with_quotes_angle_brackets_and_ampersands_escapes_them() {
+        let doc = FileDoc { boxes: vec![plain("say \"hi\" <to> A&B")] };
+        let text = write(&doc);
+        assert!(text.contains("label=\"say &quot;hi&quot; &lt;to&gt; A&amp;B\""), "{text}");
+    }
+
+    #[test]
+    fn reading_what_was_written_gives_back_the_spec_example() {
+        let doc = spec_example();
+        assert_eq!(read(&write(&doc)), Some(doc));
+    }
+
+    #[test]
+    fn reading_what_was_written_gives_back_a_single_plain_box() {
+        let doc = FileDoc { boxes: vec![plain("Auth")] };
+        assert_eq!(read(&write(&doc)), Some(doc));
+    }
+
+    #[test]
+    fn reading_what_was_written_gives_back_an_empty_diagram() {
+        assert_eq!(read(&write(&FileDoc::default())), Some(FileDoc::default()));
+    }
+
+    #[test]
+    fn reading_what_was_written_gives_back_escaped_labels() {
+        let doc = FileDoc { boxes: vec![plain("say \"hi\" <to> A&B")] };
+        assert_eq!(read(&write(&doc)), Some(doc));
+    }
+
+    #[test]
+    fn reading_what_was_written_gives_back_deeply_nested_boxes() {
+        let mut deepest = plain("level 20");
+        for depth in (0..20).rev() {
+            deepest = with_children(plain(&format!("level {depth}")), vec![deepest]);
+        }
+        let doc = FileDoc { boxes: vec![deepest] };
+        assert_eq!(read(&write(&doc)), Some(doc));
+    }
+
+    #[test]
+    fn reading_accepts_reformatted_xml() {
+        let text = "<dre>\n\n    <box   rounded='true' colour='2'   label='API gateway' >\n<box label='Auth'></box>\n\t<box fill=\"1\" label=\"Orders\"><box label=\"Postgres\"><box label=\"Replica\"><box label=\"Backup\"></box></box></box></box>\n</box><box label='Billing'   /></dre>";
+        assert_eq!(read(text), Some(spec_example()));
+    }
+
+    #[test]
+    fn reading_a_zero_byte_file_gives_nothing() {
+        assert_eq!(read(""), None);
+    }
+
+    #[test]
+    fn reading_malformed_xml_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"Auth\"></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_box_without_a_label_gives_nothing() {
+        assert_eq!(read("<dre><box colour=\"2\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_non_numeric_colour_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"Auth\" colour=\"red\"/></dre>"), None);
     }
 }
