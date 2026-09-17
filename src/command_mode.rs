@@ -43,6 +43,90 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
     })
 }
 
+pub(crate) struct KeyBinding {
+    pub(crate) keys: &'static [&'static str],
+    pub(crate) command: Command,
+    pub(crate) description: &'static str,
+}
+
+pub(crate) const COMMAND_KEYMAP: &[KeyBinding] = &[
+    KeyBinding {
+        keys: &["u"],
+        command: Command::Undo,
+        description: "Undo the last change",
+    },
+    KeyBinding {
+        keys: &["b"],
+        command: Command::NewBox,
+        description: "Add a child box",
+    },
+    KeyBinding {
+        keys: &["s"],
+        command: Command::NewSibling,
+        description: "Add a sibling box",
+    },
+    KeyBinding {
+        keys: &["h"],
+        command: Command::SelectParent,
+        description: "Select the parent box",
+    },
+    KeyBinding {
+        keys: &["l"],
+        command: Command::SelectChild,
+        description: "Select the first child box",
+    },
+    KeyBinding {
+        keys: &["j"],
+        command: Command::SelectNext,
+        description: "Select the next sibling",
+    },
+    KeyBinding {
+        keys: &["k"],
+        command: Command::SelectPrevious,
+        description: "Select the previous sibling",
+    },
+    KeyBinding {
+        keys: &["i"],
+        command: Command::EditLabel,
+        description: "Edit the selected box's label",
+    },
+    KeyBinding {
+        keys: &["I"],
+        command: Command::RenameLabel,
+        description: "Rename the selected box's label",
+    },
+    KeyBinding {
+        keys: &["c"],
+        command: Command::CycleColour,
+        description: "Cycle the box's colour",
+    },
+    KeyBinding {
+        keys: &["C"],
+        command: Command::CycleSiblingsColour,
+        description: "Cycle the colour of every sibling",
+    },
+    KeyBinding {
+        keys: &["f"],
+        command: Command::CycleFill,
+        description: "Cycle the box's fill",
+    },
+    KeyBinding {
+        keys: &["F"],
+        command: Command::CycleSiblingsFill,
+        description: "Cycle the fill of every sibling",
+    },
+    KeyBinding {
+        keys: &["r"],
+        command: Command::ToggleRounded,
+        description: "Toggle rounded corners",
+    },
+    KeyBinding {
+        keys: &["q"],
+        command: Command::Quit,
+        description: "Save and quit (or choose where to save)",
+    },
+];
+
 pub(crate) fn is_undoable(command: Command) -> bool {
     matches!(
         command,
@@ -266,6 +350,33 @@ mod tests {
         assert_eq!(parse("x"), None);
         assert_eq!(parse("\x1b"), None);
         assert_eq!(parse("é"), None);
+    }
+
+    #[test]
+    fn command_keymap_agrees_with_parse() {
+        let bound: Vec<String> = COMMAND_KEYMAP
+            .iter()
+            .flat_map(|binding| binding.keys)
+            .map(|key| key.to_string())
+            .collect();
+
+        for binding in COMMAND_KEYMAP {
+            for key in binding.keys {
+                assert_eq!(parse(key), Some(binding.command));
+            }
+        }
+
+        for ch in (b'a'..=b'z').chain(b'A'..=b'Z').chain(b'0'..=b'9') {
+            let key = (ch as char).to_string();
+            if !bound.contains(&key) {
+                assert_eq!(parse(&key), None);
+            }
+        }
+
+        let mut unique = bound.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), bound.len());
     }
 
     #[test]
