@@ -156,7 +156,10 @@ fn toggle_rounded(mut state: State, path: Path) -> State {
 }
 
 fn quit(mut state: State) -> State {
-    state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() };
+    match state.save_to {
+        Some(_) => state.running = false,
+        None => state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() },
+    }
     state
 }
 
@@ -260,7 +263,7 @@ mod tests {
                 1 => None,
                 _ => Some(Path { ancestors: vec![0; depth - 2], index: 0 }),
             };
-            let state = new_state(boxes.clone(), Mode::Command, selected);
+            let state = new_state(boxes.clone(), Mode::Command, selected, None);
             let result = reduce(state.clone(), command);
             assert_eq!(result.doc, state.doc);
         }
@@ -268,7 +271,7 @@ mod tests {
 
     #[test]
     fn b_on_an_empty_canvas_appends_a_box_enters_insert_and_selects_it() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         let result: State = handle_key(state, "b");
         assert_eq!(result.doc.boxes, vec![node(PAD)]);
         assert_eq!(result.mode, Mode::Insert);
@@ -278,14 +281,14 @@ mod tests {
 
     #[test]
     fn b_on_an_empty_canvas_does_not_mutate_the_given_state() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         handle_key(state.clone(), "b");
         assert_eq!(state.doc.boxes, Vec::<Node>::new());
     }
 
     #[test]
     fn b_on_a_selected_box_appends_and_selects_a_child() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "b");
         assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![node(PAD)])]);
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
@@ -294,7 +297,7 @@ mod tests {
 
     #[test]
     fn a_second_b_on_the_same_parent_places_a_second_child() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let state = handle_key(state, "b");
         let state = handle_key(state, "\x1b");
         let state = handle_key(state, "h");
@@ -308,7 +311,7 @@ mod tests {
 
     #[test]
     fn q_opens_the_save_prompt_and_preserves_boxes_and_selection() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "q");
         assert!(result.running);
         assert_eq!(result.doc.boxes, vec![node("a")]);
@@ -317,8 +320,24 @@ mod tests {
     }
 
     #[test]
+    fn q_with_a_file_to_save_to_stops_without_prompting() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path { ancestors: vec![], index: 0 }),
+            Some("plans.dre".to_string()),
+        );
+        let result = handle_key(state, "q");
+        assert!(!result.running);
+        assert_eq!(result.save_to, Some("plans.dre".to_string()));
+        assert_eq!(result.mode, Mode::Command);
+        assert_eq!(result.doc.boxes, vec![node("a")]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
     fn s_on_a_top_level_box_appends_a_sibling() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "s");
         assert_eq!(result.doc.boxes, vec![node("a"), node(PAD)]);
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
@@ -328,7 +347,7 @@ mod tests {
     #[test]
     fn s_on_a_child_box_appends_a_sibling_to_the_parents_children() {
         let boxes = vec![node_with_children("a", vec![node("b")])];
-        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }), None);
         let result = handle_key(state, "s");
         assert_eq!(
             result.doc.boxes,
@@ -339,7 +358,7 @@ mod tests {
 
     #[test]
     fn s_with_no_selection_returns_the_state_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, None);
+        let state = new_state(vec![node("a")], Mode::Command, None, None);
         let result = handle_key(state, "s");
         assert_eq!(result.doc.boxes, vec![node("a")]);
         assert_eq!(result.doc.selected, None);
@@ -348,7 +367,7 @@ mod tests {
     #[test]
     fn h_selects_the_parent_and_is_a_no_op_at_the_top() {
         let boxes = vec![node_with_children("a", vec![node("c")])];
-        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }), None);
         let result = handle_key(state, "h");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
 
@@ -358,7 +377,7 @@ mod tests {
 
     #[test]
     fn h_on_an_empty_canvas_returns_the_state_unchanged() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         let result = handle_key(state, "h");
         assert_eq!(result.doc.selected, None);
     }
@@ -366,37 +385,37 @@ mod tests {
     #[test]
     fn l_selects_the_first_child_or_keeps_selection_with_none() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "l");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
 
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "l");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]
     fn j_and_k_move_between_siblings_with_bounds() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "j");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
 
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }), None);
         let result = handle_key(state, "j");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
 
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }), None);
         let result = handle_key(state, "k");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
 
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "k");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]
     fn i_enters_insert_and_appends_pad_to_the_selected_boxs_label() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }), None);
         let result = handle_key(state, "i");
         assert_eq!(result.mode, Mode::Insert);
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
@@ -405,7 +424,7 @@ mod tests {
 
     #[test]
     fn i_on_an_empty_canvas_returns_the_state_unchanged() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         let result = handle_key(state, "i");
         assert_eq!(result.mode, Mode::Command);
         assert_eq!(result.doc.boxes, Vec::<Node>::new());
@@ -413,7 +432,7 @@ mod tests {
 
     #[test]
     fn capital_i_clears_the_selected_boxs_label() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 1 }), None);
         let result = handle_key(state, "I");
         assert_eq!(result.mode, Mode::Insert);
         assert_eq!(result.doc.boxes, vec![node("a"), node(PAD)]);
@@ -421,14 +440,14 @@ mod tests {
 
     #[test]
     fn cycle_colour_and_fill_advance_independently_and_cycle_back_to_plain() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "c");
         let mut expected = node("a");
         expected.colour = next_colour(None);
         assert_eq!(result.doc.boxes, vec![expected]);
         assert_eq!(result.doc.boxes[0].label, "a");
 
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "f");
         let mut expected = node("a");
         expected.fill = next_colour(None);
@@ -437,7 +456,7 @@ mod tests {
         let mut state_boxed = vec![node("a")];
         let mut colour: Option<u8> = None;
         for _ in 0..=PALETTE_SIZE {
-            let s = new_state(state_boxed.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+            let s = new_state(state_boxed.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
             let result = handle_key(s, "c");
             state_boxed = result.doc.boxes;
             colour = state_boxed[0].colour;
@@ -447,17 +466,17 @@ mod tests {
 
     #[test]
     fn toggle_rounded_flips_and_flips_back() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "r");
         assert_eq!(result.doc.boxes[0].rounded, true);
-        let state = new_state(result.doc.boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(result.doc.boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state, "r");
         assert_eq!(result.doc.boxes[0].rounded, false);
     }
 
     #[test]
     fn capital_c_on_a_top_level_box_does_nothing() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let result = handle_key(state.clone(), "C");
         assert_eq!(result.doc.boxes, state.doc.boxes);
         assert_eq!(result.doc.selected, state.doc.selected);
@@ -466,7 +485,7 @@ mod tests {
     #[test]
     fn capital_c_advances_uniformly_coloured_siblings() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }));
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }), None);
         let result = handle_key(state, "C");
         let mut c = node("c");
         c.colour = next_colour(None);
@@ -477,7 +496,7 @@ mod tests {
 
     #[test]
     fn u_after_b_restores_boxes_and_selected() {
-        let before = new_state(vec![], Mode::Command, None);
+        let before = new_state(vec![], Mode::Command, None, None);
         let after = handle_key(before.clone(), "b");
         let after_escape = handle_key(after, "\x1b");
         let undone = handle_key(after_escape, "u");
@@ -488,7 +507,7 @@ mod tests {
 
     #[test]
     fn u_after_c_restores_boxes() {
-        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after = handle_key(before.clone(), "c");
         let undone = handle_key(after, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
@@ -496,7 +515,7 @@ mod tests {
 
     #[test]
     fn u_after_c_with_nothing_selected_is_a_no_op() {
-        let state = new_state(vec![node("a")], Mode::Command, None);
+        let state = new_state(vec![node("a")], Mode::Command, None, None);
         let after = handle_key(state.clone(), "c");
         let undone = handle_key(after, "u");
         assert_eq!(undone.doc.boxes, state.doc.boxes);
@@ -505,7 +524,7 @@ mod tests {
 
     #[test]
     fn u_with_no_previous_action_leaves_state_unchanged() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         let result = handle_key(state, "u");
         assert_eq!(result.doc.boxes, Vec::<Node>::new());
         assert_eq!(result.doc.selected, None);
@@ -513,7 +532,7 @@ mod tests {
 
     #[test]
     fn u_twice_in_a_row_does_not_redo() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after_command = handle_key(state, "c");
         let after_first_undo = handle_key(after_command, "u");
         let after_second_undo = handle_key(after_first_undo.clone(), "u");
@@ -524,7 +543,7 @@ mod tests {
     #[test]
     fn movement_keys_do_not_clobber_an_existing_undo_snapshot() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        let before = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let before = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }), None);
         let after_command = handle_key(before.clone(), "c");
         let navigated = handle_key(after_command, "j");
         let navigated = handle_key(navigated, "h");
@@ -537,7 +556,7 @@ mod tests {
 
     #[test]
     fn q_does_not_clobber_an_existing_undo_snapshot() {
-        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after_command = handle_key(before.clone(), "c");
         let mut after_quit = handle_key(after_command, "q");
         after_quit.mode = Mode::Command;
@@ -548,7 +567,7 @@ mod tests {
 
     #[test]
     fn u_after_an_insert_session_undoes_the_b_that_started_it() {
-        let before = new_state(vec![], Mode::Command, None);
+        let before = new_state(vec![], Mode::Command, None, None);
         let after_b = handle_key(before.clone(), "b");
         let after_typing = handle_key(after_b, "h");
         let after_typing = handle_key(after_typing, "i");
@@ -560,7 +579,7 @@ mod tests {
 
     #[test]
     fn repeated_u_walks_back_through_every_undoable_command() {
-        let start = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let start = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after_colour = handle_key(start.clone(), "c");
         let after_fill = handle_key(after_colour.clone(), "f");
         let after_rounded = handle_key(after_fill.clone(), "r");
@@ -575,7 +594,7 @@ mod tests {
 
     #[test]
     fn u_on_an_exhausted_history_leaves_the_state_unchanged() {
-        let start = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let start = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after_colour = handle_key(start.clone(), "c");
         let after_fill = handle_key(after_colour, "f");
         let undone = handle_key(after_fill, "u");
@@ -589,7 +608,7 @@ mod tests {
 
     #[test]
     fn u_after_capital_i_restores_the_boxs_previous_label() {
-        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let before = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
         let after = handle_key(before.clone(), "I");
         let after_escape = handle_key(after, "\x1b");
         let undone = handle_key(after_escape, "u");
