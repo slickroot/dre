@@ -2,13 +2,14 @@ use quick_xml::se::Serializer;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename = "dre")]
+#[serde(rename = "dre", deny_unknown_fields)]
 pub(crate) struct FileDoc {
     #[serde(rename = "box", default)]
     pub(crate) boxes: Vec<FileBox>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct FileBox {
     #[serde(rename = "@label")]
     pub(crate) label: String,
@@ -160,5 +161,30 @@ mod tests {
     #[test]
     fn reading_a_non_numeric_colour_gives_nothing() {
         assert_eq!(read("<dre><box label=\"Auth\" colour=\"red\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_attribute_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" shadow=\"true\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_element_gives_nothing() {
+        assert_eq!(read("<dre><arrow/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_element_inside_a_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\"><arrow/></box></dre>"), None);
+    }
+
+    #[test]
+    fn reading_text_content_in_the_root_gives_nothing() {
+        assert_eq!(read("<dre>hi</dre>"), None);
+    }
+
+    #[test]
+    fn reading_text_content_in_a_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\">hi</box></dre>"), None);
     }
 }
