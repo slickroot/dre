@@ -130,10 +130,9 @@ fn prompt_line(filename: &str, cols: i64) -> String {
         .collect()
 }
 
-fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
+fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
     let (cell_width, cell_height) = cell_size()?;
     let mut renderer = TerminalRenderer::new(KittyGraphics::new(), cell_width, cell_height);
-    let mut state = State::default();
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
@@ -159,7 +158,19 @@ fn terminal_size(stdin_fd: RawFd) -> io::Result<(i64, i64)> {
     Ok((winsize.ws_col as i64, winsize.ws_row as i64))
 }
 
+fn load_state(arg: Option<String>) -> io::Result<State> {
+    let Some(path) = arg else {
+        return Ok(State::default());
+    };
+    let text = fs::read_to_string(&path)?;
+    let doc = dre_format::read(&text).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("{path} is not a valid diagram"))
+    })?;
+    Ok(file_document::to_state(doc))
+}
+
 pub fn write() -> io::Result<ExitCode> {
+    let state = load_state(std::env::args().nth(1))?;
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
     let supported = supports_kitty_graphics(&mut stdout, stdin_fd)?;
@@ -168,7 +179,7 @@ pub fn write() -> io::Result<ExitCode> {
         println!("{NOT_SUPPORTED_MESSAGE}");
         return Ok(ExitCode::FAILURE);
     }
-    run(&mut stdout, stdin_fd)?;
+    run(&mut stdout, stdin_fd, state)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -257,5 +268,63 @@ mod tests {
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
         assert!(!written(&stream).contains("Save as:"));
+    }
+
+    fn temp_file(name: &str, contents: &str) -> String {
+        let path = std::env::temp_dir().join(format!("dre-{}-{name}", std::process::id()));
+        fs::write(&path, contents).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn no_argument_starts_from_an_empty_diagram() {
+        let state = load_state(None).unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+    }
+
+    #[test]
+    fn a_valid_file_loads_with_the_first_box_selected() {
+        let path = temp_file("valid.dre", &dre_format::write(&dre_format::FileDoc {
+            boxes: vec![dre_format::FileBox { label: "API".to_string(), colour: None, fill: None, rounded: false, children: vec![] }],
+        }));
+        let state = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let state = state.unwrap();
+        assert_eq!(state.doc.boxes.len(), 1);
+        assert_eq!(state.doc.boxes[0].label, "API");
+        assert_eq!(state.doc.selected, Some(crate::state::Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn a_file_with_no_boxes_loads_an_empty_canvas_with_nothing_selected() {
+        let path = temp_file("empty-dre.dre", "<dre/>");
+        let state = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let state = state.unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+    }
+
+    #[test]
+    fn a_zero_byte_file_is_invalid_data() {
+        let path = temp_file("zero.dre", "");
+        let result = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(result.err().map(|e| e.kind()), Some(io::ErrorKind::InvalidData));
+    }
+
+    #[test]
+    fn a_malformed_file_is_invalid_data() {
+        let path = temp_file("malformed.dre", "<dre><box");
+        let result = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(result.err().map(|e| e.kind()), Some(io::ErrorKind::InvalidData));
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let path = std::env::temp_dir().join(format!("dre-{}-missing.dre", std::process::id()));
+        assert!(load_state(Some(path.to_string_lossy().into_owned())).is_err());
     }
 }

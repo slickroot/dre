@@ -35,7 +35,6 @@ pub(crate) fn write(doc: &FileDoc) -> String {
     text
 }
 
-#[allow(dead_code)]
 pub(crate) fn read(text: &str) -> Option<FileDoc> {
     quick_xml::de::from_str(text).ok()
 }
