@@ -102,6 +102,46 @@ mod tests {
     }
 
     #[test]
+    fn from_state_writes_fill_equal_to_border_colour_index_when_filled() {
+        let mut state = State::default();
+        state.doc.boxes = vec![
+            Node { label: "A".to_string(), colour: Some(2), filled: true, ..Node::default() },
+            Node { label: "B".to_string(), colour: Some(2), filled: false, ..Node::default() },
+        ];
+        let fd = from_state(&state);
+        assert_eq!(fd.boxes[0].fill, Some(2));
+        assert_eq!(fd.boxes[1].fill, None);
+    }
+
+    #[test]
+    fn from_state_omits_fill_when_filled_but_colourless() {
+        let mut state = State::default();
+        state.doc.boxes = vec![Node { label: "A".to_string(), colour: None, filled: true, ..Node::default() }];
+        let fd = from_state(&state);
+        assert_eq!(fd.boxes[0].fill, None);
+    }
+
+    #[test]
+    fn filled_colourless_box_round_trips_as_unfilled() {
+        let mut state = State::default();
+        state.doc.boxes = vec![Node { label: "A".to_string(), colour: None, filled: true, ..Node::default() }];
+        let fd = from_state(&state);
+        let reloaded = to_state(fd);
+        assert_eq!(reloaded.doc.boxes[0].filled, false);
+        assert_eq!(reloaded.doc.boxes[0].label, "A");
+        assert_eq!(reloaded.doc.boxes[0].colour, None);
+    }
+
+    #[test]
+    fn legacy_fill_zero_means_filled() {
+        let fd = FileDoc {
+            boxes: vec![FileBox { label: "A".to_string(), colour: None, fill: Some(0), rounded: false, children: vec![] }],
+        };
+        let s = to_state(fd);
+        assert_eq!(s.doc.boxes[0].filled, true);
+    }
+
+    #[test]
     fn opening_a_file_doc_keeps_command_mode_and_no_save_target() {
         let state = to_state(FileDoc { boxes: vec![] });
         assert_eq!(state.mode, Mode::Command);

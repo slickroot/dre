@@ -58,8 +58,7 @@ pub(crate) fn only_a_dre_root(text: &str) -> bool {
 pub(crate) fn in_palette(doc: &FileDoc) -> bool {
     fn box_in_palette(file_box: &FileBox) -> bool {
         let colour_ok = file_box.colour.is_none_or(|i| i < state::PALETTE_SIZE);
-        let fill_ok = file_box.fill.is_none_or(|i| i < state::PALETTE_SIZE);
-        colour_ok && fill_ok && file_box.children.iter().all(box_in_palette)
+        colour_ok && file_box.children.iter().all(box_in_palette)
     }
     doc.boxes.iter().all(box_in_palette)
 }
@@ -232,8 +231,9 @@ mod tests {
     }
 
     #[test]
-    fn reading_a_fill_outside_the_palette_gives_nothing() {
-        assert_eq!(read("<dre><box label=\"A\" fill=\"99\"/></dre>"), None);
+    fn reading_a_legacy_fill_value_is_accepted_and_not_validated_against_palette() {
+        let doc = read("<dre><box label=\"A\" fill=\"99\"/></dre>").unwrap();
+        assert_eq!(doc.boxes[0].fill, Some(99));
     }
 
     #[test]
