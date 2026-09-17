@@ -130,10 +130,26 @@ fn prompt_line(filename: &str, cols: i64) -> String {
         .collect()
 }
 
-fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
+fn load_state(path: Option<String>) -> io::Result<State> {
+    match path {
+        None => Ok(State::default()),
+        Some(path) => {
+            let contents = fs::read_to_string(&path)?;
+            match v0::read(&contents) {
+                Some(doc) => Ok(file_document::to_state(doc)),
+                None => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{path} is not a valid diagram"),
+                )),
+            }
+        }
+    }
+}
+
+fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, state: State) -> io::Result<()> {
     let (cell_width, cell_height) = cell_size()?;
     let mut renderer = TerminalRenderer::new(KittyGraphics::new(), cell_width, cell_height);
-    let mut state = State::default();
+    let mut state = state;
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
@@ -168,7 +184,8 @@ pub fn write() -> io::Result<ExitCode> {
         println!("{NOT_SUPPORTED_MESSAGE}");
         return Ok(ExitCode::FAILURE);
     }
-    run(&mut stdout, stdin_fd)?;
+    let state = load_state(std::env::args().nth(1))?;
+    run(&mut stdout, stdin_fd, state)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -257,5 +274,74 @@ mod tests {
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
         assert!(!written(&stream).contains("Save as:"));
+    }
+
+    fn unique_temp_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "dre-writer-test-{}-{}-{}",
+            std::process::id(),
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn no_path_gives_the_default_state() {
+        let state = load_state(None).unwrap();
+        assert_eq!(state.doc.boxes, Vec::new());
+        assert_eq!(state.doc.selected, Vec::<usize>::new());
+        assert_eq!(state.mode, Mode::Command);
+        assert_eq!(state.save_to, None);
+    }
+
+    #[test]
+    fn a_valid_file_is_loaded_with_the_first_box_selected() {
+        let path = unique_temp_path("valid");
+        let text = "\"a\" colour=2 rounded\n  \"b\"\n";
+        fs::write(&path, text).unwrap();
+
+        let state = load_state(Some(path.to_str().unwrap().to_string())).unwrap();
+
+        let expected = file_document::to_state(v0::read(text).unwrap());
+        assert_eq!(state.doc, expected.doc);
+        assert_eq!(state.doc.selected, vec![0]);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_file_is_a_data_error() {
+        let path = unique_temp_path("invalid");
+        fs::write(&path, "not canonical text").unwrap();
+
+        let result = load_state(Some(path.to_str().unwrap().to_string()));
+        match result {
+            Err(err) => assert_eq!(err.kind(), io::ErrorKind::InvalidData),
+            Ok(_) => panic!("expected an error"),
+        }
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn an_empty_file_gives_no_boxes_and_no_selection() {
+        let path = unique_temp_path("empty");
+        fs::write(&path, "").unwrap();
+
+        let state = load_state(Some(path.to_str().unwrap().to_string())).unwrap();
+        assert_eq!(state.doc.boxes, Vec::new());
+        assert_eq!(state.doc.selected, Vec::<usize>::new());
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_nonexistent_path_is_an_error() {
+        let path = unique_temp_path("missing");
+        let result = load_state(Some(path.to_str().unwrap().to_string()));
+        assert!(result.is_err());
     }
 }
