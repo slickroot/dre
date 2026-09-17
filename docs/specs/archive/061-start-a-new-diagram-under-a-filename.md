@@ -55,9 +55,6 @@ Checked in order:
 
 ### Tests
 
-Depends on spec 064: tests set `new_file` and `save_to` on the state
-returned by `new_state`, so adding `new_file` changes no existing test.
-
 - `writer`: `a_missing_file_is_an_error` becomes "a missing file loads an
   empty canvas saved to that path": no boxes, nothing selected,
   `save_to == Some(path)`, `new_file`. Loading an existing file leaves
