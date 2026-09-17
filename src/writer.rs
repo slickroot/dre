@@ -145,8 +145,10 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
             return Ok(());
         }
         state = handle_key(state, &key);
-        if let Some(path) = &state.save_to {
-            fs::write(path, dre_format::write(&file_document::from_state(&state)))?;
+        if !state.running {
+            if let Some(path) = &state.save_to {
+                fs::write(path, dre_format::write(&file_document::from_state(&state)))?;
+            }
         }
     }
     Ok(())
@@ -166,7 +168,9 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{path} is not a valid diagram"))
     })?;
-    Ok(file_document::to_state(doc))
+    let mut state = file_document::to_state(doc);
+    state.save_to = Some(path);
+    Ok(state)
 }
 
 pub fn write() -> io::Result<ExitCode> {
@@ -251,7 +255,7 @@ mod tests {
 
     #[test]
     fn the_prompt_replaces_the_last_row_in_save_prompt_mode() {
-        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
+        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
@@ -263,7 +267,7 @@ mod tests {
 
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
@@ -281,6 +285,7 @@ mod tests {
         let state = load_state(None).unwrap();
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, None);
     }
 
     #[test]
@@ -294,6 +299,14 @@ mod tests {
         assert_eq!(state.doc.boxes.len(), 1);
         assert_eq!(state.doc.boxes[0].label, "API");
         assert_eq!(state.doc.selected, Some(crate::state::Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn a_valid_file_loads_saving_back_to_the_given_path() {
+        let path = temp_file("save-to.dre", "<dre/>");
+        let state = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(state.unwrap().save_to, Some(path));
     }
 
     #[test]

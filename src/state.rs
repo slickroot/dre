@@ -133,8 +133,8 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
 }
 
 #[cfg(test)]
-pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None }
+pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>, save_to: Option<String>) -> State {
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to }
 }
 
 #[cfg(test)]
@@ -303,19 +303,19 @@ mod tests {
 
     #[test]
     fn state_starts_running() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         assert!(state.running);
     }
 
     #[test]
     fn state_starts_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None);
+        let state = new_state(vec![], Mode::Command, None, None);
         assert_eq!(state.mode, Mode::Command);
     }
 
     #[test]
     fn unknown_key_returns_the_state_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, None);
+        let state = new_state(vec![node("a")], Mode::Command, None, None);
         let result = handle_key(state.clone(), "x");
         assert_eq!(result.doc.boxes, state.doc.boxes);
         assert_eq!(result.doc.selected, state.doc.selected);
