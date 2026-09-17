@@ -24,11 +24,10 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
 }
 
 pub(crate) fn reduce(mut state: State, command: Command) -> State {
-    if state.doc.selected.is_none() {
+    let Some(path) = &state.doc.selected else {
         return state;
-    }
-    let path = state.doc.selected.clone().unwrap();
-    let node = at(&mut state.doc.boxes, &path);
+    };
+    let node = at(&mut state.doc.boxes, path);
     let label = node.label.clone();
     match command {
         Command::Commit => {

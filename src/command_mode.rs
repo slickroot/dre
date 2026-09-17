@@ -60,9 +60,9 @@ pub(crate) fn min_depth(command: Command) -> usize {
     }
 }
 
-fn enter_insert(mut state: State, base_label: &str) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
     at(&mut state.doc.boxes, &path).label = format!("{base_label}{PAD}");
+    state.doc.selected = Some(path);
     state.mode = Mode::Insert;
     state
 }
@@ -77,92 +77,84 @@ fn new_box(mut state: State) -> State {
     state
 }
 
-fn new_sibling(mut state: State) -> State {
-    let selected = state.doc.selected.as_ref().unwrap();
-    state.doc.selected = Some(grow(&mut state.doc.boxes, &selected.ancestors));
+fn new_sibling(mut state: State, path: Path) -> State {
+    state.doc.selected = Some(grow(&mut state.doc.boxes, &path.ancestors));
     state.mode = Mode::Insert;
     state
 }
 
-fn select_parent(mut state: State) -> State {
-    state.doc.selected = state
-        .doc
-        .selected
-        .take()
-        .and_then(|mut path| path.ancestors.pop().map(|index| Path { ancestors: path.ancestors, index }));
+fn select_parent(mut state: State, mut path: Path) -> State {
+    state.doc.selected = path.ancestors.pop().map(|index| Path { ancestors: path.ancestors, index });
     state
 }
 
-fn select_child(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
-    if at(&mut state.doc.boxes, &path).children.is_empty() {
-        return state;
+fn select_child(mut state: State, mut path: Path) -> State {
+    if !at(&mut state.doc.boxes, &path).children.is_empty() {
+        path.ancestors.push(path.index);
+        path.index = 0;
     }
-    let mut path = state.doc.selected.take().unwrap();
-    path.ancestors.push(path.index);
-    path.index = 0;
     state.doc.selected = Some(path);
     state
 }
 
-fn select_next(mut state: State) -> State {
-    let path = state.doc.selected.as_ref().unwrap();
+fn select_next(mut state: State, mut path: Path) -> State {
     let count = children_at(&mut state.doc.boxes, &path.ancestors).len();
-    if path.index + 1 >= count {
-        return state;
+    if path.index + 1 < count {
+        path.index += 1;
     }
-    state.doc.selected.as_mut().unwrap().index += 1;
+    state.doc.selected = Some(path);
     state
 }
 
-fn select_previous(mut state: State) -> State {
-    let selected = state.doc.selected.as_mut().unwrap();
-    if selected.index == 0 {
-        return state;
-    }
-    selected.index -= 1;
+fn select_previous(mut state: State, mut path: Path) -> State {
+    path.index = path.index.saturating_sub(1);
+    state.doc.selected = Some(path);
     state
 }
 
-fn edit_label(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn edit_label(mut state: State, path: Path) -> State {
     let label = at(&mut state.doc.boxes, &path).label.clone();
-    enter_insert(state, &label)
+    enter_insert(state, path, &label)
 }
 
-fn rename_label(state: State) -> State {
-    enter_insert(state, "")
+fn rename_label(state: State, path: Path) -> State {
+    enter_insert(state, path, "")
 }
 
-fn cycle_colour(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn cycle_colour(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.colour = next_colour(node.colour);
+    state.doc.selected = Some(path);
     state
 }
 
-fn cycle_siblings_colour(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn cycle_siblings_colour(mut state: State, path: Path) -> State {
     colour_row(&mut state.doc.boxes, &path);
+    state.doc.selected = Some(path);
     state
 }
 
-fn cycle_fill(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn cycle_fill(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.fill = next_colour(node.fill);
+    state.doc.selected = Some(path);
     state
 }
 
-fn toggle_rounded(mut state: State) -> State {
-    let path = state.doc.selected.clone().unwrap();
+fn toggle_rounded(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.rounded = !node.rounded;
+    state.doc.selected = Some(path);
     state
 }
 
 fn quit(mut state: State) -> State {
     state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() };
+    state
+}
+
+fn reselect(mut state: State, selected: Option<Path>) -> State {
+    state.doc.selected = selected;
     state
 }
 
@@ -174,22 +166,23 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
     if depth < min_depth(command) {
         return state;
     }
-    let state = if is_undoable(command) { snapshot(state) } else { state };
-    match command {
-        Command::Undo => undo(state),
-        Command::NewBox => new_box(state),
-        Command::NewSibling => new_sibling(state),
-        Command::SelectParent => select_parent(state),
-        Command::SelectChild => select_child(state),
-        Command::SelectNext => select_next(state),
-        Command::SelectPrevious => select_previous(state),
-        Command::EditLabel => edit_label(state),
-        Command::RenameLabel => rename_label(state),
-        Command::CycleColour => cycle_colour(state),
-        Command::CycleSiblingsColour => cycle_siblings_colour(state),
-        Command::CycleFill => cycle_fill(state),
-        Command::ToggleRounded => toggle_rounded(state),
-        Command::Quit => quit(state),
+    let mut state = if is_undoable(command) { snapshot(state) } else { state };
+    match (command, state.doc.selected.take()) {
+        (Command::Undo, selected) => undo(reselect(state, selected)),
+        (Command::NewBox, selected) => new_box(reselect(state, selected)),
+        (Command::Quit, selected) => quit(reselect(state, selected)),
+        (Command::NewSibling, Some(path)) => new_sibling(state, path),
+        (Command::SelectParent, Some(path)) => select_parent(state, path),
+        (Command::SelectChild, Some(path)) => select_child(state, path),
+        (Command::SelectNext, Some(path)) => select_next(state, path),
+        (Command::SelectPrevious, Some(path)) => select_previous(state, path),
+        (Command::EditLabel, Some(path)) => edit_label(state, path),
+        (Command::RenameLabel, Some(path)) => rename_label(state, path),
+        (Command::CycleColour, Some(path)) => cycle_colour(state, path),
+        (Command::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
+        (Command::CycleFill, Some(path)) => cycle_fill(state, path),
+        (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
+        (_, None) => state,
     }
 }
 
