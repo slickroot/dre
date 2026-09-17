@@ -156,9 +156,13 @@ fn toggle_rounded(mut state: State, path: Path) -> State {
 }
 
 fn quit(mut state: State) -> State {
-    match state.save_to {
-        Some(_) => state.running = false,
-        None => state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() },
+    if state.new_file && state.doc.boxes.is_empty() {
+        state.save_to = None;
+        state.running = false;
+    } else if state.save_to.is_some() {
+        state.running = false;
+    } else {
+        state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() };
     }
     state
 }
@@ -333,6 +337,47 @@ mod tests {
         assert_eq!(result.mode, Mode::Command);
         assert_eq!(result.doc.boxes, vec![node("a")]);
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    fn new_file_state(boxes: Vec<Node>) -> State {
+        let mut state = new_state(boxes, Mode::Command, None, Some("ideas.dre".to_string()));
+        state.new_file = true;
+        state
+    }
+
+    #[test]
+    fn q_on_a_new_file_with_no_boxes_stops_without_a_file_to_save_to() {
+        let result = handle_key(new_file_state(vec![]), "q");
+        assert!(!result.running);
+        assert_eq!(result.save_to, None);
+        assert_eq!(result.mode, Mode::Command);
+    }
+
+    #[test]
+    fn q_on_a_new_file_after_undoing_every_box_stops_without_a_file_to_save_to() {
+        let state = handle_key(new_file_state(vec![]), "b");
+        let state = handle_key(state, "\x1b");
+        let state = handle_key(state, "u");
+        let result = handle_key(state, "q");
+        assert!(!result.running);
+        assert_eq!(result.save_to, None);
+    }
+
+    #[test]
+    fn q_on_a_new_file_with_boxes_stops_without_prompting() {
+        let result = handle_key(new_file_state(vec![node("a")]), "q");
+        assert!(!result.running);
+        assert_eq!(result.save_to, Some("ideas.dre".to_string()));
+        assert_eq!(result.mode, Mode::Command);
+    }
+
+    #[test]
+    fn q_on_an_existing_file_with_no_boxes_keeps_its_file_to_save_to() {
+        let state = new_state(vec![], Mode::Command, None, Some("plans.dre".to_string()));
+        let result = handle_key(state, "q");
+        assert!(!result.running);
+        assert_eq!(result.save_to, Some("plans.dre".to_string()));
+        assert_eq!(result.mode, Mode::Command);
     }
 
     #[test]
