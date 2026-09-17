@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn q_in_command_mode_opens_the_prompt_with_the_default_filename() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { head: 0, tail: vec![] }));
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "q");
         assert_eq!(result.mode, prompt(DEFAULT_FILENAME));
         assert!(result.running);
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn escape_stops_without_saving_and_preserves_boxes() {
-        let state = new_state(vec![node("a")], prompt(DEFAULT_FILENAME), Some(Path { head: 0, tail: vec![] }));
+        let state = new_state(vec![node("a")], prompt(DEFAULT_FILENAME), Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);

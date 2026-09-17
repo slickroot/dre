@@ -37,8 +37,8 @@ pub(crate) enum Mode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Path {
-    pub(crate) head: usize,
-    pub(crate) tail: Vec<usize>,
+    pub(crate) ancestors: Vec<usize>,
+    pub(crate) index: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -88,26 +88,20 @@ pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
     }
 }
 
-pub(crate) fn at<'a>(boxes: &'a mut [Node], path: &Path) -> &'a mut Node {
-    let mut node = &mut boxes[path.head];
-    for &index in &path.tail {
-        node = &mut node.children[index];
+pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
+    let mut children = boxes;
+    for &index in ancestors {
+        children = &mut children[index].children;
     }
-    node
+    children
+}
+
+pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
+    &mut children_at(boxes, &path.ancestors)[path.index]
 }
 
 pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
-    let parent = if path.tail.is_empty() {
-        None
-    } else {
-        let mut tail = path.tail.clone();
-        tail.pop();
-        Some(Path { head: path.head, tail })
-    };
-    let siblings = match &parent {
-        None => boxes,
-        Some(parent) => &mut at(boxes, parent).children,
-    };
+    let siblings = children_at(boxes, &path.ancestors);
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
     let new_colour = if uniform { next_colour(first_colour) } else { Some(0) };
@@ -116,21 +110,10 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
-pub(crate) fn grow(boxes: &mut Vec<Node>, path: &Option<Path>) -> Path {
-    match path {
-        None => {
-            boxes.push(Node { label: PAD.to_string(), ..Default::default() });
-            Path { head: boxes.len() - 1, tail: Vec::new() }
-        }
-        Some(path) => {
-            let children = &mut at(boxes, path).children;
-            children.push(Node { label: PAD.to_string(), ..Default::default() });
-            let new_index = children.len() - 1;
-            let mut tail = path.tail.clone();
-            tail.push(new_index);
-            Path { head: path.head, tail }
-        }
-    }
+pub(crate) fn grow(boxes: &mut Vec<Node>, parent: &[usize]) -> Path {
+    let children = children_at(boxes, parent);
+    children.push(Node { label: PAD.to_string(), ..Default::default() });
+    Path { ancestors: parent.to_vec(), index: children.len() - 1 }
 }
 
 pub(crate) fn handle_key(state: State, key: &str) -> State {
@@ -211,15 +194,31 @@ mod tests {
     }
 
     #[test]
+    fn children_at_no_ancestors_returns_the_top_level_boxes() {
+        let mut boxes = vec![node("a"), node("b")];
+        assert_eq!(*children_at(&mut boxes, &[]), vec![node("a"), node("b")]);
+    }
+
+    #[test]
+    fn children_at_ancestors_returns_the_addressed_nodes_children() {
+        let mut boxes = vec![node_with_children(
+            "a",
+            vec![node_with_children("b", vec![node("c"), node("d")])],
+        )];
+        assert_eq!(*children_at(&mut boxes, &[0]), vec![node_with_children("b", vec![node("c"), node("d")])]);
+        assert_eq!(*children_at(&mut boxes, &[0, 0]), vec![node("c"), node("d")]);
+    }
+
+    #[test]
     fn at_a_single_index_returns_the_top_level_box() {
         let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*at(&mut boxes, &Path { head: 1, tail: vec![] }), node("b"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![], index: 1 }), node("b"));
     }
 
     #[test]
     fn at_a_longer_path_walks_into_children() {
         let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(*at(&mut boxes, &Path { head: 0, tail: vec![1] }), node("d"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0], index: 1 }), node("d"));
     }
 
     #[test]
@@ -228,42 +227,42 @@ mod tests {
             "a",
             vec![node_with_children("b", vec![node("c")])],
         )];
-        assert_eq!(*at(&mut boxes, &Path { head: 0, tail: vec![0, 0] }), node("c"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0, 0], index: 0 }), node("c"));
     }
 
     #[test]
     fn grow_on_the_canvas_appends_a_top_level_box() {
         let mut boxes = Vec::new();
-        let path = grow(&mut boxes, &None);
+        let path = grow(&mut boxes, &[]);
         assert_eq!(boxes, vec![node(PAD)]);
-        assert_eq!(path, Path { head: 0, tail: vec![] });
+        assert_eq!(path, Path { ancestors: vec![], index: 0 });
     }
 
     #[test]
     fn grow_on_the_canvas_appends_after_existing_boxes() {
         let mut boxes = vec![node("a")];
-        let path = grow(&mut boxes, &None);
+        let path = grow(&mut boxes, &[]);
         assert_eq!(boxes, vec![node("a"), node(PAD)]);
-        assert_eq!(path, Path { head: 1, tail: vec![] });
+        assert_eq!(path, Path { ancestors: vec![], index: 1 });
     }
 
     #[test]
     fn grow_on_a_box_appends_a_child() {
         let mut boxes = vec![node("a")];
-        let path = grow(&mut boxes, &Some(Path { head: 0, tail: vec![] }));
+        let path = grow(&mut boxes, &[0]);
         assert_eq!(boxes, vec![node_with_children("a", vec![node(PAD)])]);
-        assert_eq!(path, Path { head: 0, tail: vec![0] });
+        assert_eq!(path, Path { ancestors: vec![0], index: 0 });
     }
 
     #[test]
     fn grow_on_a_box_with_a_child_appends_a_second_child() {
         let mut boxes = vec![node_with_children("a", vec![node("c")])];
-        let path = grow(&mut boxes, &Some(Path { head: 0, tail: vec![] }));
+        let path = grow(&mut boxes, &[0]);
         assert_eq!(
             boxes,
             vec![node_with_children("a", vec![node("c"), node(PAD)])]
         );
-        assert_eq!(path, Path { head: 0, tail: vec![1] });
+        assert_eq!(path, Path { ancestors: vec![0], index: 1 });
     }
 
     #[test]
@@ -284,7 +283,7 @@ mod tests {
         a.colour = next_colour(None);
         let mut b = node("b");
         b.colour = next_colour(None);
-        colour_row(&mut boxes, &Path { head: 0, tail: vec![] });
+        colour_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
         assert_eq!(boxes, vec![a, b]);
     }
 
@@ -299,7 +298,7 @@ mod tests {
         expected_a.colour = Some(0);
         let mut expected_b = node("b");
         expected_b.colour = Some(0);
-        colour_row(&mut boxes, &Path { head: 0, tail: vec![] });
+        colour_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
         assert_eq!(boxes, vec![expected_a, expected_b]);
     }
 

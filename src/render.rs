@@ -1132,7 +1132,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::state::Path { head: 0, tail: vec![] },
+                path: crate::state::Path { ancestors: vec![], index: 0 },
             }),
             x,
             y,
