@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn readme_keymap_table_stays_in_sync() {
-        let markdown = format_keymap_markdown();
+        let markdown = format!("\n\n{}\n", format_keymap_markdown());
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let path = std::path::Path::new(manifest_dir).join("README.md");
         let readme = std::fs::read_to_string(&path).unwrap();

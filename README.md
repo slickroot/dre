@@ -29,7 +29,9 @@ saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
 
 ## Command mode
 
-<!-- keymap:start -->| Key | Description |
+<!-- keymap:start -->
+
+| Key | Description |
 | --- | --- |
 | `u` | Undo the last change |
 | `b` | Add a child box |
@@ -46,6 +48,7 @@ saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
 | `F` | Cycle the fill of every sibling |
 | `r` | Toggle rounded corners |
 | `q` | Save and quit (or choose where to save) |
+
 <!-- keymap:end -->
 
 ## Other keys
