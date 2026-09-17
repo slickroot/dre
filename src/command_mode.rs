@@ -42,12 +42,14 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
     })
 }
 
+#[allow(dead_code)]
 pub(crate) struct KeyBinding {
     pub(crate) keys: &'static [&'static str],
     pub(crate) command: Command,
     pub(crate) description: &'static str,
 }
 
+#[allow(dead_code)]
 pub(crate) const COMMAND_KEYMAP: &[KeyBinding] = &[
     KeyBinding {
         keys: &["u"],
@@ -306,6 +308,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_keymap_markdown() -> String {
     let mut out = String::from("| Key | Description |\n| --- | --- |\n");
     for binding in COMMAND_KEYMAP {
