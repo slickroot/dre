@@ -1,6 +1,5 @@
 use crate::state::{
-    at, children_at, colour_row, fill_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME,
-    PAD,
+    at, children_at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -16,8 +15,8 @@ pub(crate) enum Command {
     RenameLabel,
     CycleColour,
     CycleSiblingsColour,
-    CycleSiblingsFill,
-    CycleFill,
+    ToggleSiblingsFill,
+    ToggleFill,
     ToggleRounded,
     Quit,
 }
@@ -35,8 +34,8 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
         "I" => Command::RenameLabel,
         "c" => Command::CycleColour,
         "C" => Command::CycleSiblingsColour,
-        "F" => Command::CycleSiblingsFill,
-        "f" => Command::CycleFill,
+        "F" => Command::ToggleSiblingsFill,
+        "f" => Command::ToggleFill,
         "r" => Command::ToggleRounded,
         "q" => Command::Quit,
         _ => return None,
@@ -107,13 +106,13 @@ pub(crate) const COMMAND_KEYMAP: &[KeyBinding] = &[
     },
     KeyBinding {
         keys: &["f"],
-        command: Command::CycleFill,
-        description: "Cycle the box's fill",
+        command: Command::ToggleFill,
+        description: "Toggle the box's fill",
     },
     KeyBinding {
         keys: &["F"],
-        command: Command::CycleSiblingsFill,
-        description: "Cycle the fill of every sibling",
+        command: Command::ToggleSiblingsFill,
+        description: "Toggle the fill of every sibling",
     },
     KeyBinding {
         keys: &["r"],
@@ -132,10 +131,10 @@ pub(crate) fn is_undoable(command: Command) -> bool {
         command,
         Command::NewBox
             | Command::CycleColour
-            | Command::CycleFill
+            | Command::ToggleFill
             | Command::ToggleRounded
             | Command::CycleSiblingsColour
-            | Command::CycleSiblingsFill
+            | Command::ToggleSiblingsFill
             | Command::RenameLabel
     )
 }
@@ -143,7 +142,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
 pub(crate) fn min_depth(command: Command) -> usize {
     match command {
         Command::Undo | Command::NewBox | Command::Quit => 0,
-        Command::SelectParent | Command::CycleSiblingsColour | Command::CycleSiblingsFill => 2,
+        Command::SelectParent | Command::CycleSiblingsColour | Command::ToggleSiblingsFill => 2,
         _ => 1,
     }
 }
@@ -229,15 +228,27 @@ fn cycle_siblings_colour(mut state: State, path: Path) -> State {
     state
 }
 
-fn cycle_siblings_fill(mut state: State, path: Path) -> State {
-    fill_row(&mut state.doc.boxes, &path);
+fn toggle_siblings_fill(mut state: State, path: Path) -> State {
+    let siblings = children_at(&mut state.doc.boxes, &path.ancestors);
+    if siblings.iter().all(|sibling| sibling.colour.is_none()) {
+        state.doc.selected = Some(path);
+        return state;
+    }
+    let all_filled = siblings.iter().all(|sibling| sibling.filled);
+    for sibling in siblings.iter_mut() {
+        sibling.filled = !all_filled;
+    }
     state.doc.selected = Some(path);
     state
 }
 
-fn cycle_fill(mut state: State, path: Path) -> State {
+fn toggle_fill(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
-    node.fill = next_colour(node.fill);
+    if node.colour.is_none() {
+        state.doc.selected = Some(path);
+        return state;
+    }
+    node.filled = !node.filled;
     state.doc.selected = Some(path);
     state
 }
@@ -288,8 +299,8 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
         (Command::RenameLabel, Some(path)) => rename_label(state, path),
         (Command::CycleColour, Some(path)) => cycle_colour(state, path),
         (Command::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
-        (Command::CycleSiblingsFill, Some(path)) => cycle_siblings_fill(state, path),
-        (Command::CycleFill, Some(path)) => cycle_fill(state, path),
+        (Command::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
+        (Command::ToggleFill, Some(path)) => toggle_fill(state, path),
         (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
         (_, None) => state,
     }
@@ -329,8 +340,8 @@ mod tests {
         Command::RenameLabel,
         Command::CycleColour,
         Command::CycleSiblingsColour,
-        Command::CycleSiblingsFill,
-        Command::CycleFill,
+        Command::ToggleSiblingsFill,
+        Command::ToggleFill,
         Command::ToggleRounded,
         Command::Quit,
     ];
@@ -371,8 +382,8 @@ mod tests {
         assert_eq!(parse("I"), Some(Command::RenameLabel));
         assert_eq!(parse("c"), Some(Command::CycleColour));
         assert_eq!(parse("C"), Some(Command::CycleSiblingsColour));
-        assert_eq!(parse("F"), Some(Command::CycleSiblingsFill));
-        assert_eq!(parse("f"), Some(Command::CycleFill));
+        assert_eq!(parse("F"), Some(Command::ToggleSiblingsFill));
+        assert_eq!(parse("f"), Some(Command::ToggleFill));
         assert_eq!(parse("r"), Some(Command::ToggleRounded));
         assert_eq!(parse("q"), Some(Command::Quit));
     }
@@ -642,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn cycle_colour_and_fill_advance_independently_and_cycle_back_to_plain() {
+    fn cycle_colour_and_toggle_fill_advance_independently() {
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "c");
         let mut expected = node("a");
@@ -651,9 +662,12 @@ mod tests {
         assert_eq!(result.doc.boxes[0].label, "a");
 
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let colourised = handle_key(state, "c");
+        let state = new_state(colourised.doc.boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "f");
         let mut expected = node("a");
-        expected.fill = next_colour(None);
+        expected.colour = next_colour(None);
+        expected.filled = true;
         assert_eq!(result.doc.boxes, vec![expected]);
 
         let mut state_boxed = vec![node("a")];
@@ -665,6 +679,48 @@ mod tests {
             colour = state_boxed[0].colour;
         }
         assert_eq!(colour, None);
+    }
+
+    #[test]
+    fn f_toggles_fill_on_and_off() {
+        let colour = next_colour(None);
+        let mut colourised = node("a");
+        colourised.colour = colour;
+        let state = new_state(vec![colourised.clone()], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(state, "f");
+        let mut filled = node("a");
+        filled.colour = colour;
+        filled.filled = true;
+        assert_eq!(result.doc.boxes, vec![filled]);
+
+        let state = new_state(result.doc.boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(state, "f");
+        assert_eq!(result.doc.boxes, vec![colourised]);
+    }
+
+    #[test]
+    fn f_on_a_colourless_box_does_nothing() {
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(state.clone(), "f");
+        assert_eq!(result.doc.boxes, state.doc.boxes);
+        assert_eq!(result.doc.selected, state.doc.selected);
+    }
+
+    #[test]
+    fn a_toggled_fill_survives_a_colour_cycle_back_to_plain() {
+        let mut state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        for _ in 0..PALETTE_SIZE {
+            state = handle_key(state, "c");
+        }
+        assert_ne!(state.doc.boxes[0].colour, None);
+        state = handle_key(state, "f");
+        assert_eq!(state.doc.boxes[0].filled, true);
+        let plain = handle_key(state, "c");
+        assert_eq!(plain.doc.boxes[0].colour, None);
+        assert_eq!(plain.doc.boxes[0].filled, true);
+        let re_coloured = handle_key(plain, "c");
+        assert_ne!(re_coloured.doc.boxes[0].colour, None);
+        assert_eq!(re_coloured.doc.boxes[0].filled, true);
     }
 
     #[test]
@@ -714,21 +770,52 @@ mod tests {
     }
 
     #[test]
-    fn capital_f_advances_uniformly_filled_siblings_and_leaves_colour_untouched() {
+    fn capital_f_toggles_every_sibling_fill_and_leaves_colour_untouched() {
+        let colour_one = next_colour(None);
+        let colour_two = next_colour(colour_one);
         let mut c = node("c");
-        c.colour = Some(1);
+        c.colour = colour_one;
         let mut d = node("d");
-        d.colour = Some(2);
+        d.colour = colour_two;
         let boxes = vec![node_with_children("a", vec![c, d])];
         let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }));
         let result = handle_key(state, "F");
-        let mut expected_c = node("c");
-        expected_c.colour = Some(1);
-        expected_c.fill = next_colour(None);
-        let mut expected_d = node("d");
-        expected_d.colour = Some(2);
-        expected_d.fill = next_colour(None);
-        assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![expected_c, expected_d])]);
+        assert_eq!(result.doc.boxes[0].children[0].filled, true);
+        assert_eq!(result.doc.boxes[0].children[0].colour, colour_one);
+        assert_eq!(result.doc.boxes[0].children[1].filled, true);
+        assert_eq!(result.doc.boxes[0].children[1].colour, colour_two);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 1 }));
+
+        let state = new_state(result.doc.boxes.clone(), Mode::Command, Some(Path { ancestors: vec![0], index: 1 }));
+        let result = handle_key(state, "F");
+        assert_eq!(result.doc.boxes[0].children[0].filled, false);
+        assert_eq!(result.doc.boxes[0].children[0].colour, colour_one);
+        assert_eq!(result.doc.boxes[0].children[1].filled, false);
+        assert_eq!(result.doc.boxes[0].children[1].colour, colour_two);
+    }
+
+    #[test]
+    fn capital_f_fills_every_sibling_including_colourless_ones() {
+        let colour = next_colour(None);
+        let mut c = node("c");
+        c.colour = colour;
+        let d = node("d");
+        let boxes = vec![node_with_children("a", vec![c, d])];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let result = handle_key(state, "F");
+        assert_eq!(result.doc.boxes[0].children[0].filled, true);
+        assert_eq!(result.doc.boxes[0].children[0].colour, colour);
+        assert_eq!(result.doc.boxes[0].children[1].filled, true);
+        assert_eq!(result.doc.boxes[0].children[1].colour, None);
+    }
+
+    #[test]
+    fn capital_f_does_nothing_when_every_sibling_is_colourless() {
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }));
+        let result = handle_key(state.clone(), "F");
+        assert_eq!(result.doc.boxes, state.doc.boxes);
+        assert_eq!(result.doc.selected, state.doc.selected);
     }
 
     #[test]

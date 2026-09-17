@@ -5,7 +5,7 @@ fn file_box(node: &Node) -> FileBox {
     FileBox {
         label: node.label.clone(),
         colour: node.colour,
-        fill: node.fill,
+        fill: if node.filled && node.colour.is_some() { node.colour } else { None },
         rounded: node.rounded,
         children: node.children.iter().map(file_box).collect(),
     }
@@ -19,7 +19,7 @@ fn node(file_box: FileBox) -> Node {
     Node {
         label: file_box.label,
         colour: file_box.colour,
-        fill: file_box.fill,
+        filled: file_box.fill.is_some(),
         rounded: file_box.rounded,
         children: file_box.children.into_iter().map(node).collect(),
     }
@@ -41,10 +41,10 @@ mod tests {
     #[test]
     fn saving_a_state_maps_labels_colours_fills_rounding_and_nesting_across() {
         let mut state = State::default();
-        let child = Node { label: "Auth".to_string(), fill: Some(3), ..Node::default() };
+        let child = Node { label: "Auth".to_string(), colour: Some(1), filled: true, ..Node::default() };
         state.doc.boxes = vec![
             Node { label: "API".to_string(), colour: Some(2), rounded: true, children: vec![child], ..Node::default() },
-            Node { label: "Billing".to_string(), ..Node::default() },
+            Node { label: "Billing".to_string(), filled: true, ..Node::default() },
         ];
         let expected = FileDoc {
             boxes: vec![
@@ -53,7 +53,7 @@ mod tests {
                     colour: Some(2),
                     fill: None,
                     rounded: true,
-                    children: vec![FileBox { label: "Auth".to_string(), colour: None, fill: Some(3), rounded: false, children: vec![] }],
+                    children: vec![FileBox { label: "Auth".to_string(), colour: Some(1), fill: Some(1), rounded: false, children: vec![] }],
                 },
                 FileBox { label: "Billing".to_string(), colour: None, fill: None, rounded: false, children: vec![] },
             ],
@@ -93,10 +93,10 @@ mod tests {
                 FileBox { label: "Billing".to_string(), colour: Some(4), fill: Some(1), rounded: false, children: vec![] },
             ],
         };
-        let child = Node { label: "Auth".to_string(), fill: Some(3), ..Node::default() };
+        let child = Node { label: "Auth".to_string(), filled: true, ..Node::default() };
         let expected = vec![
             Node { label: "API".to_string(), colour: Some(2), rounded: true, children: vec![child], ..Node::default() },
-            Node { label: "Billing".to_string(), colour: Some(4), fill: Some(1), ..Node::default() },
+            Node { label: "Billing".to_string(), colour: Some(4), filled: true, ..Node::default() },
         ];
         assert_eq!(to_state(doc).doc.boxes, expected);
     }
