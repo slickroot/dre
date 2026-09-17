@@ -164,7 +164,15 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     let Some(path) = arg else {
         return Ok(State::default());
     };
-    let text = fs::read_to_string(&path)?;
+    let text = match fs::read_to_string(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            let mut state = State::default();
+            state.save_to = Some(path);
+            state.new_file = true;
+            return Ok(state);
+        }
+        result => result?,
+    };
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{path} is not a valid diagram"))
     })?;
@@ -336,8 +344,23 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_file_is_an_error() {
-        let path = std::env::temp_dir().join(format!("dre-{}-missing.dre", std::process::id()));
-        assert!(load_state(Some(path.to_string_lossy().into_owned())).is_err());
+    fn a_valid_file_is_not_a_new_file() {
+        let path = temp_file("not-new.dre", "<dre/>");
+        let state = load_state(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert!(!state.unwrap().new_file);
+    }
+
+    #[test]
+    fn a_missing_file_loads_an_empty_canvas_saved_to_that_path() {
+        let path = std::env::temp_dir()
+            .join(format!("dre-{}-missing.dre", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let state = load_state(Some(path.clone())).unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, Some(path));
+        assert!(state.new_file);
     }
 }
