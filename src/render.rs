@@ -42,15 +42,14 @@ pub(crate) fn colour(colour: Option<u8>) -> (u8, u8, u8) {
     }
 }
 
-pub(crate) fn fill_colour(fill: Option<u8>) -> (u8, u8, u8, u8) {
-    match fill {
-        None => TRANSPARENT,
-        Some(i) => {
-            let (r, g, b) = PALETTE[i as usize];
-            let composite =
-                |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
-            (composite(r), composite(g), composite(b), OPAQUE)
-        }
+pub(crate) fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
+    if !filled || colour.is_none() {
+        TRANSPARENT
+    } else {
+        let (r, g, b) = PALETTE[colour.unwrap() as usize];
+        let composite =
+            |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
+        (composite(r), composite(g), composite(b), OPAQUE)
     }
 }
 
@@ -554,7 +553,7 @@ impl TerminalRenderer {
         let border = BORDER;
         let (r, g, b) = colour(node.colour);
         let edge = (r, g, b, OPAQUE);
-        let fill = fill_colour(if node.filled { node.colour } else { None });
+        let fill = fill_colour(node.colour, node.filled);
         let first_x = self.cells_to_pixels_x(left - placement.x);
         let last_x = self.cells_to_pixels_x(right - placement.x);
         let first_y = self.cells_to_pixels_y(top - placement.y);
@@ -769,7 +768,8 @@ mod tests {
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
-        assert_eq!(fill_colour(None), TRANSPARENT);
+        assert_eq!(fill_colour(None, false), TRANSPARENT);
+        assert_eq!(fill_colour(None, true), TRANSPARENT);
     }
 
     #[test]
@@ -777,7 +777,12 @@ mod tests {
         let (r, g, b) = PALETTE[2];
         let round = |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
         let expected = (round(r), round(g), round(b), OPAQUE);
-        assert_eq!(fill_colour(Some(2)), expected);
+        assert_eq!(fill_colour(Some(2), true), expected);
+    }
+
+    #[test]
+    fn coloured_but_not_filled_is_transparent() {
+        assert_eq!(fill_colour(Some(2), false), TRANSPARENT);
     }
 
     #[test]
@@ -814,7 +819,7 @@ mod tests {
     fn plain_fill_renders_transparent_interior() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
-        let fill = fill_colour(None);
+        let fill = fill_colour(None, false);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), TRANSPARENT);
     }
@@ -823,26 +828,26 @@ mod tests {
     fn a_fill_colour_is_composited_over_black_and_made_opaque() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
-        assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2)));
+        assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2), true));
     }
 
     #[test]
     fn border_pixels_are_unaffected_by_fill() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(Some(3));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
         assert_eq!(pixel_at(&pixels, size, 0, 0), edge_rgba(Some(3)));
-        assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2)));
+        assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2), true));
     }
 
     #[test]
     fn a_border_is_bold_at_every_edge() {
         let size = 3 * 4;
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
         for offset in 0..BORDER {
             assert_eq!(pixel_at(&pixels, size, 5, offset), edge);
@@ -863,7 +868,7 @@ mod tests {
     #[test]
     fn a_square_box_is_built_from_flat_edge_and_body_rows() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels =
             square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
 
@@ -885,7 +890,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_its_extreme_corners() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let rounded = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill);
         let pixels = rounded.pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
         let (last_x, last_y) = (CORNER_SIZE - 1, CORNER_SIZE - 1);
@@ -898,7 +903,7 @@ mod tests {
     #[test]
     fn straight_edges_stay_as_crisp_as_a_square_box() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let square = square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
         let rounded =
             RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
@@ -944,7 +949,7 @@ mod tests {
     #[test]
     fn border_coverage_is_composed_over_the_opaque_fill() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
             .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (131, 27, 25, OPAQUE));
@@ -953,7 +958,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_more_than_a_square_one() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let square = square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
         let rounded =
             RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
@@ -985,7 +990,7 @@ mod tests {
     #[test]
     fn clipping_a_rounded_box_is_a_pure_crop_of_the_whole_box() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let cell_width = 8;
         let hidden_cols = 2;
         let offset = hidden_cols * cell_width;
@@ -1008,7 +1013,7 @@ mod tests {
     #[test]
     fn the_sprite_holds_exactly_one_pixel_per_cell_of_its_area() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let pixels = RoundedBox::new(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
             .pixels(0, SMALL_SIZE, 0, SMALL_SIZE);
         assert_eq!(pixels.len() as i64, SMALL_SIZE * SMALL_SIZE * 4);
@@ -1017,7 +1022,7 @@ mod tests {
     #[test]
     fn clipping_a_small_box_is_a_pure_crop_of_the_whole_box() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2));
+        let fill = fill_colour(Some(2), true);
         let cell_width = 10;
         let hidden_cols = 1;
         let offset = hidden_cols * cell_width;
@@ -1433,7 +1438,7 @@ mod tests {
         let r = renderer(1, 1);
         let size = 2 * BORDER + 3;
         let sprite = box_outline(&r, &box_node(Some(2), true, false), size, size);
-        assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), fill_colour(Some(2)));
+        assert_eq!(pixel_of(&sprite, BORDER + 1, BORDER + 1), fill_colour(Some(2), true));
     }
 
     #[test]
