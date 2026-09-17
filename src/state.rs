@@ -112,6 +112,16 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
+pub(crate) fn fill_row(boxes: &mut Vec<Node>, path: &Path) {
+    let siblings = children_at(boxes, &path.ancestors);
+    let first_fill = siblings[0].fill;
+    let uniform = siblings.iter().all(|b| b.fill == first_fill);
+    let new_fill = if uniform { next_colour(first_fill) } else { Some(0) };
+    for sibling in siblings.iter_mut() {
+        sibling.fill = new_fill;
+    }
+}
+
 pub(crate) fn grow(siblings: &mut Vec<Node>) -> usize {
     siblings.push(Node { label: PAD.to_string(), ..Default::default() });
     siblings.len() - 1
@@ -301,6 +311,43 @@ mod tests {
         expected_b.colour = Some(0);
         colour_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
         assert_eq!(boxes, vec![expected_a, expected_b]);
+    }
+
+    #[test]
+    fn fill_row_advances_uniformly_filled_siblings() {
+        let mut boxes = vec![node("a"), node("b")];
+        boxes[0].fill = next_colour(None);
+        boxes[1].fill = next_colour(None);
+        fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
+        let mut expected_a = node("a");
+        expected_a.fill = next_colour(next_colour(None));
+        let mut expected_b = node("b");
+        expected_b.fill = next_colour(next_colour(None));
+        assert_eq!(boxes, vec![expected_a, expected_b]);
+    }
+
+    #[test]
+    fn fill_row_sets_mixed_siblings_to_the_first_palette_colour() {
+        let mut a = node("a");
+        a.fill = Some(0);
+        let mut b = node("b");
+        b.fill = Some(1);
+        let mut boxes = vec![a, b];
+        let mut expected_a = node("a");
+        expected_a.fill = Some(0);
+        let mut expected_b = node("b");
+        expected_b.fill = Some(0);
+        fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
+        assert_eq!(boxes, vec![expected_a, expected_b]);
+    }
+
+    #[test]
+    fn fill_row_wraps_back_to_no_fill_after_a_full_cycle() {
+        let mut boxes = vec![node("a"), node("b")];
+        for _ in 0..=PALETTE_SIZE {
+            fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
+        }
+        assert_eq!(boxes, vec![node("a"), node("b")]);
     }
 
     #[test]
