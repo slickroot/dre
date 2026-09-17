@@ -54,6 +54,7 @@ pub(crate) struct State {
     pub(crate) mode: Mode,
     pub(crate) running: bool,
     pub(crate) save_to: Option<String>,
+    pub(crate) new_file: bool,
 }
 
 impl Default for State {
@@ -64,6 +65,7 @@ impl Default for State {
             mode: Mode::default(),
             running: true,
             save_to: None,
+            new_file: false,
         }
     }
 }
@@ -134,7 +136,7 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>, save_to: Option<String>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to }
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to, new_file: false }
 }
 
 #[cfg(test)]
