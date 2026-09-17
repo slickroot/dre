@@ -67,18 +67,25 @@ fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
     state
 }
 
-fn new_box(mut state: State) -> State {
-    let parent = match &state.doc.selected {
-        None => Vec::new(),
-        Some(path) => [path.ancestors.as_slice(), &[path.index]].concat(),
+fn new_box(mut state: State, selected: Option<Path>) -> State {
+    state.doc.selected = match selected {
+        Some(mut path) => {
+            let index = grow(&mut at(&mut state.doc.boxes, &path).children);
+            path.ancestors.push(path.index);
+            Some(Path { ancestors: path.ancestors, index })
+        }
+        None => {
+            let index = grow(&mut state.doc.boxes);
+            Some(Path { ancestors: Vec::new(), index })
+        }
     };
-    state.doc.selected = Some(grow(&mut state.doc.boxes, &parent));
     state.mode = Mode::Insert;
     state
 }
 
 fn new_sibling(mut state: State, path: Path) -> State {
-    state.doc.selected = Some(grow(&mut state.doc.boxes, &path.ancestors));
+    let index = grow(children_at(&mut state.doc.boxes, &path.ancestors));
+    state.doc.selected = Some(Path { ancestors: path.ancestors, index });
     state.mode = Mode::Insert;
     state
 }
@@ -169,7 +176,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
     let mut state = if is_undoable(command) { snapshot(state) } else { state };
     match (command, state.doc.selected.take()) {
         (Command::Undo, selected) => undo(reselect(state, selected)),
-        (Command::NewBox, selected) => new_box(reselect(state, selected)),
+        (Command::NewBox, selected) => new_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
         (Command::SelectParent, Some(path)) => select_parent(state, path),
