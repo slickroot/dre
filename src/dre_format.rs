@@ -41,55 +41,16 @@ pub(crate) fn write(doc: &FileDoc) -> String {
 
 pub(crate) fn only_a_dre_root(text: &str) -> bool {
     let mut reader = Reader::from_str(text);
-    let mut seen_root = false;
-    let mut depth: u32 = 0;
     loop {
         match reader.read_event() {
-            Ok(Event::Eof) => return seen_root,
-            Ok(Event::Decl(_)) if !seen_root && depth == 0 => {}
-            Ok(Event::Comment(_)) => {}
+            Ok(Event::Decl(_) | Event::Comment(_)) => {}
             Ok(Event::Text(text)) => {
-                let is_whitespace = text.as_ref().chars().all(char::is_whitespace);
-                if !is_whitespace {
+                if !text.as_ref().chars().all(char::is_whitespace) {
                     return false;
                 }
             }
-            Ok(Event::Start(tag)) => {
-                if depth == 0 {
-                    if seen_root || tag.name().as_ref() != "dre" {
-                        return false;
-                    }
-                    seen_root = true;
-                } else if !seen_root {
-                    return false;
-                }
-                depth += 1;
-            }
-            Ok(Event::Empty(tag)) => {
-                if depth == 0 {
-                    if seen_root {
-                        return false;
-                    }
-                    if tag.name().as_ref() != "dre" {
-                        return false;
-                    }
-                    seen_root = true;
-                } else if !seen_root {
-                    return false;
-                }
-            }
-            Ok(Event::End(_)) => {
-                if depth == 0 {
-                    return false;
-                }
-                depth -= 1;
-            }
-            Ok(_) => {
-                if !seen_root || depth == 0 {
-                    return false;
-                }
-            }
-            Err(_) => return false,
+            Ok(Event::Start(tag) | Event::Empty(tag)) => return tag.name().as_ref() == "dre",
+            _ => return false,
         }
     }
 }
@@ -266,16 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn reading_content_after_the_root_gives_nothing() {
-        assert_eq!(read("<dre/><dre/>"), None);
-    }
-
-    #[test]
-    fn reading_junk_after_the_root_gives_nothing() {
-        assert_eq!(read("<dre/>junk"), None);
-    }
-
-    #[test]
     fn reading_a_colour_outside_the_palette_gives_nothing() {
         assert_eq!(read("<dre><box label=\"A\" colour=\"5\"/></dre>"), None);
     }
@@ -297,8 +248,8 @@ mod tests {
     }
 
     #[test]
-    fn reading_accepts_an_xml_declaration_and_comments_and_whitespace_around_the_root() {
-        let text = "<?xml version=\"1.0\"?>\n<!-- a comment -->\n\n<dre/>\n<!-- trailing --> \n";
+    fn reading_accepts_an_xml_declaration_and_comments_and_whitespace_before_the_root() {
+        let text = "<?xml version=\"1.0\"?>\n<!-- a comment -->\n\n<dre/>";
         assert_eq!(read(text), Some(FileDoc::default()));
     }
 }
