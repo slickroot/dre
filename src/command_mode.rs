@@ -295,6 +295,15 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
     }
 }
 
+pub(crate) fn format_keymap_markdown() -> String {
+    let mut out = String::from("| Key | Description |\n| --- | --- |\n");
+    for binding in COMMAND_KEYMAP {
+        let keys: Vec<String> = binding.keys.iter().map(|k| format!("`{k}`")).collect();
+        out.push_str(&format!("| {} | {} |\n", keys.join(", "), binding.description));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +334,29 @@ mod tests {
         Command::ToggleRounded,
         Command::Quit,
     ];
+
+    #[test]
+    fn readme_keymap_table_stays_in_sync() {
+        let markdown = format_keymap_markdown();
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir).join("README.md");
+        let readme = std::fs::read_to_string(&path).unwrap();
+        let start_marker = "<!-- keymap:start -->";
+        let end_marker = "<!-- keymap:end -->";
+        let start = readme.find(start_marker).expect("missing <!-- keymap:start --> in README.md");
+        let end = readme.find(end_marker).expect("missing <!-- keymap:end --> in README.md");
+        let start_after = start + start_marker.len();
+        let between = &readme[start_after..end];
+        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
+            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
+            std::fs::write(&path, new_readme).unwrap();
+        } else {
+            assert_eq!(
+                between, markdown,
+                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
+            );
+        }
+    }
 
     #[test]
     fn parse_maps_known_keys_to_their_commands() {
