@@ -1,5 +1,6 @@
 use crate::state::{
-    at, children_at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME, PAD,
+    at, children_at, colour_row, fill_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME,
+    PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -15,6 +16,7 @@ pub(crate) enum Command {
     RenameLabel,
     CycleColour,
     CycleSiblingsColour,
+    CycleSiblingsFill,
     CycleFill,
     ToggleRounded,
     Quit,
@@ -33,6 +35,7 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
         "I" => Command::RenameLabel,
         "c" => Command::CycleColour,
         "C" => Command::CycleSiblingsColour,
+        "F" => Command::CycleSiblingsFill,
         "f" => Command::CycleFill,
         "r" => Command::ToggleRounded,
         "q" => Command::Quit,
@@ -48,6 +51,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
             | Command::CycleFill
             | Command::ToggleRounded
             | Command::CycleSiblingsColour
+            | Command::CycleSiblingsFill
             | Command::RenameLabel
     )
 }
@@ -55,7 +59,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
 pub(crate) fn min_depth(command: Command) -> usize {
     match command {
         Command::Undo | Command::NewBox | Command::Quit => 0,
-        Command::SelectParent | Command::CycleSiblingsColour => 2,
+        Command::SelectParent | Command::CycleSiblingsColour | Command::CycleSiblingsFill => 2,
         _ => 1,
     }
 }
@@ -141,6 +145,12 @@ fn cycle_siblings_colour(mut state: State, path: Path) -> State {
     state
 }
 
+fn cycle_siblings_fill(mut state: State, path: Path) -> State {
+    fill_row(&mut state.doc.boxes, &path);
+    state.doc.selected = Some(path);
+    state
+}
+
 fn cycle_fill(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.fill = next_colour(node.fill);
@@ -194,6 +204,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
         (Command::RenameLabel, Some(path)) => rename_label(state, path),
         (Command::CycleColour, Some(path)) => cycle_colour(state, path),
         (Command::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
+        (Command::CycleSiblingsFill, Some(path)) => cycle_siblings_fill(state, path),
         (Command::CycleFill, Some(path)) => cycle_fill(state, path),
         (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
         (_, None) => state,
@@ -213,7 +224,7 @@ mod tests {
         Node { label: label.to_string(), children, ..Default::default() }
     }
 
-    const COMMANDS: [Command; 14] = [
+    const COMMANDS: [Command; 15] = [
         Command::Undo,
         Command::NewBox,
         Command::NewSibling,
@@ -225,6 +236,7 @@ mod tests {
         Command::RenameLabel,
         Command::CycleColour,
         Command::CycleSiblingsColour,
+        Command::CycleSiblingsFill,
         Command::CycleFill,
         Command::ToggleRounded,
         Command::Quit,
@@ -243,6 +255,7 @@ mod tests {
         assert_eq!(parse("I"), Some(Command::RenameLabel));
         assert_eq!(parse("c"), Some(Command::CycleColour));
         assert_eq!(parse("C"), Some(Command::CycleSiblingsColour));
+        assert_eq!(parse("F"), Some(Command::CycleSiblingsFill));
         assert_eq!(parse("f"), Some(Command::CycleFill));
         assert_eq!(parse("r"), Some(Command::ToggleRounded));
         assert_eq!(parse("q"), Some(Command::Quit));
@@ -528,6 +541,22 @@ mod tests {
     }
 
     #[test]
+    fn capital_f_on_a_top_level_box_does_nothing() {
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }), None);
+        let result = handle_key(state.clone(), "F");
+        assert_eq!(result.doc.boxes, state.doc.boxes);
+        assert_eq!(result.doc.selected, state.doc.selected);
+    }
+
+    #[test]
+    fn capital_f_with_nothing_selected_does_nothing() {
+        let state = new_state(vec![node("a")], Mode::Command, None, None);
+        let result = handle_key(state.clone(), "F");
+        assert_eq!(result.doc.boxes, state.doc.boxes);
+        assert_eq!(result.doc.selected, state.doc.selected);
+    }
+
+    #[test]
     fn capital_c_advances_uniformly_coloured_siblings() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
         let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }), None);
@@ -537,6 +566,24 @@ mod tests {
         let mut d = node("d");
         d.colour = next_colour(None);
         assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![c, d])]);
+    }
+
+    #[test]
+    fn capital_f_advances_uniformly_filled_siblings_and_leaves_colour_untouched() {
+        let mut c = node("c");
+        c.colour = Some(1);
+        let mut d = node("d");
+        d.colour = Some(2);
+        let boxes = vec![node_with_children("a", vec![c, d])];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 1 }), None);
+        let result = handle_key(state, "F");
+        let mut expected_c = node("c");
+        expected_c.colour = Some(1);
+        expected_c.fill = next_colour(None);
+        let mut expected_d = node("d");
+        expected_d.colour = Some(2);
+        expected_d.fill = next_colour(None);
+        assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![expected_c, expected_d])]);
     }
 
     #[test]
