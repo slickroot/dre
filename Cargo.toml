@@ -7,3 +7,5 @@ edition = "2021"
 base64 = "0.22"
 flate2 = "1"
 nix = { version = "0.31.3", features = ["term", "ioctl", "poll"] }
+quick-xml = { version = "0.42.0", features = ["serialize"] }
+serde = { version = "1.0.229", features = ["derive"] }
