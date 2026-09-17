@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::state::{Node, PLAIN};
+use crate::state::Node;
 
 const INDENT: &str = "  ";
 
@@ -11,11 +11,11 @@ pub(crate) fn quote(label: &str) -> String {
 
 fn line(node: &Node) -> String {
     let mut line = quote(&node.label);
-    if node.colour != PLAIN {
-        line.push_str(&format!(" colour={}", node.colour));
+    if let Some(colour) = node.colour {
+        line.push_str(&format!(" colour={colour}"));
     }
-    if node.fill != PLAIN {
-        line.push_str(&format!(" fill={}", node.fill));
+    if let Some(fill) = node.fill {
+        line.push_str(&format!(" fill={fill}"));
     }
     if node.rounded {
         line.push_str(" rounded");
@@ -123,14 +123,14 @@ mod tests {
 
     #[test]
     fn settings_follow_the_label_in_colour_fill_rounded_order() {
-        let boxed = Node { colour: 2, fill: 1, rounded: true, ..node("API") };
+        let boxed = Node { colour: Some(2), fill: Some(1), rounded: true, ..node("API") };
         assert_eq!(serialize(&[boxed]), "\"API\" colour=2 fill=1 rounded\n");
     }
 
     #[test]
     fn settings_at_their_defaults_are_left_out() {
-        let colour_only = Node { colour: 3, fill: PLAIN, rounded: false, ..node("a") };
-        let fill_only = Node { fill: 0, ..node("b") };
+        let colour_only = Node { colour: Some(3), fill: None, rounded: false, ..node("a") };
+        let fill_only = Node { fill: Some(0), ..node("b") };
         let rounded_only = Node { rounded: true, ..node("c") };
         assert_eq!(serialize(&[colour_only]), "\"a\" colour=3\n");
         assert_eq!(serialize(&[fill_only]), "\"b\" fill=0\n");
@@ -232,9 +232,9 @@ mod tests {
             "Postgres",
             vec![node_with_children("Replica", vec![node("Backup")])],
         );
-        let orders = Node { fill: 1, ..node_with_children("Orders", vec![postgres]) };
+        let orders = Node { fill: Some(1), ..node_with_children("Orders", vec![postgres]) };
         let api = Node {
-            colour: 2,
+            colour: Some(2),
             rounded: true,
             ..node_with_children("API gateway", vec![node("Auth"), orders])
         };

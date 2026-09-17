@@ -24,10 +24,10 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
 }
 
 pub(crate) fn reduce(mut state: State, command: Command) -> State {
-    if state.doc.selected.is_empty() {
+    let Some(path) = &state.doc.selected else {
         return state;
-    }
-    let node = at(&mut state.doc.boxes, &state.doc.selected);
+    };
+    let node = at(&mut state.doc.boxes, path);
     let label = node.label.clone();
     match command {
         Command::Commit => {
@@ -43,7 +43,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Node};
+    use crate::state::{handle_key, new_state, Node, Path};
 
     fn node(label: &str) -> Node {
         Node { label: label.to_string(), ..Default::default() }
@@ -78,43 +78,43 @@ mod tests {
 
     #[test]
     fn h_in_insert_mode_types_the_letter_h() {
-        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "h");
         assert_eq!(result.doc.boxes, vec![node(&format!("ah{PAD}"))]);
     }
 
     #[test]
     fn typing_appends_to_the_selected_box_label() {
-        let state = new_state(vec![node(&format!("h{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("h{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "i");
         assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
     fn space_and_tilde_are_printable() {
-        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, " ");
         assert_eq!(result.doc.boxes, vec![node(&format!("a {PAD}"))]);
 
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "~");
         assert_eq!(result.doc.boxes, vec![node(&format!("~{PAD}"))]);
     }
 
     #[test]
     fn backspace_drops_the_last_character_and_is_a_no_op_when_empty() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x7f");
         assert_eq!(result.doc.boxes, vec![node(&format!("h{PAD}"))]);
 
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x7f");
         assert_eq!(result.doc.boxes, vec![node(PAD)]);
     }
 
     #[test]
     fn esc_returns_to_command_mode_and_trims_pad() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x1b");
         assert_eq!(result.mode, Mode::Command);
         assert_eq!(result.doc.boxes, vec![node("hi")]);
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn control_and_non_ascii_characters_return_the_state_unchanged() {
-        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state.clone(), "\x01");
         assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
 
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn insert_mode_is_dispatched_separately() {
-        let state = new_state(vec![node(PAD)], Mode::Insert, vec![0]);
+        let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "q");
         assert!(result.running);
     }

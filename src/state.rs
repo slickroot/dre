@@ -2,16 +2,15 @@ use crate::command_mode;
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
-pub(crate) const PLAIN: i64 = -1;
-pub(crate) const PALETTE_SIZE: i64 = 5;
+pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
     pub(crate) label: String,
-    pub(crate) colour: i64,
-    pub(crate) fill: i64,
+    pub(crate) colour: Option<u8>,
+    pub(crate) fill: Option<u8>,
     pub(crate) rounded: bool,
     pub(crate) children: Vec<Node>,
 }
@@ -20,8 +19,8 @@ impl Default for Node {
     fn default() -> Self {
         Node {
             label: String::new(),
-            colour: PLAIN,
-            fill: PLAIN,
+            colour: None,
+            fill: None,
             rounded: false,
             children: Vec::new(),
         }
@@ -36,10 +35,16 @@ pub(crate) enum Mode {
     SavePrompt { filename: String },
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Path {
+    pub(crate) ancestors: Vec<usize>,
+    pub(crate) index: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct Document {
     pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Vec<usize>,
+    pub(crate) selected: Option<Path>,
 }
 
 #[derive(Clone)]
@@ -75,45 +80,39 @@ pub(crate) fn undo(mut state: State) -> State {
     state
 }
 
-pub(crate) fn next_colour(colour: i64) -> i64 {
-    (colour + 2).rem_euclid(PALETTE_SIZE + 1) - 1
-}
-
-pub(crate) fn at<'a>(boxes: &'a mut [Node], path: &[usize]) -> &'a mut Node {
-    let mut node = &mut boxes[path[0]];
-    for &index in &path[1..] {
-        node = &mut node.children[index];
+pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
+    match colour {
+        None => Some(0),
+        Some(i) if i + 1 < PALETTE_SIZE => Some(i + 1),
+        Some(_) => None,
     }
-    node
 }
 
-pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &[usize]) {
-    let parent = &path[..path.len() - 1];
-    let siblings = if parent.is_empty() {
-        boxes
-    } else {
-        &mut at(boxes, parent).children
-    };
+pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
+    let mut children = boxes;
+    for &index in ancestors {
+        children = &mut children[index].children;
+    }
+    children
+}
+
+pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
+    &mut children_at(boxes, &path.ancestors)[path.index]
+}
+
+pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
+    let siblings = children_at(boxes, &path.ancestors);
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
-    let new_colour = if uniform { next_colour(first_colour) } else { 0 };
+    let new_colour = if uniform { next_colour(first_colour) } else { Some(0) };
     for sibling in siblings.iter_mut() {
         sibling.colour = new_colour;
     }
 }
 
-pub(crate) fn grow(boxes: &mut Vec<Node>, path: &[usize]) -> Vec<usize> {
-    if path.is_empty() {
-        boxes.push(Node { label: PAD.to_string(), ..Default::default() });
-        vec![boxes.len() - 1]
-    } else {
-        let children = &mut at(boxes, path).children;
-        children.push(Node { label: PAD.to_string(), ..Default::default() });
-        let new_index = children.len() - 1;
-        let mut new_path = path.to_vec();
-        new_path.push(new_index);
-        new_path
-    }
+pub(crate) fn grow(siblings: &mut Vec<Node>) -> usize {
+    siblings.push(Node { label: PAD.to_string(), ..Default::default() });
+    siblings.len() - 1
 }
 
 pub(crate) fn handle_key(state: State, key: &str) -> State {
@@ -134,7 +133,7 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
 }
 
 #[cfg(test)]
-pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Vec<usize>) -> State {
+pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
     State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None }
 }
 
@@ -157,12 +156,12 @@ mod tests {
 
     #[test]
     fn boxes_default_to_the_plain_colour() {
-        assert_eq!(Node::default().colour, PLAIN);
+        assert_eq!(Node::default().colour, None);
     }
 
     #[test]
     fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().fill, PLAIN);
+        assert_eq!(Node::default().fill, None);
     }
 
     #[test]
@@ -194,15 +193,31 @@ mod tests {
     }
 
     #[test]
+    fn children_at_no_ancestors_returns_the_top_level_boxes() {
+        let mut boxes = vec![node("a"), node("b")];
+        assert_eq!(*children_at(&mut boxes, &[]), vec![node("a"), node("b")]);
+    }
+
+    #[test]
+    fn children_at_ancestors_returns_the_addressed_nodes_children() {
+        let mut boxes = vec![node_with_children(
+            "a",
+            vec![node_with_children("b", vec![node("c"), node("d")])],
+        )];
+        assert_eq!(*children_at(&mut boxes, &[0]), vec![node_with_children("b", vec![node("c"), node("d")])]);
+        assert_eq!(*children_at(&mut boxes, &[0, 0]), vec![node("c"), node("d")]);
+    }
+
+    #[test]
     fn at_a_single_index_returns_the_top_level_box() {
         let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*at(&mut boxes, &[1]), node("b"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![], index: 1 }), node("b"));
     }
 
     #[test]
     fn at_a_longer_path_walks_into_children() {
         let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(*at(&mut boxes, &[0, 1]), node("d"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0], index: 1 }), node("d"));
     }
 
     #[test]
@@ -211,96 +226,96 @@ mod tests {
             "a",
             vec![node_with_children("b", vec![node("c")])],
         )];
-        assert_eq!(*at(&mut boxes, &[0, 0, 0]), node("c"));
+        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0, 0], index: 0 }), node("c"));
     }
 
     #[test]
-    fn grow_on_the_canvas_appends_a_top_level_box() {
+    fn grow_on_an_empty_list_appends_a_padded_node() {
         let mut boxes = Vec::new();
-        let path = grow(&mut boxes, &[]);
+        let index = grow(&mut boxes);
         assert_eq!(boxes, vec![node(PAD)]);
-        assert_eq!(path, vec![0]);
+        assert_eq!(index, 0);
     }
 
     #[test]
-    fn grow_on_the_canvas_appends_after_existing_boxes() {
+    fn grow_appends_after_existing_nodes() {
         let mut boxes = vec![node("a")];
-        let path = grow(&mut boxes, &[]);
+        let index = grow(&mut boxes);
         assert_eq!(boxes, vec![node("a"), node(PAD)]);
-        assert_eq!(path, vec![1]);
+        assert_eq!(index, 1);
     }
 
     #[test]
-    fn grow_on_a_box_appends_a_child() {
+    fn grow_on_a_nodes_children_appends_a_child() {
         let mut boxes = vec![node("a")];
-        let path = grow(&mut boxes, &[0]);
+        let index = grow(&mut boxes[0].children);
         assert_eq!(boxes, vec![node_with_children("a", vec![node(PAD)])]);
-        assert_eq!(path, vec![0, 0]);
+        assert_eq!(index, 0);
     }
 
     #[test]
-    fn grow_on_a_box_with_a_child_appends_a_second_child() {
+    fn grow_on_a_nodes_children_appends_a_second_child() {
         let mut boxes = vec![node_with_children("a", vec![node("c")])];
-        let path = grow(&mut boxes, &[0]);
+        let index = grow(&mut boxes[0].children);
         assert_eq!(
             boxes,
             vec![node_with_children("a", vec![node("c"), node(PAD)])]
         );
-        assert_eq!(path, vec![0, 1]);
+        assert_eq!(index, 1);
     }
 
     #[test]
     fn next_colour_cycles_through_the_palette_and_back_to_plain() {
-        let mut colour = PLAIN;
+        let mut colour = None;
         for _ in 0..PALETTE_SIZE {
             colour = next_colour(colour);
         }
-        assert_ne!(colour, PLAIN);
+        assert_ne!(colour, None);
         colour = next_colour(colour);
-        assert_eq!(colour, PLAIN);
+        assert_eq!(colour, None);
     }
 
     #[test]
     fn colour_row_advances_uniformly_coloured_siblings() {
         let mut boxes = vec![node("a"), node("b")];
         let mut a = node("a");
-        a.colour = next_colour(PLAIN);
+        a.colour = next_colour(None);
         let mut b = node("b");
-        b.colour = next_colour(PLAIN);
-        colour_row(&mut boxes, &[0]);
+        b.colour = next_colour(None);
+        colour_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
         assert_eq!(boxes, vec![a, b]);
     }
 
     #[test]
     fn colour_row_sets_mixed_siblings_to_the_first_palette_colour() {
         let mut a = node("a");
-        a.colour = 0;
+        a.colour = Some(0);
         let mut b = node("b");
-        b.colour = 1;
+        b.colour = Some(1);
         let mut boxes = vec![a, b];
         let mut expected_a = node("a");
-        expected_a.colour = 0;
+        expected_a.colour = Some(0);
         let mut expected_b = node("b");
-        expected_b.colour = 0;
-        colour_row(&mut boxes, &[0]);
+        expected_b.colour = Some(0);
+        colour_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
         assert_eq!(boxes, vec![expected_a, expected_b]);
     }
 
     #[test]
     fn state_starts_running() {
-        let state = new_state(vec![], Mode::Command, vec![]);
+        let state = new_state(vec![], Mode::Command, None);
         assert!(state.running);
     }
 
     #[test]
     fn state_starts_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, vec![]);
+        let state = new_state(vec![], Mode::Command, None);
         assert_eq!(state.mode, Mode::Command);
     }
 
     #[test]
     fn unknown_key_returns_the_state_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, vec![]);
+        let state = new_state(vec![node("a")], Mode::Command, None);
         let result = handle_key(state.clone(), "x");
         assert_eq!(result.doc.boxes, state.doc.boxes);
         assert_eq!(result.doc.selected, state.doc.selected);
