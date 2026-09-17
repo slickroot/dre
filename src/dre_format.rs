@@ -1,14 +1,18 @@
+use crate::state;
+use quick_xml::events::Event;
 use quick_xml::se::Serializer;
+use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename = "dre")]
+#[serde(rename = "dre", deny_unknown_fields)]
 pub(crate) struct FileDoc {
     #[serde(rename = "box", default)]
     pub(crate) boxes: Vec<FileBox>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct FileBox {
     #[serde(rename = "@label")]
     pub(crate) label: String,
@@ -35,8 +39,38 @@ pub(crate) fn write(doc: &FileDoc) -> String {
     text
 }
 
+pub(crate) fn only_a_dre_root(text: &str) -> bool {
+    let mut reader = Reader::from_str(text);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Decl(_) | Event::Comment(_)) => {}
+            Ok(Event::Text(text)) => {
+                if !text.as_ref().chars().all(char::is_whitespace) {
+                    return false;
+                }
+            }
+            Ok(Event::Start(tag) | Event::Empty(tag)) => return tag.name().as_ref() == "dre",
+            _ => return false,
+        }
+    }
+}
+
+pub(crate) fn in_palette(doc: &FileDoc) -> bool {
+    fn box_in_palette(file_box: &FileBox) -> bool {
+        let colour_ok = file_box.colour.is_none_or(|i| i < state::PALETTE_SIZE);
+        let fill_ok = file_box.fill.is_none_or(|i| i < state::PALETTE_SIZE);
+        colour_ok && fill_ok && file_box.children.iter().all(box_in_palette)
+    }
+    doc.boxes.iter().all(box_in_palette)
+}
+
 pub(crate) fn read(text: &str) -> Option<FileDoc> {
-    quick_xml::de::from_str(text).ok()
+    let doc: FileDoc = quick_xml::de::from_str(text).ok()?;
+    if only_a_dre_root(text) && in_palette(&doc) {
+        Some(doc)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -160,5 +194,62 @@ mod tests {
     #[test]
     fn reading_a_non_numeric_colour_gives_nothing() {
         assert_eq!(read("<dre><box label=\"Auth\" colour=\"red\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_attribute_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" shadow=\"true\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_element_gives_nothing() {
+        assert_eq!(read("<dre><arrow/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_an_unknown_element_inside_a_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\"><arrow/></box></dre>"), None);
+    }
+
+    #[test]
+    fn reading_text_content_in_the_root_gives_nothing() {
+        assert_eq!(read("<dre>hi</dre>"), None);
+    }
+
+    #[test]
+    fn reading_text_content_in_a_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\">hi</box></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_different_root_element_gives_nothing() {
+        assert_eq!(read("<plans><box label=\"A\"/></plans>"), None);
+    }
+
+    #[test]
+    fn reading_a_colour_outside_the_palette_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" colour=\"5\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_fill_outside_the_palette_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\" fill=\"99\"/></dre>"), None);
+    }
+
+    #[test]
+    fn reading_a_bad_colour_on_a_nested_box_gives_nothing() {
+        assert_eq!(read("<dre><box label=\"A\"><box label=\"B\" colour=\"5\"/></box></dre>"), None);
+    }
+
+    #[test]
+    fn reading_accepts_colour_and_fill_at_the_edges_of_the_palette() {
+        let doc = FileDoc { boxes: vec![FileBox { colour: Some(4), fill: Some(0), ..plain("A") }] };
+        assert_eq!(read("<dre><box label=\"A\" colour=\"4\" fill=\"0\"/></dre>"), Some(doc));
+    }
+
+    #[test]
+    fn reading_accepts_an_xml_declaration_and_comments_and_whitespace_before_the_root() {
+        let text = "<?xml version=\"1.0\"?>\n<!-- a comment -->\n\n<dre/>";
+        assert_eq!(read(text), Some(FileDoc::default()));
     }
 }

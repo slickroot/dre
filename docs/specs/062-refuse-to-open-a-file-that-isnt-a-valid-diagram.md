@@ -28,8 +28,7 @@ What `read` lets through today:
 
 - serde ignores unknown attributes (`shadow="1"`), unknown elements (`<arrow>`)
   and stray text.
-- quick-xml does not check the root name (`<plans>` loads) and ignores anything
-  after the root element (`<dre/><dre/>`).
+- quick-xml does not check the root name (`<plans>` loads).
 - `colour` and `fill` are `u8`, so `colour="99"` loads and then panics in
   `render` on `PALETTE[99]`.
 
@@ -46,9 +45,8 @@ All the "is this a valid file" rules live here. `read` still returns
 - `read` returns `Some` only when all three checks pass:
   1. **`only_a_dre_root(text) -> bool`**: walks `quick_xml::Reader` events.
      Before the root, only the XML declaration, comments and whitespace are
-     allowed. The first start or empty tag must be named `dre`. After the root
-     closes (tracked by depth), only comments and whitespace are allowed. Any
-     reader error means invalid.
+     allowed. The first start or empty tag must be named `dre`. Anything after
+     the root is not checked. Any reader error means invalid.
   2. serde deserialises the text into a `FileDoc`.
   3. **`in_palette(&FileDoc) -> bool`**: walks every box and its children
      recursively. Every `colour` and `fill` that is `Some(i)` must have
@@ -74,11 +72,10 @@ All the "is this a valid file" rules live here. `read` still returns
     `<box label="A"><arrow/></box>`
   - text content: `<dre>hi</dre>`, `<box label="A">hi</box>`
   - a different root: `<plans><box label="A"/></plans>`
-  - content after the root: `<dre/><dre/>`, `<dre/>junk`
 - `dre_format`, where `read` still gives `Some` for:
   - `colour="4"` and `fill="0"` (the edges of the palette)
   - a leading `<?xml version="1.0"?>`, plus comments and whitespace before
-    and after the root
+    the root
   - the existing round-trip and reformatted-XML tests, unchanged
 - `writer`: an invalid file's error message is exactly
   `<path>: not a valid diagram`, for example with `colour="99"`.
