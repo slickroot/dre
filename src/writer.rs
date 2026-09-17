@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn the_prompt_replaces_the_last_row_in_save_prompt_mode() {
-        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None, None);
+        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None, None);
+        let state = new_state(vec![], Mode::Command, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
