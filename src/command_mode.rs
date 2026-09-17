@@ -1,4 +1,6 @@
-use crate::state::{at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State, PAD};
+use crate::state::{
+    at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME, PAD,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Command {
@@ -180,7 +182,7 @@ fn toggle_rounded(mut state: State) -> State {
 }
 
 fn quit(mut state: State) -> State {
-    state.running = false;
+    state.mode = Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() };
     state
 }
 
@@ -325,13 +327,13 @@ mod tests {
     }
 
     #[test]
-    fn q_stops_the_state_and_preserves_boxes_and_selection() {
+    fn q_opens_the_save_prompt_and_preserves_boxes_and_selection() {
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { head: 0, tail: vec![] }));
         let result = handle_key(state, "q");
-        assert!(!result.running);
+        assert!(result.running);
         assert_eq!(result.doc.boxes, vec![node("a")]);
         assert_eq!(result.doc.selected, Some(Path { head: 0, tail: vec![] }));
-        assert_eq!(result.mode, Mode::Command);
+        assert_eq!(result.mode, Mode::SavePrompt { filename: DEFAULT_FILENAME.to_string() });
     }
 
     #[test]
@@ -557,7 +559,8 @@ mod tests {
     fn q_does_not_clobber_an_existing_undo_snapshot() {
         let before = new_state(vec![node("a")], Mode::Command, Some(Path { head: 0, tail: vec![] }));
         let after_command = handle_key(before.clone(), "c");
-        let after_quit = handle_key(after_command, "q");
+        let mut after_quit = handle_key(after_command, "q");
+        after_quit.mode = Mode::Command;
         let undone = handle_key(after_quit, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
         assert_eq!(undone.doc.selected, before.doc.selected);

@@ -1,8 +1,10 @@
 use crate::command_mode;
 use crate::insert_mode;
+use crate::save_prompt_mode;
 
 pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
+pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
@@ -25,11 +27,12 @@ impl Default for Node {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
 pub(crate) enum Mode {
     #[default]
     Command,
     Insert,
+    SavePrompt { filename: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +53,7 @@ pub(crate) struct State {
     history: Vec<Document>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
+    pub(crate) save_to: Option<String>,
 }
 
 impl Default for State {
@@ -59,6 +63,7 @@ impl Default for State {
             history: Vec::new(),
             mode: Mode::default(),
             running: true,
+            save_to: None,
         }
     }
 }
@@ -129,7 +134,7 @@ pub(crate) fn grow(boxes: &mut Vec<Node>, path: &Option<Path>) -> Path {
 }
 
 pub(crate) fn handle_key(state: State, key: &str) -> State {
-    match state.mode {
+    match &state.mode {
         Mode::Command => match command_mode::parse(key) {
             Some(command) => command_mode::reduce(state, command),
             None => state,
@@ -138,12 +143,16 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
             Some(command) => insert_mode::reduce(state, command),
             None => state,
         },
+        Mode::SavePrompt { .. } => match save_prompt_mode::parse(key) {
+            Some(command) => save_prompt_mode::reduce(state, command),
+            None => state,
+        },
     }
 }
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true }
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None }
 }
 
 #[cfg(test)]
