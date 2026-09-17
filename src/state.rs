@@ -45,7 +45,7 @@ pub(crate) struct Document {
 #[derive(Clone)]
 pub(crate) struct State {
     pub(crate) doc: Document,
-    history: Vec<Document>,
+    pub(crate) history: Vec<Document>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
     pub(crate) save_to: Option<String>,

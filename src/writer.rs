@@ -8,27 +8,12 @@ use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
-use crate::dre_format::v0::{self, FileBox, FileDoc};
+use crate::dre_format::v0;
+use crate::file_document;
 use crate::layout::{layout, with_cursor};
 use crate::render::{TerminalRenderer, CURSOR};
-use crate::state::{handle_key, Mode, Node, State, PLAIN};
+use crate::state::{handle_key, Mode, State};
 use crate::KittyGraphics;
-
-// TODO(slice 3): move to file_document::from_state.
-fn to_file_box(node: &Node) -> FileBox {
-    FileBox {
-        label: node.label.clone(),
-        colour: (node.colour != PLAIN).then_some(node.colour as u8),
-        fill: (node.fill != PLAIN).then_some(node.fill as u8),
-        rounded: node.rounded,
-        children: node.children.iter().map(to_file_box).collect(),
-    }
-}
-
-// TODO(slice 3): move to file_document::from_state.
-fn to_file_doc(boxes: &[Node]) -> FileDoc {
-    FileDoc { boxes: boxes.iter().map(to_file_box).collect() }
-}
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -162,7 +147,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
         }
         state = handle_key(state, &key);
         if let Some(path) = &state.save_to {
-            fs::write(path, v0::write(&to_file_doc(&state.doc.boxes)))?;
+            fs::write(path, v0::write(&file_document::from_state(&state)))?;
         }
     }
     Ok(())
