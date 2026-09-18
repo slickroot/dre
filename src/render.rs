@@ -408,8 +408,26 @@ impl TerminalRenderer {
         cols: i64,
         rows: i64,
     ) -> Vec<String> {
-        let mut lines = self.grid(placements, cols, rows);
-        let sprites = self.sprites(placements, cols, rows);
+        let (left, top) = if placements.is_empty() {
+            (0, 0)
+        } else {
+            let min_x = placements.iter().map(|placement| placement.x).min().unwrap();
+            let span = placements.iter().map(|placement| placement.x + placement.width).max().unwrap() - min_x;
+            let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
+            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
+        };
+        let shifted: Vec<crate::layout::Placement> = placements
+            .iter()
+            .map(|placement| crate::layout::Placement {
+                node: placement.node.clone(),
+                x: placement.x + left,
+                y: placement.y + top,
+                width: placement.width,
+                height: placement.height,
+            })
+            .collect();
+        let mut lines = self.grid(&shifted, cols, rows);
+        let sprites = self.sprites(&shifted, cols, rows);
         let payload = self.graphics.draw(sprites);
         let last = lines.len() - 1;
         lines[last] = format!("{}{}", lines[last], payload);
@@ -1045,6 +1063,14 @@ mod tests {
         crate::state::Node { label: String::new(), colour, filled, rounded, children: vec![] }
     }
 
+    fn node(label: &str) -> crate::state::Node {
+        crate::state::Node { label: label.to_string(), ..Default::default() }
+    }
+
+    fn node_with_children(label: &str, children: Vec<crate::state::Node>) -> crate::state::Node {
+        crate::state::Node { label: label.to_string(), children, ..Default::default() }
+    }
+
     fn box_placement(node: &crate::state::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Node(node),
@@ -1168,6 +1194,61 @@ mod tests {
         let lines = r.render(&[], 3, 2);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), crate::DELETE_ALL));
+    }
+
+    #[test]
+    fn centres_a_leaf_box_within_the_terminal() {
+        let leaf = node("hi");
+        let nodes = vec![leaf.clone()];
+        let placements = crate::layout::layout(&nodes);
+        let cols = 20;
+        let rows = 10;
+        let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
+        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let mut r = renderer(1, 1);
+        let lines = r.render(&placements, cols, rows);
+        let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
+        let label_row = top + crate::layout::BOX_HEIGHT / 2;
+        assert_eq!(&lines[label_row as usize][label_x as usize..label_x as usize + 2], "hi");
+        assert_eq!(lines[top as usize], " ".repeat(cols as usize));
+        assert_eq!(lines[(top + crate::layout::BOX_HEIGHT) as usize], " ".repeat(cols as usize));
+    }
+
+    #[test]
+    fn centres_a_parent_and_children_as_a_group() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent.clone()];
+        let placements = crate::layout::layout(&nodes);
+        let cols = 40;
+        let rows = 12;
+        let span = crate::layout::width(&parent) + crate::layout::GAP_WIDTH
+            + crate::layout::width(&node("a"));
+        let height =
+            crate::layout::LEAF_STRIDE * crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT;
+        let left = (cols - span).div_euclid(2);
+        let top = (rows - height).div_euclid(2);
+        let mut r = renderer(1, 1);
+        let lines = r.render(&placements, cols, rows);
+
+        let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
+        let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
+        let parent_label_row = top + crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT / 2;
+        let child_a_label_x =
+            left + child_base_x + crate::layout::centre(crate::layout::width(&node("a")), "a");
+        let child_a_label_row = top + crate::layout::BOX_HEIGHT / 2;
+
+        assert_eq!(
+            &lines[parent_label_row as usize]
+                [parent_label_x as usize..parent_label_x as usize + "parent".len()],
+            "parent"
+        );
+        assert_eq!(
+            &lines[child_a_label_row as usize]
+                [child_a_label_x as usize..child_a_label_x as usize + 1],
+            "a"
+        );
+        assert_eq!(lines[top as usize], " ".repeat(cols as usize));
+        assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
     }
 
     #[test]
