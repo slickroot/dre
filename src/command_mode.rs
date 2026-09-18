@@ -186,6 +186,15 @@ fn select_previous(mut state: State, mut path: Path) -> State {
     state
 }
 
+fn repeat(mut state: State, path: Path, count: usize, step: fn(State, Path) -> State) -> State {
+    state.doc.selected = Some(path);
+    for _ in 0..count {
+        let path = state.doc.selected.clone().unwrap();
+        state = step(state, path);
+    }
+    state
+}
+
 fn edit_label(mut state: State, path: Path) -> State {
     let label = at(&mut state.doc.boxes, &path).label.clone();
     enter_insert(state, path, &label)
@@ -272,35 +281,13 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         (Command::NewBox, selected) => add_child_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
-        (Command::SelectParent, Some(path)) => {
-            // Clamp the climb to the available ancestors so a count larger than
-            // the number of levels stops at the top-level box instead of popping
-            // an empty ancestors vec and clearing the selection.
-            let climbs = count.min(path.ancestors.len());
-            state.doc.selected = Some(path.clone());
-            for _ in 0..climbs {
-                let path = state.doc.selected.clone().unwrap();
-                state = select_parent(state, path);
-            }
-            state
-        }
+        // Clamp the climb to the available ancestors so a count larger than the
+        // number of levels stops at the top-level box instead of popping an
+        // empty ancestors vec and clearing the selection.
+        (Command::SelectParent, Some(path)) => repeat(state, path.clone(), count.min(path.ancestors.len()), select_parent),
         (Command::SelectChild, Some(path)) => select_child(state, path),
-        (Command::SelectNext, Some(path)) => {
-            state.doc.selected = Some(path.clone());
-            for _ in 0..count {
-                let path = state.doc.selected.clone().unwrap();
-                state = select_next(state, path);
-            }
-            state
-        }
-        (Command::SelectPrevious, Some(path)) => {
-            state.doc.selected = Some(path.clone());
-            for _ in 0..count {
-                let path = state.doc.selected.clone().unwrap();
-                state = select_previous(state, path);
-            }
-            state
-        }
+        (Command::SelectNext, Some(path)) => repeat(state, path, count, select_next),
+        (Command::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
         (Command::EditLabel, Some(path)) => edit_label(state, path),
         (Command::RenameLabel, Some(path)) => rename_label(state, path),
         (Command::CycleColour, Some(path)) => cycle_colour(state, path),
