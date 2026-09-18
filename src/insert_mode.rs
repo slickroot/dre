@@ -248,6 +248,17 @@ mod tests {
     }
 
     #[test]
+    fn digit_in_insert_mode_types_the_digit_as_label_text() {
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
+            let result = handle_key(state, key);
+            assert_eq!(result.doc.boxes, vec![node(&format!("a{key}{PAD}"))]);
+            assert_eq!(result.mode, Mode::Insert);
+            assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        }
+    }
+
+    #[test]
     fn insert_keymap_agrees_with_parse() {
         let raw_for = |display: &str| match display {
             "Enter" => "\r",
