@@ -1,8 +1,18 @@
 <dre>
-  <box label="state" rounded="true">
-    <box label="layout">
-      <box label="tui" colour="3"/>
-      <box label="svg" colour="3"/>
+  <box label="dre" colour="2" rounded="true">
+    <box label="cli" colour="4" rounded="true">
+      <box label="edit" colour="2">
+        <box label="writer" colour="1">
+          <box label="command_mode"/>
+          <box label="insert_mode"/>
+          <box label="save_prompt_mode"/>
+        </box>
+      </box>
+      <box label="export">
+        <box label="svg" colour="4"/>
+      </box>
     </box>
+    <box label="layout" colour="1" fill="1"/>
+    <box label="dre_format" colour="3"/>
   </box>
 </dre>

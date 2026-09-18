@@ -1,6 +1,6 @@
 **dre** is a keyboard-driven diagram editor that runs in your terminal.
 Build a tree of boxes with a few keystrokes, style them, and save it to a
-`.dre` file.
+`.dre` file — or export it to a crisp SVG.
 
 ## Requirements
 
@@ -26,6 +26,37 @@ mode.
 To quit, press `q`. With a filename, `q` saves to that file and quits. Without
 a filename, `q` asks "Save as:" — pre-filled with `diagram.dre` — and `Enter`
 saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
+
+## Example
+
+`docs/example.dre` shows off rounded corners, border colours, translucent
+fills, and arrows:
+
+```xml
+<dre>
+  <box label="API gateway" colour="2" rounded="true">
+    <box label="Auth"/>
+    <box label="Orders" fill="1">
+      <box label="Postgres">
+        <box label="Replica">
+          <box label="Backup"/>
+        </box>
+      </box>
+    </box>
+  </box>
+  <box label="Billing"/>
+</dre>
+```
+
+`dre --svg docs/example.dre` renders it as `docs/example.svg`:
+
+![The example diagram rendered by dre](docs/example.svg)
+
+## Export to SVG
+
+`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
+exits — a crisp, vector copy with the same boxes, labels, colours, fills,
+rounded corners, and arrows, but no cursor or selection.
 
 ## Command mode
 
@@ -71,3 +102,37 @@ Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
 removes a character from the filename.
 
 `Ctrl-C` quits without saving.
+
+## How dre is built
+
+Each box below is a source module, and an arrow means the module on its left
+drives the module on its right. The figure is itself a dre diagram —
+`docs/architecture.dre`:
+
+```xml
+<dre>
+  <box label="dre" colour="2" rounded="true">
+    <box label="cli" colour="4" rounded="true">
+      <box label="edit" colour="2">
+        <box label="writer" colour="1">
+          <box label="command_mode"/>
+          <box label="insert_mode"/>
+          <box label="save_prompt_mode"/>
+        </box>
+      </box>
+      <box label="export">
+        <box label="svg" colour="4"/>
+      </box>
+    </box>
+    <box label="layout" colour="1" fill="1"/>
+    <box label="dre_format" colour="3"/>
+  </box>
+</dre>
+```
+
+`cli` splits into an interactive `edit` path (the `writer` terminal loop with
+its three modes) and a headless `export` path. Both feed `layout`, which turns
+boxes into placements that each renderer draws in its own way — the terminal
+sprites in the editor, `<rect>`s and `<text>`s for SVG.
+
+![The architecture of dre rendered by dre](docs/architecture.svg)

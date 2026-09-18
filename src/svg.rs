@@ -859,6 +859,43 @@ mod tests {
         paths
     }
 
+    fn render_document_figure(name: &str) -> String {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let source = std::path::Path::new(manifest_dir).join(format!("docs/{name}.dre"));
+        let text = std::fs::read_to_string(&source)
+            .unwrap_or_else(|_| panic!("missing docs/{name}.dre source of truth"));
+        let doc = crate::dre_format::read(&text)
+            .unwrap_or_else(|| panic!("docs/{name}.dre must be a valid diagram"));
+        let boxes = crate::file_document::to_state(doc).doc.boxes;
+        SvgRenderer {}.render(&crate::layout::layout(&boxes))
+    }
+
+    #[test]
+    fn committed_readme_figures_stay_in_sync() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        for name in ["example", "architecture"] {
+            let output = std::path::Path::new(manifest_dir).join(format!("docs/{name}.svg"));
+            let svg = render_document_figure(name);
+            if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
+                std::fs::write(&output, svg).unwrap();
+            } else {
+                let committed = std::fs::read_to_string(&output)
+                    .unwrap_or_else(|_| panic!("missing docs/{name}.svg; regenerate with UPDATE_README=1"));
+                assert_eq!(
+                    committed,
+                    svg,
+                    "docs/{name}.svg is out of date. Run UPDATE_README=1 cargo test to regenerate."
+                );
+            }
+        }
+        let readme = std::fs::read_to_string(std::path::Path::new(manifest_dir).join("README.md")).unwrap();
+        for name in ["example", "architecture"] {
+            let source = std::fs::read_to_string(std::path::Path::new(manifest_dir).join(format!("docs/{name}.dre"))).unwrap();
+            assert!(readme.contains(&format!("docs/{name}.svg")), "README.md should reference docs/{name}.svg");
+            assert!(readme.contains(source.trim()), "README.md should show the docs/{name}.dre source. Run UPDATE_README=1 cargo test to regenerate.");
+        }
+    }
+
     #[test]
     fn renders_the_spec_example_diagram_as_a_whole_document() {
         let nodes = vec![
