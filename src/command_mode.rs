@@ -257,7 +257,8 @@ fn reselect(mut state: State, selected: Option<Path>) -> State {
     state
 }
 
-pub(crate) fn reduce(state: State, command: Command) -> State {
+pub(crate) fn reduce(mut state: State, command: Command) -> State {
+    let count = state.pending_count.take().unwrap_or(1);
     let depth = match &state.doc.selected {
         None => 0,
         Some(path) => 1 + path.ancestors.len(),
@@ -271,10 +272,35 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
         (Command::NewBox, selected) => add_child_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
-        (Command::SelectParent, Some(path)) => select_parent(state, path),
+        (Command::SelectParent, Some(path)) => {
+            // Clamp the climb to the available ancestors so a count larger than
+            // the number of levels stops at the top-level box instead of popping
+            // an empty ancestors vec and clearing the selection.
+            let climbs = count.min(path.ancestors.len());
+            state.doc.selected = Some(path.clone());
+            for _ in 0..climbs {
+                let path = state.doc.selected.clone().unwrap();
+                state = select_parent(state, path);
+            }
+            state
+        }
         (Command::SelectChild, Some(path)) => select_child(state, path),
-        (Command::SelectNext, Some(path)) => select_next(state, path),
-        (Command::SelectPrevious, Some(path)) => select_previous(state, path),
+        (Command::SelectNext, Some(path)) => {
+            state.doc.selected = Some(path.clone());
+            for _ in 0..count {
+                let path = state.doc.selected.clone().unwrap();
+                state = select_next(state, path);
+            }
+            state
+        }
+        (Command::SelectPrevious, Some(path)) => {
+            state.doc.selected = Some(path.clone());
+            for _ in 0..count {
+                let path = state.doc.selected.clone().unwrap();
+                state = select_previous(state, path);
+            }
+            state
+        }
         (Command::EditLabel, Some(path)) => edit_label(state, path),
         (Command::RenameLabel, Some(path)) => rename_label(state, path),
         (Command::CycleColour, Some(path)) => cycle_colour(state, path),
@@ -606,6 +632,166 @@ mod tests {
         let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "k");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn j_with_a_count_prefix_moves_multiple_steps_forward() {
+        let boxes: Vec<Node> = (0..7).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(handle_key(state, "3"), "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 3 }));
+    }
+
+    #[test]
+    fn k_with_a_count_prefix_moves_multiple_steps_back() {
+        let boxes: Vec<Node> = (0..7).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 6 }));
+        let result = handle_key(handle_key(state, "3"), "k");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 3 }));
+    }
+
+    #[test]
+    fn j_with_a_count_prefix_clamps_at_the_last_sibling() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 3 }));
+        let result = handle_key(handle_key(state, "3"), "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 4 }));
+    }
+
+    #[test]
+    fn k_with_a_count_prefix_clamps_at_the_first_sibling() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let result = handle_key(handle_key(state, "3"), "k");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn h_with_a_count_prefix_climbs_multiple_levels() {
+        let boxes = vec![node_with_children(
+            "root",
+            vec![node_with_children("a", vec![node_with_children("b", vec![node("c")])])],
+        )];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0, 0, 0], index: 0 }));
+        let result = handle_key(handle_key(state, "3"), "h");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn h_with_a_large_count_stops_at_the_top_level_box() {
+        let boxes = vec![node_with_children(
+            "root",
+            vec![node_with_children("a", vec![node_with_children("b", vec![node("c")])])],
+        )];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0, 0], index: 0 }));
+        let state = handle_key(state, "1");
+        let state = handle_key(state, "2");
+        let result = handle_key(state, "h");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn one_j_moves_one_step_like_plain_j() {
+        let boxes = vec![node("a"), node("b"), node("c")];
+        let plain = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let prefixed = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let plain = handle_key(plain, "j");
+        let prefixed = handle_key(handle_key(prefixed, "1"), "j");
+        assert_eq!(plain.doc.selected, prefixed.doc.selected);
+        assert_eq!(prefixed.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn twelve_j_moves_twelve_steps() {
+        let boxes: Vec<Node> = (0..15).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "1");
+        let state = handle_key(state, "2");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 12 }));
+    }
+
+    #[test]
+    fn zero_j_leaves_the_selection_unchanged() {
+        let boxes = vec![node("a"), node("b"), node("c")];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let result = handle_key(handle_key(state, "0"), "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn zero_k_leaves_the_selection_unchanged() {
+        let boxes = vec![node("a"), node("b"), node("c")];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        let result = handle_key(handle_key(state, "0"), "k");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn zero_h_leaves_the_selection_unchanged() {
+        let boxes = vec![node_with_children("root", vec![node("a")])];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let result = handle_key(handle_key(state, "0"), "h");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+    }
+
+    #[test]
+    fn a_count_prefix_on_s_behaves_exactly_as_s_and_is_consumed() {
+        let boxes = vec![node("a"), node("b"), node("c"), node("d")];
+        let plain = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 2 }));
+        let prefixed = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 2 }));
+        let plain = handle_key(plain, "s");
+        let prefixed = handle_key(handle_key(prefixed, "2"), "s");
+        assert_eq!(plain.doc.boxes, prefixed.doc.boxes);
+        assert_eq!(plain.doc.selected, prefixed.doc.selected);
+        assert_eq!(plain.mode, prefixed.mode);
+        assert_eq!(prefixed.doc.selected, Some(Path { ancestors: vec![], index: 4 }));
+
+        let committed = handle_key(prefixed, "\x1b");
+        let result = handle_key(committed, "k");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 3 }));
+    }
+
+    #[test]
+    fn a_digit_followed_by_an_unknown_key_then_j_moves_one_step() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "3");
+        let state = handle_key(state, "x");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn j_with_a_count_prefix_and_no_selection_leaves_the_document_unchanged() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes.clone(), Mode::Command, None);
+        let state = handle_key(state, "3");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.boxes, boxes);
+        assert_eq!(result.doc.selected, None);
+    }
+
+    #[test]
+    fn a_count_consumed_by_a_no_op_selection_does_not_leak_to_the_next_command() {
+        let boxes = vec![node("a"), node("b"), node("c")];
+        let state = new_state(boxes.clone(), Mode::Command, None);
+        let state = handle_key(state, "3");
+        let state = handle_key(state, "j");
+        let state = handle_key(state, "b");
+        let state = handle_key(state, "\x1b");
+        let result = handle_key(state, "k");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 2 }));
+    }
+
+    #[test]
+    fn a_count_consumed_by_failed_min_depth_does_not_leak_to_the_next_command() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "3");
+        let state = handle_key(state, "h");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
     }
 
     #[test]

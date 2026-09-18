@@ -62,6 +62,7 @@ pub(crate) struct State {
     pub(crate) running: bool,
     pub(crate) save_to: Option<String>,
     pub(crate) new_file: bool,
+    pub(crate) pending_count: Option<usize>,
 }
 
 impl Default for State {
@@ -73,6 +74,7 @@ impl Default for State {
             running: true,
             save_to: None,
             new_file: false,
+            pending_count: None,
         }
     }
 }
@@ -140,12 +142,29 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state
 }
 
-pub(crate) fn handle_key(state: State, key: &str) -> State {
+pub(crate) fn handle_key(mut state: State, key: &str) -> State {
     match &state.mode {
-        Mode::Command => match command_mode::parse(key) {
-            Some(command) => command_mode::reduce(state, command),
-            None => state,
-        },
+        Mode::Command => {
+            if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
+                let digit = key.as_bytes()[0] - b'0';
+                state.pending_count = Some(
+                    state
+                        .pending_count
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit as usize),
+                );
+                state
+            } else {
+                match command_mode::parse(key) {
+                    Some(command) => command_mode::reduce(state, command),
+                    None => {
+                        state.pending_count = None;
+                        state
+                    }
+                }
+            }
+        }
         Mode::Insert => match insert_mode::parse(key) {
             Some(command) => insert_mode::reduce(state, command),
             None => state,
@@ -159,7 +178,7 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false }
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
 }
 
 #[cfg(test)]
@@ -364,5 +383,29 @@ mod tests {
         assert_eq!(result.doc.selected, state.doc.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
+    }
+
+    #[test]
+    fn digits_accumulate_across_keystrokes() {
+        let boxes: Vec<Node> = (0..40).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "3");
+        let result = handle_key(state, "2");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(result, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 32 }));
+    }
+
+    #[test]
+    fn repeated_digits_saturate_without_panic() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let mut state = state;
+        for _ in 0..20 {
+            state = handle_key(state, "9");
+        }
+        let state = handle_key(state, "x");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
     }
 }
