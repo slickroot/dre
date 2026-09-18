@@ -113,7 +113,7 @@ fn frame<W: Write>(
     rows: i64,
 ) -> io::Result<()> {
     let selected = state.doc.selected.clone();
-    let placements = with_cursor(layout(&state.doc.boxes, cols, rows), selected);
+    let placements = with_cursor(layout(&state.doc.boxes), selected);
     let mut lines = renderer.render(&placements, cols, rows);
     if let Mode::SavePrompt { filename } = &state.mode {
         let last = lines.len() - 1;
