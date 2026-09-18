@@ -199,7 +199,7 @@ pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
     }
     offsets.push(offset);
 
-    let mut placements = place(nodes, &offsets);
+    let placements = place(nodes, &offsets);
 
     let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
