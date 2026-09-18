@@ -1,5 +1,7 @@
 use crate::layout::PlacementNode;
-use crate::render::{colour, CELL_HEIGHT, CELL_WIDTH};
+use crate::render::{
+    arrowhead_depth, arrowhead_slope, colour, ARROW_STROKE, CELL_HEIGHT, CELL_WIDTH, PLAIN_COLOUR,
+};
 
 const TEXT_COLOUR: (u8, u8, u8) = (33, 33, 33);
 
@@ -13,13 +15,17 @@ impl SvgRenderer {
         let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {span_x} {span_y}\">"
         );
+        if placements.iter().any(|placement| matches!(placement.node, PlacementNode::Arrow(_))) {
+            svg.push_str(&marker_defs());
+        }
         for placement in placements {
             if let PlacementNode::Node(node) = &placement.node {
                 svg.push_str(&rect(placement, node));
             }
         }
         for placement in placements {
-            if let PlacementNode::Arrow(_) = &placement.node {
+            if let PlacementNode::Arrow(arrow) = &placement.node {
+                svg.push_str(&arrow_paths(placement, arrow));
             }
         }
         for placement in placements {
@@ -66,6 +72,55 @@ fn view_box(placements: &[crate::layout::Placement]) -> (i64, i64, i64, i64) {
 }
 
 #[allow(dead_code)]
+fn marker_defs() -> String {
+    let depth = arrowhead_depth();
+    let slope = arrowhead_slope();
+    let arm = depth * slope;
+    let box_width = depth.ceil() as i64;
+    let box_height = (arm * 2.0).ceil() as i64;
+    let tip_x = box_width as f64;
+    let tip_y = box_height as f64 / 2.0;
+    let base_x = box_width as f64 - depth;
+    let (r, g, b) = PLAIN_COLOUR;
+    format!(
+        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+        tip_y - arm,
+        tip_y + arm,
+    )
+}
+
+#[allow(dead_code)]
+fn arrow_paths(
+    placement: &crate::layout::Placement,
+    arrow: &crate::layout::Arrow,
+) -> String {
+    let left = placement.x * CELL_WIDTH;
+    let right = placement.x * CELL_WIDTH + placement.width * CELL_WIDTH - 1;
+    let trunk_x = placement.x * CELL_WIDTH + (placement.width * CELL_WIDTH) / 2;
+    let shaft_row = (placement.y + arrow.shaft) * CELL_HEIGHT + CELL_HEIGHT / 2;
+    let stop_rows: Vec<i64> = arrow
+        .stops
+        .iter()
+        .map(|stop| (placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
+        .collect();
+    let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
+    let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
+    let (r, g, b) = PLAIN_COLOUR;
+    let mut paths = format!(
+        "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+    );
+    paths.push_str(&format!(
+        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+    ));
+    for row in stop_rows {
+        paths.push_str(&format!(
+            "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        ));
+    }
+    paths
+}
+
+#[allow(dead_code)]
 fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> String {
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
@@ -109,7 +164,10 @@ fn label_text(
 mod tests {
     use super::*;
     use crate::layout::BOX_HEIGHT;
+    use crate::render::arrowhead_depth;
+    use crate::render::arrowhead_slope;
     use crate::render::colour;
+    use crate::render::ARROW_STROKE;
     use crate::render::BORDER;
     use crate::render::CELL_HEIGHT;
     use crate::render::CELL_WIDTH;
@@ -126,6 +184,10 @@ mod tests {
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node { label: label.to_string(), colour, filled, rounded, children: vec![] }
+    }
+
+    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
+        Node { label: label.to_string(), children, ..Default::default() }
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -303,5 +365,102 @@ mod tests {
 
         assert!(svg.contains(">a&lt;b&gt;&amp;c</text>"));
         assert!(!svg.contains("a<b>&c"));
+    }
+
+    #[test]
+    fn an_arrow_with_two_stops_renders_a_defs_marker_between_boxes_and_labels() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let defs = svg.find("<defs>").expect("arrows emit a defs block");
+        let rect = svg.find("<rect").expect("the parent box draws a rect");
+        let arm = svg
+            .find("marker-end=\"url(#arrowhead)\"")
+            .expect("each stop arm references the arrowhead");
+        let text = svg.find("<text").expect("labels draw text");
+        assert!(defs < rect, "defs are emitted before the first rect");
+        assert!(rect < arm, "boxes are drawn before the stop arms");
+        assert!(arm < text, "arrow paths are drawn before labels");
+        assert!(svg.contains(
+            "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\""
+        ));
+
+        let arrow_placement = placements
+            .iter()
+            .find(|placement| matches!(placement.node, PlacementNode::Arrow(_)))
+            .expect("a parent with children yields an arrow placement");
+        let arrow = match &arrow_placement.node {
+            PlacementNode::Arrow(arrow) => arrow,
+            _ => unreachable!("the arrow placement wraps an Arrow"),
+        };
+
+        let left = arrow_placement.x * CELL_WIDTH;
+        let right = arrow_placement.x * CELL_WIDTH + arrow_placement.width * CELL_WIDTH - 1;
+        let trunk_x = arrow_placement.x * CELL_WIDTH + (arrow_placement.width * CELL_WIDTH) / 2;
+        let shaft_row = (arrow_placement.y + arrow.shaft) * CELL_HEIGHT + CELL_HEIGHT / 2;
+        let stop_rows: Vec<i64> = arrow
+            .stops
+            .iter()
+            .map(|stop| (arrow_placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
+            .collect();
+        let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
+        let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
+        let ink = rgb(PLAIN_COLOUR);
+
+        assert_eq!(stop_rows.len(), 2);
+        assert!(svg.contains(&format!(
+            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        )));
+        assert!(svg.contains(&format!(
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        )));
+        for row in stop_rows {
+            assert!(svg.contains(&format!(
+                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            )));
+        }
+    }
+
+    #[test]
+    fn the_arrowhead_marker_geometry_is_computed_from_the_mirrored_constants() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let depth = arrowhead_depth();
+        let slope = arrowhead_slope();
+        let arm = depth * slope;
+        let box_width = depth.ceil() as i64;
+        let box_height = (arm * 2.0).ceil() as i64;
+        let tip_x = box_width as f64;
+        let tip_y = box_height as f64 / 2.0;
+        let base_x = box_width as f64 - depth;
+
+        assert!(svg.contains(&format!(
+            "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\">"
+        )));
+        assert!(svg.contains(&format!(
+            "d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\"",
+            tip_y - arm,
+            tip_y + arm
+        )));
+        assert!(svg.contains(&format!("fill=\"{}\"", rgb(PLAIN_COLOUR))));
+    }
+
+    #[test]
+    fn a_chart_without_arrows_has_no_defs_or_arrowhead() {
+        let nodes = vec![node("hi")];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        assert!(!svg.contains("<defs>"));
+        assert!(!svg.contains("marker-end"));
+        assert!(!svg.contains("arrowhead"));
     }
 }
