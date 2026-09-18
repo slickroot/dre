@@ -158,7 +158,10 @@ fn new_sibling(mut state: State, path: Path) -> State {
 }
 
 fn select_parent(mut state: State, mut path: Path) -> State {
-    state.doc.selected = path.ancestors.pop().map(|index| Path { ancestors: path.ancestors, index });
+    state.doc.selected = Some(match path.ancestors.pop() {
+        Some(index) => Path { ancestors: path.ancestors, index },
+        None => path,
+    });
     state
 }
 
@@ -281,10 +284,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         (Command::NewBox, selected) => add_child_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
-        // Clamp the climb to the available ancestors so a count larger than the
-        // number of levels stops at the top-level box instead of popping an
-        // empty ancestors vec and clearing the selection.
-        (Command::SelectParent, Some(path)) => repeat(state, path.clone(), count.min(path.ancestors.len()), select_parent),
+        (Command::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
         (Command::SelectChild, Some(path)) => select_child(state, path),
         (Command::SelectNext, Some(path)) => repeat(state, path, count, select_next),
         (Command::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
