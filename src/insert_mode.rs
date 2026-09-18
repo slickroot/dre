@@ -1,4 +1,4 @@
-use crate::state::{at, Mode, State, PAD};
+use crate::state::{add_child_box, at, snapshot, Mode, State, PAD};
 
 fn drop_last_chars(s: &str, n: usize) -> String {
     let len = s.chars().count();
@@ -8,6 +8,7 @@ fn drop_last_chars(s: &str, n: usize) -> String {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Command {
     Commit,
+    CommitAndAddChild,
     Backspace,
     Append(char),
 }
@@ -15,6 +16,7 @@ pub(crate) enum Command {
 pub(crate) fn parse(key: &str) -> Option<Command> {
     match key {
         "\x1b" => Some(Command::Commit),
+        "\r" => Some(Command::CommitAndAddChild),
         "\x7f" => Some(Command::Backspace),
         _ => match key.chars().next() {
             Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Command::Append(c)),
@@ -33,11 +35,22 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         Command::Commit => {
             node.label = drop_last_chars(&label, 1);
             state.mode = Mode::Command;
+            state
         }
-        Command::Backspace => node.label = format!("{}{PAD}", drop_last_chars(&label, 2)),
-        Command::Append(c) => node.label = format!("{}{c}{PAD}", drop_last_chars(&label, 1)),
+        Command::CommitAndAddChild => {
+            node.label = drop_last_chars(&label, 1);
+            let selected = state.doc.selected.clone();
+            add_child_box(snapshot(state), selected)
+        }
+        Command::Backspace => {
+            node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
+            state
+        }
+        Command::Append(c) => {
+            node.label = format!("{}{c}{PAD}", drop_last_chars(&label, 1));
+            state
+        }
     }
-    state
 }
 
 #[cfg(test)]
@@ -47,6 +60,10 @@ mod tests {
 
     fn node(label: &str) -> Node {
         Node { label: label.to_string(), ..Default::default() }
+    }
+
+    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
+        Node { label: label.to_string(), children, ..Default::default() }
     }
 
     #[test]
@@ -74,6 +91,59 @@ mod tests {
         assert_eq!(parse("\x1f"), None);
         assert_eq!(parse("\x01"), None);
         assert_eq!(parse("é"), None);
+    }
+
+    #[test]
+    fn parse_maps_enter_to_commit_and_add_child() {
+        assert_eq!(parse("\r"), Some(Command::CommitAndAddChild));
+    }
+
+    #[test]
+    fn parse_does_not_map_newline_or_backspace_control_to_commit_and_add_child() {
+        assert_eq!(parse("\n"), None);
+        assert_eq!(parse("\x08"), None);
+    }
+
+    #[test]
+    fn enter_finishes_the_box_and_adds_an_empty_child_ready_for_typing() {
+        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(state, "\r");
+        assert_eq!(result.doc.boxes, vec![node_with_children("hi", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn enter_on_an_empty_label_still_creates_an_empty_child() {
+        let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(state, "\r");
+        assert_eq!(result.doc.boxes, vec![node_with_children("", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn u_after_enter_and_esc_reverts_the_child_and_keeps_the_label() {
+        let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "\r");
+        let state = handle_key(state, "\x1b");
+        let result = handle_key(state, "u");
+        assert_eq!(result.doc.boxes, vec![node("hi")]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.mode, Mode::Command);
+    }
+
+    #[test]
+    fn repeated_enter_drills_deeper_creating_a_child_then_a_grandchild() {
+        let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "\r");
+        let result = handle_key(state, "\r");
+        assert_eq!(
+            result.doc.boxes,
+            vec![node_with_children("a", vec![node_with_children("", vec![node(PAD)])])]
+        );
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0, 0], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]
