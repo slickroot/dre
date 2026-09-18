@@ -15,6 +15,11 @@ pub(crate) const RESET: &str = "\x1b[0m";
 #[allow(dead_code)]
 pub(crate) const CACHE_LIMIT: usize = 512;
 
+#[allow(dead_code)]
+pub(crate) const CELL_WIDTH: i64 = 8;
+#[allow(dead_code)]
+pub(crate) const CELL_HEIGHT: i64 = 16;
+
 pub(crate) const ROUNDED_RADIUS: i64 = 20;
 pub(crate) const BORDER: i64 = 4;
 

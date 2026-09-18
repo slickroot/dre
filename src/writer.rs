@@ -181,8 +181,8 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     Ok(state)
 }
 
-pub fn write() -> io::Result<ExitCode> {
-    let state = load_state(std::env::args().nth(1))?;
+pub fn write(file: Option<String>) -> io::Result<ExitCode> {
+    let state = load_state(file)?;
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
     let supported = supports_kitty_graphics(&mut stdout, stdin_fd)?;
