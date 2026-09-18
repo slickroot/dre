@@ -17,13 +17,13 @@ impl SvgRenderer {
             svg.push_str(&marker_defs());
         }
         for placement in placements {
-            if let PlacementNode::Node(node) = &placement.node {
-                svg.push_str(&rect(placement, node));
+            if let PlacementNode::Arrow(arrow) = &placement.node {
+                svg.push_str(&arrow_paths(placement, arrow));
             }
         }
         for placement in placements {
-            if let PlacementNode::Arrow(arrow) = &placement.node {
-                svg.push_str(&arrow_paths(placement, arrow));
+            if let PlacementNode::Node(node) = &placement.node {
+                svg.push_str(&rect(placement, node));
             }
         }
         for placement in placements {
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_with_two_stops_renders_a_defs_marker_between_boxes_and_labels() {
+    fn an_arrow_with_two_stops_renders_a_defs_marker_before_boxes_and_labels() {
         let parent = node_with_children("parent", vec![node("a"), node("b")]);
         let nodes = vec![parent];
         let placements = crate::layout::layout(&nodes);
@@ -429,7 +429,8 @@ mod tests {
             .expect("each stop arm references the arrowhead");
         let text = svg.find("<text").expect("labels draw text");
         assert!(defs < rect, "defs are emitted before the first rect");
-        assert!(rect < arm, "boxes are drawn before the stop arms");
+        assert!(defs < arm, "defs are emitted before the stop arms");
+        assert!(arm < rect, "stop arms are drawn before the boxes so box borders sit on top");
         assert!(arm < text, "arrow paths are drawn before labels");
         assert!(svg.contains(
             "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\""
@@ -644,6 +645,7 @@ mod tests {
                 33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
             ),
             expected_marker(),
+            arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
                 rect_at(0, 0, 7, 3, None, false, false),
                 rect_at(0, 6, 7, 3, Some(1), true, true),
@@ -654,7 +656,6 @@ mod tests {
                 rect_at(15, 30, 3, 3, None, false, false),
             ]
             .concat(),
-            arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
                 label_at(1, 1, "start"),
                 label_at(1, 7, "greet"),
