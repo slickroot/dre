@@ -4,7 +4,6 @@ use crate::render::{
 };
 
 const INK: (u8, u8, u8) = (0, 0, 0);
-const PLAIN_BOX_WHITE: (u8, u8, u8) = (255, 255, 255);
 
 pub(crate) struct SvgRenderer {}
 
@@ -18,13 +17,13 @@ impl SvgRenderer {
             svg.push_str(&marker_defs());
         }
         for placement in placements {
-            if let PlacementNode::Node(node) = &placement.node {
-                svg.push_str(&rect(placement, node));
+            if let PlacementNode::Arrow(arrow) = &placement.node {
+                svg.push_str(&arrow_paths(placement, arrow));
             }
         }
         for placement in placements {
-            if let PlacementNode::Arrow(arrow) = &placement.node {
-                svg.push_str(&arrow_paths(placement, arrow));
+            if let PlacementNode::Node(node) = &placement.node {
+                svg.push_str(&rect(placement, node));
             }
         }
         for placement in placements {
@@ -80,9 +79,10 @@ fn marker_defs() -> String {
     let base_x = box_width as f64 - depth;
     let (r, g, b) = INK;
     format!(
-        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
+        ARROW_STROKE / 2,
     )
 }
 
@@ -124,7 +124,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
     use std::fmt::Write as _;
 
     let (r, g, b) = match node.colour {
-        None => PLAIN_BOX_WHITE,
+        None => INK,
         Some(_) => colour(node.colour),
     };
     let mut rect = format!(
@@ -142,6 +142,8 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
         let (fr, fg, fb) = crate::render::PALETTE[node.colour.unwrap() as usize];
         let opacity = crate::render::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(rect, " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\"").unwrap();
+    } else {
+        rect.push_str(" fill=\"none\"");
     }
     rect.push_str("/>");
     rect
@@ -204,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_leaf_box_renders_with_margins_and_no_fill_or_rounding() {
+    fn a_plain_leaf_box_renders_with_margins_a_transparent_fill_and_no_rounding() {
         let nodes = vec![node("hi")];
         let placements = crate::layout::layout(&nodes);
 
@@ -219,14 +221,13 @@ mod tests {
         );
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
         assert!(svg.contains(&format!(
-            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>",
+            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
             box_width * CELL_WIDTH,
             BOX_HEIGHT * CELL_HEIGHT,
-            rgb(PLAIN_BOX_WHITE),
+            rgb(INK),
             BORDER / 2,
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
-        assert!(!svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
@@ -235,7 +236,7 @@ mod tests {
             .split('<')
             .find(|element| element.starts_with("rect "))
             .expect("a plain leaf box renders a rect");
-        assert!(!rect.contains("fill"));
+        assert!(rect.contains("fill=\"none\""));
     }
 
     #[test]
@@ -267,29 +268,42 @@ mod tests {
     }
 
     #[test]
-    fn a_fill_is_only_emitted_for_a_filled_coloured_box() {
+    fn every_box_declares_a_fill_and_only_a_filled_coloured_box_gets_a_colour_fill() {
         let nodes = vec![
-            boxed("plain", None, true, false),
-            boxed("colour", Some(1), false, false),
+            boxed("plain", None, false, false),
+            boxed("plain_filled", None, true, false),
+            boxed("colour", Some(2), false, false),
+            boxed("colour_filled", Some(1), true, false),
         ];
         let placements = crate::layout::layout(&nodes);
 
         let svg = SvgRenderer {}.render(&placements);
 
-        for element in svg
+        let rects: Vec<&str> = svg
             .split("</svg>")
             .next()
             .expect("the document closes the svg tag")
             .split('<')
             .filter(|element| element.starts_with("rect "))
-        {
-            assert!(!element.contains("fill"));
+            .collect();
+
+        assert_eq!(rects.len(), 4);
+
+        for rect in &rects {
+            assert!(rect.contains("fill="));
         }
+
+        let (pr, pg, pb) = PALETTE[1];
+        let palette_fill = format!("fill=\"rgb({pr},{pg},{pb})\"");
+        let colour_filled_count = rects.iter().filter(|r| r.contains(&palette_fill)).count();
+        assert_eq!(colour_filled_count, 1);
+
+        let none_fill_count = rects.iter().filter(|r| r.contains("fill=\"none\"")).count();
+        assert_eq!(none_fill_count, 3);
     }
 
     #[test]
-    fn colourless_box_strokes_stay_white_while_coloured_boxes_keep_palette_colours_and_arrows_are_ink(
-    ) {
+    fn colourless_boxes_are_ink_while_coloured_boxes_keep_palette_colours() {
         let nodes = vec![
             boxed("plain", None, false, false),
             boxed("colour", Some(2), false, false),
@@ -299,10 +313,23 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PALETTE[2]))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
+        let ink_stroke = format!("stroke=\"{}\"", rgb(INK));
+        let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
+
+        let rects: Vec<&str> = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
+
+        assert!(rects.iter().all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
+        assert_eq!(rects.iter().filter(|rect| rect.contains(&coloured_stroke)).count(), 1);
+        assert_eq!(
+            rects.iter().filter(|rect| rect.contains(&ink_stroke)).count(),
+            rects.len() - 1
+        );
     }
 
     fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
@@ -388,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_with_two_stops_renders_a_defs_marker_between_boxes_and_labels() {
+    fn an_arrow_with_two_stops_renders_a_defs_marker_before_boxes_and_labels() {
         let parent = node_with_children("parent", vec![node("a"), node("b")]);
         let nodes = vec![parent];
         let placements = crate::layout::layout(&nodes);
@@ -402,7 +429,8 @@ mod tests {
             .expect("each stop arm references the arrowhead");
         let text = svg.find("<text").expect("labels draw text");
         assert!(defs < rect, "defs are emitted before the first rect");
-        assert!(rect < arm, "boxes are drawn before the stop arms");
+        assert!(defs < arm, "defs are emitted before the stop arms");
+        assert!(arm < rect, "stop arms are drawn before the boxes so box borders sit on top");
         assert!(arm < text, "arrow paths are drawn before labels");
         assert!(svg.contains(
             "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\""
@@ -468,11 +496,21 @@ mod tests {
             "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\">"
         )));
         assert!(svg.contains(&format!(
-            "d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\"",
+            "d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\"",
             tip_y - arm,
             tip_y + arm
         )));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE / 2)));
+        assert!(svg.contains("fill=\"none\""));
+        let marker = svg
+            .split("</defs>")
+            .next()
+            .expect("arrows emit a defs block")
+            .split('<')
+            .find(|element| element.starts_with("path "))
+            .expect("the marker contains a path");
+        assert!(!marker.contains('Z'));
     }
 
     #[test]
@@ -498,9 +536,10 @@ mod tests {
         let base_x = box_width as f64 - depth;
         let (r, g, b) = INK;
         format!(
-            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
+            ARROW_STROKE / 2
         )
     }
 
@@ -516,7 +555,7 @@ mod tests {
         use std::fmt::Write as _;
 
         let (r, g, b) = match colour_index {
-            None => PLAIN_BOX_WHITE,
+            None => INK,
             Some(_) => colour(colour_index),
         };
         let mut rect = format!(
@@ -538,6 +577,8 @@ mod tests {
                 fill_opacity()
             )
             .unwrap();
+        } else {
+            rect.push_str(" fill=\"none\"");
         }
         rect.push_str("/>");
         rect
@@ -604,6 +645,7 @@ mod tests {
                 33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
             ),
             expected_marker(),
+            arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
                 rect_at(0, 0, 7, 3, None, false, false),
                 rect_at(0, 6, 7, 3, Some(1), true, true),
@@ -614,7 +656,6 @@ mod tests {
                 rect_at(15, 30, 3, 3, None, false, false),
             ]
             .concat(),
-            arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
                 label_at(1, 1, "start"),
                 label_at(1, 7, "greet"),
