@@ -80,9 +80,10 @@ fn marker_defs() -> String {
     let base_x = box_width as f64 - depth;
     let (r, g, b) = INK;
     format!(
-        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
+        ARROW_STROKE / 2,
     )
 }
 
@@ -302,7 +303,7 @@ mod tests {
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PALETTE[2]))));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
     }
 
     fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
@@ -468,11 +469,21 @@ mod tests {
             "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\">"
         )));
         assert!(svg.contains(&format!(
-            "d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\"",
+            "d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\"",
             tip_y - arm,
             tip_y + arm
         )));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE / 2)));
+        assert!(svg.contains("fill=\"none\""));
+        let marker = svg
+            .split("</defs>")
+            .next()
+            .expect("arrows emit a defs block")
+            .split('<')
+            .find(|element| element.starts_with("path "))
+            .expect("the marker contains a path");
+        assert!(!marker.contains('Z'));
     }
 
     #[test]
@@ -498,9 +509,10 @@ mod tests {
         let base_x = box_width as f64 - depth;
         let (r, g, b) = INK;
         format!(
-            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
+            ARROW_STROKE / 2
         )
     }
 
