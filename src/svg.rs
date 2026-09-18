@@ -463,4 +463,140 @@ mod tests {
         assert!(!svg.contains("marker-end"));
         assert!(!svg.contains("arrowhead"));
     }
+
+    fn expected_marker() -> String {
+        let depth = arrowhead_depth();
+        let slope = arrowhead_slope();
+        let arm = depth * slope;
+        let box_width = depth.ceil() as i64;
+        let box_height = (arm * 2.0).ceil() as i64;
+        let tip_x = box_width as f64;
+        let tip_y = box_height as f64 / 2.0;
+        let base_x = box_width as f64 - depth;
+        let (r, g, b) = PLAIN_COLOUR;
+        format!(
+            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
+            tip_y - arm,
+            tip_y + arm,
+        )
+    }
+
+    fn rect_at(
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        colour_index: Option<u8>,
+        filled: bool,
+        rounded: bool,
+    ) -> String {
+        use std::fmt::Write as _;
+
+        let (r, g, b) = colour(colour_index);
+        let mut rect = format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{BORDER}\"",
+            x * CELL_WIDTH,
+            y * CELL_HEIGHT,
+            width * CELL_WIDTH,
+            height * CELL_HEIGHT,
+        );
+        if rounded {
+            write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
+        }
+        if filled && colour_index.is_some() {
+            let (fr, fg, fb) = PALETTE[colour_index.unwrap() as usize];
+            write!(
+                rect,
+                " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{}\"",
+                fill_opacity()
+            )
+            .unwrap();
+        }
+        rect.push_str("/>");
+        rect
+    }
+
+    fn label_at(x: i64, y: i64, text: &str) -> String {
+        let chars = text.chars().count() as i64;
+        let (r, g, b) = TEXT_COLOUR;
+        format!(
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
+            x * CELL_WIDTH,
+            y * CELL_HEIGHT,
+            chars * CELL_WIDTH,
+        )
+    }
+
+    fn arrow_at(x: i64, y: i64, width: i64, shaft: i64, stops: &[i64]) -> String {
+        let left = x * CELL_WIDTH;
+        let right = x * CELL_WIDTH + width * CELL_WIDTH - 1;
+        let trunk_x = x * CELL_WIDTH + (width * CELL_WIDTH) / 2;
+        let shaft_row = (y + shaft) * CELL_HEIGHT + CELL_HEIGHT / 2;
+        let stop_rows: Vec<i64> = stops
+            .iter()
+            .map(|&stop| (y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
+            .collect();
+        let trunk_top = *stop_rows.iter().min().expect("an arrow has stops");
+        let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
+        let (r, g, b) = PLAIN_COLOUR;
+        let mut paths = format!(
+            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        );
+        paths.push_str(&format!(
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        ));
+        for row in stop_rows {
+            paths.push_str(&format!(
+                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            ));
+        }
+        paths
+    }
+
+    #[test]
+    fn renders_the_spec_example_diagram_as_a_whole_document() {
+        let nodes = vec![
+            node("start"),
+            boxed("greet", Some(1), true, true),
+            boxed("warn", Some(3), false, false),
+            node_with_children("root", vec![node("A"), node("B"), node("C")]),
+        ];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let expected = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
+            view_box(
+                -CELL_HEIGHT,
+                -CELL_HEIGHT,
+                18 * CELL_WIDTH + 2 * CELL_HEIGHT,
+                33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
+            ),
+            expected_marker(),
+            [
+                rect_at(0, 0, 7, 3, None, false, false),
+                rect_at(0, 6, 7, 3, Some(1), true, true),
+                rect_at(0, 12, 7, 3, Some(3), false, false),
+                rect_at(0, 24, 7, 3, None, false, false),
+                rect_at(15, 18, 3, 3, None, false, false),
+                rect_at(15, 24, 3, 3, None, false, false),
+                rect_at(15, 30, 3, 3, None, false, false),
+            ]
+            .concat(),
+            arrow_at(7, 19, 8, 6, &[0, 6, 12]),
+            [
+                label_at(1, 1, "start"),
+                label_at(1, 7, "greet"),
+                label_at(2, 13, "warn"),
+                label_at(2, 25, "root"),
+                label_at(16, 19, "A"),
+                label_at(16, 25, "B"),
+                label_at(16, 31, "C"),
+            ]
+            .concat(),
+        );
+
+        assert_eq!(svg, expected);
+    }
 }
