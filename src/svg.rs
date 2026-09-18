@@ -4,7 +4,6 @@ use crate::render::{
 };
 
 const INK: (u8, u8, u8) = (0, 0, 0);
-const PLAIN_BOX_WHITE: (u8, u8, u8) = (255, 255, 255);
 
 pub(crate) struct SvgRenderer {}
 
@@ -125,7 +124,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
     use std::fmt::Write as _;
 
     let (r, g, b) = match node.colour {
-        None => PLAIN_BOX_WHITE,
+        None => INK,
         Some(_) => colour(node.colour),
     };
     let mut rect = format!(
@@ -225,11 +224,10 @@ mod tests {
             "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
             box_width * CELL_WIDTH,
             BOX_HEIGHT * CELL_HEIGHT,
-            rgb(PLAIN_BOX_WHITE),
+            rgb(INK),
             BORDER / 2,
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
-        assert!(!svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
@@ -305,8 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn colourless_box_strokes_stay_white_while_coloured_boxes_keep_palette_colours_and_arrows_are_ink(
-    ) {
+    fn colourless_boxes_are_ink_while_coloured_boxes_keep_palette_colours() {
         let nodes = vec![
             boxed("plain", None, false, false),
             boxed("colour", Some(2), false, false),
@@ -316,10 +313,23 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PALETTE[2]))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        let ink_stroke = format!("stroke=\"{}\"", rgb(INK));
+        let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
+
+        let rects: Vec<&str> = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
+
+        assert!(rects.iter().all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
+        assert_eq!(rects.iter().filter(|rect| rect.contains(&coloured_stroke)).count(), 1);
+        assert_eq!(
+            rects.iter().filter(|rect| rect.contains(&ink_stroke)).count(),
+            rects.len() - 1
+        );
     }
 
     fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
@@ -544,7 +554,7 @@ mod tests {
         use std::fmt::Write as _;
 
         let (r, g, b) = match colour_index {
-            None => PLAIN_BOX_WHITE,
+            None => INK,
             Some(_) => colour(colour_index),
         };
         let mut rect = format!(
