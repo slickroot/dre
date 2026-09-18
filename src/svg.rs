@@ -1,6 +1,8 @@
 use crate::layout::PlacementNode;
 use crate::render::{colour, CELL_HEIGHT, CELL_WIDTH};
 
+const TEXT_COLOUR: (u8, u8, u8) = (33, 33, 33);
+
 #[allow(dead_code)]
 pub(crate) struct SvgRenderer {}
 
@@ -16,9 +18,31 @@ impl SvgRenderer {
                 svg.push_str(&rect(placement, node));
             }
         }
+        for placement in placements {
+            if let PlacementNode::Arrow(_) = &placement.node {
+            }
+        }
+        for placement in placements {
+            if let PlacementNode::Label(label) = &placement.node {
+                svg.push_str(&label_text(placement, label));
+            }
+        }
         svg.push_str("</svg>");
         svg
     }
+}
+
+fn escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 #[allow(dead_code)]
@@ -64,6 +88,21 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
     }
     rect.push_str("/>");
     rect
+}
+
+fn label_text(
+    placement: &crate::layout::Placement,
+    label: &crate::layout::Label,
+) -> String {
+    let (r, g, b) = TEXT_COLOUR;
+    let chars = label.text.chars().count() as i64;
+    format!(
+        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        placement.x * CELL_WIDTH,
+        placement.y * CELL_HEIGHT,
+        chars * CELL_WIDTH,
+        escape(label.text),
+    )
 }
 
 #[cfg(test)]
@@ -125,7 +164,14 @@ mod tests {
         )));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(None)))));
         assert!(!svg.contains("rx"));
-        assert!(!svg.contains("fill"));
+        let rect = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .find(|element| element.starts_with("rect "))
+            .expect("a plain leaf box renders a rect");
+        assert!(!rect.contains("fill"));
     }
 
     #[test]
@@ -166,6 +212,96 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        assert!(!svg.contains("fill"));
+        for element in svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+        {
+            assert!(!element.contains("fill"));
+        }
+    }
+
+    fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
+        crate::layout::Placement {
+            node: crate::layout::PlacementNode::Label(crate::layout::Label {
+                text,
+                path: crate::state::Path { ancestors: vec![], index: 0 },
+            }),
+            x,
+            y,
+            width: text.chars().count() as i64,
+            height: 1,
+        }
+    }
+
+    #[test]
+    fn a_single_label_over_a_box_renders_one_text_element() {
+        let node = node("hi");
+        let label_x = 2;
+        let label_y = 1;
+        let placements = vec![
+            crate::layout::Placement {
+                node: crate::layout::PlacementNode::Node(&node),
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 3,
+            },
+            label_placement("hi", label_x, label_y),
+        ];
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let (r, g, b) = TEXT_COLOUR;
+        assert!(svg.contains(&format!(
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
+            label_x * CELL_WIDTH,
+            label_y * CELL_HEIGHT,
+            2 * CELL_WIDTH,
+        )));
+        assert!(svg.contains(">hi</text>"));
+    }
+
+    #[test]
+    fn boxes_are_drawn_before_labels() {
+        let node = node("hi");
+        let placements = vec![
+            crate::layout::Placement {
+                node: crate::layout::PlacementNode::Node(&node),
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 3,
+            },
+            label_placement("hi", 2, 1),
+        ];
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let rect = svg.find("<rect").expect("a box placement draws a rect");
+        let text = svg.find("<text").expect("a label placement draws a text");
+        assert!(rect < text);
+    }
+
+    #[test]
+    fn a_label_with_xml_special_characters_escapes_them_in_the_text_content() {
+        let node = node("hi");
+        let placements = vec![
+            crate::layout::Placement {
+                node: crate::layout::PlacementNode::Node(&node),
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 3,
+            },
+            label_placement("a<b>&c", 2, 1),
+        ];
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        assert!(svg.contains(">a&lt;b&gt;&amp;c</text>"));
+        assert!(!svg.contains("a<b>&c"));
     }
 }
