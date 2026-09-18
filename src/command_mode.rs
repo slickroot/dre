@@ -1,5 +1,6 @@
 use crate::state::{
-    at, children_at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State, DEFAULT_FILENAME, PAD,
+    add_child_box, at, children_at, colour_row, grow, next_colour, snapshot, undo, KeyBinding, Mode,
+    Path, State, DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -43,14 +44,7 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
 }
 
 #[allow(dead_code)]
-pub(crate) struct KeyBinding {
-    pub(crate) keys: &'static [&'static str],
-    pub(crate) command: Command,
-    pub(crate) description: &'static str,
-}
-
-#[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding] = &[
+pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Command>] = &[
     KeyBinding {
         keys: &["u"],
         command: Command::Undo,
@@ -152,22 +146,6 @@ pub(crate) fn min_depth(command: Command) -> usize {
 fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
     at(&mut state.doc.boxes, &path).label = format!("{base_label}{PAD}");
     state.doc.selected = Some(path);
-    state.mode = Mode::Insert;
-    state
-}
-
-fn new_box(mut state: State, selected: Option<Path>) -> State {
-    state.doc.selected = match selected {
-        Some(mut path) => {
-            let index = grow(&mut at(&mut state.doc.boxes, &path).children);
-            path.ancestors.push(path.index);
-            Some(Path { ancestors: path.ancestors, index })
-        }
-        None => {
-            let index = grow(&mut state.doc.boxes);
-            Some(Path { ancestors: Vec::new(), index })
-        }
-    };
     state.mode = Mode::Insert;
     state
 }
@@ -290,7 +268,7 @@ pub(crate) fn reduce(state: State, command: Command) -> State {
     let mut state = if is_undoable(command) { snapshot(state) } else { state };
     match (command, state.doc.selected.take()) {
         (Command::Undo, selected) => undo(reselect(state, selected)),
-        (Command::NewBox, selected) => new_box(state, selected),
+        (Command::NewBox, selected) => add_child_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
         (Command::SelectParent, Some(path)) => select_parent(state, path),

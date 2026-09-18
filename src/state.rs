@@ -6,6 +6,13 @@ pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
+#[allow(dead_code)]
+pub(crate) struct KeyBinding<C> {
+    pub(crate) keys: &'static [&'static str],
+    pub(crate) command: C,
+    pub(crate) description: &'static str,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
     pub(crate) label: String,
@@ -115,6 +122,22 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
 pub(crate) fn grow(siblings: &mut Vec<Node>) -> usize {
     siblings.push(Node { label: PAD.to_string(), ..Default::default() });
     siblings.len() - 1
+}
+
+pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
+    state.doc.selected = match selected {
+        Some(mut path) => {
+            let index = grow(&mut at(&mut state.doc.boxes, &path).children);
+            path.ancestors.push(path.index);
+            Some(Path { ancestors: path.ancestors, index })
+        }
+        None => {
+            let index = grow(&mut state.doc.boxes);
+            Some(Path { ancestors: Vec::new(), index })
+        }
+    };
+    state.mode = Mode::Insert;
+    state
 }
 
 pub(crate) fn handle_key(state: State, key: &str) -> State {
@@ -264,6 +287,24 @@ mod tests {
             vec![node_with_children("a", vec![node("c"), node(PAD)])]
         );
         assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = add_child_box(state, None);
+        assert_eq!(result.doc.boxes, vec![node(PAD)]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn add_child_box_with_a_selection_grows_a_child_and_descends_the_path() {
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = add_child_box(state, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]
