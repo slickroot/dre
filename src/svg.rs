@@ -1,9 +1,9 @@
 use crate::layout::PlacementNode;
 use crate::render::{
-    arrowhead_depth, arrowhead_slope, colour, ARROW_STROKE, CELL_HEIGHT, CELL_WIDTH, PLAIN_COLOUR,
+    arrowhead_depth, arrowhead_slope, colour, ARROW_STROKE, CELL_HEIGHT, CELL_WIDTH,
 };
 
-const TEXT_COLOUR: (u8, u8, u8) = (33, 33, 33);
+const INK: (u8, u8, u8) = (0, 0, 0);
 const PLAIN_BOX_WHITE: (u8, u8, u8) = (255, 255, 255);
 
 pub(crate) struct SvgRenderer {}
@@ -78,7 +78,7 @@ fn marker_defs() -> String {
     let tip_x = box_width as f64;
     let tip_y = box_height as f64 / 2.0;
     let base_x = box_width as f64 - depth;
-    let (r, g, b) = PLAIN_COLOUR;
+    let (r, g, b) = INK;
     format!(
         "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
         tip_y - arm,
@@ -101,7 +101,7 @@ fn arrow_paths(
         .collect();
     let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
     let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
-    let (r, g, b) = PLAIN_COLOUR;
+    let (r, g, b) = INK;
     let mut paths = format!(
         "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
         ARROW_STROKE / 2
@@ -151,12 +151,12 @@ fn label_text(
     placement: &crate::layout::Placement,
     label: &crate::layout::Label,
 ) -> String {
-    let (r, g, b) = TEXT_COLOUR;
+    let (r, g, b) = INK;
     let chars = label.text.chars().count() as i64;
     format!(
         "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
         placement.x * CELL_WIDTH,
-        placement.y * CELL_HEIGHT,
+        placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
         escape(label.text),
     )
@@ -176,7 +176,6 @@ mod tests {
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
     use crate::render::PALETTE;
-    use crate::render::PLAIN_COLOUR;
     use crate::render::ROUNDED_RADIUS;
     use crate::state::Node;
 
@@ -227,7 +226,7 @@ mod tests {
             BORDER / 2,
         )));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
-        assert!(!svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_COLOUR))));
+        assert!(!svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
@@ -289,7 +288,8 @@ mod tests {
     }
 
     #[test]
-    fn colourless_box_strokes_are_white_while_coloured_and_arrow_strokes_keep_their_colours() {
+    fn colourless_box_strokes_stay_white_while_coloured_boxes_keep_palette_colours_and_arrows_are_ink(
+    ) {
         let nodes = vec![
             boxed("plain", None, false, false),
             boxed("colour", Some(2), false, false),
@@ -301,7 +301,8 @@ mod tests {
 
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PALETTE[2]))));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_COLOUR))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
     }
 
     fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
@@ -335,11 +336,11 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        let (r, g, b) = TEXT_COLOUR;
+        let (r, g, b) = INK;
         assert!(svg.contains(&format!(
             "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
             label_x * CELL_WIDTH,
-            label_y * CELL_HEIGHT,
+            label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
             2 * CELL_WIDTH,
         )));
         assert!(svg.contains(">hi</text>"));
@@ -427,7 +428,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
-        let ink = rgb(PLAIN_COLOUR);
+        let ink = rgb(INK);
 
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
@@ -471,7 +472,7 @@ mod tests {
             tip_y - arm,
             tip_y + arm
         )));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(PLAIN_COLOUR))));
+        assert!(svg.contains(&format!("fill=\"{}\"", rgb(INK))));
     }
 
     #[test]
@@ -495,7 +496,7 @@ mod tests {
         let tip_x = box_width as f64;
         let tip_y = box_height as f64 / 2.0;
         let base_x = box_width as f64 - depth;
-        let (r, g, b) = PLAIN_COLOUR;
+        let (r, g, b) = INK;
         format!(
             "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} L {base_x} {} Z\" fill=\"rgb({r},{g},{b})\"/></marker></defs>",
             tip_y - arm,
@@ -544,11 +545,11 @@ mod tests {
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
-        let (r, g, b) = TEXT_COLOUR;
+        let (r, g, b) = INK;
         format!(
             "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
             x * CELL_WIDTH,
-            y * CELL_HEIGHT,
+            y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
         )
     }
@@ -564,7 +565,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("an arrow has stops");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
-        let (r, g, b) = PLAIN_COLOUR;
+        let (r, g, b) = INK;
         let mut paths = format!(
             "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
             ARROW_STROKE / 2
