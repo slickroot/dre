@@ -386,6 +386,31 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_digit_in_command_mode_leaves_the_document_unchanged() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            let result = handle_key(state.clone(), key);
+            assert_eq!(result.doc.boxes, boxes);
+            assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+        }
+    }
+
+    #[test]
+    fn digits_and_count_prefixed_movement_leave_mode_and_running_unchanged() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            let result = handle_key(state.clone(), key);
+            assert_eq!(result.mode, Mode::Command);
+            assert_eq!(result.running, state.running);
+        }
+        let result = handle_key(handle_key(handle_key(state.clone(), "3"), "2"), "j");
+        assert_eq!(result.mode, Mode::Command);
+        assert_eq!(result.running, state.running);
+    }
+
+    #[test]
     fn digits_accumulate_across_keystrokes() {
         let boxes: Vec<Node> = (0..40).map(|i| node(&i.to_string())).collect();
         let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));

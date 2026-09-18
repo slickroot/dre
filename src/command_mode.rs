@@ -403,6 +403,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_returns_nothing_for_each_digit_key() {
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            assert_eq!(parse(key), None);
+        }
+    }
+
+    #[test]
     fn command_keymap_agrees_with_parse() {
         let bound: Vec<String> = COMMAND_KEYMAP
             .iter()
@@ -1040,6 +1047,20 @@ mod tests {
         let navigated = handle_key(navigated, "h");
         let navigated = handle_key(navigated, "l");
         let navigated = handle_key(navigated, "k");
+        let undone = handle_key(navigated, "u");
+        assert_eq!(undone.doc.boxes, before.doc.boxes);
+        assert_eq!(undone.doc.selected, before.doc.selected);
+    }
+
+    #[test]
+    fn count_prefixed_movement_does_not_clobber_an_existing_undo_snapshot() {
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let before = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![0], index: 0 }));
+        let after_command = handle_key(before.clone(), "c");
+        let navigated = handle_key(handle_key(after_command.clone(), "3"), "j");
+        let navigated = handle_key(handle_key(navigated, "2"), "h");
+        let navigated = handle_key(navigated, "k");
+        let navigated = handle_key(handle_key(navigated, "2"), "l");
         let undone = handle_key(navigated, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
         assert_eq!(undone.doc.selected, before.doc.selected);
