@@ -4,11 +4,10 @@ use crate::render::{
 };
 
 const TEXT_COLOUR: (u8, u8, u8) = (33, 33, 33);
+const PLAIN_BOX_WHITE: (u8, u8, u8) = (255, 255, 255);
 
-#[allow(dead_code)]
 pub(crate) struct SvgRenderer {}
 
-#[allow(dead_code)]
 impl SvgRenderer {
     pub(crate) fn render(&self, placements: &[crate::layout::Placement]) -> String {
         let (min_x, min_y, span_x, span_y) = view_box(placements);
@@ -51,7 +50,6 @@ fn escape(text: &str) -> String {
     escaped
 }
 
-#[allow(dead_code)]
 fn view_box(placements: &[crate::layout::Placement]) -> (i64, i64, i64, i64) {
     let mut min_x = 0;
     let mut min_y = 0;
@@ -71,7 +69,6 @@ fn view_box(placements: &[crate::layout::Placement]) -> (i64, i64, i64, i64) {
     )
 }
 
-#[allow(dead_code)]
 fn marker_defs() -> String {
     let depth = arrowhead_depth();
     let slope = arrowhead_slope();
@@ -89,7 +86,6 @@ fn marker_defs() -> String {
     )
 }
 
-#[allow(dead_code)]
 fn arrow_paths(
     placement: &crate::layout::Placement,
     arrow: &crate::layout::Arrow,
@@ -107,31 +103,37 @@ fn arrow_paths(
     let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
     let (r, g, b) = PLAIN_COLOUR;
     let mut paths = format!(
-        "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        ARROW_STROKE / 2
     );
     paths.push_str(&format!(
-        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        ARROW_STROKE / 2
     ));
     for row in stop_rows {
         paths.push_str(&format!(
-            "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE / 2
         ));
     }
     paths
 }
 
-#[allow(dead_code)]
 fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> String {
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
-    let (r, g, b) = colour(node.colour);
+    let (r, g, b) = match node.colour {
+        None => PLAIN_BOX_WHITE,
+        Some(_) => colour(node.colour),
+    };
     let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{BORDER}\"",
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT,
         placement.width * CELL_WIDTH,
         placement.height * CELL_HEIGHT,
+        BORDER / 2,
     );
     if node.rounded {
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
@@ -152,7 +154,7 @@ fn label_text(
     let (r, g, b) = TEXT_COLOUR;
     let chars = label.text.chars().count() as i64;
     format!(
-        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT,
         chars * CELL_WIDTH,
@@ -221,10 +223,11 @@ mod tests {
             "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>",
             box_width * CELL_WIDTH,
             BOX_HEIGHT * CELL_HEIGHT,
-            rgb(PLAIN_COLOUR),
-            BORDER,
+            rgb(PLAIN_BOX_WHITE),
+            BORDER / 2,
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(None)))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
+        assert!(!svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_COLOUR))));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
@@ -244,7 +247,7 @@ mod tests {
         let svg = SvgRenderer {}.render(&placements);
 
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(Some(1))))));
-        assert!(svg.contains(&format!("stroke-width=\"{BORDER}\"")));
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
         assert!(svg.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
         assert!(svg.contains(&format!("fill=\"{}\"", rgb(PALETTE[1]))));
         assert!(svg.contains(&format!("fill-opacity=\"{}\"", fill_opacity())));
@@ -285,6 +288,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn colourless_box_strokes_are_white_while_coloured_and_arrow_strokes_keep_their_colours() {
+        let nodes = vec![
+            boxed("plain", None, false, false),
+            boxed("colour", Some(2), false, false),
+            node_with_children("root", vec![node("A")]),
+        ];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_BOX_WHITE))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PALETTE[2]))));
+        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(PLAIN_COLOUR))));
+    }
+
     fn label_placement<'a>(text: &'a str, x: i64, y: i64) -> crate::layout::Placement<'a> {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
@@ -299,8 +318,8 @@ mod tests {
     }
 
     #[test]
-    fn a_single_label_over_a_box_renders_one_text_element() {
-        let node = node("hi");
+    fn a_label_over_a_coloured_box_is_vertically_centred_on_the_box_midline() {
+        let node = boxed("hi", Some(1), false, false);
         let label_x = 2;
         let label_y = 1;
         let placements = vec![
@@ -318,7 +337,7 @@ mod tests {
 
         let (r, g, b) = TEXT_COLOUR;
         assert!(svg.contains(&format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT,
             2 * CELL_WIDTH,
@@ -412,14 +431,17 @@ mod tests {
 
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
-            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE / 2
         )));
         assert!(svg.contains(&format!(
-            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE / 2
         )));
         for row in stop_rows {
             assert!(svg.contains(&format!(
-                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+                ARROW_STROKE / 2
             )));
         }
     }
@@ -492,13 +514,17 @@ mod tests {
     ) -> String {
         use std::fmt::Write as _;
 
-        let (r, g, b) = colour(colour_index);
+        let (r, g, b) = match colour_index {
+            None => PLAIN_BOX_WHITE,
+            Some(_) => colour(colour_index),
+        };
         let mut rect = format!(
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{BORDER}\"",
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
             x * CELL_WIDTH,
             y * CELL_HEIGHT,
             width * CELL_WIDTH,
             height * CELL_HEIGHT,
+            BORDER / 2,
         );
         if rounded {
             write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
@@ -520,7 +546,7 @@ mod tests {
         let chars = text.chars().count() as i64;
         let (r, g, b) = TEXT_COLOUR;
         format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
             x * CELL_WIDTH,
             y * CELL_HEIGHT,
             chars * CELL_WIDTH,
@@ -540,14 +566,17 @@ mod tests {
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
         let (r, g, b) = PLAIN_COLOUR;
         let mut paths = format!(
-            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE / 2
         );
         paths.push_str(&format!(
-            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE / 2
         ));
         for row in stop_rows {
             paths.push_str(&format!(
-                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{ARROW_STROKE}\" fill=\"none\"/>"
+                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+                ARROW_STROKE / 2
             ));
         }
         paths
