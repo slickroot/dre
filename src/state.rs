@@ -6,6 +6,13 @@ pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
+#[allow(dead_code)]
+pub(crate) struct KeyBinding<C> {
+    pub(crate) keys: &'static [&'static str],
+    pub(crate) command: C,
+    pub(crate) description: &'static str,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
     pub(crate) label: String,

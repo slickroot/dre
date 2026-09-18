@@ -51,10 +51,21 @@ saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
 
 <!-- keymap:end -->
 
-## Other keys
+## Insert mode
 
-Insert mode: `Esc` commits or cancels the edit, `Backspace` removes a
-character, any printable character appends to the label.
+<!-- insert-keymap:start -->
+
+| Key | Description |
+| --- | --- |
+| `Enter` | Finish the box and add a child box |
+| `Esc` | Switch to command mode |
+| `Backspace` | Remove the last character |
+
+<!-- insert-keymap:end -->
+
+Any printable character appends to the label.
+
+## Other keys
 
 Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
 removes a character from the filename.

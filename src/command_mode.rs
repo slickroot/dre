@@ -1,6 +1,6 @@
 use crate::state::{
-    add_child_box, at, children_at, colour_row, grow, next_colour, snapshot, undo, Mode, Path, State,
-    DEFAULT_FILENAME, PAD,
+    add_child_box, at, children_at, colour_row, grow, next_colour, snapshot, undo, KeyBinding, Mode,
+    Path, State, DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,14 +44,7 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
 }
 
 #[allow(dead_code)]
-pub(crate) struct KeyBinding {
-    pub(crate) keys: &'static [&'static str],
-    pub(crate) command: Command,
-    pub(crate) description: &'static str,
-}
-
-#[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding] = &[
+pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Command>] = &[
     KeyBinding {
         keys: &["u"],
         command: Command::Undo,
