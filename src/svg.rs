@@ -14,6 +14,7 @@ impl SvgRenderer {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {span_x} {span_y}\">"
         );
         svg.push_str(&style_block());
+        svg.push_str(&background_rect(min_x, min_y, span_x, span_y));
         if placements.iter().any(|placement| matches!(placement.node, PlacementNode::Arrow(_))) {
             svg.push_str(&marker_defs());
         }
@@ -41,6 +42,12 @@ fn style_block() -> String {
     let (r, g, b) = INK;
     format!(
         "<style>svg {{ --ink: rgb({r},{g},{b}); --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: rgb({r},{g},{b}) }} }}</style>"
+    )
+}
+
+fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+    format!(
+        "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
     )
 }
 
@@ -242,7 +249,7 @@ mod tests {
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .find(|element| element.starts_with("rect "))
+            .find(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .expect("a plain leaf box renders a rect");
         assert!(rect.contains("fill=\"none\""));
     }
@@ -272,7 +279,86 @@ mod tests {
             2 * CELL_HEIGHT,
         );
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
-        assert!(!svg.contains("<rect"));
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let rects: Vec<&str> =
+            body.split('<').filter(|element| element.starts_with("rect ")).collect();
+        assert_eq!(rects.len(), 1, "only the background rect is drawn on an empty document");
+        assert!(rects[0].contains("fill=\"var(--bg)\""), "the rect is the background rect");
+        assert!(!svg.contains("stroke="), "no boxes means no strokes");
+    }
+
+    #[test]
+    fn every_document_paints_a_single_background_rect_filling_the_view_box() {
+        let svg = SvgRenderer {}.render(&[]);
+
+        let (min_x, min_y, span_x, span_y) = super::view_box(&[]);
+        let background = format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+        );
+        let style_end = svg.find("</style>").expect("every document has a style block")
+            + "</style>".len();
+        assert_eq!(
+            svg.find(&background).expect("the background rect is emitted"),
+            style_end,
+            "the background rect immediately follows the style block"
+        );
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let rects: Vec<&str> =
+            body.split('<').filter(|element| element.starts_with("rect ")).collect();
+        assert_eq!(rects.len(), 1, "the background rect is the only rect");
+        assert!(rects[0].contains("fill=\"var(--bg)\""));
+        assert!(!rects[0].contains("stroke"));
+    }
+
+    #[test]
+    fn the_background_rect_is_painted_before_defs_boxes_and_labels() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![boxed("warn", Some(1), false, false), parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let (min_x, min_y, span_x, span_y) = super::view_box(&placements);
+        let background = format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+        );
+        let background_pos =
+            svg.find(&background).expect("the background rect is emitted");
+        let style_end =
+            svg.find("</style>").expect("every document has a style block") + "</style>".len();
+        assert_eq!(background_pos, style_end);
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let mut rects: Vec<&str> = body
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
+        let background_rect =
+            rects.remove(0);
+        assert!(background_rect.contains("fill=\"var(--bg)\""));
+        assert!(!background_rect.contains("stroke="));
+        for rect in &rects {
+            assert!(rect.contains("stroke="), "each box rect is stroked and painted atop the background");
+        }
+
+        assert!(
+            background_pos < svg.find("<defs>").expect("arrows emit defs"),
+            "the background rect precedes defs"
+        );
+        assert!(
+            background_pos < svg.find("<text").expect("labels draw text"),
+            "the background rect precedes labels"
+        );
     }
 
     #[test]
@@ -292,7 +378,7 @@ mod tests {
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .filter(|element| element.starts_with("rect "))
+            .filter(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .collect();
 
         assert_eq!(rects.len(), 4);
@@ -329,7 +415,7 @@ mod tests {
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .filter(|element| element.starts_with("rect "))
+            .filter(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .collect();
 
         assert!(rects.iter().all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
@@ -430,7 +516,14 @@ mod tests {
         let svg = SvgRenderer {}.render(&placements);
 
         let defs = svg.find("<defs>").expect("arrows emit a defs block");
-        let rect = svg.find("<rect").expect("the parent box draws a rect");
+        let box_rect = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .find(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
+            .expect("the parent box draws a rect");
+        let rect = svg.find(box_rect).expect("the box rect is emitted");
         let arm = svg
             .find("marker-end=\"url(#arrowhead)\"")
             .expect("each stop arm references the arrowhead");
@@ -587,6 +680,12 @@ mod tests {
             "<style>svg {{ --ink: {}; --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: {} }} }}</style>",
             rgb(INK),
             rgb(INK)
+        )
+    }
+
+    fn expected_background(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+        format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
         )
     }
 
@@ -763,15 +862,17 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
+        let (min_x, min_y, span_x, span_y) = (
+            -CELL_HEIGHT,
+            -CELL_HEIGHT,
+            18 * CELL_WIDTH + 2 * CELL_HEIGHT,
+            33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
+        );
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}{}</svg>",
-            view_box(
-                -CELL_HEIGHT,
-                -CELL_HEIGHT,
-                18 * CELL_WIDTH + 2 * CELL_HEIGHT,
-                33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
-            ),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}{}{}</svg>",
+            view_box(min_x, min_y, span_x, span_y),
             expected_style(),
+            expected_background(min_x, min_y, span_x, span_y),
             expected_marker(),
             arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
