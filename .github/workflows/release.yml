@@ -27,4 +27,4 @@ jobs:
             exit 1
           fi
       - run: cargo build --release
-      - run: gh release create "$TAG" target/release/dre --title "$TAG" --target "$GITHUB_SHA"
+      - run: gh release create "$TAG" target/release/dre --title "$TAG" --generate-notes --target "$GITHUB_SHA"
