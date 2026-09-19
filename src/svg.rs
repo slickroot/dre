@@ -13,6 +13,7 @@ impl SvgRenderer {
         let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {span_x} {span_y}\">"
         );
+        svg.push_str(&style_block());
         if placements.iter().any(|placement| matches!(placement.node, PlacementNode::Arrow(_))) {
             svg.push_str(&marker_defs());
         }
@@ -34,6 +35,13 @@ impl SvgRenderer {
         svg.push_str("</svg>");
         svg
     }
+}
+
+fn style_block() -> String {
+    let (r, g, b) = INK;
+    format!(
+        "<style>svg {{ --ink: rgb({r},{g},{b}) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255) }} }}</style>"
+    )
 }
 
 fn escape(text: &str) -> String {
@@ -576,6 +584,72 @@ mod tests {
         assert!(!svg.contains("arrowhead"));
     }
 
+    fn expected_style() -> String {
+        format!(
+            "<style>svg {{ --ink: {} }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255) }} }}</style>",
+            rgb(INK)
+        )
+    }
+
+    #[test]
+    fn the_style_block_follows_the_svg_tag_on_every_document() {
+        let svg = SvgRenderer {}.render(&[]);
+
+        let opening = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">",
+            view_box(
+                -CELL_HEIGHT,
+                -CELL_HEIGHT,
+                2 * CELL_HEIGHT,
+                2 * CELL_HEIGHT,
+            )
+        );
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains("</style>"));
+        assert!(svg.starts_with(&format!("{opening}{}", expected_style())));
+    }
+
+    #[test]
+    fn the_style_light_default_is_built_from_the_ink_constant() {
+        let svg = SvgRenderer {}.render(&[]);
+
+        assert!(svg.contains(&format!("svg {{ --ink: {} }}", rgb(INK))));
+    }
+
+    #[test]
+    fn the_style_dark_override_uses_a_media_query_with_white_ink() {
+        let svg = SvgRenderer {}.render(&[]);
+
+        assert!(svg.contains(
+            "@media (prefers-color-scheme: dark) { svg { --ink: rgb(255,255,255) } }"
+        ));
+    }
+
+    #[test]
+    fn the_style_block_precedes_defs_and_immediately_follows_the_svg_tag() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let elements: Vec<&str> = body.split('<').collect();
+        assert!(elements[1].starts_with("svg "), "the document opens with the svg tag");
+        assert!(
+            elements[2].starts_with("style>"),
+            "the style block immediately follows the opening svg tag"
+        );
+        let style = svg.find("<style>").expect("the document emits a style block");
+        let defs = svg.find("<defs>").expect("arrows emit a defs block");
+        let rect = svg.find("<rect").expect("a box draws a rect");
+        assert!(style < defs, "the style block precedes any defs");
+        assert!(style < rect, "the style block precedes the boxes");
+    }
+
     fn expected_marker() -> String {
         let depth = arrowhead_depth();
         let slope = arrowhead_slope();
@@ -690,13 +764,14 @@ mod tests {
         let svg = SvgRenderer {}.render(&placements);
 
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}{}</svg>",
             view_box(
                 -CELL_HEIGHT,
                 -CELL_HEIGHT,
                 18 * CELL_WIDTH + 2 * CELL_HEIGHT,
                 33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
             ),
+            expected_style(),
             expected_marker(),
             arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
