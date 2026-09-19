@@ -1,5 +1,14 @@
+use std::io::{self, Write};
+
+use crate::state::Document;
+
+pub(crate) trait Renderer {
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
+}
+
 pub(crate) const BLANK: char = ' ';
 pub(crate) const CURSOR: char = '\u{2588}';
+pub(crate) const HOME_CURSOR: &str = "\x1b[H";
 
 pub(crate) const ARROW_STROKE: i64 = 4;
 pub(crate) const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
@@ -395,6 +404,17 @@ pub(crate) struct TerminalRenderer {
     pub(crate) cell_width: i64,
     pub(crate) cell_height: i64,
     pub(crate) cache: std::collections::HashMap<SpriteKey, Sprite>,
+    cols: i64,
+    rows: i64,
+}
+
+impl Renderer for TerminalRenderer {
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
+        let placements = crate::layout::with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
+        let lines = self.draw(&placements, self.cols, self.rows);
+        out.write_all(HOME_CURSOR.as_bytes())?;
+        out.write_all(lines.join("\r\n").as_bytes())
+    }
 }
 
 impl TerminalRenderer {
@@ -404,10 +424,17 @@ impl TerminalRenderer {
             cell_width,
             cell_height,
             cache: std::collections::HashMap::new(),
+            cols: 0,
+            rows: 0,
         }
     }
 
-    pub(crate) fn render(
+    pub(crate) fn resize(&mut self, cols: i64, rows: i64) {
+        self.cols = cols;
+        self.rows = rows;
+    }
+
+    fn draw(
         &mut self,
         placements: &[crate::layout::Placement],
         cols: i64,
@@ -1190,13 +1217,13 @@ mod tests {
     #[test]
     fn line_count_is_unchanged() {
         let mut r = renderer(2, 4);
-        assert_eq!(r.render(&[], 3, 3).len(), 3);
+        assert_eq!(r.draw(&[], 3, 3).len(), 3);
     }
 
     #[test]
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
         let mut r = renderer(2, 4);
-        let lines = r.render(&[], 3, 2);
+        let lines = r.draw(&[], 3, 2);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), crate::DELETE_ALL));
     }
@@ -1211,7 +1238,7 @@ mod tests {
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
         let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
         let mut r = renderer(1, 1);
-        let lines = r.render(&placements, cols, rows);
+        let lines = r.draw(&placements, cols, rows);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
         assert_eq!(&lines[label_row as usize][label_x as usize..label_x as usize + 2], "hi");
@@ -1233,7 +1260,7 @@ mod tests {
         let left = (cols - span).div_euclid(2);
         let top = (rows - height).div_euclid(2);
         let mut r = renderer(1, 1);
-        let lines = r.render(&placements, cols, rows);
+        let lines = r.draw(&placements, cols, rows);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
         let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
@@ -1254,6 +1281,60 @@ mod tests {
         );
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
+    }
+
+    fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
+        let mut out = Vec::new();
+        r.render(doc, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn empty_doc() -> Document {
+        Document { boxes: vec![], selected: None }
+    }
+
+    #[test]
+    fn the_cursor_goes_home_before_the_lines() {
+        let mut r = renderer(1, 1);
+        r.resize(2, 2);
+        assert_eq!(
+            rendered(&mut r, &empty_doc()),
+            format!("{HOME_CURSOR}  \r\n  {}", crate::DELETE_ALL)
+        );
+    }
+
+    #[test]
+    fn no_newline_follows_the_last_line() {
+        let mut r = renderer(1, 1);
+        r.resize(2, 2);
+        assert!(!rendered(&mut r, &empty_doc()).ends_with('\n'));
+    }
+
+    #[test]
+    fn the_output_is_sized_by_the_last_resize() {
+        let mut r = renderer(1, 1);
+        r.resize(3, 2);
+        r.resize(5, 4);
+        let output = rendered(&mut r, &empty_doc());
+        let body = output.strip_prefix(HOME_CURSOR).unwrap().strip_suffix(crate::DELETE_ALL).unwrap();
+        assert_eq!(body.split("\r\n").collect::<Vec<_>>(), vec![BLANK.to_string().repeat(5); 4]);
+    }
+
+    #[test]
+    fn the_cursor_is_drawn_for_the_selected_box() {
+        let boxes = vec![node("hi")];
+        let mut r = renderer(1, 1);
+        r.resize(20, 10);
+        let selected = Document { boxes: boxes.clone(), selected: Some(crate::state::Path { ancestors: vec![], index: 0 }) };
+        assert!(rendered(&mut r, &selected).contains(CURSOR));
+    }
+
+    #[test]
+    fn no_cursor_is_drawn_without_a_selection() {
+        let mut r = renderer(1, 1);
+        r.resize(20, 10);
+        let unselected = Document { boxes: vec![node("hi")], selected: None };
+        assert!(!rendered(&mut r, &unselected).contains(CURSOR));
     }
 
     #[test]
