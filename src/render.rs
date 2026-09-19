@@ -1,10 +1,11 @@
 use std::io::{self, Write};
 
-use crate::diagram::{palette, Diagram};
+use crate::diagram::palette;
 use crate::kitty::{self, Sprite};
+use crate::state::Document;
 
 pub(crate) trait Renderer {
-    fn render(&mut self, diagram: &Diagram, out: &mut impl Write) -> io::Result<()>;
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
 }
 
 pub(crate) const BLANK: char = ' ';
@@ -392,8 +393,8 @@ pub(crate) struct TerminalRenderer {
 }
 
 impl Renderer for TerminalRenderer {
-    fn render(&mut self, diagram: &Diagram, out: &mut impl Write) -> io::Result<()> {
-        let placements = crate::layout::layout(&diagram.boxes);
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
+        let placements = crate::layout::layout(&doc.boxes);
         let lines = self.draw(&placements, self.cols, self.rows);
         out.write_all(HOME_CURSOR.as_bytes())?;
         out.write_all(lines.join("\r\n").as_bytes())
@@ -1256,14 +1257,14 @@ mod tests {
         assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
     }
 
-    fn rendered(r: &mut TerminalRenderer, diagram: &Diagram) -> String {
+    fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
         let mut out = Vec::new();
-        r.render(diagram, &mut out).unwrap();
+        r.render(doc, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
-    fn empty_diagram() -> Diagram {
-        Diagram::default()
+    fn empty_doc() -> Document {
+        Document { boxes: vec![], selected: None }
     }
 
     #[test]
@@ -1271,7 +1272,7 @@ mod tests {
         let mut r = renderer(1, 1);
         r.resize(2, 2);
         assert_eq!(
-            rendered(&mut r, &empty_diagram()),
+            rendered(&mut r, &empty_doc()),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
         );
     }
@@ -1280,7 +1281,7 @@ mod tests {
     fn no_newline_follows_the_last_line() {
         let mut r = renderer(1, 1);
         r.resize(2, 2);
-        assert!(!rendered(&mut r, &empty_diagram()).ends_with('\n'));
+        assert!(!rendered(&mut r, &empty_doc()).ends_with('\n'));
     }
 
     #[test]
@@ -1288,7 +1289,7 @@ mod tests {
         let mut r = renderer(1, 1);
         r.resize(3, 2);
         r.resize(5, 4);
-        let output = rendered(&mut r, &empty_diagram());
+        let output = rendered(&mut r, &empty_doc());
         let body = output.strip_prefix(HOME_CURSOR).unwrap().strip_suffix(&kitty::clear().to_string()).unwrap();
         assert_eq!(body.split("\r\n").collect::<Vec<_>>(), vec![BLANK.to_string().repeat(5); 4]);
     }

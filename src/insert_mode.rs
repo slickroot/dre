@@ -44,10 +44,10 @@ pub(crate) fn format_keymap_markdown() -> String {
 }
 
 pub(crate) fn reduce(mut state: State, command: Command) -> State {
-    let Some(path) = &state.selected else {
+    let Some(path) = &state.doc.selected else {
         return state;
     };
-    let node = at(&mut state.diagram.boxes, path);
+    let node = at(&mut state.doc.boxes, path);
     let label = node.label.clone();
     match command {
         Command::Commit => {
@@ -57,7 +57,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         }
         Command::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);
-            let selected = state.selected.clone();
+            let selected = state.doc.selected.clone();
             add_child_box(snapshot(state), selected)
         }
         Command::Backspace => {
@@ -119,8 +119,8 @@ mod tests {
     fn enter_finishes_the_box_and_adds_an_empty_child_ready_for_typing() {
         let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\r");
-        assert_eq!(result.diagram.boxes, vec![node_with_children("hi", vec![node(PAD)])]);
-        assert_eq!(result.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.doc.boxes, vec![node_with_children("hi", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
         assert_eq!(result.mode, Mode::Insert);
     }
 
@@ -128,8 +128,8 @@ mod tests {
     fn enter_on_an_empty_label_still_creates_an_empty_child() {
         let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\r");
-        assert_eq!(result.diagram.boxes, vec![node_with_children("", vec![node(PAD)])]);
-        assert_eq!(result.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.doc.boxes, vec![node_with_children("", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
         assert_eq!(result.mode, Mode::Insert);
     }
 
@@ -139,8 +139,8 @@ mod tests {
         let state = handle_key(state, "\r");
         let state = handle_key(state, "\x1b");
         let result = handle_key(state, "u");
-        assert_eq!(result.diagram.boxes, vec![node("hi")]);
-        assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.doc.boxes, vec![node("hi")]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
         assert_eq!(result.mode, Mode::Command);
     }
 
@@ -150,10 +150,10 @@ mod tests {
         let state = handle_key(state, "\r");
         let result = handle_key(state, "\r");
         assert_eq!(
-            result.diagram.boxes,
+            result.doc.boxes,
             vec![node_with_children("a", vec![node_with_children("", vec![node(PAD)])])]
         );
-        assert_eq!(result.selected, Some(Path { ancestors: vec![0, 0], index: 0 }));
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0, 0], index: 0 }));
         assert_eq!(result.mode, Mode::Insert);
     }
 
@@ -161,36 +161,36 @@ mod tests {
     fn h_in_insert_mode_types_the_letter_h() {
         let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "h");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("ah{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("ah{PAD}"))]);
     }
 
     #[test]
     fn typing_appends_to_the_selected_box_label() {
         let state = new_state(vec![node(&format!("h{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "i");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("hi{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
     fn space_and_tilde_are_printable() {
         let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, " ");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("a {PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("a {PAD}"))]);
 
         let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "~");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("~{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("~{PAD}"))]);
     }
 
     #[test]
     fn backspace_drops_the_last_character_and_is_a_no_op_when_empty() {
         let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x7f");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("h{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("h{PAD}"))]);
 
         let state = new_state(vec![node(PAD)], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x7f");
-        assert_eq!(result.diagram.boxes, vec![node(PAD)]);
+        assert_eq!(result.doc.boxes, vec![node(PAD)]);
     }
 
     #[test]
@@ -198,17 +198,17 @@ mod tests {
         let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state, "\x1b");
         assert_eq!(result.mode, Mode::Command);
-        assert_eq!(result.diagram.boxes, vec![node("hi")]);
+        assert_eq!(result.doc.boxes, vec![node("hi")]);
     }
 
     #[test]
     fn control_and_non_ascii_characters_return_the_state_unchanged() {
         let state = new_state(vec![node(&format!("hi{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(state.clone(), "\x01");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("hi{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
 
         let result = handle_key(state, "é");
-        assert_eq!(result.diagram.boxes, vec![node(&format!("hi{PAD}"))]);
+        assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
     }
 
     #[test]
@@ -246,9 +246,9 @@ mod tests {
         for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
             let state = new_state(vec![node(&format!("a{PAD}"))], Mode::Insert, Some(Path { ancestors: vec![], index: 0 }));
             let result = handle_key(state, key);
-            assert_eq!(result.diagram.boxes, vec![node(&format!("a{key}{PAD}"))]);
+            assert_eq!(result.doc.boxes, vec![node(&format!("a{key}{PAD}"))]);
             assert_eq!(result.mode, Mode::Insert);
-            assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 0 }));
+            assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
         }
     }
 
