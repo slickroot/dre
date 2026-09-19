@@ -203,7 +203,7 @@ mod tests {
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::diagram::{node, node_with_children, palette, Node, Path};
+    use crate::diagram::{node, node_with_children, palette, Node};
     use crate::state::Document;
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
@@ -915,14 +915,5 @@ mod tests {
         };
 
         assert_eq!(rendered(&doc), SvgRenderer {}.draw(&layout(&doc.boxes)));
-    }
-
-    #[test]
-    fn a_selection_does_not_change_the_svg() {
-        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
-        let unselected = Document { boxes: boxes.clone(), selected: None };
-        let selected = Document { boxes, selected: Some(Path { ancestors: vec![0], index: 1 }) };
-
-        assert_eq!(rendered(&selected), rendered(&unselected));
     }
 }

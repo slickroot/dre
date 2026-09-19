@@ -9,7 +9,6 @@ pub(crate) trait Renderer {
 }
 
 pub(crate) const BLANK: char = ' ';
-pub(crate) const CURSOR: char = '\u{2588}';
 pub(crate) const HOME_CURSOR: &str = "\x1b[H";
 
 pub(crate) const ARROW_STROKE: i64 = 4;
@@ -395,7 +394,7 @@ pub(crate) struct TerminalRenderer {
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        let placements = crate::layout::with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
+        let placements = crate::layout::layout(&doc.boxes);
         let lines = self.draw(&placements, self.cols, self.rows);
         out.write_all(HOME_CURSOR.as_bytes())?;
         out.write_all(lines.join("\r\n").as_bytes())
@@ -424,14 +423,7 @@ impl TerminalRenderer {
         cols: i64,
         rows: i64,
     ) -> Vec<String> {
-        let (left, top) = if placements.is_empty() {
-            (0, 0)
-        } else {
-            let min_x = placements.iter().map(|placement| placement.x).min().unwrap();
-            let span = placements.iter().map(|placement| placement.x + placement.width).max().unwrap() - min_x;
-            let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
-            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
-        };
+        let (left, top) = crate::layout::centre(placements, cols, rows);
         let shifted: Vec<crate::layout::Placement> = placements
             .iter()
             .map(|placement| crate::layout::Placement {
@@ -460,7 +452,6 @@ impl TerminalRenderer {
         for placement in placements {
             match &placement.node {
                 PlacementNode::Node(_) => self.draw_box(&mut grid, placement),
-                PlacementNode::Cursor(_) => self.draw_cursor(&mut grid, placement),
                 PlacementNode::Label(label) => self.draw_label(&mut grid, placement, label),
                 PlacementNode::Arrow(_) => {}
             }
@@ -476,10 +467,6 @@ impl TerminalRenderer {
                 self.put(grid, x, y, BLANK_CELL);
             }
         }
-    }
-
-    fn draw_cursor(&self, grid: &mut [Vec<(char, Option<u8>, Option<u8>)>], placement: &crate::layout::Placement) {
-        self.stamp(grid, placement.x, placement.y, CURSOR);
     }
 
     fn draw_label(
@@ -1184,16 +1171,6 @@ mod tests {
         }
     }
 
-    fn cursor_placement(x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'static> {
-        crate::layout::Placement {
-            node: crate::layout::PlacementNode::Cursor(crate::layout::Cursor),
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
     #[test]
     fn line_count_is_unchanged() {
         let mut r = renderer(2, 4);
@@ -1236,7 +1213,7 @@ mod tests {
         let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
         let mut r = renderer(1, 1);
         let lines = r.draw(&placements, cols, rows);
-        let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
+        let label_x = left + crate::layout::label_centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
         assert_eq!(&lines[label_row as usize][label_x as usize..label_x as usize + 2], "hi");
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
@@ -1260,10 +1237,10 @@ mod tests {
         let lines = r.draw(&placements, cols, rows);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
-        let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
+        let parent_label_x = left + crate::layout::label_centre(crate::layout::width(&parent), "parent");
         let parent_label_row = top + crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT / 2;
         let child_a_label_x =
-            left + child_base_x + crate::layout::centre(crate::layout::width(&node("a")), "a");
+            left + child_base_x + crate::layout::label_centre(crate::layout::width(&node("a")), "a");
         let child_a_label_row = top + crate::layout::BOX_HEIGHT / 2;
 
         assert_eq!(
@@ -1318,23 +1295,6 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_is_drawn_for_the_selected_box() {
-        let boxes = vec![node("hi")];
-        let mut r = renderer(1, 1);
-        r.resize(20, 10);
-        let selected = Document { boxes: boxes.clone(), selected: Some(crate::diagram::Path { ancestors: vec![], index: 0 }) };
-        assert!(rendered(&mut r, &selected).contains(CURSOR));
-    }
-
-    #[test]
-    fn no_cursor_is_drawn_without_a_selection() {
-        let mut r = renderer(1, 1);
-        r.resize(20, 10);
-        let unselected = Document { boxes: vec![node("hi")], selected: None };
-        assert!(!rendered(&mut r, &unselected).contains(CURSOR));
-    }
-
-    #[test]
     fn empty_canvas_fills_terminal() {
         let grid = renderer(1, 1).grid(&[], 11, 5);
         assert_eq!(grid, vec![BLANK.to_string().repeat(11); 5]);
@@ -1374,51 +1334,6 @@ mod tests {
     }
 
     #[test]
-    fn cursor_is_drawn_after_the_label() {
-        let node = box_node(None, false, false);
-        let placements = vec![
-            box_placement(&node, 0, 0, 5, 3),
-            label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
-        ];
-        let grid = renderer(1, 1).grid(&placements, 5, 3);
-        assert_eq!(grid[1], format!(" hi{} ", CURSOR));
-    }
-
-    #[test]
-    fn label_and_cursor_past_the_edge_are_clipped() {
-        let node = box_node(None, false, false);
-        let placements = vec![
-            box_placement(&node, 0, 0, 5, 3),
-            label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
-        ];
-        let grid = renderer(1, 1).grid(&placements, 3, 3);
-        assert_eq!(grid[1], " hi");
-    }
-
-    #[test]
-    fn a_box_does_not_draw_a_cursor() {
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(None, false, false), 0, 0, 5, 3)], 5, 3);
-        assert!(!grid.join("").contains(CURSOR));
-    }
-
-    #[test]
-    fn cursor_placement_is_drawn_at_its_own_position() {
-        let grid = renderer(1, 1).grid(&[cursor_placement(2, 1, 1, 1)], 4, 3);
-        assert_eq!(
-            grid,
-            vec!["    ".to_string(), format!("  {} ", CURSOR), "    ".to_string()]
-        );
-    }
-
-    #[test]
-    fn a_cursor_outside_the_grid_is_clipped() {
-        let grid = renderer(1, 1).grid(&[cursor_placement(9, 9, 1, 1)], 4, 3);
-        assert_eq!(grid, vec!["    ".to_string(); 3]);
-    }
-
-    #[test]
     fn an_arrow_leaves_the_gap_blank() {
         let grid = renderer(1, 1).grid(&[arrow_placement(vec![0], 0, 2, 1, 1, 2)], 4, 4);
         assert_eq!(grid, vec!["    ".to_string(); 4]);
@@ -1430,7 +1345,6 @@ mod tests {
         let placements = vec![
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
         ];
         let grid = renderer(1, 1).grid(&placements, 5, 3);
         assert!(!grid.join("").contains('\x1b'));
@@ -1440,13 +1354,6 @@ mod tests {
     fn a_coloured_box_puts_no_colour_in_the_grid() {
         let grid = renderer(1, 1).grid(&[box_placement(&box_node(Some(2), false, false), 0, 0, 5, 3)], 5, 3);
         assert_eq!(grid, vec!["     ".to_string(); 3]);
-    }
-
-    #[test]
-    fn a_cursor_has_no_sprite() {
-        let mut r = renderer(2, 4);
-        let sprites = r.sprites(&[cursor_placement(1, 1, 1, 1)], 40, 20);
-        assert!(sprites.is_empty());
     }
 
     #[test]

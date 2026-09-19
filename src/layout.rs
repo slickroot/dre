@@ -23,7 +23,7 @@ pub(crate) fn height(_node: &Node) -> i64 {
     BOX_HEIGHT
 }
 
-pub(crate) fn centre(width: i64, label: &str) -> i64 {
+pub(crate) fn label_centre(width: i64, label: &str) -> i64 {
     let leftover = width - BORDERS - interior(label);
     1 + leftover - leftover.div_euclid(2)
 }
@@ -81,7 +81,7 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
             height: BOX_HEIGHT,
         }];
 
-        let start = x + centre(width, &node.label);
+        let start = x + label_centre(width, &node.label);
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
             node: PlacementNode::Label(Label { text: &node.label, path: path.clone() }),
@@ -165,14 +165,10 @@ pub(crate) struct Arrow {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Cursor;
-
-#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode<'a> {
     Node(&'a Node),
     Label(Label<'a>),
     Arrow(Arrow),
-    Cursor(Cursor),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,23 +210,23 @@ pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
     boxes_first
 }
 
-pub(crate) fn with_cursor<'a>(placements: Vec<Placement<'a>>, selected: Option<Path>) -> Vec<Placement<'a>> {
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if Some(&label.path) == selected.as_ref() {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Cursor(Cursor),
-                    x: placement.x + placement.width - 1,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
+pub(crate) fn centre(placements: &[Placement], cols: i64, rows: i64) -> (i64, i64) {
+    if placements.is_empty() {
+        return (0, 0);
     }
-    placements
+    let min_x = placements.iter().map(|placement| placement.x).min().unwrap();
+    let span = placements.iter().map(|placement| placement.x + placement.width).max().unwrap() - min_x;
+    let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
+    ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
+}
+
+pub(crate) fn label_end(placements: &[Placement], path: &Path) -> Option<(i64, i64)> {
+    placements.iter().find_map(|placement| match &placement.node {
+        PlacementNode::Label(label) if &label.path == path => {
+            Some((placement.x + placement.width - 1, placement.y))
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -309,13 +305,13 @@ mod tests {
     }
 
     #[test]
-    fn centre_centers_the_label_within_the_box() {
-        assert_eq!(centre(7, "hi"), 3);
+    fn label_centre_centers_the_label_within_the_box() {
+        assert_eq!(label_centre(7, "hi"), 3);
     }
 
     #[test]
-    fn centre_of_a_tightly_fit_label_is_one() {
-        assert_eq!(centre(2 + BORDERS, "hi"), 1);
+    fn label_centre_of_a_tightly_fit_label_is_one() {
+        assert_eq!(label_centre(2 + BORDERS, "hi"), 1);
     }
 
     #[test]
@@ -479,29 +475,40 @@ mod tests {
     }
 
     #[test]
-    fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
-        let nodes = vec![node("hi")];
+    fn label_end_is_the_last_cell_of_the_matching_label() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("bb")])];
         let placements = layout(&nodes);
+        let path = Path { ancestors: vec![0], index: 1 };
         let label = placements
             .iter()
-            .find(|p| matches!(p.node, PlacementNode::Label(_)))
-            .expect("layout of a leaf box includes a label placement")
-            .clone();
-
-        let result = with_cursor(placements.clone(), Some(Path { ancestors: vec![], index: 0 }));
-        assert_eq!(result.len(), placements.len() + 1);
-        let cursor = result.last().unwrap();
-        assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
-        assert_eq!(cursor.x, label.x + label.width - 1);
-        assert_eq!(cursor.y, label.y);
+            .find(|p| matches!(&p.node, PlacementNode::Label(label) if label.path == path))
+            .expect("layout includes a label for every node");
+        assert_eq!(label_end(&placements, &path), Some((label.x + label.width - 1, label.y)));
     }
 
     #[test]
-    fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
+    fn label_end_is_none_when_no_label_matches() {
         let nodes = vec![node("hi")];
         let placements = layout(&nodes);
-        let result = with_cursor(placements.clone(), Some(Path { ancestors: vec![], index: 99 }));
-        assert_eq!(result, placements);
+        assert_eq!(label_end(&placements, &Path { ancestors: vec![], index: 99 }), None);
+    }
+
+    #[test]
+    fn centre_of_no_placements_is_the_origin() {
+        assert_eq!(centre(&[], 20, 10), (0, 0));
+    }
+
+    #[test]
+    fn centre_centres_the_placements_extent_in_the_terminal() {
+        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let placements = layout(&nodes);
+        let (cols, rows) = (40, 12);
+        let span = placements.iter().map(|p| p.x + p.width).max().unwrap();
+        let height = placements.iter().map(|p| p.y + p.height).max().unwrap();
+        assert_eq!(
+            centre(&placements, cols, rows),
+            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
+        );
     }
 
     #[test]
@@ -552,8 +559,5 @@ mod tests {
             PlacementNode::Arrow(arrow) => assert_eq!(arrow, Arrow { stops: vec![0], shaft: 0 }),
             _ => panic!("expected an Arrow variant"),
         }
-
-        let cursor_placement = Placement { node: PlacementNode::Cursor(Cursor), x: 0, y: 0, width: 1, height: 1 };
-        assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
     }
 }
