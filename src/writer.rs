@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
-use crate::diagram::{Node, Path};
+use crate::diagram::{Diagram, Path};
 use crate::dre_format;
 use crate::file_document;
 use crate::kitty;
@@ -75,9 +75,9 @@ fn frame<W: Write>(
     rows: i64,
 ) -> io::Result<()> {
     renderer.resize(cols, rows);
-    renderer.render(&state.doc, stream)?;
-    if let Some(selected) = &state.doc.selected {
-        draw_cursor(&state.doc.boxes, selected, cols, rows, stream)?;
+    renderer.render(&state.diagram, stream)?;
+    if let Some(selected) = &state.selected {
+        draw_cursor(&state.diagram, selected, cols, rows, stream)?;
     }
     if let Mode::SavePrompt { filename } = &state.mode {
         write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
@@ -85,8 +85,8 @@ fn frame<W: Write>(
     stream.flush()
 }
 
-fn draw_cursor(boxes: &[Node], selected: &Path, cols: i64, rows: i64, out: &mut impl Write) -> io::Result<()> {
-    let placements = layout::layout(boxes);
+fn draw_cursor(diagram: &Diagram, selected: &Path, cols: i64, rows: i64, out: &mut impl Write) -> io::Result<()> {
+    let placements = layout::layout(&diagram.boxes);
     let (left, top) = layout::centre(&placements, cols, rows);
     if let Some((x, y)) = layout::label_end(&placements, selected) {
         write!(out, "\x1b[{};{}H{CURSOR}", top + y + 1, left + x + 1)?;
@@ -119,7 +119,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
         state = handle_key(state, &key);
         if !state.running {
             if let Some(path) = &state.save_to {
-                fs::write(path, dre_format::write(&file_document::from_state(&state)))?;
+                fs::write(path, dre_format::write(&file_document::from_diagram(&state.diagram)))?;
             }
         }
     }
@@ -148,7 +148,11 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{path}: not a valid diagram"))
     })?;
-    let mut state = file_document::to_state(doc);
+    let mut state = State::default();
+    state.diagram = file_document::to_diagram(doc);
+    if !state.diagram.boxes.is_empty() {
+        state.selected = Some(Path { ancestors: vec![], index: 0 });
+    }
     state.save_to = Some(path);
     Ok(state)
 }
@@ -203,7 +207,7 @@ mod tests {
         Path { ancestors: vec![], index: 0 }
     }
 
-    fn cursor_at(boxes: &[Node], selected: &Path, cols: i64, rows: i64) -> String {
+    fn cursor_at(boxes: &[crate::diagram::Node], selected: &Path, cols: i64, rows: i64) -> String {
         let placements = layout::layout(boxes);
         let (left, top) = layout::centre(&placements, cols, rows);
         let (x, y) = layout::label_end(&placements, selected).unwrap();
@@ -212,11 +216,11 @@ mod tests {
 
     #[test]
     fn the_cursor_is_drawn_at_the_end_of_the_selected_label() {
-        let boxes = vec![crate::diagram::node_with_children("parent", vec![crate::diagram::node("hi")])];
+        let diagram = Diagram { boxes: vec![crate::diagram::node_with_children("parent", vec![crate::diagram::node("hi")])] };
         let selected = Path { ancestors: vec![0], index: 0 };
         let mut out = Cursor::new(Vec::new());
-        draw_cursor(&boxes, &selected, 40, 10, &mut out).unwrap();
-        assert_eq!(written(&out), cursor_at(&boxes, &selected, 40, 10));
+        draw_cursor(&diagram, &selected, 40, 10, &mut out).unwrap();
+        assert_eq!(written(&out), cursor_at(&diagram.boxes, &selected, 40, 10));
     }
 
     #[test]
@@ -236,7 +240,7 @@ mod tests {
         let mut expected = Vec::new();
         let mut reference = TerminalRenderer::new(1, 1);
         reference.resize(cols, rows);
-        reference.render(&state.doc, &mut expected).unwrap();
+        reference.render(&state.diagram, &mut expected).unwrap();
         let expected = String::from_utf8(expected).unwrap() + &cursor_at(&boxes, &selected_first(), cols, rows);
         let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
@@ -287,8 +291,8 @@ mod tests {
     #[test]
     fn no_argument_starts_from_an_empty_diagram() {
         let state = load_state(None).unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert!(state.diagram.boxes.is_empty());
+        assert_eq!(state.selected, None);
         assert_eq!(state.save_to, None);
     }
 
@@ -300,9 +304,9 @@ mod tests {
         let state = load_state(Some(path.clone()));
         fs::remove_file(&path).unwrap();
         let state = state.unwrap();
-        assert_eq!(state.doc.boxes.len(), 1);
-        assert_eq!(state.doc.boxes[0].label, "API");
-        assert_eq!(state.doc.selected, Some(crate::diagram::Path { ancestors: vec![], index: 0 }));
+        assert_eq!(state.diagram.boxes.len(), 1);
+        assert_eq!(state.diagram.boxes[0].label, "API");
+        assert_eq!(state.selected, Some(crate::diagram::Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]
@@ -319,8 +323,8 @@ mod tests {
         let state = load_state(Some(path.clone()));
         fs::remove_file(&path).unwrap();
         let state = state.unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert!(state.diagram.boxes.is_empty());
+        assert_eq!(state.selected, None);
     }
 
     #[test]
@@ -363,8 +367,8 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let state = load_state(Some(path.clone())).unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert!(state.diagram.boxes.is_empty());
+        assert_eq!(state.selected, None);
         assert_eq!(state.save_to, Some(path));
         assert!(state.new_file);
     }

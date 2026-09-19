@@ -41,8 +41,8 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{input}: not a valid diagram"))
     })?;
-    let doc = file_document::to_state(doc).doc;
-    SvgRenderer {}.render(&doc, &mut File::create(output_path(&input))?)?;
+    let diagram = file_document::to_diagram(doc);
+    SvgRenderer {}.render(&diagram, &mut File::create(output_path(&input))?)?;
     Ok(ExitCode::SUCCESS)
 }
 

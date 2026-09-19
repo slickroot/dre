@@ -1,5 +1,5 @@
 use crate::command_mode;
-use crate::diagram::{append, at, children_at, palette, Node, Path};
+use crate::diagram::{append, at, children_at, palette, Diagram, Node, Path};
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
@@ -21,16 +21,17 @@ pub(crate) enum Mode {
     SavePrompt { filename: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct Document {
-    pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Option<Path>,
+#[derive(Clone)]
+struct Snapshot {
+    diagram: Diagram,
+    selected: Option<Path>,
 }
 
 #[derive(Clone)]
 pub(crate) struct State {
-    pub(crate) doc: Document,
-    history: Vec<Document>,
+    pub(crate) diagram: Diagram,
+    pub(crate) selected: Option<Path>,
+    history: Vec<Snapshot>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
     pub(crate) save_to: Option<String>,
@@ -41,7 +42,8 @@ pub(crate) struct State {
 impl Default for State {
     fn default() -> Self {
         State {
-            doc: Document::default(),
+            diagram: Diagram::default(),
+            selected: None,
             history: Vec::new(),
             mode: Mode::default(),
             running: true,
@@ -53,13 +55,14 @@ impl Default for State {
 }
 
 pub(crate) fn snapshot(mut state: State) -> State {
-    state.history.push(state.doc.clone());
+    state.history.push(Snapshot { diagram: state.diagram.clone(), selected: state.selected.clone() });
     state
 }
 
 pub(crate) fn undo(mut state: State) -> State {
     if let Some(previous) = state.history.pop() {
-        state.doc = previous;
+        state.diagram = previous.diagram;
+        state.selected = previous.selected;
     }
     state
 }
@@ -87,14 +90,14 @@ pub(crate) fn blank_box() -> Node {
 }
 
 pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
-    state.doc.selected = match selected {
+    state.selected = match selected {
         Some(mut path) => {
-            let index = append(&mut at(&mut state.doc.boxes, &path).children, blank_box());
+            let index = append(&mut at(&mut state.diagram.boxes, &path).children, blank_box());
             path.ancestors.push(path.index);
             Some(Path { ancestors: path.ancestors, index })
         }
         None => {
-            let index = append(&mut state.doc.boxes, blank_box());
+            let index = append(&mut state.diagram.boxes, blank_box());
             Some(Path { ancestors: Vec::new(), index })
         }
     };
@@ -138,7 +141,7 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
+    State { diagram: Diagram { boxes }, selected, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
 }
 
 #[cfg(test)]
@@ -155,8 +158,8 @@ mod tests {
     fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
         let state = new_state(vec![], Mode::Command, None);
         let result = add_child_box(state, None);
-        assert_eq!(result.doc.boxes, vec![node(PAD)]);
-        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.diagram.boxes, vec![node(PAD)]);
+        assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 0 }));
         assert_eq!(result.mode, Mode::Insert);
     }
 
@@ -164,8 +167,8 @@ mod tests {
     fn add_child_box_with_a_selection_grows_a_child_and_descends_the_path() {
         let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let result = add_child_box(state, Some(Path { ancestors: vec![], index: 0 }));
-        assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![node(PAD)])]);
-        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.diagram.boxes, vec![node_with_children("a", vec![node(PAD)])]);
+        assert_eq!(result.selected, Some(Path { ancestors: vec![0], index: 0 }));
         assert_eq!(result.mode, Mode::Insert);
     }
 
@@ -222,8 +225,8 @@ mod tests {
     fn unknown_key_returns_the_state_unchanged() {
         let state = new_state(vec![node("a")], Mode::Command, None);
         let result = handle_key(state.clone(), "x");
-        assert_eq!(result.doc.boxes, state.doc.boxes);
-        assert_eq!(result.doc.selected, state.doc.selected);
+        assert_eq!(result.diagram.boxes, state.diagram.boxes);
+        assert_eq!(result.selected, state.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
     }
@@ -234,8 +237,8 @@ mod tests {
         let state = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
         for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
             let result = handle_key(state.clone(), key);
-            assert_eq!(result.doc.boxes, boxes);
-            assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+            assert_eq!(result.diagram.boxes, boxes);
+            assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 1 }));
         }
     }
 
@@ -259,9 +262,9 @@ mod tests {
         let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
         let state = handle_key(state, "3");
         let result = handle_key(state, "2");
-        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 0 }));
         let result = handle_key(result, "j");
-        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 32 }));
+        assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 32 }));
     }
 
     #[test]
@@ -274,6 +277,6 @@ mod tests {
         }
         let state = handle_key(state, "x");
         let result = handle_key(state, "j");
-        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+        assert_eq!(result.selected, Some(Path { ancestors: vec![], index: 1 }));
     }
 }

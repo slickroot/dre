@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crate::layout::{layout, PlacementNode};
 use crate::render::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
-use crate::state::Document;
+use crate::diagram::Diagram;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -42,8 +42,8 @@ impl SvgRenderer {
 }
 
 impl Renderer for SvgRenderer {
-    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        out.write_all(self.draw(&layout(&doc.boxes)).as_bytes())
+    fn render(&mut self, diagram: &Diagram, out: &mut impl Write) -> io::Result<()> {
+        out.write_all(self.draw(&layout(&diagram.boxes)).as_bytes())
     }
 }
 
@@ -203,8 +203,7 @@ mod tests {
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::diagram::{node, node_with_children, palette, Node};
-    use crate::state::Document;
+    use crate::diagram::{node, node_with_children, palette, Diagram, Node};
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node { label: label.to_string(), colour, filled, rounded, children: vec![] }
@@ -901,19 +900,18 @@ mod tests {
         assert_eq!(svg, expected);
     }
 
-    fn rendered(doc: &Document) -> String {
+    fn rendered(diagram: &Diagram) -> String {
         let mut out = Vec::new();
-        SvgRenderer {}.render(doc, &mut out).unwrap();
+        SvgRenderer {}.render(diagram, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
     #[test]
     fn rendering_a_document_writes_the_drawing_of_its_layout() {
-        let doc = Document {
+        let diagram = Diagram {
             boxes: vec![node_with_children("root", vec![node("A"), node("B")])],
-            selected: None,
         };
 
-        assert_eq!(rendered(&doc), SvgRenderer {}.draw(&layout(&doc.boxes)));
+        assert_eq!(rendered(&diagram), SvgRenderer {}.draw(&layout(&diagram.boxes)));
     }
 }

@@ -121,6 +121,6 @@ mod tests {
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);
-        assert_eq!(result.doc.boxes, vec![node("a")]);
+        assert_eq!(result.diagram.boxes, vec![node("a")]);
     }
 }
