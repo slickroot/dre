@@ -1,5 +1,8 @@
-use crate::layout::PlacementNode;
-use crate::render::{arrowhead_depth, arrowhead_slope, colour, CELL_HEIGHT, CELL_WIDTH};
+use std::io::{self, Write};
+
+use crate::layout::{layout, PlacementNode};
+use crate::render::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
+use crate::state::Document;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -8,7 +11,7 @@ const INK: (u8, u8, u8) = (0, 0, 0);
 pub(crate) struct SvgRenderer {}
 
 impl SvgRenderer {
-    pub(crate) fn render(&self, placements: &[crate::layout::Placement]) -> String {
+    fn draw(&self, placements: &[crate::layout::Placement]) -> String {
         let (min_x, min_y, span_x, span_y) = view_box(placements);
         let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {span_x} {span_y}\">"
@@ -33,6 +36,12 @@ impl SvgRenderer {
         }
         svg.push_str("</svg>");
         svg
+    }
+}
+
+impl Renderer for SvgRenderer {
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
+        out.write_all(self.draw(&layout(&doc.boxes)).as_bytes())
     }
 }
 
@@ -180,7 +189,7 @@ mod tests {
     use crate::render::OPAQUE;
     use crate::render::PALETTE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::state::Node;
+    use crate::state::{Document, Node, Path};
 
     fn node(label: &str) -> Node {
         Node { label: label.to_string(), ..Default::default() }
@@ -211,7 +220,7 @@ mod tests {
         let nodes = vec![node("hi")];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let box_width = crate::layout::width(&nodes[0]);
         let expected = view_box(
@@ -245,7 +254,7 @@ mod tests {
         let nodes = vec![boxed("hi", Some(1), true, true)];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(Some(1))))));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
@@ -256,7 +265,7 @@ mod tests {
 
     #[test]
     fn empty_placements_render_a_document_with_the_empty_bbox_view_box() {
-        let svg = SvgRenderer {}.render(&[]);
+        let svg = SvgRenderer {}.draw(&[]);
 
         let expected = view_box(
             -CELL_HEIGHT,
@@ -278,7 +287,7 @@ mod tests {
         ];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let rects: Vec<&str> = svg
             .split("</svg>")
@@ -312,7 +321,7 @@ mod tests {
         ];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let ink_stroke = format!("stroke=\"{}\"", rgb(INK));
         let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
@@ -362,7 +371,7 @@ mod tests {
             label_placement("hi", label_x, label_y),
         ];
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let (r, g, b) = INK;
         assert!(svg.contains(&format!(
@@ -388,7 +397,7 @@ mod tests {
             label_placement("hi", 2, 1),
         ];
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let rect = svg.find("<rect").expect("a box placement draws a rect");
         let text = svg.find("<text").expect("a label placement draws a text");
@@ -409,7 +418,7 @@ mod tests {
             label_placement("a<b>&c", 2, 1),
         ];
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         assert!(svg.contains(">a&lt;b&gt;&amp;c</text>"));
         assert!(!svg.contains("a<b>&c"));
@@ -421,7 +430,7 @@ mod tests {
         let nodes = vec![parent];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let defs = svg.find("<defs>").expect("arrows emit a defs block");
         let rect = svg.find("<rect").expect("the parent box draws a rect");
@@ -484,7 +493,7 @@ mod tests {
         let nodes = vec![parent];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let arrow_placement = placements
             .iter()
@@ -532,7 +541,7 @@ mod tests {
         let nodes = vec![parent];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let depth = arrowhead_depth();
         let slope = arrowhead_slope();
@@ -569,7 +578,7 @@ mod tests {
         let nodes = vec![node("hi")];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         assert!(!svg.contains("<defs>"));
         assert!(!svg.contains("marker-end"));
@@ -687,7 +696,7 @@ mod tests {
         ];
         let placements = crate::layout::layout(&nodes);
 
-        let svg = SvgRenderer {}.render(&placements);
+        let svg = SvgRenderer {}.draw(&placements);
 
         let expected = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
@@ -722,5 +731,30 @@ mod tests {
         );
 
         assert_eq!(svg, expected);
+    }
+
+    fn rendered(doc: &Document) -> String {
+        let mut out = Vec::new();
+        SvgRenderer {}.render(doc, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn rendering_a_document_writes_the_drawing_of_its_layout() {
+        let doc = Document {
+            boxes: vec![node_with_children("root", vec![node("A"), node("B")])],
+            selected: None,
+        };
+
+        assert_eq!(rendered(&doc), SvgRenderer {}.draw(&layout(&doc.boxes)));
+    }
+
+    #[test]
+    fn a_selection_does_not_change_the_svg() {
+        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let unselected = Document { boxes: boxes.clone(), selected: None };
+        let selected = Document { boxes, selected: Some(Path { ancestors: vec![0], index: 1 }) };
+
+        assert_eq!(rendered(&selected), rendered(&unselected));
     }
 }

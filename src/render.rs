@@ -1,3 +1,11 @@
+use std::io::{self, Write};
+
+use crate::state::Document;
+
+pub(crate) trait Renderer {
+    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
+}
+
 pub(crate) const BLANK: char = ' ';
 pub(crate) const CURSOR: char = '\u{2588}';
 
