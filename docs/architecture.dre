@@ -1,0 +1,8 @@
+<dre>
+  <box label="state" rounded="true">
+    <box label="layout">
+      <box label="tui" colour="3"/>
+      <box label="svg" colour="3"/>
+    </box>
+  </box>
+</dre>
