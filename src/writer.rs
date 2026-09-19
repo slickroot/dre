@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use crate::dre_format;
 use crate::file_document;
 use crate::kitty;
-use crate::render::{Renderer, TerminalRenderer, CURSOR};
+use crate::render::{Renderer, TerminalRenderer};
 use crate::diagram::Path;
 use crate::state::{handle_key, Mode, State};
 
@@ -17,6 +17,7 @@ const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
+const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
@@ -160,7 +161,6 @@ pub fn write(file: Option<String>) -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::HOME_CURSOR;
     use crate::state::new_state;
     use std::io::Cursor;
 
@@ -176,7 +176,7 @@ mod tests {
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
         assert_eq!(
             written(&stream),
-            format!("{HOME_CURSOR}   \r\n   {}", crate::kitty::clear())
+            format!("\x1b[H   \r\n   {}", crate::kitty::clear())
         );
     }
 
@@ -186,7 +186,7 @@ mod tests {
         let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
-        assert!(written(&stream).starts_with(HOME_CURSOR));
+        assert!(written(&stream).starts_with("\x1b[H"));
     }
 
     #[test]
