@@ -40,7 +40,7 @@ impl SvgRenderer {
 fn style_block() -> String {
     let (r, g, b) = INK;
     format!(
-        "<style>svg {{ --ink: rgb({r},{g},{b}) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255) }} }}</style>"
+        "<style>svg {{ --ink: rgb({r},{g},{b}); --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: rgb({r},{g},{b}) }} }}</style>"
     )
 }
 
@@ -584,7 +584,8 @@ mod tests {
 
     fn expected_style() -> String {
         format!(
-            "<style>svg {{ --ink: {} }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255) }} }}</style>",
+            "<style>svg {{ --ink: {}; --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: {} }} }}</style>",
+            rgb(INK),
             rgb(INK)
         )
     }
@@ -611,16 +612,20 @@ mod tests {
     fn the_style_light_default_is_built_from_the_ink_constant() {
         let svg = SvgRenderer {}.render(&[]);
 
-        assert!(svg.contains(&format!("svg {{ --ink: {} }}", rgb(INK))));
+        assert!(svg.contains(&format!(
+            "svg {{ --ink: {}; --bg: rgb(255,255,255) }}",
+            rgb(INK)
+        )));
     }
 
     #[test]
-    fn the_style_dark_override_uses_a_media_query_with_white_ink() {
+    fn the_style_dark_override_uses_a_media_query_with_white_ink_and_black_bg() {
         let svg = SvgRenderer {}.render(&[]);
 
-        assert!(svg.contains(
-            "@media (prefers-color-scheme: dark) { svg { --ink: rgb(255,255,255) } }"
-        ));
+        assert!(svg.contains(&format!(
+            "@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: {} }} }}",
+            rgb(INK)
+        )));
     }
 
     #[test]
