@@ -6,11 +6,18 @@ pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
+#[allow(dead_code)]
+pub(crate) struct KeyBinding<C> {
+    pub(crate) keys: &'static [&'static str],
+    pub(crate) command: C,
+    pub(crate) description: &'static str,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Node {
     pub(crate) label: String,
     pub(crate) colour: Option<u8>,
-    pub(crate) fill: Option<u8>,
+    pub(crate) filled: bool,
     pub(crate) rounded: bool,
     pub(crate) children: Vec<Node>,
 }
@@ -20,7 +27,7 @@ impl Default for Node {
         Node {
             label: String::new(),
             colour: None,
-            fill: None,
+            filled: false,
             rounded: false,
             children: Vec::new(),
         }
@@ -55,6 +62,7 @@ pub(crate) struct State {
     pub(crate) running: bool,
     pub(crate) save_to: Option<String>,
     pub(crate) new_file: bool,
+    pub(crate) pending_count: Option<usize>,
 }
 
 impl Default for State {
@@ -66,6 +74,7 @@ impl Default for State {
             running: true,
             save_to: None,
             new_file: false,
+            pending_count: None,
         }
     }
 }
@@ -112,27 +121,50 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
-pub(crate) fn fill_row(boxes: &mut Vec<Node>, path: &Path) {
-    let siblings = children_at(boxes, &path.ancestors);
-    let first_fill = siblings[0].fill;
-    let uniform = siblings.iter().all(|b| b.fill == first_fill);
-    let new_fill = if uniform { next_colour(first_fill) } else { Some(0) };
-    for sibling in siblings.iter_mut() {
-        sibling.fill = new_fill;
-    }
-}
-
 pub(crate) fn grow(siblings: &mut Vec<Node>) -> usize {
     siblings.push(Node { label: PAD.to_string(), ..Default::default() });
     siblings.len() - 1
 }
 
-pub(crate) fn handle_key(state: State, key: &str) -> State {
+pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
+    state.doc.selected = match selected {
+        Some(mut path) => {
+            let index = grow(&mut at(&mut state.doc.boxes, &path).children);
+            path.ancestors.push(path.index);
+            Some(Path { ancestors: path.ancestors, index })
+        }
+        None => {
+            let index = grow(&mut state.doc.boxes);
+            Some(Path { ancestors: Vec::new(), index })
+        }
+    };
+    state.mode = Mode::Insert;
+    state
+}
+
+pub(crate) fn handle_key(mut state: State, key: &str) -> State {
     match &state.mode {
-        Mode::Command => match command_mode::parse(key) {
-            Some(command) => command_mode::reduce(state, command),
-            None => state,
-        },
+        Mode::Command => {
+            if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
+                let digit = key.as_bytes()[0] - b'0';
+                state.pending_count = Some(
+                    state
+                        .pending_count
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit as usize),
+                );
+                state
+            } else {
+                match command_mode::parse(key) {
+                    Some(command) => command_mode::reduce(state, command),
+                    None => {
+                        state.pending_count = None;
+                        state
+                    }
+                }
+            }
+        }
         Mode::Insert => match insert_mode::parse(key) {
             Some(command) => insert_mode::reduce(state, command),
             None => state,
@@ -145,8 +177,8 @@ pub(crate) fn handle_key(state: State, key: &str) -> State {
 }
 
 #[cfg(test)]
-pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>, save_to: Option<String>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to, new_file: false }
+pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
+    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
 }
 
 #[cfg(test)]
@@ -173,7 +205,7 @@ mod tests {
 
     #[test]
     fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().fill, None);
+        assert_eq!(Node::default().filled, false);
     }
 
     #[test]
@@ -277,6 +309,24 @@ mod tests {
     }
 
     #[test]
+    fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = add_child_box(state, None);
+        assert_eq!(result.doc.boxes, vec![node(PAD)]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn add_child_box_with_a_selection_grows_a_child_and_descends_the_path() {
+        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let result = add_child_box(state, Some(Path { ancestors: vec![], index: 0 }));
+        assert_eq!(result.doc.boxes, vec![node_with_children("a", vec![node(PAD)])]);
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![0], index: 0 }));
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
     fn next_colour_cycles_through_the_palette_and_back_to_plain() {
         let mut colour = None;
         for _ in 0..PALETTE_SIZE {
@@ -314,61 +364,73 @@ mod tests {
     }
 
     #[test]
-    fn fill_row_advances_uniformly_filled_siblings() {
-        let mut boxes = vec![node("a"), node("b")];
-        boxes[0].fill = next_colour(None);
-        boxes[1].fill = next_colour(None);
-        fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
-        let mut expected_a = node("a");
-        expected_a.fill = next_colour(next_colour(None));
-        let mut expected_b = node("b");
-        expected_b.fill = next_colour(next_colour(None));
-        assert_eq!(boxes, vec![expected_a, expected_b]);
-    }
-
-    #[test]
-    fn fill_row_sets_mixed_siblings_to_the_first_palette_colour() {
-        let mut a = node("a");
-        a.fill = Some(0);
-        let mut b = node("b");
-        b.fill = Some(1);
-        let mut boxes = vec![a, b];
-        let mut expected_a = node("a");
-        expected_a.fill = Some(0);
-        let mut expected_b = node("b");
-        expected_b.fill = Some(0);
-        fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
-        assert_eq!(boxes, vec![expected_a, expected_b]);
-    }
-
-    #[test]
-    fn fill_row_wraps_back_to_no_fill_after_a_full_cycle() {
-        let mut boxes = vec![node("a"), node("b")];
-        for _ in 0..=PALETTE_SIZE {
-            fill_row(&mut boxes, &Path { ancestors: vec![], index: 0 });
-        }
-        assert_eq!(boxes, vec![node("a"), node("b")]);
-    }
-
-    #[test]
     fn state_starts_running() {
-        let state = new_state(vec![], Mode::Command, None, None);
+        let state = new_state(vec![], Mode::Command, None);
         assert!(state.running);
     }
 
     #[test]
     fn state_starts_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None, None);
+        let state = new_state(vec![], Mode::Command, None);
         assert_eq!(state.mode, Mode::Command);
     }
 
     #[test]
     fn unknown_key_returns_the_state_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, None, None);
+        let state = new_state(vec![node("a")], Mode::Command, None);
         let result = handle_key(state.clone(), "x");
         assert_eq!(result.doc.boxes, state.doc.boxes);
         assert_eq!(result.doc.selected, state.doc.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
+    }
+
+    #[test]
+    fn a_bare_digit_in_command_mode_leaves_the_document_unchanged() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 1 }));
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            let result = handle_key(state.clone(), key);
+            assert_eq!(result.doc.boxes, boxes);
+            assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+        }
+    }
+
+    #[test]
+    fn digits_and_count_prefixed_movement_leave_mode_and_running_unchanged() {
+        let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            let result = handle_key(state.clone(), key);
+            assert_eq!(result.mode, Mode::Command);
+            assert_eq!(result.running, state.running);
+        }
+        let result = handle_key(handle_key(handle_key(state.clone(), "3"), "2"), "j");
+        assert_eq!(result.mode, Mode::Command);
+        assert_eq!(result.running, state.running);
+    }
+
+    #[test]
+    fn digits_accumulate_across_keystrokes() {
+        let boxes: Vec<Node> = (0..40).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = handle_key(state, "3");
+        let result = handle_key(state, "2");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+        let result = handle_key(result, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 32 }));
+    }
+
+    #[test]
+    fn repeated_digits_saturate_without_panic() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes, Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let mut state = state;
+        for _ in 0..20 {
+            state = handle_key(state, "9");
+        }
+        let state = handle_key(state, "x");
+        let result = handle_key(state, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
     }
 }

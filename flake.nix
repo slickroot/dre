@@ -24,10 +24,6 @@
           buildInputs = [
             rustToolchain
           ];
-
-          shellHook = ''
-            export CARGO_TARGET_DIR=$HOME/.cache/dre-cargo-target
-          '';
         };
       });
 }

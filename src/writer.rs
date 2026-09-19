@@ -10,8 +10,7 @@ use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
-use crate::layout::{layout, with_cursor};
-use crate::render::{TerminalRenderer, CURSOR};
+use crate::render::{Renderer, TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
 use crate::KittyGraphics;
 
@@ -19,7 +18,6 @@ const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
-const HOME_CURSOR: &str = "\x1b[H";
 const INTERRUPT: &str = "\x03";
 const KITTY_GRAPHICS_QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
 const NOT_SUPPORTED_MESSAGE: &str =
@@ -99,12 +97,6 @@ fn cell_size() -> io::Result<(i64, i64)> {
     Ok(((xpixel / cols).round() as i64, (ypixel / rows).round() as i64))
 }
 
-fn paint<W: Write>(stream: &mut W, lines: &[String]) -> io::Result<()> {
-    stream.write_all(HOME_CURSOR.as_bytes())?;
-    stream.write_all(lines.join("\r\n").as_bytes())?;
-    stream.flush()
-}
-
 fn frame<W: Write>(
     state: &State,
     renderer: &mut TerminalRenderer,
@@ -112,14 +104,12 @@ fn frame<W: Write>(
     cols: i64,
     rows: i64,
 ) -> io::Result<()> {
-    let selected = state.doc.selected.clone();
-    let placements = with_cursor(layout(&state.doc.boxes, cols, rows), selected);
-    let mut lines = renderer.render(&placements, cols, rows);
+    renderer.resize(cols, rows);
+    renderer.render(&state.doc, stream)?;
     if let Mode::SavePrompt { filename } = &state.mode {
-        let last = lines.len() - 1;
-        lines[last] = prompt_line(filename, cols);
+        write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
     }
-    paint(stream, &lines)
+    stream.flush()
 }
 
 fn prompt_line(filename: &str, cols: i64) -> String {
@@ -181,8 +171,8 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     Ok(state)
 }
 
-pub fn write() -> io::Result<ExitCode> {
-    let state = load_state(std::env::args().nth(1))?;
+pub fn write(file: Option<String>) -> io::Result<ExitCode> {
+    let state = load_state(file)?;
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
     let supported = supports_kitty_graphics(&mut stdout, stdin_fd)?;
@@ -198,31 +188,12 @@ pub fn write() -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::HOME_CURSOR;
     use crate::state::new_state;
     use std::io::Cursor;
 
     fn written(buffer: &Cursor<Vec<u8>>) -> String {
         String::from_utf8(buffer.get_ref().clone()).expect("test output is always ASCII")
-    }
-
-    #[test]
-    fn the_cursor_goes_home_before_the_lines() {
-        let mut stream = Cursor::new(Vec::new());
-        paint(&mut stream, &["ab".to_string(), "cd".to_string()]).unwrap();
-        assert_eq!(written(&stream), format!("{HOME_CURSOR}ab\r\ncd"));
-    }
-
-    #[test]
-    fn no_newline_follows_the_last_line() {
-        let mut stream = Cursor::new(Vec::new());
-        paint(&mut stream, &["ab".to_string(), "cd".to_string()]).unwrap();
-        assert!(!written(&stream).ends_with('\n'));
-    }
-
-    #[test]
-    fn the_stream_is_flushed() {
-        let mut stream = Cursor::new(Vec::new());
-        assert!(paint(&mut stream, &["ab".to_string()]).is_ok());
     }
 
     #[test]
@@ -262,20 +233,18 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_replaces_the_last_row_in_save_prompt_mode() {
-        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None, None);
+    fn the_prompt_is_drawn_on_the_last_row_after_the_frame_in_save_prompt_mode() {
+        let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
-        assert_eq!(
-            written(&stream),
-            format!("{HOME_CURSOR}{}\r\n{}", " ".repeat(11), prompt_line("a", 11))
-        );
+        let (cols, rows) = (11, 2);
+        frame(&state, &mut renderer, &mut stream, cols, rows).unwrap();
+        assert!(written(&stream).ends_with(&format!("\x1b[{rows};1H{}", prompt_line("a", cols))));
     }
 
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None, None);
+        let state = new_state(vec![], Mode::Command, None);
         let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();

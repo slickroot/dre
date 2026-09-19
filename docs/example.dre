@@ -1,0 +1,12 @@
+<dre>
+  <box label="API gateway" colour="2" fill="1" rounded="true">
+    <box label="Auth" colour="1" fill="1"/>
+    <box label="Orders" colour="1" fill="1">
+      <box label="Postgres" colour="4" fill="1">
+        <box label="Replica" colour="4" fill="1"/>
+        <box label="Archive" colour="4" fill="1"/>
+      </box>
+    </box>
+    <box label="Payments" colour="1" fill="1"/>
+  </box>
+</dre>

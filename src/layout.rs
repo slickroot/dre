@@ -184,36 +184,22 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) fn layout<'a>(nodes: &'a [Node], cols: i64, rows: i64) -> Vec<Placement<'a>> {
+pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
     if nodes.is_empty() {
         return Vec::new();
     }
 
     let widths = measure_columns(nodes);
-    let span: i64 = widths.iter().sum();
-    let left = (cols - span).div_euclid(2);
 
     let mut offsets = Vec::with_capacity(widths.len() + 1);
-    let mut offset = left;
+    let mut offset = 0;
     for w in &widths {
         offsets.push(offset);
         offset += w;
     }
     offsets.push(offset);
 
-    let mut placements = place(nodes, &offsets);
-
-    let max_row_y = placements
-        .iter()
-        .filter(|placement| matches!(placement.node, PlacementNode::Node(_)))
-        .map(|placement| placement.y)
-        .max()
-        .unwrap_or(0);
-    let total_height = max_row_y + BOX_HEIGHT;
-    let top = (rows - total_height).div_euclid(2);
-    for placement in &mut placements {
-        placement.y += top;
-    }
+    let placements = place(nodes, &offsets);
 
     let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
@@ -456,13 +442,23 @@ mod tests {
 
     #[test]
     fn layout_of_no_boxes_is_empty() {
-        assert_eq!(layout(&[], 80, 24), vec![]);
+        assert_eq!(layout(&[]), vec![]);
+    }
+
+    #[test]
+    fn layout_of_a_single_leaf_box_starts_at_the_origin() {
+        let nodes = vec![node("hi")];
+        let placements = layout(&nodes);
+        let box_placement = placements[0].clone();
+        assert!(matches!(box_placement.node, PlacementNode::Node(_)));
+        assert_eq!(box_placement.x, 0);
+        assert_eq!(box_placement.y, 0);
     }
 
     #[test]
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
         let nodes = vec![node("hi")];
-        let placements = layout(&nodes, 80, 24);
+        let placements = layout(&nodes);
         assert!(placements.iter().all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Node(_))));
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Label(_))));
@@ -471,14 +467,14 @@ mod tests {
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
-        let placements = layout(&boxes, 80, 24);
+        let placements = layout(&boxes);
         assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Arrow(_))));
     }
 
     #[test]
     fn layout_draws_boxes_before_labels_and_arrows() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
-        let placements = layout(&boxes, 80, 24);
+        let placements = layout(&boxes);
 
         let first_non_box = placements
             .iter()
@@ -492,7 +488,7 @@ mod tests {
     #[test]
     fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
         let nodes = vec![node("hi")];
-        let placements = layout(&nodes, 80, 24);
+        let placements = layout(&nodes);
         let label = placements
             .iter()
             .find(|p| matches!(p.node, PlacementNode::Label(_)))
@@ -510,7 +506,7 @@ mod tests {
     #[test]
     fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
         let nodes = vec![node("hi")];
-        let placements = layout(&nodes, 80, 24);
+        let placements = layout(&nodes);
         let result = with_cursor(placements.clone(), Some(Path { ancestors: vec![], index: 99 }));
         assert_eq!(result, placements);
     }
