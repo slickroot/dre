@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crate::layout::{layout, PlacementNode};
 use crate::render::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
-use crate::state::Document;
+use crate::diagram::Document;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -203,8 +203,7 @@ mod tests {
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::diagram::{node, node_with_children, palette, Node, Path};
-    use crate::state::Document;
+    use crate::diagram::{node, node_with_children, palette, Document, Node, Path};
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node { label: label.to_string(), colour, filled, rounded, children: vec![] }

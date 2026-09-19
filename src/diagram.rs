@@ -25,6 +25,12 @@ pub(crate) struct Path {
     pub(crate) index: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Default)]
+pub(crate) struct Document {
+    pub(crate) boxes: Vec<Node>,
+    pub(crate) selected: Option<Path>,
+}
+
 pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
     let mut children = boxes;
     for &index in ancestors {

@@ -1,5 +1,5 @@
 use crate::command_mode;
-use crate::diagram::{append, at, children_at, palette, Node, Path};
+use crate::diagram::{append, at, children_at, palette, Document, Node, Path};
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
@@ -19,12 +19,6 @@ pub(crate) enum Mode {
     Command,
     Insert,
     SavePrompt { filename: String },
-}
-
-#[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct Document {
-    pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Option<Path>,
 }
 
 #[derive(Clone)]

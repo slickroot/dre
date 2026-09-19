@@ -1,8 +1,7 @@
 use std::io::{self, Write};
 
-use crate::diagram::palette;
+use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
-use crate::state::Document;
 
 pub(crate) trait Renderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
