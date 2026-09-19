@@ -1,6 +1,6 @@
 **dre** is a keyboard-driven diagram editor that runs in your terminal.
 Build a tree of boxes with a few keystrokes, style them, and save it to a
-`.dre` file.
+`.dre` file — or export it to a crisp SVG.
 
 ## Requirements
 
@@ -26,6 +26,39 @@ mode.
 To quit, press `q`. With a filename, `q` saves to that file and quits. Without
 a filename, `q` asks "Save as:" — pre-filled with `diagram.dre` — and `Enter`
 saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
+
+## Example
+
+`docs/example.dre` shows off rounded corners, border colours, translucent
+fills, and arrows:
+
+```xml
+<dre>
+  <box label="API gateway" colour="2" fill="1" rounded="true">
+    <box label="Auth" colour="1" fill="1"/>
+    <box label="Orders" colour="1" fill="1">
+      <box label="Postgres" colour="4" fill="1">
+        <box label="Replica" colour="4" fill="1"/>
+        <box label="Archive" colour="4" fill="1"/>
+      </box>
+    </box>
+    <box label="Payments" colour="1" fill="1"/>
+  </box>
+</dre>
+```
+
+Each colour names a layer — pink the edge, orange the services, blue the
+data — and the rounded corners mark the single entry point.
+
+`dre --svg docs/example.dre` renders it as `docs/example.svg`:
+
+![The example diagram rendered by dre](docs/example.svg)
+
+## Export to SVG
+
+`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
+exits — a crisp, vector copy with the same boxes, labels, colours, fills,
+rounded corners, and arrows, but no cursor or selection.
 
 ## Command mode
 
@@ -71,3 +104,26 @@ Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
 removes a character from the filename.
 
 `Ctrl-C` quits without saving.
+
+## How dre is built
+
+An arrow means the box on its left feeds the box on its right. The figure is
+itself a dre diagram — `docs/architecture.dre`:
+
+```xml
+<dre>
+  <box label="state" rounded="true">
+    <box label="layout">
+      <box label="tui" colour="3"/>
+      <box label="svg" colour="3"/>
+    </box>
+  </box>
+</dre>
+```
+
+`state` holds the tree of boxes and is where everything starts. `layout` turns
+that tree into placements, and two renderers draw the same placements in their
+own way: `tui` (`src/render.rs`) paints sprites in the editor, and `svg`
+(`src/svg.rs`) writes `<rect>`s and `<text>`s. Purple marks the renderers.
+
+![The architecture of dre rendered by dre](docs/architecture.svg)
