@@ -1,11 +1,11 @@
-use std::fs;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
-use crate::layout;
+use crate::render::Renderer;
 use crate::svg::SvgRenderer;
 
 #[derive(Debug, PartialEq)]
@@ -41,10 +41,8 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{input}: not a valid diagram"))
     })?;
-    let boxes = file_document::to_state(doc).doc.boxes;
-    let placements = layout::layout(&boxes);
-    let output = output_path(&input);
-    fs::write(output, SvgRenderer {}.render(&placements))?;
+    let doc = file_document::to_state(doc).doc;
+    SvgRenderer {}.render(&doc, &mut File::create(output_path(&input))?)?;
     Ok(ExitCode::SUCCESS)
 }
 
