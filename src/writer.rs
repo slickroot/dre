@@ -6,12 +6,10 @@ use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
-use crate::diagram::{Node, Path};
 use crate::dre_format;
 use crate::file_document;
 use crate::kitty;
-use crate::layout;
-use crate::render::{Renderer, TerminalRenderer};
+use crate::render::{Renderer, TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
@@ -22,7 +20,6 @@ const INTERRUPT: &str = "\x03";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
 const CLEAR_LINE: &str = "\r\x1b[K";
-const CURSOR: char = '\u{2588}';
 
 nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
 
@@ -76,22 +73,10 @@ fn frame<W: Write>(
 ) -> io::Result<()> {
     renderer.resize(cols, rows);
     renderer.render(&state.doc, stream)?;
-    if let Some(selected) = &state.doc.selected {
-        draw_cursor(&state.doc.boxes, selected, cols, rows, stream)?;
-    }
     if let Mode::SavePrompt { filename } = &state.mode {
         write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
     }
     stream.flush()
-}
-
-fn draw_cursor(boxes: &[Node], selected: &Path, cols: i64, rows: i64, out: &mut impl Write) -> io::Result<()> {
-    let placements = layout::layout(boxes);
-    let (left, top) = layout::centre(&placements, cols, rows);
-    if let Some((x, y)) = layout::label_end(&placements, selected) {
-        write!(out, "\x1b[{};{}H{CURSOR}", top + y + 1, left + x + 1)?;
-    }
-    Ok(())
 }
 
 fn prompt_line(filename: &str, cols: i64) -> String {
@@ -197,51 +182,6 @@ mod tests {
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
         assert!(written(&stream).starts_with(HOME_CURSOR));
-    }
-
-    fn selected_first() -> Path {
-        Path { ancestors: vec![], index: 0 }
-    }
-
-    fn cursor_at(boxes: &[Node], selected: &Path, cols: i64, rows: i64) -> String {
-        let placements = layout::layout(boxes);
-        let (left, top) = layout::centre(&placements, cols, rows);
-        let (x, y) = layout::label_end(&placements, selected).unwrap();
-        format!("\x1b[{};{}H{CURSOR}", top + y + 1, left + x + 1)
-    }
-
-    #[test]
-    fn the_cursor_is_drawn_at_the_end_of_the_selected_label() {
-        let boxes = vec![crate::diagram::node_with_children("parent", vec![crate::diagram::node("hi")])];
-        let selected = Path { ancestors: vec![0], index: 0 };
-        let mut out = Cursor::new(Vec::new());
-        draw_cursor(&boxes, &selected, 40, 10, &mut out).unwrap();
-        assert_eq!(written(&out), cursor_at(&boxes, &selected, 40, 10));
-    }
-
-    #[test]
-    fn no_cursor_is_drawn_without_a_selection() {
-        let state = new_state(vec![crate::diagram::node("hi")], Mode::Command, None);
-        let mut renderer = TerminalRenderer::new(1, 1);
-        let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 20, 10).unwrap();
-        assert!(!written(&stream).contains(CURSOR));
-    }
-
-    #[test]
-    fn the_frame_draws_the_cursor_after_the_rendered_diagram() {
-        let boxes = vec![crate::diagram::node("hi")];
-        let state = new_state(boxes.clone(), Mode::Command, Some(selected_first()));
-        let (cols, rows) = (20, 10);
-        let mut expected = Vec::new();
-        let mut reference = TerminalRenderer::new(1, 1);
-        reference.resize(cols, rows);
-        reference.render(&state.doc, &mut expected).unwrap();
-        let expected = String::from_utf8(expected).unwrap() + &cursor_at(&boxes, &selected_first(), cols, rows);
-        let mut renderer = TerminalRenderer::new(1, 1);
-        let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, cols, rows).unwrap();
-        assert_eq!(written(&stream), expected);
     }
 
     #[test]
