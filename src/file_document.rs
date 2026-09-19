@@ -1,5 +1,6 @@
 use crate::dre_format::{FileBox, FileDoc};
-use crate::state::{Document, Node, Path, State};
+use crate::diagram::{Node, Path};
+use crate::state::{Document, State};
 
 fn file_box(node: &Node) -> FileBox {
     FileBox {

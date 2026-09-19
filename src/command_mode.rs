@@ -1,6 +1,7 @@
+use crate::diagram::{append, at, children_at, Path};
 use crate::state::{
-    add_child_box, at, children_at, colour_row, grow, next_colour, snapshot, undo, KeyBinding, Mode,
-    Path, State, DEFAULT_FILENAME, PAD,
+    add_child_box, blank_box, colour_row, next_colour, snapshot, undo, KeyBinding, Mode, State,
+    DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,7 +152,7 @@ fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
 }
 
 fn new_sibling(mut state: State, path: Path) -> State {
-    let index = grow(children_at(&mut state.doc.boxes, &path.ancestors));
+    let index = append(children_at(&mut state.doc.boxes, &path.ancestors), blank_box());
     state.doc.selected = Some(Path { ancestors: path.ancestors, index });
     state.mode = Mode::Insert;
     state
@@ -312,15 +313,8 @@ pub(crate) fn format_keymap_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Node, PALETTE_SIZE};
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children, Node};
+    use crate::state::{handle_key, new_state, PALETTE_SIZE};
 
     const COMMANDS: [Command; 15] = [
         Command::Undo,

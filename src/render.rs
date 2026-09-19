@@ -679,6 +679,7 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagram::{node, node_with_children};
 
     fn ink() -> [u8; 4] {
         let (r, g, b) = colour(Some(1));
@@ -1084,19 +1085,11 @@ mod tests {
         }
     }
 
-    fn box_node(colour: Option<u8>, filled: bool, rounded: bool) -> crate::state::Node {
-        crate::state::Node { label: String::new(), colour, filled, rounded, children: vec![] }
+    fn box_node(colour: Option<u8>, filled: bool, rounded: bool) -> crate::diagram::Node {
+        crate::diagram::Node { label: String::new(), colour, filled, rounded, children: vec![] }
     }
 
-    fn node(label: &str) -> crate::state::Node {
-        crate::state::Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<crate::state::Node>) -> crate::state::Node {
-        crate::state::Node { label: label.to_string(), children, ..Default::default() }
-    }
-
-    fn box_placement(node: &crate::state::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
+    fn box_placement(node: &crate::diagram::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Node(node),
             x,
@@ -1188,7 +1181,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::state::Path { ancestors: vec![], index: 0 },
+                path: crate::diagram::Path { ancestors: vec![], index: 0 },
             }),
             x,
             y,
@@ -1335,7 +1328,7 @@ mod tests {
         let boxes = vec![node("hi")];
         let mut r = renderer(1, 1);
         r.resize(20, 10);
-        let selected = Document { boxes: boxes.clone(), selected: Some(crate::state::Path { ancestors: vec![], index: 0 }) };
+        let selected = Document { boxes: boxes.clone(), selected: Some(crate::diagram::Path { ancestors: vec![], index: 0 }) };
         assert!(rendered(&mut r, &selected).contains(CURSOR));
     }
 
@@ -1593,7 +1586,7 @@ mod tests {
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
 
-    fn box_outline(r: &TerminalRenderer, node: &crate::state::Node, width: i64, height: i64) -> Sprite {
+    fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
         r.outline_box(&placement, 0, 0, width, height)
     }

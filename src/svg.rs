@@ -143,7 +143,7 @@ fn arrow_paths(
     paths
 }
 
-fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> String {
+fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> String {
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
@@ -204,18 +204,11 @@ mod tests {
     use crate::render::OPAQUE;
     use crate::render::PALETTE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::state::{Document, Node, Path};
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children, Node, Path};
+    use crate::state::Document;
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node { label: label.to_string(), colour, filled, rounded, children: vec![] }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -439,7 +432,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::state::Path { ancestors: vec![], index: 0 },
+                path: crate::diagram::Path { ancestors: vec![], index: 0 },
             }),
             x,
             y,

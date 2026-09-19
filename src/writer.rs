@@ -242,7 +242,7 @@ mod tests {
         let state = state.unwrap();
         assert_eq!(state.doc.boxes.len(), 1);
         assert_eq!(state.doc.boxes[0].label, "API");
-        assert_eq!(state.doc.selected, Some(crate::state::Path { ancestors: vec![], index: 0 }));
+        assert_eq!(state.doc.selected, Some(crate::diagram::Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]
