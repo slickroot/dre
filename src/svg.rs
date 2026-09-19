@@ -85,9 +85,8 @@ fn marker_defs() -> String {
     let tip_x = box_width as f64;
     let tip_y = box_height as f64 / 2.0;
     let base_x = box_width as f64 - depth;
-    let (r, g, b) = INK;
     format!(
-        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
+        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
         ARROW_STROKE,
@@ -109,19 +108,18 @@ fn arrow_paths(
         .collect();
     let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
     let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
-    let (r, g, b) = INK;
     let mut paths = format!(
-        "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
         trunk_x + ARROW_JOIN_OVERLAP,
         ARROW_STROKE
     );
     paths.push_str(&format!(
-        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
         ARROW_STROKE
     ));
     for row in stop_rows {
         paths.push_str(&format!(
-            "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             trunk_x - ARROW_JOIN_OVERLAP,
             ARROW_STROKE
         ));
@@ -133,12 +131,15 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
-    let (r, g, b) = match node.colour {
-        None => INK,
-        Some(_) => colour(node.colour),
+    let stroke = match node.colour {
+        None => "var(--ink)".to_string(),
+        Some(_) => {
+            let (r, g, b) = colour(node.colour);
+            format!("rgb({r},{g},{b})")
+        }
     };
     let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT,
         placement.width * CELL_WIDTH,
@@ -163,10 +164,9 @@ fn label_text(
     placement: &crate::layout::Placement,
     label: &crate::layout::Label,
 ) -> String {
-    let (r, g, b) = INK;
     let chars = label.text.chars().count() as i64;
     format!(
-        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
@@ -230,13 +230,12 @@ mod tests {
         );
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
         assert!(svg.contains(&format!(
-            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             box_width * CELL_WIDTH,
             BOX_HEIGHT * CELL_HEIGHT,
-            rgb(INK),
             BORDER / 2,
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains("stroke=\"var(--ink)\""));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
@@ -322,7 +321,7 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        let ink_stroke = format!("stroke=\"{}\"", rgb(INK));
+        let ink_stroke = "stroke=\"var(--ink)\"".to_string();
         let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
 
         let rects: Vec<&str> = svg
@@ -372,9 +371,8 @@ mod tests {
 
         let svg = SvgRenderer {}.render(&placements);
 
-        let (r, g, b) = INK;
         assert!(svg.contains(&format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
             2 * CELL_WIDTH,
@@ -465,7 +463,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
-        let ink = rgb(INK);
+        let ink = "var(--ink)";
 
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
@@ -514,7 +512,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
-        let ink = rgb(INK);
+        let ink = "var(--ink)";
 
         assert!(svg.contains(&format!(
             "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
@@ -559,7 +557,7 @@ mod tests {
             tip_y - arm,
             tip_y + arm
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains("stroke=\"var(--ink)\""));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE)));
         assert!(svg.contains("fill=\"none\""));
         let marker = svg
@@ -659,9 +657,8 @@ mod tests {
         let tip_x = box_width as f64;
         let tip_y = box_height as f64 / 2.0;
         let base_x = box_width as f64 - depth;
-        let (r, g, b) = INK;
         format!(
-            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
+            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
             ARROW_STROKE
@@ -679,12 +676,12 @@ mod tests {
     ) -> String {
         use std::fmt::Write as _;
 
-        let (r, g, b) = match colour_index {
-            None => INK,
-            Some(_) => colour(colour_index),
+        let stroke = match colour_index {
+            None => "var(--ink)".to_string(),
+            Some(_) => rgb(colour(colour_index)),
         };
         let mut rect = format!(
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
             x * CELL_WIDTH,
             y * CELL_HEIGHT,
             width * CELL_WIDTH,
@@ -711,9 +708,8 @@ mod tests {
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
-        let (r, g, b) = INK;
         format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
@@ -731,19 +727,18 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("an arrow has stops");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
-        let (r, g, b) = INK;
         let mut paths = format!(
-            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             trunk_x + ARROW_JOIN_OVERLAP,
             ARROW_STROKE
         );
         paths.push_str(&format!(
-            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             ARROW_STROKE
         ));
         for row in stop_rows {
             paths.push_str(&format!(
-                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
                 trunk_x - ARROW_JOIN_OVERLAP,
                 ARROW_STROKE
             ));
