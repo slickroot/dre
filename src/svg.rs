@@ -16,6 +16,8 @@ impl SvgRenderer {
         let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{min_x} {min_y} {span_x} {span_y}\">"
         );
+        svg.push_str(&style_block());
+        svg.push_str(&background_rect(min_x, min_y, span_x, span_y));
         if placements.iter().any(|placement| matches!(placement.node, PlacementNode::Arrow(_))) {
             svg.push_str(&marker_defs());
         }
@@ -43,6 +45,19 @@ impl Renderer for SvgRenderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
         out.write_all(self.draw(&layout(&doc.boxes)).as_bytes())
     }
+}
+
+fn style_block() -> String {
+    let (r, g, b) = INK;
+    format!(
+        "<style>svg {{ --ink: rgb({r},{g},{b}); --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: rgb({r},{g},{b}) }} }}</style>"
+    )
+}
+
+fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+    format!(
+        "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+    )
 }
 
 fn escape(text: &str) -> String {
@@ -86,9 +101,8 @@ fn marker_defs() -> String {
     let tip_x = box_width as f64;
     let tip_y = box_height as f64 / 2.0;
     let base_x = box_width as f64 - depth;
-    let (r, g, b) = INK;
     format!(
-        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
+        "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
         ARROW_STROKE,
@@ -110,19 +124,18 @@ fn arrow_paths(
         .collect();
     let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
     let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
-    let (r, g, b) = INK;
     let mut paths = format!(
-        "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
         trunk_x + ARROW_JOIN_OVERLAP,
         ARROW_STROKE
     );
     paths.push_str(&format!(
-        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
         ARROW_STROKE
     ));
     for row in stop_rows {
         paths.push_str(&format!(
-            "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             trunk_x - ARROW_JOIN_OVERLAP,
             ARROW_STROKE
         ));
@@ -134,12 +147,15 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
-    let (r, g, b) = match node.colour {
-        None => INK,
-        Some(_) => colour(node.colour),
+    let stroke = match node.colour {
+        None => "var(--ink)".to_string(),
+        Some(_) => {
+            let (r, g, b) = colour(node.colour);
+            format!("rgb({r},{g},{b})")
+        }
     };
     let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT,
         placement.width * CELL_WIDTH,
@@ -164,10 +180,9 @@ fn label_text(
     placement: &crate::layout::Placement,
     label: &crate::layout::Label,
 ) -> String {
-    let (r, g, b) = INK;
     let chars = label.text.chars().count() as i64;
     format!(
-        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
@@ -231,20 +246,19 @@ mod tests {
         );
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
         assert!(svg.contains(&format!(
-            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             box_width * CELL_WIDTH,
             BOX_HEIGHT * CELL_HEIGHT,
-            rgb(INK),
             BORDER / 2,
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains("stroke=\"var(--ink)\""));
         assert!(!svg.contains("rx"));
         let rect = svg
             .split("</svg>")
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .find(|element| element.starts_with("rect "))
+            .find(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .expect("a plain leaf box renders a rect");
         assert!(rect.contains("fill=\"none\""));
     }
@@ -274,7 +288,86 @@ mod tests {
             2 * CELL_HEIGHT,
         );
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
-        assert!(!svg.contains("<rect"));
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let rects: Vec<&str> =
+            body.split('<').filter(|element| element.starts_with("rect ")).collect();
+        assert_eq!(rects.len(), 1, "only the background rect is drawn on an empty document");
+        assert!(rects[0].contains("fill=\"var(--bg)\""), "the rect is the background rect");
+        assert!(!svg.contains("stroke="), "no boxes means no strokes");
+    }
+
+    #[test]
+    fn every_document_paints_a_single_background_rect_filling_the_view_box() {
+        let svg = SvgRenderer {}.draw(&[]);
+
+        let (min_x, min_y, span_x, span_y) = super::view_box(&[]);
+        let background = format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+        );
+        let style_end = svg.find("</style>").expect("every document has a style block")
+            + "</style>".len();
+        assert_eq!(
+            svg.find(&background).expect("the background rect is emitted"),
+            style_end,
+            "the background rect immediately follows the style block"
+        );
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let rects: Vec<&str> =
+            body.split('<').filter(|element| element.starts_with("rect ")).collect();
+        assert_eq!(rects.len(), 1, "the background rect is the only rect");
+        assert!(rects[0].contains("fill=\"var(--bg)\""));
+        assert!(!rects[0].contains("stroke"));
+    }
+
+    #[test]
+    fn the_background_rect_is_painted_before_defs_boxes_and_labels() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![boxed("warn", Some(1), false, false), parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.draw(&placements);
+
+        let (min_x, min_y, span_x, span_y) = super::view_box(&placements);
+        let background = format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+        );
+        let background_pos =
+            svg.find(&background).expect("the background rect is emitted");
+        let style_end =
+            svg.find("</style>").expect("every document has a style block") + "</style>".len();
+        assert_eq!(background_pos, style_end);
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let mut rects: Vec<&str> = body
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
+        let background_rect =
+            rects.remove(0);
+        assert!(background_rect.contains("fill=\"var(--bg)\""));
+        assert!(!background_rect.contains("stroke="));
+        for rect in &rects {
+            assert!(rect.contains("stroke="), "each box rect is stroked and painted atop the background");
+        }
+
+        assert!(
+            background_pos < svg.find("<defs>").expect("arrows emit defs"),
+            "the background rect precedes defs"
+        );
+        assert!(
+            background_pos < svg.find("<text").expect("labels draw text"),
+            "the background rect precedes labels"
+        );
     }
 
     #[test]
@@ -294,7 +387,7 @@ mod tests {
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .filter(|element| element.starts_with("rect "))
+            .filter(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .collect();
 
         assert_eq!(rects.len(), 4);
@@ -323,7 +416,7 @@ mod tests {
 
         let svg = SvgRenderer {}.draw(&placements);
 
-        let ink_stroke = format!("stroke=\"{}\"", rgb(INK));
+        let ink_stroke = "stroke=\"var(--ink)\"".to_string();
         let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
 
         let rects: Vec<&str> = svg
@@ -331,7 +424,7 @@ mod tests {
             .next()
             .expect("the document closes the svg tag")
             .split('<')
-            .filter(|element| element.starts_with("rect "))
+            .filter(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .collect();
 
         assert!(rects.iter().all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
@@ -373,9 +466,8 @@ mod tests {
 
         let svg = SvgRenderer {}.draw(&placements);
 
-        let (r, g, b) = INK;
         assert!(svg.contains(&format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
             2 * CELL_WIDTH,
@@ -433,7 +525,14 @@ mod tests {
         let svg = SvgRenderer {}.draw(&placements);
 
         let defs = svg.find("<defs>").expect("arrows emit a defs block");
-        let rect = svg.find("<rect").expect("the parent box draws a rect");
+        let box_rect = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .find(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
+            .expect("the parent box draws a rect");
+        let rect = svg.find(box_rect).expect("the box rect is emitted");
         let arm = svg
             .find("marker-end=\"url(#arrowhead)\"")
             .expect("each stop arm references the arrowhead");
@@ -466,7 +565,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
-        let ink = rgb(INK);
+        let ink = "var(--ink)";
 
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
@@ -515,7 +614,7 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
-        let ink = rgb(INK);
+        let ink = "var(--ink)";
 
         assert!(svg.contains(&format!(
             "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
@@ -560,7 +659,7 @@ mod tests {
             tip_y - arm,
             tip_y + arm
         )));
-        assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
+        assert!(svg.contains("stroke=\"var(--ink)\""));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE)));
         assert!(svg.contains("fill=\"none\""));
         let marker = svg
@@ -585,6 +684,83 @@ mod tests {
         assert!(!svg.contains("arrowhead"));
     }
 
+    fn expected_style() -> String {
+        format!(
+            "<style>svg {{ --ink: {}; --bg: rgb(255,255,255) }}@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: {} }} }}</style>",
+            rgb(INK),
+            rgb(INK)
+        )
+    }
+
+    fn expected_background(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+        format!(
+            "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+        )
+    }
+
+    #[test]
+    fn the_style_block_follows_the_svg_tag_on_every_document() {
+        let svg = SvgRenderer {}.draw(&[]);
+
+        let opening = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">",
+            view_box(
+                -CELL_HEIGHT,
+                -CELL_HEIGHT,
+                2 * CELL_HEIGHT,
+                2 * CELL_HEIGHT,
+            )
+        );
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains("</style>"));
+        assert!(svg.starts_with(&format!("{opening}{}", expected_style())));
+    }
+
+    #[test]
+    fn the_style_light_default_is_built_from_the_ink_constant() {
+        let svg = SvgRenderer {}.draw(&[]);
+
+        assert!(svg.contains(&format!(
+            "svg {{ --ink: {}; --bg: rgb(255,255,255) }}",
+            rgb(INK)
+        )));
+    }
+
+    #[test]
+    fn the_style_dark_override_uses_a_media_query_with_white_ink_and_black_bg() {
+        let svg = SvgRenderer {}.draw(&[]);
+
+        assert!(svg.contains(&format!(
+            "@media (prefers-color-scheme: dark) {{ svg {{ --ink: rgb(255,255,255); --bg: {} }} }}",
+            rgb(INK)
+        )));
+    }
+
+    #[test]
+    fn the_style_block_precedes_defs_and_immediately_follows_the_svg_tag() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.draw(&placements);
+
+        let body = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag");
+        let elements: Vec<&str> = body.split('<').collect();
+        assert!(elements[1].starts_with("svg "), "the document opens with the svg tag");
+        assert!(
+            elements[2].starts_with("style>"),
+            "the style block immediately follows the opening svg tag"
+        );
+        let style = svg.find("<style>").expect("the document emits a style block");
+        let defs = svg.find("<defs>").expect("arrows emit a defs block");
+        let rect = svg.find("<rect").expect("a box draws a rect");
+        assert!(style < defs, "the style block precedes any defs");
+        assert!(style < rect, "the style block precedes the boxes");
+    }
+
     fn expected_marker() -> String {
         let depth = arrowhead_depth();
         let slope = arrowhead_slope();
@@ -594,9 +770,8 @@ mod tests {
         let tip_x = box_width as f64;
         let tip_y = box_height as f64 / 2.0;
         let base_x = box_width as f64 - depth;
-        let (r, g, b) = INK;
         format!(
-            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
+            "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
             ARROW_STROKE
@@ -614,12 +789,12 @@ mod tests {
     ) -> String {
         use std::fmt::Write as _;
 
-        let (r, g, b) = match colour_index {
-            None => INK,
-            Some(_) => colour(colour_index),
+        let stroke = match colour_index {
+            None => "var(--ink)".to_string(),
+            Some(_) => rgb(colour(colour_index)),
         };
         let mut rect = format!(
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
             x * CELL_WIDTH,
             y * CELL_HEIGHT,
             width * CELL_WIDTH,
@@ -646,9 +821,8 @@ mod tests {
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
-        let (r, g, b) = INK;
         format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{text}</text>",
+            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
@@ -666,19 +840,18 @@ mod tests {
             .collect();
         let trunk_top = *stop_rows.iter().min().expect("an arrow has stops");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
-        let (r, g, b) = INK;
         let mut paths = format!(
-            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             trunk_x + ARROW_JOIN_OVERLAP,
             ARROW_STROKE
         );
         paths.push_str(&format!(
-            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
             ARROW_STROKE
         ));
         for row in stop_rows {
             paths.push_str(&format!(
-                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
                 trunk_x - ARROW_JOIN_OVERLAP,
                 ARROW_STROKE
             ));
@@ -698,14 +871,17 @@ mod tests {
 
         let svg = SvgRenderer {}.draw(&placements);
 
+        let (min_x, min_y, span_x, span_y) = (
+            -CELL_HEIGHT,
+            -CELL_HEIGHT,
+            18 * CELL_WIDTH + 2 * CELL_HEIGHT,
+            33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
+        );
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
-            view_box(
-                -CELL_HEIGHT,
-                -CELL_HEIGHT,
-                18 * CELL_WIDTH + 2 * CELL_HEIGHT,
-                33 * CELL_HEIGHT + 2 * CELL_HEIGHT,
-            ),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}{}{}</svg>",
+            view_box(min_x, min_y, span_x, span_y),
+            expected_style(),
+            expected_background(min_x, min_y, span_x, span_y),
             expected_marker(),
             arrow_at(7, 19, 8, 6, &[0, 6, 12]),
             [
