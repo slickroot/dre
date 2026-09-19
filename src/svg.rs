@@ -1,8 +1,8 @@
 use crate::layout::PlacementNode;
-use crate::render::{
-    arrowhead_depth, arrowhead_slope, colour, ARROW_STROKE, CELL_HEIGHT, CELL_WIDTH,
-};
+use crate::render::{arrowhead_depth, arrowhead_slope, colour, CELL_HEIGHT, CELL_WIDTH};
 
+const ARROW_STROKE: i64 = 2;
+const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const INK: (u8, u8, u8) = (0, 0, 0);
 
 pub(crate) struct SvgRenderer {}
@@ -82,7 +82,7 @@ fn marker_defs() -> String {
         "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
-        ARROW_STROKE / 2,
+        ARROW_STROKE,
     )
 }
 
@@ -103,17 +103,19 @@ fn arrow_paths(
     let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
     let (r, g, b) = INK;
     let mut paths = format!(
-        "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-        ARROW_STROKE / 2
+        "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+        trunk_x + ARROW_JOIN_OVERLAP,
+        ARROW_STROKE
     );
     paths.push_str(&format!(
         "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-        ARROW_STROKE / 2
+        ARROW_STROKE
     ));
     for row in stop_rows {
         paths.push_str(&format!(
-            "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            trunk_x - ARROW_JOIN_OVERLAP,
+            ARROW_STROKE
         ));
     }
     paths
@@ -171,7 +173,6 @@ mod tests {
     use crate::render::arrowhead_depth;
     use crate::render::arrowhead_slope;
     use crate::render::colour;
-    use crate::render::ARROW_STROKE;
     use crate::render::BORDER;
     use crate::render::CELL_HEIGHT;
     use crate::render::CELL_WIDTH;
@@ -460,17 +461,67 @@ mod tests {
 
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
-            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+            trunk_x + ARROW_JOIN_OVERLAP,
+            ARROW_STROKE
         )));
         assert!(svg.contains(&format!(
             "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         )));
         for row in stop_rows {
             assert!(svg.contains(&format!(
-                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-                ARROW_STROKE / 2
+                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+                trunk_x - ARROW_JOIN_OVERLAP,
+                ARROW_STROKE
+            )));
+        }
+    }
+
+    #[test]
+    fn the_join_overlap_seams_each_horizontal_stroke_into_the_trunk_for_a_flush_elbow() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer {}.render(&placements);
+
+        let arrow_placement = placements
+            .iter()
+            .find(|placement| matches!(placement.node, PlacementNode::Arrow(_)))
+            .expect("a parent with children yields an arrow placement");
+        let arrow = match &arrow_placement.node {
+            PlacementNode::Arrow(arrow) => arrow,
+            _ => unreachable!("the arrow placement wraps an Arrow"),
+        };
+
+        let left = arrow_placement.x * CELL_WIDTH;
+        let right = arrow_placement.x * CELL_WIDTH + arrow_placement.width * CELL_WIDTH - 1;
+        let trunk_x = arrow_placement.x * CELL_WIDTH + (arrow_placement.width * CELL_WIDTH) / 2;
+        let shaft_row = (arrow_placement.y + arrow.shaft) * CELL_HEIGHT + CELL_HEIGHT / 2;
+        let stop_rows: Vec<i64> = arrow
+            .stops
+            .iter()
+            .map(|stop| (arrow_placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
+            .collect();
+        let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
+        let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
+        let ink = rgb(INK);
+
+        assert!(svg.contains(&format!(
+            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+            trunk_x + ARROW_JOIN_OVERLAP,
+            ARROW_STROKE
+        )));
+        assert!(svg.contains(&format!(
+            "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+            ARROW_STROKE
+        )));
+        for row in stop_rows {
+            assert!(svg.contains(&format!(
+                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
+                trunk_x - ARROW_JOIN_OVERLAP,
+                ARROW_STROKE
             )));
         }
     }
@@ -501,7 +552,7 @@ mod tests {
             tip_y + arm
         )));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
-        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE / 2)));
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE)));
         assert!(svg.contains("fill=\"none\""));
         let marker = svg
             .split("</defs>")
@@ -539,7 +590,7 @@ mod tests {
             "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
-            ARROW_STROKE / 2
+            ARROW_STROKE
         )
     }
 
@@ -608,17 +659,19 @@ mod tests {
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
         let (r, g, b) = INK;
         let mut paths = format!(
-            "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+            trunk_x + ARROW_JOIN_OVERLAP,
+            ARROW_STROKE
         );
         paths.push_str(&format!(
             "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         ));
         for row in stop_rows {
             paths.push_str(&format!(
-                "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-                ARROW_STROKE / 2
+                "<path d=\"M {} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
+                trunk_x - ARROW_JOIN_OVERLAP,
+                ARROW_STROKE
             ));
         }
         paths
