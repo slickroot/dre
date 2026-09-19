@@ -3,6 +3,9 @@ use std::io::{self, Write};
 use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
 
+mod svg;
+pub(crate) use svg::SvgRenderer;
+
 pub(crate) trait Renderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
 }
