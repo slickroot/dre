@@ -1,8 +1,13 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use nix::sys::select::{select, FdSet};
+use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
+use nix::sys::time::{TimeVal, TimeValLike};
+use nix::unistd::read;
 use std::fmt;
-use std::io::Write;
+use std::io::{self, Write};
+use std::os::fd::{BorrowedFd, RawFd};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Sprite {
@@ -34,8 +39,43 @@ pub(crate) fn show(sprite: &Sprite) -> Command {
     ))
 }
 
+pub(crate) fn supported<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<bool> {
+    let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
+    let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
+    stream.write_all(QUERY.as_bytes())?;
+    stream.flush()?;
+    let mut raw = saved.clone();
+    cfmakeraw(&mut raw);
+    tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+
+    let result = (|| -> io::Result<bool> {
+        let mut fds = FdSet::new();
+        fds.insert(borrowed);
+        let mut timeout = TimeVal::microseconds(REPLY_TIMEOUT_MICROS);
+        let ready = select(None, Some(&mut fds), None, None, Some(&mut timeout))
+            .map_err(io::Error::from)?;
+        let mut buffer = [0u8; 32];
+        let reply: Vec<u8> = if ready > 0 && fds.contains(borrowed) {
+            let count = read(borrowed, &mut buffer).map_err(io::Error::from)?;
+            buffer[..count].to_vec()
+        } else {
+            Vec::new()
+        };
+        Ok(is_supported(&reply))
+    })();
+
+    tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
+    result
+}
+
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
+const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
+const REPLY_TIMEOUT_MICROS: i64 = 500_000;
+
+fn is_supported(reply: &[u8]) -> bool {
+    reply.windows(3).any(|window| window == b"i=1")
+}
 
 fn zlib(pixels: &[u8]) -> Vec<u8> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -207,5 +247,20 @@ mod tests {
             show(&sprite).to_string(),
             format!("\x1b[6;4H{}", transmission(&sprite.pixels, sprite.width, sprite.height))
         );
+    }
+
+    #[test]
+    fn a_reply_containing_i_1_means_supported() {
+        assert!(is_supported(b"\x1b_Gi=1;OK\x1b\\"));
+    }
+
+    #[test]
+    fn an_empty_reply_means_not_supported() {
+        assert!(!is_supported(b""));
+    }
+
+    #[test]
+    fn an_unrelated_reply_means_not_supported() {
+        assert!(!is_supported(b"\x1b[?62;c"));
     }
 }

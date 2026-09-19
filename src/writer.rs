@@ -1,7 +1,5 @@
 use nix::libc;
-use nix::sys::select::{select, FdSet};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
-use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
 use std::fs;
 use std::io::{self, Write};
@@ -10,6 +8,7 @@ use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
+use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
 
@@ -18,10 +17,8 @@ const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
 const INTERRUPT: &str = "\x03";
-const KITTY_GRAPHICS_QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
-const KITTY_GRAPHICS_REPLY_TIMEOUT_MICROS: i64 = 500_000;
 const CLEAR_LINE: &str = "\r\x1b[K";
 
 nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
@@ -54,35 +51,6 @@ impl<'a, W: Write> Drop for RawModeGuard<'a, W> {
         let _ = self.stream.write_all(LEAVE_ALTERNATE_SCREEN.as_bytes());
         let _ = self.stream.flush();
     }
-}
-
-fn supports_kitty_graphics<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<bool> {
-    let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-    let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
-    stream.write_all(KITTY_GRAPHICS_QUERY.as_bytes())?;
-    stream.flush()?;
-    let mut raw = saved.clone();
-    cfmakeraw(&mut raw);
-    tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
-
-    let result = (|| -> io::Result<bool> {
-        let mut fds = FdSet::new();
-        fds.insert(borrowed);
-        let mut timeout = TimeVal::microseconds(KITTY_GRAPHICS_REPLY_TIMEOUT_MICROS);
-        let ready = select(None, Some(&mut fds), None, None, Some(&mut timeout))
-            .map_err(io::Error::from)?;
-        let mut buffer = [0u8; 32];
-        let reply: Vec<u8> = if ready > 0 && fds.contains(borrowed) {
-            let count = read(borrowed, &mut buffer).map_err(io::Error::from)?;
-            buffer[..count].to_vec()
-        } else {
-            Vec::new()
-        };
-        Ok(reply.windows(3).any(|window| window == b"i=1"))
-    })();
-
-    tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
-    result
 }
 
 fn cell_size() -> io::Result<(i64, i64)> {
@@ -174,7 +142,7 @@ pub fn write(file: Option<String>) -> io::Result<ExitCode> {
     let state = load_state(file)?;
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
-    let supported = supports_kitty_graphics(&mut stdout, stdin_fd)?;
+    let supported = kitty::supported(&mut stdout, stdin_fd)?;
     if !supported {
         let _ = stdout.write_all(CLEAR_LINE.as_bytes());
         println!("{NOT_SUPPORTED_MESSAGE}");
