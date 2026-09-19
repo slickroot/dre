@@ -1,56 +1,28 @@
 use std::io::{self, Write};
 
+use super::{
+    arrowhead_depth, arrowhead_slope, colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS,
+};
 use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
 
-pub(crate) trait Renderer {
-    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
-}
+const BLANK: char = ' ';
+const CURSOR: char = '\u{2588}';
+const HOME_CURSOR: &str = "\x1b[H";
 
-pub(crate) const BLANK: char = ' ';
-pub(crate) const CURSOR: char = '\u{2588}';
-pub(crate) const HOME_CURSOR: &str = "\x1b[H";
+const ARROW_STROKE: i64 = 4;
+const RESET: &str = "\x1b[0m";
 
-pub(crate) const ARROW_STROKE: i64 = 4;
-pub(crate) const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
-pub(crate) const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
-pub(crate) fn arrowhead_depth() -> f64 {
-    ARROWHEAD_EDGE_LENGTH * ARROWHEAD_ANGLE_DEG.to_radians().cos()
-}
-pub(crate) fn arrowhead_slope() -> f64 {
-    ARROWHEAD_ANGLE_DEG.to_radians().tan()
-}
-pub(crate) const RESET: &str = "\x1b[0m";
+const CACHE_LIMIT: usize = 512;
 
-#[allow(dead_code)]
-pub(crate) const CACHE_LIMIT: usize = 512;
+const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
-#[allow(dead_code)]
-pub(crate) const CELL_WIDTH: i64 = 8;
-#[allow(dead_code)]
-pub(crate) const CELL_HEIGHT: i64 = 16;
-
-pub(crate) const ROUNDED_RADIUS: i64 = 20;
-pub(crate) const BORDER: i64 = 4;
-
-pub(crate) const OPAQUE: u8 = 255;
-pub(crate) const FILL_ALPHA: u16 = 77;
-pub(crate) const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
-pub(crate) const PLAIN_COLOUR: (u8, u8, u8) = (128, 128, 128);
-
-pub(crate) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
+fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
 }
 
-pub(crate) fn colour(colour: Option<u8>) -> (u8, u8, u8) {
-    match colour {
-        None => PLAIN_COLOUR,
-        Some(i) => palette(i).unwrap(),
-    }
-}
-
-pub(crate) fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
+fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
     if !filled || colour.is_none() {
         TRANSPARENT
     } else {
@@ -61,7 +33,7 @@ pub(crate) fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) 
     }
 }
 
-pub(crate) fn cell(character: char, colour: Option<u8>, fill: Option<u8>) -> String {
+fn cell(character: char, colour: Option<u8>, fill: Option<u8>) -> String {
     let mut codes = Vec::new();
     if let Some(i) = colour {
         codes.push(30 + i as i64);
@@ -80,7 +52,7 @@ pub(crate) fn cell(character: char, colour: Option<u8>, fill: Option<u8>) -> Str
     format!("\x1b[{joined}m{character}{RESET}")
 }
 
-pub(crate) struct Canvas {
+struct Canvas {
     pub(crate) first_x: i64,
     pub(crate) last_x: i64,
     pub(crate) first_y: i64,
@@ -169,7 +141,7 @@ fn python_round(value: f64) -> f64 {
     }
 }
 
-pub(crate) fn body_row(
+fn body_row(
     width: i64,
     border: i64,
     edge: (u8, u8, u8, u8),
@@ -193,7 +165,7 @@ pub(crate) fn body_row(
     row
 }
 
-pub(crate) fn square_pixels(
+fn square_pixels(
     width: i64,
     height: i64,
     border: i64,
@@ -221,7 +193,7 @@ pub(crate) fn square_pixels(
     pixels
 }
 
-pub(crate) struct RoundedBox {
+struct RoundedBox {
     width: i64,
     height: i64,
     border: i64,
@@ -324,7 +296,7 @@ impl RoundedBox {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum SpriteKey {
+enum SpriteKey {
     Box {
         width: i64,
         height: i64,
@@ -348,7 +320,7 @@ pub(crate) enum SpriteKey {
     },
 }
 
-pub(crate) fn sprite_key(
+fn sprite_key(
     placement: &crate::layout::Placement,
     left: i64,
     top: i64,
@@ -382,12 +354,12 @@ pub(crate) fn sprite_key(
     }
 }
 
-pub(crate) const BLANK_CELL: (char, Option<u8>, Option<u8>) = (BLANK, None, None);
+const BLANK_CELL: (char, Option<u8>, Option<u8>) = (BLANK, None, None);
 
 pub(crate) struct TerminalRenderer {
     pub(crate) cell_width: i64,
     pub(crate) cell_height: i64,
-    pub(crate) cache: std::collections::HashMap<SpriteKey, Sprite>,
+    cache: std::collections::HashMap<SpriteKey, Sprite>,
     cols: i64,
     rows: i64,
 }
@@ -672,6 +644,7 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::PLAIN_COLOUR;
     use crate::diagram::{node, node_with_children};
 
     fn ink() -> [u8; 4] {
@@ -791,16 +764,6 @@ mod tests {
             assert_eq!(pixel(&canvas, 0, y), ink_pixel());
             assert_eq!(pixel(&canvas, 1, y), ink_pixel());
         }
-    }
-
-    #[test]
-    fn colour_of_plain_is_the_plain_grey() {
-        assert_eq!(colour(None), PLAIN_COLOUR);
-    }
-
-    #[test]
-    fn colour_of_a_palette_index_is_the_palette_entry() {
-        assert_eq!(colour(Some(2)), palette(2).unwrap());
     }
 
     #[test]

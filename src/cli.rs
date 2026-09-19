@@ -5,8 +5,7 @@ use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
-use crate::render::Renderer;
-use crate::svg::SvgRenderer;
+use crate::render::{Renderer, SvgRenderer};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Command {

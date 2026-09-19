@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::layout::{layout, PlacementNode};
-use crate::render::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
+use super::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
 use crate::diagram::Document;
 
 const ARROW_STROKE: i64 = 2;
@@ -144,7 +144,7 @@ fn arrow_paths(
 }
 
 fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> String {
-    use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
+    use super::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
     let stroke = match node.colour {
@@ -167,7 +167,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
     }
     if node.filled && node.colour.is_some() {
         let (fr, fg, fb) = crate::diagram::palette(node.colour.unwrap()).unwrap();
-        let opacity = crate::render::FILL_ALPHA as f64 / OPAQUE as f64;
+        let opacity = super::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(rect, " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\"").unwrap();
     } else {
         rect.push_str(" fill=\"none\"");
@@ -194,15 +194,15 @@ fn label_text(
 mod tests {
     use super::*;
     use crate::layout::BOX_HEIGHT;
-    use crate::render::arrowhead_depth;
-    use crate::render::arrowhead_slope;
-    use crate::render::colour;
-    use crate::render::BORDER;
-    use crate::render::CELL_HEIGHT;
-    use crate::render::CELL_WIDTH;
-    use crate::render::FILL_ALPHA;
-    use crate::render::OPAQUE;
-    use crate::render::ROUNDED_RADIUS;
+    use super::super::arrowhead_depth;
+    use super::super::arrowhead_slope;
+    use super::super::colour;
+    use super::super::BORDER;
+    use super::super::CELL_HEIGHT;
+    use super::super::CELL_WIDTH;
+    use super::super::FILL_ALPHA;
+    use super::super::OPAQUE;
+    use super::super::ROUNDED_RADIUS;
     use crate::diagram::{node, node_with_children, palette, Document, Node, Path};
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
