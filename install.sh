@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION=v0.1.0-dev
-URL="https://github.com/slickroot/dre/releases/download/$VERSION/dre"
+URL="https://github.com/slickroot/dre/releases/latest/download/dre"
 
 DEST="$HOME/.local/bin/dre"
 mkdir -p "$(dirname "$DEST")"
@@ -16,7 +15,7 @@ if [ -e "$DEST" ]; then
 fi
 mv "$tmp" "$DEST"
 
-echo "dre $VERSION installed to ~/.local/bin/dre"
+echo "dre installed to ~/.local/bin/dre"
 
 case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
