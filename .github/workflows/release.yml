@@ -5,26 +5,71 @@ on:
     branches: [release]
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Read version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "dre") | .version')
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Refuse to overwrite an existing release
+        run: |
+          tag=${{ steps.version.outputs.tag }}
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "::error::A release for $tag already exists. Bump the version in Cargo.toml before pushing to release."
+            exit 1
+          fi
+
+  build:
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            asset: dre-macos-arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: dre-macos-x86_64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: dre-linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: dre-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo test --all-targets --target ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+      - run: mv target/${{ matrix.target }}/release/dre ${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
   publish:
-    runs-on: macos-14
+    needs: [check, build]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets
-      - name: Read version
-        run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "dre") | .version')
-          echo "TAG=v$version" >> "$GITHUB_ENV"
-      - name: Refuse to overwrite an existing release
-        run: |
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "::error::A release for $TAG already exists. Bump the version in Cargo.toml before pushing to release."
-            exit 1
-          fi
-      - run: cargo build --release
-      - run: gh release create "$TAG" target/release/dre --prerelease --title "$TAG" --target "$GITHUB_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - run: gh release create "${{ needs.check.outputs.tag }}" assets/* --repo "$GITHUB_REPOSITORY" --title "${{ needs.check.outputs.tag }}" --generate-notes --target "$GITHUB_SHA"

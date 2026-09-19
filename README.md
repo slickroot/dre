@@ -4,8 +4,8 @@ Build a tree of boxes with a few keystrokes, style them, and save it to a
 
 ## Requirements
 
-- an Apple Silicon Mac
-- tested terminals: WezTerm works, Terminal.app doesn't
+- macOS (Apple Silicon or Intel) or Linux (x86_64 or arm64)
+- a terminal with Kitty graphics support — WezTerm works, Terminal.app doesn't
 
 ## Install
 
