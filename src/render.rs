@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use crate::kitty::{self, Sprite};
 use crate::state::Document;
 
 pub(crate) trait Renderer {
@@ -390,17 +391,7 @@ pub(crate) fn sprite_key(
 
 pub(crate) const BLANK_CELL: (char, Option<u8>, Option<u8>) = (BLANK, None, None);
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Sprite {
-    pub(crate) pixels: Vec<u8>,
-    pub(crate) width: i64,
-    pub(crate) height: i64,
-    pub(crate) col: i64,
-    pub(crate) row: i64,
-}
-
 pub(crate) struct TerminalRenderer {
-    pub(crate) graphics: crate::KittyGraphics,
     pub(crate) cell_width: i64,
     pub(crate) cell_height: i64,
     pub(crate) cache: std::collections::HashMap<SpriteKey, Sprite>,
@@ -418,9 +409,8 @@ impl Renderer for TerminalRenderer {
 }
 
 impl TerminalRenderer {
-    pub(crate) fn new(graphics: crate::KittyGraphics, cell_width: i64, cell_height: i64) -> Self {
+    pub(crate) fn new(cell_width: i64, cell_height: i64) -> Self {
         TerminalRenderer {
-            graphics,
             cell_width,
             cell_height,
             cache: std::collections::HashMap::new(),
@@ -460,7 +450,10 @@ impl TerminalRenderer {
             .collect();
         let mut lines = self.grid(&shifted, cols, rows);
         let sprites = self.sprites(&shifted, cols, rows);
-        let payload = self.graphics.draw(sprites);
+        let mut payload = kitty::clear().to_string();
+        for sprite in &sprites {
+            payload.push_str(&kitty::show(sprite).to_string());
+        }
         let last = lines.len() - 1;
         lines[last] = format!("{}{}", lines[last], payload);
         lines
@@ -1188,7 +1181,7 @@ mod tests {
     }
 
     fn renderer(cell_width: i64, cell_height: i64) -> TerminalRenderer {
-        TerminalRenderer::new(crate::KittyGraphics::new(), cell_width, cell_height)
+        TerminalRenderer::new(cell_width, cell_height)
     }
 
     fn label_placement(text: &str, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
@@ -1225,7 +1218,24 @@ mod tests {
         let mut r = renderer(2, 4);
         let lines = r.draw(&[], 3, 2);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
-        assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), crate::DELETE_ALL));
+        assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), kitty::clear()));
+    }
+
+    #[test]
+    fn a_frame_with_sprites_ends_with_a_clear_then_each_sprite_shown_in_order() {
+        let parent = node_with_children("parent", vec![node("a"), node("b")]);
+        let nodes = vec![parent];
+        let placements = crate::layout::layout(&nodes);
+        let cols = placements.iter().map(|placement| placement.x + placement.width).max().unwrap();
+        let rows = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
+        let sprites = renderer(2, 4).sprites(&placements, cols, rows);
+        assert!(sprites.len() > 1);
+        let expected: String = std::iter::once(kitty::clear())
+            .chain(sprites.iter().map(kitty::show))
+            .map(|command| command.to_string())
+            .collect();
+        let lines = renderer(2, 4).draw(&placements, cols, rows);
+        assert!(lines.last().unwrap().ends_with(&expected));
     }
 
     #[test]
@@ -1299,7 +1309,7 @@ mod tests {
         r.resize(2, 2);
         assert_eq!(
             rendered(&mut r, &empty_doc()),
-            format!("{HOME_CURSOR}  \r\n  {}", crate::DELETE_ALL)
+            format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
         );
     }
 
@@ -1316,7 +1326,7 @@ mod tests {
         r.resize(3, 2);
         r.resize(5, 4);
         let output = rendered(&mut r, &empty_doc());
-        let body = output.strip_prefix(HOME_CURSOR).unwrap().strip_suffix(crate::DELETE_ALL).unwrap();
+        let body = output.strip_prefix(HOME_CURSOR).unwrap().strip_suffix(&kitty::clear().to_string()).unwrap();
         assert_eq!(body.split("\r\n").collect::<Vec<_>>(), vec![BLANK.to_string().repeat(5); 4]);
     }
 

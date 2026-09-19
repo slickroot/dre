@@ -12,7 +12,6 @@ use crate::dre_format;
 use crate::file_document;
 use crate::render::{Renderer, TerminalRenderer, CURSOR};
 use crate::state::{handle_key, Mode, State};
-use crate::KittyGraphics;
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -122,7 +121,7 @@ fn prompt_line(filename: &str, cols: i64) -> String {
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
     let (cell_width, cell_height) = cell_size()?;
-    let mut renderer = TerminalRenderer::new(KittyGraphics::new(), cell_width, cell_height);
+    let mut renderer = TerminalRenderer::new(cell_width, cell_height);
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
@@ -199,19 +198,19 @@ mod tests {
     #[test]
     fn the_renderer_is_given_the_terminal_size() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
         assert_eq!(
             written(&stream),
-            format!("{HOME_CURSOR}   \r\n   {}", crate::DELETE_ALL)
+            format!("{HOME_CURSOR}   \r\n   {}", crate::kitty::clear())
         );
     }
 
     #[test]
     fn what_the_renderer_returned_is_painted() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
         assert!(written(&stream).starts_with(HOME_CURSOR));
@@ -235,7 +234,7 @@ mod tests {
     #[test]
     fn the_prompt_is_drawn_on_the_last_row_after_the_frame_in_save_prompt_mode() {
         let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
-        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
         let (cols, rows) = (11, 2);
         frame(&state, &mut renderer, &mut stream, cols, rows).unwrap();
@@ -245,7 +244,7 @@ mod tests {
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
         let state = new_state(vec![], Mode::Command, None);
-        let mut renderer = TerminalRenderer::new(KittyGraphics::new(), 1, 1);
+        let mut renderer = TerminalRenderer::new(1, 1);
         let mut stream = Cursor::new(Vec::new());
         frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
         assert!(!written(&stream).contains("Save as:"));
