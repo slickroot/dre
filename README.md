@@ -34,19 +34,21 @@ fills, and arrows:
 
 ```xml
 <dre>
-  <box label="API gateway" colour="2" rounded="true">
-    <box label="Auth"/>
-    <box label="Orders" fill="1">
-      <box label="Postgres">
-        <box label="Replica">
-          <box label="Backup"/>
-        </box>
+  <box label="API gateway" colour="2" fill="1" rounded="true">
+    <box label="Auth" colour="1" fill="1"/>
+    <box label="Orders" colour="1" fill="1">
+      <box label="Postgres" colour="4" fill="1">
+        <box label="Replica" colour="4" fill="1"/>
+        <box label="Archive" colour="4" fill="1"/>
       </box>
     </box>
+    <box label="Payments" colour="1" fill="1"/>
   </box>
-  <box label="Billing"/>
 </dre>
 ```
+
+Each colour names a layer — pink the edge, orange the services, blue the
+data — and the rounded corners mark the single entry point.
 
 `dre --svg docs/example.dre` renders it as `docs/example.svg`:
 
@@ -105,34 +107,23 @@ removes a character from the filename.
 
 ## How dre is built
 
-Each box below is a source module, and an arrow means the module on its left
-drives the module on its right. The figure is itself a dre diagram —
-`docs/architecture.dre`:
+An arrow means the box on its left feeds the box on its right. The figure is
+itself a dre diagram — `docs/architecture.dre`:
 
 ```xml
 <dre>
-  <box label="dre" colour="2" rounded="true">
-    <box label="cli" colour="4" rounded="true">
-      <box label="edit" colour="2">
-        <box label="writer" colour="1">
-          <box label="command_mode"/>
-          <box label="insert_mode"/>
-          <box label="save_prompt_mode"/>
-        </box>
-      </box>
-      <box label="export">
-        <box label="svg" colour="4"/>
-      </box>
+  <box label="state" rounded="true">
+    <box label="layout">
+      <box label="tui" colour="3"/>
+      <box label="svg" colour="3"/>
     </box>
-    <box label="layout" colour="1" fill="1"/>
-    <box label="dre_format" colour="3"/>
   </box>
 </dre>
 ```
 
-`cli` splits into an interactive `edit` path (the `writer` terminal loop with
-its three modes) and a headless `export` path. Both feed `layout`, which turns
-boxes into placements that each renderer draws in its own way — the terminal
-sprites in the editor, `<rect>`s and `<text>`s for SVG.
+`state` holds the tree of boxes and is where everything starts. `layout` turns
+that tree into placements, and two renderers draw the same placements in their
+own way: `tui` (`src/render.rs`) paints sprites in the editor, and `svg`
+(`src/svg.rs`) writes `<rect>`s and `<text>`s. Purple marks the renderers.
 
 ![The architecture of dre rendered by dre](docs/architecture.svg)
