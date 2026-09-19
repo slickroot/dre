@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
+use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
-use crate::state::Document;
 
 pub(crate) trait Renderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
@@ -37,13 +37,6 @@ pub(crate) const OPAQUE: u8 = 255;
 pub(crate) const FILL_ALPHA: u16 = 77;
 pub(crate) const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 pub(crate) const PLAIN_COLOUR: (u8, u8, u8) = (128, 128, 128);
-pub(crate) const PALETTE: [(u8, u8, u8); 5] = [
-    (255, 190, 11),
-    (251, 86, 7),
-    (255, 0, 110),
-    (131, 56, 236),
-    (58, 134, 255),
-];
 
 pub(crate) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -53,7 +46,7 @@ pub(crate) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
 pub(crate) fn colour(colour: Option<u8>) -> (u8, u8, u8) {
     match colour {
         None => PLAIN_COLOUR,
-        Some(i) => PALETTE[i as usize],
+        Some(i) => palette(i).unwrap(),
     }
 }
 
@@ -61,7 +54,7 @@ pub(crate) fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) 
     if !filled || colour.is_none() {
         TRANSPARENT
     } else {
-        let (r, g, b) = PALETTE[colour.unwrap() as usize];
+        let (r, g, b) = palette(colour.unwrap()).unwrap();
         let composite =
             |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
         (composite(r), composite(g), composite(b), OPAQUE)
@@ -679,6 +672,7 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagram::{node, node_with_children};
 
     fn ink() -> [u8; 4] {
         let (r, g, b) = colour(Some(1));
@@ -806,7 +800,7 @@ mod tests {
 
     #[test]
     fn colour_of_a_palette_index_is_the_palette_entry() {
-        assert_eq!(colour(Some(2)), PALETTE[2]);
+        assert_eq!(colour(Some(2)), palette(2).unwrap());
     }
 
     #[test]
@@ -817,7 +811,7 @@ mod tests {
 
     #[test]
     fn fill_colour_of_a_palette_index_is_alpha_composited_and_opaque() {
-        let (r, g, b) = PALETTE[2];
+        let (r, g, b) = palette(2).unwrap();
         let round = |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
         let expected = (round(r), round(g), round(b), OPAQUE);
         assert_eq!(fill_colour(Some(2), true), expected);
@@ -1084,19 +1078,11 @@ mod tests {
         }
     }
 
-    fn box_node(colour: Option<u8>, filled: bool, rounded: bool) -> crate::state::Node {
-        crate::state::Node { label: String::new(), colour, filled, rounded, children: vec![] }
+    fn box_node(colour: Option<u8>, filled: bool, rounded: bool) -> crate::diagram::Node {
+        crate::diagram::Node { label: String::new(), colour, filled, rounded, children: vec![] }
     }
 
-    fn node(label: &str) -> crate::state::Node {
-        crate::state::Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<crate::state::Node>) -> crate::state::Node {
-        crate::state::Node { label: label.to_string(), children, ..Default::default() }
-    }
-
-    fn box_placement(node: &crate::state::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
+    fn box_placement(node: &crate::diagram::Node, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Node(node),
             x,
@@ -1188,7 +1174,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::state::Path { ancestors: vec![], index: 0 },
+                path: crate::diagram::Path { ancestors: vec![], index: 0 },
             }),
             x,
             y,
@@ -1335,7 +1321,7 @@ mod tests {
         let boxes = vec![node("hi")];
         let mut r = renderer(1, 1);
         r.resize(20, 10);
-        let selected = Document { boxes: boxes.clone(), selected: Some(crate::state::Path { ancestors: vec![], index: 0 }) };
+        let selected = Document { boxes: boxes.clone(), selected: Some(crate::diagram::Path { ancestors: vec![], index: 0 }) };
         assert!(rendered(&mut r, &selected).contains(CURSOR));
     }
 
@@ -1512,7 +1498,7 @@ mod tests {
 
     #[test]
     fn a_border_takes_the_colour_of_its_palette_index() {
-        for index in 0..PALETTE.len() as u8 {
+        for index in (0..).take_while(|&i| palette(i).is_some()) {
             let mut r = renderer(2, 4);
             let sprites = r.sprites(&[box_placement(&box_node(Some(index), false, false), 0, 0, 2, 2)], 40, 20);
             let (px, py, pz) = colour(Some(index));
@@ -1593,7 +1579,7 @@ mod tests {
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
 
-    fn box_outline(r: &TerminalRenderer, node: &crate::state::Node, width: i64, height: i64) -> Sprite {
+    fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
         r.outline_box(&placement, 0, 0, width, height)
     }

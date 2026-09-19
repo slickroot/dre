@@ -10,6 +10,7 @@ use crate::dre_format;
 use crate::file_document;
 use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer, CURSOR};
+use crate::diagram::Path;
 use crate::state::{handle_key, Mode, State};
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
@@ -104,7 +105,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
         state = handle_key(state, &key);
         if !state.running {
             if let Some(path) = &state.save_to {
-                fs::write(path, dre_format::write(&file_document::from_state(&state)))?;
+                fs::write(path, dre_format::write(&file_document::from_document(&state.doc)))?;
             }
         }
     }
@@ -133,7 +134,11 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     let doc = dre_format::read(&text).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, format!("{path}: not a valid diagram"))
     })?;
-    let mut state = file_document::to_state(doc);
+    let mut state = State::default();
+    state.doc = file_document::to_document(doc);
+    if !state.doc.boxes.is_empty() {
+        state.doc.selected = Some(Path { ancestors: vec![], index: 0 });
+    }
     state.save_to = Some(path);
     Ok(state)
 }
@@ -242,7 +247,7 @@ mod tests {
         let state = state.unwrap();
         assert_eq!(state.doc.boxes.len(), 1);
         assert_eq!(state.doc.boxes[0].label, "API");
-        assert_eq!(state.doc.selected, Some(crate::state::Path { ancestors: vec![], index: 0 }));
+        assert_eq!(state.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]

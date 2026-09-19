@@ -1,4 +1,4 @@
-use crate::state::{Node, Path};
+use crate::diagram::{Node, Path};
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 #[allow(dead_code)]
@@ -236,14 +236,7 @@ pub(crate) fn with_cursor<'a>(placements: Vec<Placement<'a>>, selected: Option<P
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children};
 
     fn offsets_for(nodes: &[Node]) -> Vec<i64> {
         let widths = measure_columns(nodes);

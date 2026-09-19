@@ -1,24 +1,24 @@
 # 078: Diagram model module
 
-Refactoring spec — no user story. Placeholder, to be designed.
+Refactoring spec — no user story.
 
 ## Goal
 
-Move `Node`, `Path`, `Document` and the tree helpers (`at`, `children_at`, `grow`, …) out of `state.rs` into `src/diagram.rs`, so renderers and layout no longer depend on the editor's state. `State` keeps only editor concerns: mode, undo history, running, save target.
+Move `Node`, `Path`, `Document` and the tree helpers (`at`, `children_at`, `grow`, …) out of `state.rs` into `src/diagram.rs`, so renderers, layout and the file format no longer depend on the editor's state. `State` keeps only editor concerns: mode, undo history, running, save target.
 
 ## Technical Design
 
 ### Principle
 
-The diagram is the data being drawn; the selection and the cursor belong to the editor. After this spec nothing on the render side (`render`, `svg`, `layout`) and nothing on the file side (`dre_format`, `file_document`) imports from `state`.
+After this spec nothing on the render side (`render`, `svg`, `layout`) and nothing on the file side (`dre_format`, `file_document`) imports from `state`.
+
+The selection stays part of `Document`: the cursor is drawn by the renderer as part of the grid, as today. An earlier draft pulled the selection out into `State` and drew the cursor from the editor; that needed a shared centring function, a label-end lookup, a second layout per frame, and lost the renderer's clipping of an off-screen cursor — more machinery than it removed.
 
 ### `src/diagram.rs` — the model (new)
 
-Knows the tree; knows nothing about modes, selection, undo or the insert cursor.
-
 - `Node { label, colour: Option<u8>, filled, rounded, children }` — moved as-is, with its `Default`.
-- `Path { ancestors, index }` — moved as-is (shared vocabulary: the editor selects with it, `layout::Label` carries it).
-- `Diagram { boxes: Vec<Node> }` — newtype replacing `Document`. **No methods**; behaviour is free functions.
+- `Path { ancestors, index }` — moved as-is.
+- `Document { boxes: Vec<Node>, selected: Option<Path> }` — moved as-is.
 - Free functions over sibling lists:
   - `at(boxes: &mut Vec<Node>, path: &Path) -> &mut Node` — moved.
   - `children_at(boxes: &mut Vec<Node>, ancestors: &[usize]) -> &mut Vec<Node>` — moved.
@@ -31,35 +31,23 @@ Knows the tree; knows nothing about modes, selection, undo or the insert cursor.
 
 ### `src/state.rs` — editor state only
 
-- `State { diagram: Diagram, selected: Option<Path>, history: Vec<Snapshot>, mode, running, save_to, new_file, pending_count }` — `doc` is gone; selection lives here.
-- Private `Snapshot { diagram: Diagram, selected: Option<Path> }`. `snapshot` pushes both, `undo` restores both — behaviour unchanged (undo still restores the cursor position and can never leave a dangling path).
-- Stays here (moves with spec 080's editor module): `Mode`, `KeyBinding`, `DEFAULT_FILENAME`, `PAD`, `next_colour`, `colour_row`, `add_child_box`, `handle_key`, `new_state` (test helper, builds `Diagram` + `selected`).
+- `State { doc: Document, history: Vec<Document>, mode, running, save_to, new_file, pending_count }` — unchanged apart from `Document` now coming from `diagram`. Undo keeps restoring the whole `Document`, selection included.
+- Stays here (moves with spec 080's editor module): `Mode`, `KeyBinding`, `DEFAULT_FILENAME`, `PAD`, `next_colour`, `colour_row`, `add_child_box`, `handle_key`, `new_state`.
 - New editor helper `blank_box() -> Node` = `Node { label: PAD.to_string(), ..Default::default() }`; `add_child_box` and `command_mode.rs` call `append(siblings, blank_box())` instead of `grow`.
 
-### Rendering — draws the diagram, nothing else
+### Rendering — unchanged
 
-- `Renderer::render(&mut self, diagram: &Diagram, out) -> io::Result<()>` — no selection, no cursor. Both `TerminalRenderer` and `SvgRenderer` take `&Diagram`.
-- `layout`:
-  - `with_cursor`, `Cursor` and `PlacementNode::Cursor` are deleted.
-  - New pure `centre(placements, cols, rows) -> (left, top)` — the offset currently computed inline in `TerminalRenderer::draw`; the renderer calls it, and so does the editor, so they cannot disagree.
-  - New pure `label_end(placements, path) -> Option<(x, y)>` — where the cursor goes for a label (replaces the lookup inside `with_cursor`).
-- `TerminalRenderer` loses `draw_cursor`/cursor stamping; `CURSOR` leaves `render.rs`.
-- Tests: `render.rs` cursor tests move to the editor side; `svg.rs`'s "selection does not change the SVG" test is deleted (selection no longer exists there).
-
-### The cursor — editor chrome
-
-- `writer.rs` owns `CURSOR` and `draw_cursor(diagram: &Diagram, selected: &Path, cols, rows, out)`: runs `layout::layout`, `layout::centre`, `layout::label_end`, then writes `\x1b[row;colH` + `█` in the terminal's default colour. No box colour, no node lookup.
-- `writer::frame` = `renderer.render(&state.diagram, out)` then, if `state.selected` is `Some`, `draw_cursor(...)`. Layout runs twice per frame — accepted: stateless, clean boundaries over performance.
-- Moves into the editor module with spec 080.
+- `Renderer::render(&mut self, doc: &Document, out)` as today; `TerminalRenderer` still draws the cursor for `doc.selected` via `layout::with_cursor`; `SvgRenderer` ignores the selection.
+- Only the imports change (`crate::diagram` instead of `crate::state`).
 
 ### Loading and saving
 
 - `file_document`:
-  - `to_state(FileDoc) -> State` becomes `to_diagram(FileDoc) -> Diagram`.
-  - `from_state(&State) -> FileDoc` becomes `from_diagram(&Diagram) -> FileDoc`.
+  - `to_state(FileDoc) -> State` becomes `to_document(FileDoc) -> Document`, with `selected: None`.
+  - `from_state(&State) -> FileDoc` becomes `from_document(&Document) -> FileDoc`.
   - No longer imports `state`.
-- "Select the first top-level box if there is one" is editor policy: `writer::load_state` builds `State` from `to_diagram(...)` and applies it.
-- `cli::export` calls `to_diagram` directly and renders it with `SvgRenderer`.
+- "Select the first top-level box if there is one" is editor policy: `writer::load_state` builds `State` from `to_document(...)` and applies it.
+- `cli::export` calls `to_document` directly and renders it with `SvgRenderer`.
 - `dre_format` validates colours with `diagram::palette` instead of `state::PALETTE_SIZE`.
 
 ### Dependencies after this spec
@@ -71,5 +59,5 @@ render, svg  → diagram, layout
 dre_format   → diagram
 file_document→ diagram, dre_format
 state, command_mode, insert_mode, save_prompt_mode → diagram
-writer       → state, diagram, layout, render, file_document
+writer       → state, diagram, render, file_document
 ```

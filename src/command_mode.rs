@@ -1,6 +1,7 @@
+use crate::diagram::{append, at, children_at, Path};
 use crate::state::{
-    add_child_box, at, children_at, colour_row, grow, next_colour, snapshot, undo, KeyBinding, Mode,
-    Path, State, DEFAULT_FILENAME, PAD,
+    add_child_box, blank_box, colour_row, next_colour, snapshot, undo, KeyBinding, Mode, State,
+    DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,7 +152,7 @@ fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
 }
 
 fn new_sibling(mut state: State, path: Path) -> State {
-    let index = grow(children_at(&mut state.doc.boxes, &path.ancestors));
+    let index = append(children_at(&mut state.doc.boxes, &path.ancestors), blank_box());
     state.doc.selected = Some(Path { ancestors: path.ancestors, index });
     state.mode = Mode::Insert;
     state
@@ -312,15 +313,8 @@ pub(crate) fn format_keymap_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Node, PALETTE_SIZE};
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children, palette, Node};
+    use crate::state::{handle_key, new_state};
 
     const COMMANDS: [Command; 15] = [
         Command::Undo,
@@ -833,7 +827,8 @@ mod tests {
 
         let mut state_boxed = vec![node("a")];
         let mut colour: Option<u8> = None;
-        for _ in 0..=PALETTE_SIZE {
+        let presses_past_the_last_colour = (0..).take_while(|&i| palette(i).is_some()).count() + 1;
+        for _ in 0..presses_past_the_last_colour {
             let s = new_state(state_boxed.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
             let result = handle_key(s, "c");
             state_boxed = result.doc.boxes;
@@ -870,7 +865,7 @@ mod tests {
     #[test]
     fn a_toggled_fill_survives_a_colour_cycle_back_to_plain() {
         let mut state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
-        for _ in 0..PALETTE_SIZE {
+        for _ in (0..).take_while(|&i| palette(i).is_some()) {
             state = handle_key(state, "c");
         }
         assert_ne!(state.doc.boxes[0].colour, None);

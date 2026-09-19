@@ -51,7 +51,8 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Mode, Node, Path, DEFAULT_FILENAME};
+    use crate::diagram::{Node, Path};
+    use crate::state::{handle_key, new_state, Mode, DEFAULT_FILENAME};
 
     fn node(label: &str) -> Node {
         Node { label: label.to_string(), ..Default::default() }

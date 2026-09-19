@@ -2,6 +2,7 @@ use std::process::ExitCode;
 
 mod cli;
 mod command_mode;
+mod diagram;
 mod dre_format;
 mod file_document;
 mod insert_mode;

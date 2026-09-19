@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crate::layout::{layout, PlacementNode};
 use crate::render::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
-use crate::state::Document;
+use crate::diagram::Document;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -143,7 +143,7 @@ fn arrow_paths(
     paths
 }
 
-fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> String {
+fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> String {
     use crate::render::{BORDER, OPAQUE, ROUNDED_RADIUS};
     use std::fmt::Write as _;
 
@@ -166,7 +166,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::state::Node) -> Stri
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
     if node.filled && node.colour.is_some() {
-        let (fr, fg, fb) = crate::render::PALETTE[node.colour.unwrap() as usize];
+        let (fr, fg, fb) = crate::diagram::palette(node.colour.unwrap()).unwrap();
         let opacity = crate::render::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(rect, " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\"").unwrap();
     } else {
@@ -202,20 +202,11 @@ mod tests {
     use crate::render::CELL_WIDTH;
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
-    use crate::render::PALETTE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::state::{Document, Node, Path};
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children, palette, Document, Node, Path};
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node { label: label.to_string(), colour, filled, rounded, children: vec![] }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -273,7 +264,7 @@ mod tests {
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(Some(1))))));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
         assert!(svg.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(PALETTE[1]))));
+        assert!(svg.contains(&format!("fill=\"{}\"", rgb(palette(1).unwrap()))));
         assert!(svg.contains(&format!("fill-opacity=\"{}\"", fill_opacity())));
     }
 
@@ -396,7 +387,7 @@ mod tests {
             assert!(rect.contains("fill="));
         }
 
-        let (pr, pg, pb) = PALETTE[1];
+        let (pr, pg, pb) = palette(1).unwrap();
         let palette_fill = format!("fill=\"rgb({pr},{pg},{pb})\"");
         let colour_filled_count = rects.iter().filter(|r| r.contains(&palette_fill)).count();
         assert_eq!(colour_filled_count, 1);
@@ -417,7 +408,7 @@ mod tests {
         let svg = SvgRenderer {}.draw(&placements);
 
         let ink_stroke = "stroke=\"var(--ink)\"".to_string();
-        let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
+        let coloured_stroke = format!("stroke=\"{}\"", rgb(palette(2).unwrap()));
 
         let rects: Vec<&str> = svg
             .split("</svg>")
@@ -439,7 +430,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::state::Path { ancestors: vec![], index: 0 },
+                path: crate::diagram::Path { ancestors: vec![], index: 0 },
             }),
             x,
             y,
@@ -805,7 +796,7 @@ mod tests {
             write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
         }
         if filled && colour_index.is_some() {
-            let (fr, fg, fb) = PALETTE[colour_index.unwrap() as usize];
+            let (fr, fg, fb) = palette(colour_index.unwrap()).unwrap();
             write!(
                 rect,
                 " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{}\"",
