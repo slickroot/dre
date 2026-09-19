@@ -1,9 +1,8 @@
 use crate::command_mode;
-use crate::diagram::{append, at, children_at, Node, Path};
+use crate::diagram::{append, at, children_at, palette, Node, Path};
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
-pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
@@ -68,7 +67,7 @@ pub(crate) fn undo(mut state: State) -> State {
 pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
     match colour {
         None => Some(0),
-        Some(i) if i + 1 < PALETTE_SIZE => Some(i + 1),
+        Some(i) if palette(i + 1).is_some() => Some(i + 1),
         Some(_) => None,
     }
 }
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn next_colour_cycles_through_the_palette_and_back_to_plain() {
         let mut colour = None;
-        for _ in 0..PALETTE_SIZE {
+        for _ in (0..).take_while(|&i| palette(i).is_some()) {
             colour = next_colour(colour);
         }
         assert_ne!(colour, None);

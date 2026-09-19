@@ -313,8 +313,8 @@ pub(crate) fn format_keymap_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::{node, node_with_children, Node};
-    use crate::state::{handle_key, new_state, PALETTE_SIZE};
+    use crate::diagram::{node, node_with_children, palette, Node};
+    use crate::state::{handle_key, new_state};
 
     const COMMANDS: [Command; 15] = [
         Command::Undo,
@@ -827,7 +827,8 @@ mod tests {
 
         let mut state_boxed = vec![node("a")];
         let mut colour: Option<u8> = None;
-        for _ in 0..=PALETTE_SIZE {
+        let presses_past_the_last_colour = (0..).take_while(|&i| palette(i).is_some()).count() + 1;
+        for _ in 0..presses_past_the_last_colour {
             let s = new_state(state_boxed.clone(), Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
             let result = handle_key(s, "c");
             state_boxed = result.doc.boxes;
@@ -864,7 +865,7 @@ mod tests {
     #[test]
     fn a_toggled_fill_survives_a_colour_cycle_back_to_plain() {
         let mut state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
-        for _ in 0..PALETTE_SIZE {
+        for _ in (0..).take_while(|&i| palette(i).is_some()) {
             state = handle_key(state, "c");
         }
         assert_ne!(state.doc.boxes[0].colour, None);

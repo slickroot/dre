@@ -37,6 +37,18 @@ pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
     &mut children_at(boxes, &path.ancestors)[path.index]
 }
 
+const PALETTE: [(u8, u8, u8); 5] = [
+    (255, 190, 11),
+    (251, 86, 7),
+    (255, 0, 110),
+    (131, 56, 236),
+    (58, 134, 255),
+];
+
+pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
+    PALETTE.get(index as usize).copied()
+}
+
 pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {
     siblings.push(node);
     siblings.len() - 1
@@ -55,6 +67,19 @@ pub(crate) fn node_with_children(label: &str, children: Vec<Node>) -> Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_has_a_colour_at_index_zero() {
+        assert!(palette(0).is_some());
+    }
+
+    #[test]
+    fn palette_has_no_colour_past_its_last_index() {
+        let first_missing = (0..=u8::MAX).find(|&i| palette(i).is_none()).unwrap();
+        assert!(first_missing > 0);
+        assert_eq!(palette(first_missing), None);
+        assert!((first_missing..=u8::MAX).all(|i| palette(i).is_none()));
+    }
 
     #[test]
     fn boxes_are_equal() {

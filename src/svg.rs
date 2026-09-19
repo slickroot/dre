@@ -166,7 +166,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
     if node.filled && node.colour.is_some() {
-        let (fr, fg, fb) = crate::render::PALETTE[node.colour.unwrap() as usize];
+        let (fr, fg, fb) = crate::diagram::palette(node.colour.unwrap()).unwrap();
         let opacity = crate::render::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(rect, " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\"").unwrap();
     } else {
@@ -202,9 +202,8 @@ mod tests {
     use crate::render::CELL_WIDTH;
     use crate::render::FILL_ALPHA;
     use crate::render::OPAQUE;
-    use crate::render::PALETTE;
     use crate::render::ROUNDED_RADIUS;
-    use crate::diagram::{node, node_with_children, Node, Path};
+    use crate::diagram::{node, node_with_children, palette, Node, Path};
     use crate::state::Document;
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
@@ -266,7 +265,7 @@ mod tests {
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(Some(1))))));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
         assert!(svg.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
-        assert!(svg.contains(&format!("fill=\"{}\"", rgb(PALETTE[1]))));
+        assert!(svg.contains(&format!("fill=\"{}\"", rgb(palette(1).unwrap()))));
         assert!(svg.contains(&format!("fill-opacity=\"{}\"", fill_opacity())));
     }
 
@@ -389,7 +388,7 @@ mod tests {
             assert!(rect.contains("fill="));
         }
 
-        let (pr, pg, pb) = PALETTE[1];
+        let (pr, pg, pb) = palette(1).unwrap();
         let palette_fill = format!("fill=\"rgb({pr},{pg},{pb})\"");
         let colour_filled_count = rects.iter().filter(|r| r.contains(&palette_fill)).count();
         assert_eq!(colour_filled_count, 1);
@@ -410,7 +409,7 @@ mod tests {
         let svg = SvgRenderer {}.draw(&placements);
 
         let ink_stroke = "stroke=\"var(--ink)\"".to_string();
-        let coloured_stroke = format!("stroke=\"{}\"", rgb(PALETTE[2]));
+        let coloured_stroke = format!("stroke=\"{}\"", rgb(palette(2).unwrap()));
 
         let rects: Vec<&str> = svg
             .split("</svg>")
@@ -798,7 +797,7 @@ mod tests {
             write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
         }
         if filled && colour_index.is_some() {
-            let (fr, fg, fb) = PALETTE[colour_index.unwrap() as usize];
+            let (fr, fg, fb) = palette(colour_index.unwrap()).unwrap();
             write!(
                 rect,
                 " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{}\"",
