@@ -1,8 +1,7 @@
 use crate::layout::PlacementNode;
-use crate::render::{
-    arrowhead_depth, arrowhead_slope, colour, ARROW_STROKE, CELL_HEIGHT, CELL_WIDTH,
-};
+use crate::render::{arrowhead_depth, arrowhead_slope, colour, CELL_HEIGHT, CELL_WIDTH};
 
+const ARROW_STROKE: i64 = 2;
 const INK: (u8, u8, u8) = (0, 0, 0);
 
 pub(crate) struct SvgRenderer {}
@@ -82,7 +81,7 @@ fn marker_defs() -> String {
         "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
         tip_y - arm,
         tip_y + arm,
-        ARROW_STROKE / 2,
+        ARROW_STROKE,
     )
 }
 
@@ -104,16 +103,16 @@ fn arrow_paths(
     let (r, g, b) = INK;
     let mut paths = format!(
         "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-        ARROW_STROKE / 2
+        ARROW_STROKE
     );
     paths.push_str(&format!(
         "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-        ARROW_STROKE / 2
+        ARROW_STROKE
     ));
     for row in stop_rows {
         paths.push_str(&format!(
             "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         ));
     }
     paths
@@ -171,7 +170,6 @@ mod tests {
     use crate::render::arrowhead_depth;
     use crate::render::arrowhead_slope;
     use crate::render::colour;
-    use crate::render::ARROW_STROKE;
     use crate::render::BORDER;
     use crate::render::CELL_HEIGHT;
     use crate::render::CELL_WIDTH;
@@ -461,16 +459,16 @@ mod tests {
         assert_eq!(stop_rows.len(), 2);
         assert!(svg.contains(&format!(
             "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         )));
         assert!(svg.contains(&format!(
             "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         )));
         for row in stop_rows {
             assert!(svg.contains(&format!(
                 "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"{ink}\" stroke-width=\"{}\" fill=\"none\"/>",
-                ARROW_STROKE / 2
+                ARROW_STROKE
             )));
         }
     }
@@ -501,7 +499,7 @@ mod tests {
             tip_y + arm
         )));
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(INK))));
-        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE / 2)));
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE)));
         assert!(svg.contains("fill=\"none\""));
         let marker = svg
             .split("</defs>")
@@ -539,7 +537,7 @@ mod tests {
             "<defs><marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\" markerWidth=\"{box_width}\" markerHeight=\"{box_height}\" refX=\"{tip_x}\" refY=\"{tip_y}\" viewBox=\"0 0 {box_width} {box_height}\"><path d=\"M {tip_x} {tip_y} L {base_x} {} M {tip_x} {tip_y} L {base_x} {}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/></marker></defs>",
             tip_y - arm,
             tip_y + arm,
-            ARROW_STROKE / 2
+            ARROW_STROKE
         )
     }
 
@@ -609,16 +607,16 @@ mod tests {
         let (r, g, b) = INK;
         let mut paths = format!(
             "<path d=\"M {left} {shaft_row} L {trunk_x} {shaft_row}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         );
         paths.push_str(&format!(
             "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-            ARROW_STROKE / 2
+            ARROW_STROKE
         ));
         for row in stop_rows {
             paths.push_str(&format!(
                 "<path d=\"M {trunk_x} {row} L {right} {row}\" marker-end=\"url(#arrowhead)\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\" fill=\"none\"/>",
-                ARROW_STROKE / 2
+                ARROW_STROKE
             ));
         }
         paths
