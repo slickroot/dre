@@ -1870,7 +1870,7 @@ mod tests {
         fn a_rounded_box_shape_matches_rounded_box_pixels() {
             let edge = edge_rgba(Some(1));
             for fill in [fill_colour(Some(2), true), fill_colour(None, false)] {
-                for (width, height) in [(80, 48), (20, 20), (48, 80), (34, 42)] {
+                for (width, height) in [(80, 48), (20, 20), (48, 80), (100, 100)] {
                     let expected = RoundedBox::new(width, height, ROUNDED_RADIUS, BORDER, edge, fill)
                         .pixels(0, width, 0, height);
                     let canvas =
