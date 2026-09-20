@@ -1,4 +1,3 @@
-use nix::libc;
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::unistd::read;
 use std::fs;
@@ -12,6 +11,7 @@ use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::diagram::Path;
 use crate::state::{handle_key, Mode, State};
+use crate::terminal;
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -22,8 +22,6 @@ const INTERRUPT: &str = "\x03";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
 const CLEAR_LINE: &str = "\r\x1b[K";
-
-nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
 
 struct RawModeGuard<'a, W: Write> {
     fd: RawFd,
@@ -55,17 +53,6 @@ impl<'a, W: Write> Drop for RawModeGuard<'a, W> {
     }
 }
 
-fn cell_size() -> io::Result<(i64, i64)> {
-    let stdout_fd = io::stdout().as_raw_fd();
-    let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
-    unsafe { terminal_window_size(stdout_fd, &mut winsize) }.map_err(io::Error::from)?;
-    let cols = winsize.ws_col as f64;
-    let rows = winsize.ws_row as f64;
-    let xpixel = winsize.ws_xpixel as f64;
-    let ypixel = winsize.ws_ypixel as f64;
-    Ok(((xpixel / cols).round() as i64, (ypixel / rows).round() as i64))
-}
-
 fn frame<W: Write>(
     state: &State,
     renderer: &mut TerminalRenderer,
@@ -90,13 +77,12 @@ fn prompt_line(filename: &str, cols: i64) -> String {
 }
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
-    let (cell_width, cell_height) = cell_size()?;
-    let mut renderer = TerminalRenderer::new(cell_width, cell_height);
+    let terminal = terminal::probe()?;
+    let mut renderer = TerminalRenderer::new(terminal.cell_width, terminal.cell_height);
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
-        let (cols, rows) = terminal_size(stdin_fd)?;
-        frame(&state, &mut renderer, &mut *guard.stream, cols, rows)?;
+        frame(&state, &mut renderer, &mut *guard.stream, terminal.cols, terminal.rows)?;
         let mut key_buffer = [0u8; 1];
         read(stdin, &mut key_buffer).map_err(io::Error::from)?;
         let key = std::str::from_utf8(&key_buffer).unwrap_or("").to_string();
@@ -111,12 +97,6 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
         }
     }
     Ok(())
-}
-
-fn terminal_size(stdin_fd: RawFd) -> io::Result<(i64, i64)> {
-    let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
-    unsafe { terminal_window_size(stdin_fd, &mut winsize) }.map_err(io::Error::from)?;
-    Ok((winsize.ws_col as i64, winsize.ws_row as i64))
 }
 
 fn load_state(arg: Option<String>) -> io::Result<State> {

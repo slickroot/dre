@@ -11,6 +11,7 @@ mod layout;
 mod render;
 mod save_prompt_mode;
 mod state;
+mod terminal;
 mod writer;
 
 fn main() -> ExitCode {
