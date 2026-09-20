@@ -5,6 +5,7 @@ use super::{
 };
 use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
+use crate::layout::{with_cursor, Label, Placement, PlacementNode};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -12,7 +13,6 @@ const CURSOR: char = '\u{2588}';
 const HOME_CURSOR: &str = "\x1b[H";
 
 const ARROW_STROKE: i64 = 4;
-const RESET: &str = "\x1b[0m";
 
 const CACHE_LIMIT: usize = 512;
 
@@ -32,25 +32,6 @@ fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
             |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
         (composite(r), composite(g), composite(b), OPAQUE)
     }
-}
-
-fn cell(character: char, colour: Option<u8>, fill: Option<u8>) -> String {
-    let mut codes = Vec::new();
-    if let Some(i) = colour {
-        codes.push(30 + i as i64);
-    }
-    if let Some(i) = fill {
-        codes.push(40 + i as i64);
-    }
-    if codes.is_empty() {
-        return character.to_string();
-    }
-    let joined = codes
-        .iter()
-        .map(|code| code.to_string())
-        .collect::<Vec<_>>()
-        .join(";");
-    format!("\x1b[{joined}m{character}{RESET}")
 }
 
 struct Canvas {
@@ -301,10 +282,10 @@ enum SpriteKey {
     Box {
         width: i64,
         height: i64,
-        left: i64,
-        top: i64,
-        right: i64,
-        bottom: i64,
+        first_x: i64,
+        last_x: i64,
+        first_y: i64,
+        last_y: i64,
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
@@ -312,31 +293,30 @@ enum SpriteKey {
     Arrow {
         width: i64,
         height: i64,
-        left: i64,
-        top: i64,
-        right: i64,
-        bottom: i64,
+        first_x: i64,
+        last_x: i64,
+        first_y: i64,
+        last_y: i64,
         stops: Vec<i64>,
         shaft: i64,
     },
 }
 
 fn sprite_key(
-    placement: &crate::layout::Placement,
-    left: i64,
-    top: i64,
-    right: i64,
-    bottom: i64,
+    placement: &Placement,
+    first_x: i64,
+    last_x: i64,
+    first_y: i64,
+    last_y: i64,
 ) -> SpriteKey {
-    use crate::layout::PlacementNode;
     match &placement.node {
         PlacementNode::Node(node) => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
-            left: left - placement.x,
-            top: top - placement.y,
-            right: right - placement.x,
-            bottom: bottom - placement.y,
+            first_x,
+            last_x,
+            first_y,
+            last_y,
             colour: node.colour,
             fill: if node.filled { node.colour } else { None },
             rounded: node.rounded,
@@ -344,10 +324,10 @@ fn sprite_key(
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
             height: placement.height,
-            left: left - placement.x,
-            top: top - placement.y,
-            right: right - placement.x,
-            bottom: bottom - placement.y,
+            first_x,
+            last_x,
+            first_y,
+            last_y,
             stops: arrow.stops.clone(),
             shaft: arrow.shaft,
         },
@@ -355,7 +335,76 @@ fn sprite_key(
     }
 }
 
-const BLANK_CELL: (char, Option<u8>, Option<u8>) = (BLANK, None, None);
+struct Screen {
+    terminal: Terminal,
+    origin: (i64, i64),
+    characters: Vec<Vec<char>>,
+    images: Vec<Sprite>,
+}
+
+impl Screen {
+    fn new(terminal: Terminal) -> Self {
+        Screen {
+            terminal,
+            origin: (0, 0),
+            characters: vec![vec![BLANK; terminal.cols as usize]; terminal.rows as usize],
+            images: Vec::new(),
+        }
+    }
+
+    fn centre_on(&mut self, placements: &[Placement]) {
+        if placements.is_empty() {
+            self.origin = (0, 0);
+            return;
+        }
+        let min_x = placements.iter().map(|placement| placement.x).min().unwrap();
+        let span = placements.iter().map(|placement| placement.x + placement.width).max().unwrap() - min_x;
+        let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
+        self.origin = (
+            (self.terminal.cols - span).div_euclid(2),
+            (self.terminal.rows - height).div_euclid(2),
+        );
+    }
+
+    fn write(&mut self, x: i64, y: i64, character: char) {
+        let (x, y) = (x + self.origin.0, y + self.origin.1);
+        if 0 <= y && (y as usize) < self.characters.len() {
+            let row = &mut self.characters[y as usize];
+            if 0 <= x && (x as usize) < row.len() {
+                row[x as usize] = character;
+            }
+        }
+    }
+
+    fn place(&mut self, image: Sprite) {
+        self.images.push(image);
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let rows: Vec<String> = self
+            .characters
+            .into_iter()
+            .map(|row| row.into_iter().collect())
+            .collect();
+        let mut bytes = HOME_CURSOR.as_bytes().to_vec();
+        bytes.extend_from_slice(rows.join("\r\n").as_bytes());
+        bytes.extend_from_slice(kitty::clear().to_string().as_bytes());
+        for image in &self.images {
+            bytes.extend_from_slice(kitty::show(image).to_string().as_bytes());
+        }
+        bytes
+    }
+}
+
+fn draw_label(screen: &mut Screen, placement: &Placement, label: &Label) {
+    for (offset, character) in label.text.chars().enumerate() {
+        screen.write(placement.x + offset as i64, placement.y, character);
+    }
+}
+
+fn draw_cursor(screen: &mut Screen, placement: &Placement) {
+    screen.write(placement.x, placement.y, CURSOR);
+}
 
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
@@ -364,10 +413,18 @@ pub(crate) struct TerminalRenderer {
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        let placements = crate::layout::with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
-        let lines = self.draw(&placements, self.terminal.cols, self.terminal.rows);
-        out.write_all(HOME_CURSOR.as_bytes())?;
-        out.write_all(lines.join("\r\n").as_bytes())
+        let placements = with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
+        let mut screen = Screen::new(self.terminal);
+        screen.centre_on(&placements);
+        for placement in &placements {
+            match &placement.node {
+                PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
+                PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
+                PlacementNode::Label(label) => draw_label(&mut screen, placement, label),
+                PlacementNode::Cursor(_) => draw_cursor(&mut screen, placement),
+            }
+        }
+        out.write_all(&screen.into_bytes())
     }
 }
 
@@ -376,148 +433,65 @@ impl TerminalRenderer {
         TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
-    fn draw(
-        &mut self,
-        placements: &[crate::layout::Placement],
-        cols: i64,
-        rows: i64,
-    ) -> Vec<String> {
-        let (left, top) = if placements.is_empty() {
-            (0, 0)
-        } else {
-            let min_x = placements.iter().map(|placement| placement.x).min().unwrap();
-            let span = placements.iter().map(|placement| placement.x + placement.width).max().unwrap() - min_x;
-            let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
-            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
-        };
-        let shifted: Vec<crate::layout::Placement> = placements
-            .iter()
-            .map(|placement| crate::layout::Placement {
-                node: placement.node.clone(),
-                x: placement.x + left,
-                y: placement.y + top,
-                width: placement.width,
-                height: placement.height,
-            })
-            .collect();
-        let mut lines = self.grid(&shifted, cols, rows);
-        let sprites = self.sprites(&shifted, cols, rows);
-        let mut payload = kitty::clear().to_string();
-        for sprite in &sprites {
-            payload.push_str(&kitty::show(sprite).to_string());
+    fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
+        let left = placement.x + screen.origin.0;
+        let top = placement.y + screen.origin.1;
+        let col = left.max(0);
+        let row = top.max(0);
+        let right = (left + placement.width).min(screen.terminal.cols);
+        let bottom = (top + placement.height).min(screen.terminal.rows);
+        if col >= right || row >= bottom {
+            return;
         }
-        let last = lines.len() - 1;
-        lines[last] = format!("{}{}", lines[last], payload);
-        lines
-    }
-
-    fn grid(&self, placements: &[crate::layout::Placement], cols: i64, rows: i64) -> Vec<String> {
-        use crate::layout::PlacementNode;
-
-        let mut grid = vec![vec![BLANK_CELL; cols as usize]; rows as usize];
-        for placement in placements {
-            match &placement.node {
-                PlacementNode::Node(_) => self.draw_box(&mut grid, placement),
-                PlacementNode::Cursor(_) => self.draw_cursor(&mut grid, placement),
-                PlacementNode::Label(label) => self.draw_label(&mut grid, placement, label),
-                PlacementNode::Arrow(_) => {}
-            }
-        }
-        grid.into_iter()
-            .map(|row| row.into_iter().map(|(c, colour, fill)| cell(c, colour, fill)).collect())
-            .collect()
-    }
-
-    fn draw_box(&self, grid: &mut [Vec<(char, Option<u8>, Option<u8>)>], placement: &crate::layout::Placement) {
-        for y in placement.y..placement.y + placement.height {
-            for x in placement.x..placement.x + placement.width {
-                self.put(grid, x, y, BLANK_CELL);
-            }
-        }
-    }
-
-    fn draw_cursor(&self, grid: &mut [Vec<(char, Option<u8>, Option<u8>)>], placement: &crate::layout::Placement) {
-        self.stamp(grid, placement.x, placement.y, CURSOR);
-    }
-
-    fn draw_label(
-        &self,
-        grid: &mut [Vec<(char, Option<u8>, Option<u8>)>],
-        placement: &crate::layout::Placement,
-        label: &crate::layout::Label,
-    ) {
-        for (offset, character) in label.text.chars().enumerate() {
-            self.stamp(grid, placement.x + offset as i64, placement.y, character);
-        }
-    }
-
-    fn put(&self, grid: &mut [Vec<(char, Option<u8>, Option<u8>)>], x: i64, y: i64, cell: (char, Option<u8>, Option<u8>)) {
-        if 0 <= y && (y as usize) < grid.len() {
-            let row = &mut grid[y as usize];
-            if 0 <= x && (x as usize) < row.len() {
-                row[x as usize] = cell;
-            }
-        }
-    }
-
-    fn stamp(&self, grid: &mut [Vec<(char, Option<u8>, Option<u8>)>], x: i64, y: i64, character: char) {
-        if 0 <= y && (y as usize) < grid.len() {
-            let row = &mut grid[y as usize];
-            if 0 <= x && (x as usize) < row.len() {
-                let (_, colour, fill) = row[x as usize];
-                row[x as usize] = (character, colour, fill);
-            }
-        }
-    }
-
-    fn sprites(&mut self, placements: &[crate::layout::Placement], cols: i64, rows: i64) -> Vec<Sprite> {
-        use crate::layout::PlacementNode;
-
-        let mut sprites = Vec::new();
-        for placement in placements {
-            if !matches!(placement.node, PlacementNode::Node(_) | PlacementNode::Arrow(_)) {
-                continue;
-            }
-            let left = placement.x.max(0);
-            let top = placement.y.max(0);
-            let right = (placement.x + placement.width).min(cols);
-            let bottom = (placement.y + placement.height).min(rows);
-            if left >= right || top >= bottom {
-                continue;
-            }
-            sprites.push(self.sprite(placement, left, top, right, bottom));
-        }
-        sprites
-    }
-
-    fn sprite(
-        &mut self,
-        placement: &crate::layout::Placement,
-        left: i64,
-        top: i64,
-        right: i64,
-        bottom: i64,
-    ) -> Sprite {
-        use crate::layout::PlacementNode;
-
-        let key = sprite_key(placement, left, top, right, bottom);
+        let first_x = self.cells_to_pixels_x(col - left);
+        let last_x = self.cells_to_pixels_x(right - left);
+        let first_y = self.cells_to_pixels_y(row - top);
+        let last_y = self.cells_to_pixels_y(bottom - top);
+        let key = sprite_key(placement, first_x, last_x, first_y, last_y);
         if !self.cache.contains_key(&key) {
-            let drawn = match &placement.node {
-                PlacementNode::Node(_) => self.outline_box(placement, left, top, right, bottom),
-                _ => self.outline_arrow(placement, left, top, right, bottom),
-            };
-            if self.cache.len() >= CACHE_LIMIT {
-                self.cache.clear();
-            }
-            self.cache.insert(key.clone(), drawn);
+            let drawn = self.outline_box(placement, col, row, first_x, last_x, first_y, last_y);
+            self.remember(key.clone(), drawn);
         }
-        let drawn = &self.cache[&key];
+        screen.place(self.cached(&key, col, row));
+    }
+
+    fn draw_arrow(&mut self, screen: &mut Screen, placement: &Placement) {
+        let left = placement.x + screen.origin.0;
+        let top = placement.y + screen.origin.1;
+        let col = left.max(0);
+        let row = top.max(0);
+        let right = (left + placement.width).min(screen.terminal.cols);
+        let bottom = (top + placement.height).min(screen.terminal.rows);
+        if col >= right || row >= bottom {
+            return;
+        }
+        let first_x = self.cells_to_pixels_x(col - left);
+        let last_x = self.cells_to_pixels_x(right - left);
+        let first_y = self.cells_to_pixels_y(row - top);
+        let last_y = self.cells_to_pixels_y(bottom - top);
+        let key = sprite_key(placement, first_x, last_x, first_y, last_y);
+        if !self.cache.contains_key(&key) {
+            let drawn = self.outline_arrow(placement, col, row, first_x, last_x, first_y, last_y);
+            self.remember(key.clone(), drawn);
+        }
+        screen.place(self.cached(&key, col, row));
+    }
+
+    fn remember(&mut self, key: SpriteKey, drawn: Sprite) {
+        if self.cache.len() >= CACHE_LIMIT {
+            self.cache.clear();
+        }
+        self.cache.insert(key, drawn);
+    }
+
+    fn cached(&self, key: &SpriteKey, col: i64, row: i64) -> Sprite {
+        let drawn = &self.cache[key];
         Sprite {
             pixels: drawn.pixels.clone(),
             width: drawn.width,
             height: drawn.height,
-            col: left,
-            row: top,
+            col,
+            row,
         }
     }
 
@@ -531,14 +505,14 @@ impl TerminalRenderer {
 
     fn outline_box(
         &self,
-        placement: &crate::layout::Placement,
-        left: i64,
-        top: i64,
-        right: i64,
-        bottom: i64,
+        placement: &Placement,
+        col: i64,
+        row: i64,
+        first_x: i64,
+        last_x: i64,
+        first_y: i64,
+        last_y: i64,
     ) -> Sprite {
-        use crate::layout::PlacementNode;
-
         let node = match &placement.node {
             PlacementNode::Node(node) => node,
             _ => unreachable!("outline_box is only called for Box placements"),
@@ -549,10 +523,6 @@ impl TerminalRenderer {
         let (r, g, b) = colour(node.colour);
         let edge = (r, g, b, OPAQUE);
         let fill = fill_colour(node.colour, node.filled);
-        let first_x = self.cells_to_pixels_x(left - placement.x);
-        let last_x = self.cells_to_pixels_x(right - placement.x);
-        let first_y = self.cells_to_pixels_y(top - placement.y);
-        let last_y = self.cells_to_pixels_y(bottom - placement.y);
         let span = last_x - first_x;
         let radius = if node.rounded { ROUNDED_RADIUS } else { 0 };
         let pixels = if radius != 0 {
@@ -561,19 +531,19 @@ impl TerminalRenderer {
         } else {
             square_pixels(width, height, border, edge, fill, first_x, last_x, first_y, last_y)
         };
-        Sprite { pixels, width: span, height: last_y - first_y, col: left, row: top }
+        Sprite { pixels, width: span, height: last_y - first_y, col, row }
     }
 
     fn outline_arrow(
         &self,
-        placement: &crate::layout::Placement,
-        left: i64,
-        top: i64,
-        right: i64,
-        bottom: i64,
+        placement: &Placement,
+        col: i64,
+        row: i64,
+        first_x: i64,
+        last_x: i64,
+        first_y: i64,
+        last_y: i64,
     ) -> Sprite {
-        use crate::layout::PlacementNode;
-
         let arrow = match &placement.node {
             PlacementNode::Arrow(arrow) => arrow,
             _ => unreachable!("outline_arrow is only called for Arrow placements"),
@@ -590,10 +560,6 @@ impl TerminalRenderer {
         let midpoint = width / 2;
         let (r, g, b) = colour(None);
         let ink = [r, g, b, OPAQUE];
-        let first_x = self.cells_to_pixels_x(left - placement.x);
-        let last_x = self.cells_to_pixels_x(right - placement.x);
-        let first_y = self.cells_to_pixels_y(top - placement.y);
-        let last_y = self.cells_to_pixels_y(bottom - placement.y);
         let mut canvas = Canvas::new(first_x, last_x, first_y, last_y, ink);
         canvas.horizontal(shaft_row, 0, midpoint, ARROW_STROKE);
         canvas.vertical(midpoint, trunk_top, trunk_bottom, ARROW_STROKE);
@@ -605,8 +571,8 @@ impl TerminalRenderer {
             pixels: canvas.pixels(),
             width: last_x - first_x,
             height: last_y - first_y,
-            col: left,
-            row: top,
+            col,
+            row,
         }
     }
 
@@ -770,26 +736,6 @@ mod tests {
     #[test]
     fn coloured_but_not_filled_is_transparent() {
         assert_eq!(fill_colour(Some(2), false), TRANSPARENT);
-    }
-
-    #[test]
-    fn cell_with_plain_colour_and_fill_is_the_bare_character() {
-        assert_eq!(cell('x', None, None), "x");
-    }
-
-    #[test]
-    fn cell_with_a_colour_only_emits_a_foreground_code() {
-        assert_eq!(cell('x', Some(2), None), "\x1b[32mx\x1b[0m");
-    }
-
-    #[test]
-    fn cell_with_a_fill_only_emits_a_background_code() {
-        assert_eq!(cell('x', None, Some(3)), "\x1b[43mx\x1b[0m");
-    }
-
-    #[test]
-    fn cell_with_colour_and_fill_emits_both_codes() {
-        assert_eq!(cell('x', Some(1), Some(4)), "\x1b[31;44mx\x1b[0m");
     }
 
     fn edge_rgba(index: Option<u8>) -> (u8, u8, u8, u8) {
@@ -1065,7 +1011,7 @@ mod tests {
         let node_b = box_node(Some(1), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_eq!(sprite_key(&a, 0, 0, 10, 10), sprite_key(&b, 0, 0, 10, 10));
+        assert_eq!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
     }
 
     #[test]
@@ -1074,7 +1020,7 @@ mod tests {
         let node_b = box_node(Some(2), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 0, 10, 10), sprite_key(&b, 0, 0, 10, 10));
+        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
     }
 
     #[test]
@@ -1083,7 +1029,7 @@ mod tests {
         let node_b = box_node(Some(1), false, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 0, 10, 10), sprite_key(&b, 0, 0, 10, 10));
+        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
     }
 
     #[test]
@@ -1092,36 +1038,80 @@ mod tests {
         let node_b = box_node(Some(1), true, false);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 0, 10, 10), sprite_key(&b, 0, 0, 10, 10));
+        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
     }
 
     #[test]
     fn sprite_key_differs_by_crop() {
         let node_a = box_node(Some(1), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 0, 10, 10), sprite_key(&a, 1, 0, 10, 10));
+        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&a, 1, 10, 0, 10));
     }
 
     #[test]
     fn sprite_key_of_arrows_with_different_stops_differs() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 3], 1, 0, 0, 4, 3);
-        assert_ne!(sprite_key(&a, 0, 0, 4, 3), sprite_key(&b, 0, 0, 4, 3));
+        assert_ne!(sprite_key(&a, 0, 4, 0, 3), sprite_key(&b, 0, 4, 0, 3));
     }
 
     #[test]
     fn sprite_key_of_identical_arrows_is_equal() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
-        assert_eq!(sprite_key(&a, 0, 0, 4, 3), sprite_key(&b, 0, 0, 4, 3));
+        assert_eq!(sprite_key(&a, 0, 4, 0, 3), sprite_key(&b, 0, 4, 0, 3));
+    }
+
+    fn terminal(cols: i64, rows: i64, cell_width: i64, cell_height: i64) -> Terminal {
+        Terminal { cols, rows, cell_width, cell_height }
     }
 
     fn renderer(cell_width: i64, cell_height: i64) -> TerminalRenderer {
-        renderer_on(Terminal { cols: 0, rows: 0, cell_width, cell_height })
+        renderer_on(terminal(0, 0, cell_width, cell_height))
     }
 
     fn renderer_on(terminal: Terminal) -> TerminalRenderer {
         TerminalRenderer::new(terminal)
+    }
+
+    fn draw_all(r: &mut TerminalRenderer, screen: &mut Screen, placements: &[Placement]) {
+        for placement in placements {
+            match &placement.node {
+                PlacementNode::Node(_) => r.draw_box(screen, placement),
+                PlacementNode::Arrow(_) => r.draw_arrow(screen, placement),
+                PlacementNode::Label(label) => draw_label(screen, placement, label),
+                PlacementNode::Cursor(_) => draw_cursor(screen, placement),
+            }
+        }
+    }
+
+    fn drawn_screen(r: &mut TerminalRenderer, placements: &[Placement]) -> Screen {
+        let mut screen = Screen::new(r.terminal);
+        draw_all(r, &mut screen, placements);
+        screen
+    }
+
+    fn rows(screen: &Screen) -> Vec<String> {
+        screen.characters.iter().map(|row| row.iter().collect()).collect()
+    }
+
+    fn grid(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
+        rows(&drawn_screen(r, placements))
+    }
+
+    fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Sprite> {
+        drawn_screen(r, placements).images
+    }
+
+    fn centred(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(placements);
+        draw_all(r, &mut screen, placements);
+        rows(&screen)
+    }
+
+    fn lines_of(frame: &str) -> Vec<&str> {
+        frame.strip_prefix(HOME_CURSOR).unwrap().split("\r\n").collect()
     }
 
     fn label_placement(text: &str, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
@@ -1148,15 +1138,49 @@ mod tests {
     }
 
     #[test]
+    fn centre_on_puts_the_diagram_in_the_middle_of_the_terminal() {
+        let node = box_node(None, false, false);
+        let (cols, rows) = (20, 10);
+        let (width, height) = (6, 4);
+        let mut screen = Screen::new(terminal(cols, rows, 1, 1));
+        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
+        assert_eq!(
+            screen.origin,
+            ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
+        );
+    }
+
+    #[test]
+    fn centre_on_measures_the_whole_bounding_box() {
+        let node = box_node(None, false, false);
+        let (cols, rows) = (20, 10);
+        let placements = vec![
+            box_placement(&node, 0, 0, 3, 2),
+            box_placement(&node, 5, 4, 3, 2),
+        ];
+        let mut screen = Screen::new(terminal(cols, rows, 1, 1));
+        screen.centre_on(&placements);
+        assert_eq!(screen.origin, ((cols - 8).div_euclid(2), (rows - 6).div_euclid(2)));
+    }
+
+    #[test]
+    fn centre_on_nothing_leaves_the_origin_at_the_corner() {
+        let mut screen = Screen::new(terminal(20, 10, 1, 1));
+        screen.centre_on(&[]);
+        assert_eq!(screen.origin, (0, 0));
+    }
+
+    #[test]
     fn line_count_is_unchanged() {
-        let mut r = renderer(2, 4);
-        assert_eq!(r.draw(&[], 3, 3).len(), 3);
+        let mut r = renderer_on(terminal(3, 3, 2, 4));
+        assert_eq!(lines_of(&rendered(&mut r, &empty_doc())).len(), 3);
     }
 
     #[test]
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
-        let mut r = renderer(2, 4);
-        let lines = r.draw(&[], 3, 2);
+        let mut r = renderer_on(terminal(3, 2, 2, 4));
+        let frame = rendered(&mut r, &empty_doc());
+        let lines = lines_of(&frame);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(lines[1], format!("{}{}", BLANK.to_string().repeat(3), kitty::clear()));
     }
@@ -1168,14 +1192,15 @@ mod tests {
         let placements = crate::layout::layout(&nodes);
         let cols = placements.iter().map(|placement| placement.x + placement.width).max().unwrap();
         let rows = placements.iter().map(|placement| placement.y + placement.height).max().unwrap();
-        let sprites = renderer(2, 4).sprites(&placements, cols, rows);
-        assert!(sprites.len() > 1);
+        let terminal = terminal(cols, rows, 2, 4);
+        let images = sprites(&mut renderer_on(terminal), &placements);
+        assert!(images.len() > 1);
         let expected: String = std::iter::once(kitty::clear())
-            .chain(sprites.iter().map(kitty::show))
+            .chain(images.iter().map(kitty::show))
             .map(|command| command.to_string())
             .collect();
-        let lines = renderer(2, 4).draw(&placements, cols, rows);
-        assert!(lines.last().unwrap().ends_with(&expected));
+        let doc = Document { boxes: nodes.clone(), selected: None };
+        assert!(rendered(&mut renderer_on(terminal), &doc).ends_with(&expected));
     }
 
     #[test]
@@ -1187,8 +1212,7 @@ mod tests {
         let rows = 10;
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
         let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
-        let mut r = renderer(1, 1);
-        let lines = r.draw(&placements, cols, rows);
+        let lines = centred(&mut renderer_on(terminal(cols, rows, 1, 1)), &placements);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
         assert_eq!(&lines[label_row as usize][label_x as usize..label_x as usize + 2], "hi");
@@ -1209,8 +1233,7 @@ mod tests {
             crate::layout::LEAF_STRIDE * crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT;
         let left = (cols - span).div_euclid(2);
         let top = (rows - height).div_euclid(2);
-        let mut r = renderer(1, 1);
-        let lines = r.draw(&placements, cols, rows);
+        let lines = centred(&mut renderer_on(terminal(cols, rows, 1, 1)), &placements);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
         let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
@@ -1287,14 +1310,17 @@ mod tests {
 
     #[test]
     fn empty_canvas_fills_terminal() {
-        let grid = renderer(1, 1).grid(&[], 11, 5);
+        let grid = grid(&mut renderer_on(terminal(11, 5, 1, 1)), &[]);
         assert_eq!(grid, vec![BLANK.to_string().repeat(11); 5]);
     }
 
     #[test]
     fn grid_matches_the_requested_size() {
         let (cols, rows) = (20, 7);
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(None, false, false), 4, 4, 3, 3)], cols, rows);
+        let grid = grid(
+            &mut renderer_on(terminal(cols, rows, 1, 1)),
+            &[box_placement(&box_node(None, false, false), 4, 4, 3, 3)],
+        );
         assert_eq!(grid.len() as i64, rows);
         for line in &grid {
             assert_eq!(line.chars().count() as i64, cols);
@@ -1303,13 +1329,19 @@ mod tests {
 
     #[test]
     fn a_box_claims_its_cells_without_border_characters() {
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(None, false, false), 4, 4, 3, 3)], 11, 11);
+        let grid = grid(
+            &mut renderer_on(terminal(11, 11, 1, 1)),
+            &[box_placement(&box_node(None, false, false), 4, 4, 3, 3)],
+        );
         assert_eq!(&grid[4][4..7], "   ");
     }
 
     #[test]
     fn a_box_reaching_past_the_edge_is_clipped() {
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(None, true, false), 3, 1, 3, 3)], 4, 2);
+        let grid = grid(
+            &mut renderer_on(terminal(4, 2, 1, 1)),
+            &[box_placement(&box_node(None, true, false), 3, 1, 3, 3)],
+        );
         assert_eq!(grid, vec!["    ".to_string(), "    ".to_string()]);
     }
 
@@ -1320,7 +1352,7 @@ mod tests {
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
         ];
-        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        let grid = grid(&mut renderer_on(terminal(5, 3, 1, 1)), &placements);
         assert_eq!(grid[1], " hi  ");
     }
 
@@ -1332,7 +1364,7 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
-        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        let grid = grid(&mut renderer_on(terminal(5, 3, 1, 1)), &placements);
         assert_eq!(grid[1], format!(" hi{} ", CURSOR));
     }
 
@@ -1344,19 +1376,22 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
-        let grid = renderer(1, 1).grid(&placements, 3, 3);
+        let grid = grid(&mut renderer_on(terminal(3, 3, 1, 1)), &placements);
         assert_eq!(grid[1], " hi");
     }
 
     #[test]
     fn a_box_does_not_draw_a_cursor() {
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(None, false, false), 0, 0, 5, 3)], 5, 3);
+        let grid = grid(
+            &mut renderer_on(terminal(5, 3, 1, 1)),
+            &[box_placement(&box_node(None, false, false), 0, 0, 5, 3)],
+        );
         assert!(!grid.join("").contains(CURSOR));
     }
 
     #[test]
     fn cursor_placement_is_drawn_at_its_own_position() {
-        let grid = renderer(1, 1).grid(&[cursor_placement(2, 1, 1, 1)], 4, 3);
+        let grid = grid(&mut renderer_on(terminal(4, 3, 1, 1)), &[cursor_placement(2, 1, 1, 1)]);
         assert_eq!(
             grid,
             vec!["    ".to_string(), format!("  {} ", CURSOR), "    ".to_string()]
@@ -1365,13 +1400,13 @@ mod tests {
 
     #[test]
     fn a_cursor_outside_the_grid_is_clipped() {
-        let grid = renderer(1, 1).grid(&[cursor_placement(9, 9, 1, 1)], 4, 3);
+        let grid = grid(&mut renderer_on(terminal(4, 3, 1, 1)), &[cursor_placement(9, 9, 1, 1)]);
         assert_eq!(grid, vec!["    ".to_string(); 3]);
     }
 
     #[test]
     fn an_arrow_leaves_the_gap_blank() {
-        let grid = renderer(1, 1).grid(&[arrow_placement(vec![0], 0, 2, 1, 1, 2)], 4, 4);
+        let grid = grid(&mut renderer_on(terminal(4, 4, 1, 1)), &[arrow_placement(vec![0], 0, 2, 1, 1, 2)]);
         assert_eq!(grid, vec!["    ".to_string(); 4]);
     }
 
@@ -1383,157 +1418,160 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
-        let grid = renderer(1, 1).grid(&placements, 5, 3);
+        let grid = grid(&mut renderer_on(terminal(5, 3, 1, 1)), &placements);
         assert!(!grid.join("").contains('\x1b'));
     }
 
     #[test]
     fn a_coloured_box_puts_no_colour_in_the_grid() {
-        let grid = renderer(1, 1).grid(&[box_placement(&box_node(Some(2), false, false), 0, 0, 5, 3)], 5, 3);
+        let grid = grid(
+            &mut renderer_on(terminal(5, 3, 1, 1)),
+            &[box_placement(&box_node(Some(2), false, false), 0, 0, 5, 3)],
+        );
         assert_eq!(grid, vec!["     ".to_string(); 3]);
     }
 
     #[test]
     fn a_cursor_has_no_sprite() {
-        let mut r = renderer(2, 4);
-        let sprites = r.sprites(&[cursor_placement(1, 1, 1, 1)], 40, 20);
-        assert!(sprites.is_empty());
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        assert!(sprites(&mut r, &[cursor_placement(1, 1, 1, 1)]).is_empty());
     }
 
     #[test]
     fn a_box_off_screen_has_no_sprite() {
-        let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), 10, 0, 4, 3)], 5, 20);
-        assert!(sprites.is_empty());
+        let mut r = renderer_on(terminal(5, 20, 4, 4));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 10, 0, 4, 3)]);
+        assert!(images.is_empty());
     }
 
     #[test]
     fn a_box_overhanging_the_left_is_cropped() {
-        let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), -2, 1, 5, 3)], 40, 20);
-        assert_eq!(sprites.len(), 1);
-        assert_eq!(sprites[0].col, 0);
-        assert_eq!(sprites[0].width, 3 * 4);
+        let mut r = renderer_on(terminal(40, 20, 4, 4));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), -2, 1, 5, 3)]);
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].col, 0);
+        assert_eq!(images[0].width, 3 * 4);
     }
 
     #[test]
     fn a_box_overhanging_the_top_is_cropped() {
-        let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), 1, -2, 4, 5)], 40, 20);
-        assert_eq!(sprites[0].row, 0);
-        assert_eq!(sprites[0].height, 3 * 4);
+        let mut r = renderer_on(terminal(40, 20, 4, 4));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, -2, 4, 5)]);
+        assert_eq!(images[0].row, 0);
+        assert_eq!(images[0].height, 3 * 4);
     }
 
     #[test]
     fn a_box_overhanging_the_right_is_cropped() {
-        let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), 1, 0, 6, 3)], 4, 20);
-        assert_eq!(sprites[0].col, 1);
-        assert_eq!(sprites[0].width, 3 * 4);
+        let mut r = renderer_on(terminal(4, 20, 4, 4));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, 0, 6, 3)]);
+        assert_eq!(images[0].col, 1);
+        assert_eq!(images[0].width, 3 * 4);
     }
 
     #[test]
     fn a_box_overhanging_the_bottom_is_cropped() {
-        let mut r = renderer(4, 4);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), 0, 1, 3, 6)], 40, 4);
-        assert_eq!(sprites[0].row, 1);
-        assert_eq!(sprites[0].height, 3 * 4);
+        let mut r = renderer_on(terminal(40, 4, 4, 4));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 1, 3, 6)]);
+        assert_eq!(images[0].row, 1);
+        assert_eq!(images[0].height, 3 * 4);
     }
 
     #[test]
     fn a_box_sprite_sits_at_the_placement_cell() {
-        let mut r = renderer(6, 12);
-        let sprites = r.sprites(&[box_placement(&box_node(None, false, false), 1, 2, 4, 3)], 40, 20);
-        assert_eq!((sprites[0].col, sprites[0].row), (1, 2));
-        assert_eq!((sprites[0].width, sprites[0].height), (24, 36));
+        let mut r = renderer_on(terminal(40, 20, 6, 12));
+        let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, 2, 4, 3)]);
+        assert_eq!((images[0].col, images[0].row), (1, 2));
+        assert_eq!((images[0].width, images[0].height), (24, 36));
     }
 
     #[test]
     fn a_border_takes_the_colour_of_its_palette_index() {
         for index in (0..).take_while(|&i| palette(i).is_some()) {
-            let mut r = renderer(2, 4);
-            let sprites = r.sprites(&[box_placement(&box_node(Some(index), false, false), 0, 0, 2, 2)], 40, 20);
+            let mut r = renderer_on(terminal(40, 20, 2, 4));
+            let images = sprites(&mut r, &[box_placement(&box_node(Some(index), false, false), 0, 0, 2, 2)]);
             let (px, py, pz) = colour(Some(index));
-            assert_eq!(&sprites[0].pixels[0..4], &[px, py, pz, OPAQUE]);
+            assert_eq!(&images[0].pixels[0..4], &[px, py, pz, OPAQUE]);
         }
     }
 
     #[test]
     fn an_unchanged_box_is_not_redrawn() {
-        let mut r = renderer(2, 4);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
         let node = box_node(Some(1), true, false);
         let placement = box_placement(&node, 0, 0, 4, 3);
-        let first = r.sprites(&[placement.clone()], 40, 20);
+        let first = sprites(&mut r, &[placement.clone()]);
         assert_eq!(r.cache.len(), 1);
-        let second = r.sprites(&[placement], 40, 20);
+        let second = sprites(&mut r, &[placement]);
         assert_eq!(first[0].pixels, second[0].pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_recoloured_box_is_redrawn() {
-        let mut r = renderer(2, 4);
-        let plain = r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 40, 20);
-        let blue = r.sprites(&[box_placement(&box_node(Some(4), false, false), 0, 0, 4, 3)], 40, 20);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        let plain = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        let blue = sprites(&mut r, &[box_placement(&box_node(Some(4), false, false), 0, 0, 4, 3)]);
         assert_ne!(plain[0].pixels, blue[0].pixels);
         assert_eq!(r.cache.len(), 2);
     }
 
     #[test]
     fn rounded_and_square_are_cached_distinctly() {
-        let mut r = renderer(2, 4);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
         for rounded in [false, true] {
-            r.sprites(&[box_placement(&box_node(None, false, rounded), 0, 0, 4, 3)], 40, 20);
+            sprites(&mut r, &[box_placement(&box_node(None, false, rounded), 0, 0, 4, 3)]);
         }
         assert_eq!(r.cache.len(), 2);
     }
 
     #[test]
     fn a_relabelled_box_of_the_same_size_reuses_its_pixels() {
-        let mut r = renderer(2, 4);
-        let first = r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 40, 20);
-        let second = r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 40, 20);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        let first = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        let second = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
         assert_eq!(first[0].pixels, second[0].pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_cached_sprite_moves_to_its_own_position() {
-        let mut r = renderer(2, 4);
-        r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 40, 20);
-        let moved = r.sprites(&[box_placement(&box_node(None, false, false), 5, 2, 4, 3)], 40, 20);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        let moved = sprites(&mut r, &[box_placement(&box_node(None, false, false), 5, 2, 4, 3)]);
         assert_eq!((moved[0].col, moved[0].row), (5, 2));
     }
 
     #[test]
     fn a_differently_cropped_box_is_redrawn() {
-        let mut r = renderer(2, 4);
-        let whole = r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 40, 20);
-        let cropped = r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, 4, 3)], 2, 20);
+        let mut r = renderer_on(terminal(4, 20, 2, 4));
+        let whole = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        let cropped = sprites(&mut r, &[box_placement(&box_node(None, false, false), 2, 0, 4, 3)]);
         assert_ne!(whole[0].width, cropped[0].width);
         assert_eq!(r.cache.len(), 2);
     }
 
     #[test]
     fn arrows_with_different_stops_are_redrawn() {
-        let mut r = renderer(2, 4);
-        let one = r.sprites(&[arrow_placement(vec![0], 0, 0, 0, 4, 6)], 40, 20);
-        let two = r.sprites(&[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)], 40, 20);
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
+        let two = sprites(&mut r, &[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)]);
         assert_ne!(one[0].pixels, two[0].pixels);
     }
 
     #[test]
     fn the_cache_is_bounded() {
-        let mut r = renderer(2, 4);
+        let mut r = renderer_on(terminal(4000, 20, 2, 4));
         for width in 0..(CACHE_LIMIT as i64 + 2) {
-            r.sprites(&[box_placement(&box_node(None, false, false), 0, 0, width + 1, 3)], 4000, 20);
+            sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, width + 1, 3)]);
         }
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
 
     fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
-        r.outline_box(&placement, 0, 0, width, height)
+        let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
+        r.outline_box(&placement, 0, 0, 0, last_x, 0, last_y)
     }
 
     fn pixel_of(sprite: &Sprite, x: i64, y: i64) -> (u8, u8, u8, u8) {
@@ -1582,15 +1620,17 @@ mod tests {
         let node = box_node(Some(1), true, true);
         let whole = box_outline(&r, &node, 10, 10);
         let hidden_cols = 2;
-        let placement = crate::layout::Placement {
-            node: crate::layout::PlacementNode::Node(&node),
-            x: -hidden_cols,
-            y: 0,
-            width: 10,
-            height: 10,
-        };
-        let clipped = r.outline_box(&placement, 0, 0, 10 - hidden_cols, 10);
-        let offset = hidden_cols * r.terminal.cell_width;
+        let placement = box_placement(&node, 0, 0, 10, 10);
+        let offset = r.cells_to_pixels_x(hidden_cols);
+        let clipped = r.outline_box(
+            &placement,
+            0,
+            0,
+            offset,
+            r.cells_to_pixels_x(10),
+            0,
+            r.cells_to_pixels_y(10),
+        );
         for y in 0..clipped.height {
             for x in 0..clipped.width {
                 assert_eq!(pixel_of(&clipped, x, y), pixel_of(&whole, x + offset, y));
@@ -1599,14 +1639,9 @@ mod tests {
     }
 
     fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Sprite {
-        let placement = crate::layout::Placement {
-            node: crate::layout::PlacementNode::Arrow(crate::layout::Arrow { stops, shaft }),
-            x: 0,
-            y: 0,
-            width,
-            height,
-        };
-        r.outline_arrow(&placement, 0, 0, width, height)
+        let placement = arrow_placement(stops, shaft, 0, 0, width, height);
+        let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
+        r.outline_arrow(&placement, 0, 0, 0, last_x, 0, last_y)
     }
 
     #[test]
