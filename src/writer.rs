@@ -12,9 +12,6 @@ use crate::terminal::{self, RawScreen};
 
 const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
-const NOT_SUPPORTED_MESSAGE: &str =
-    "Dre requires a terminal with Kitty graphics protocol support.";
-const CLEAR_LINE: &str = "\r\x1b[K";
 
 fn frame<W: Write>(state: &State, renderer: &mut TerminalRenderer, stream: &mut W) -> io::Result<()> {
     renderer.render(&state.doc, stream)?;
@@ -64,12 +61,7 @@ pub fn write(file: Option<String>) -> io::Result<ExitCode> {
     let state = load_state(file)?;
     let mut stdout = io::stdout();
     let stdin_fd = io::stdin().as_raw_fd();
-    let supported = kitty::supported(&mut stdout, stdin_fd)?;
-    if !supported {
-        let _ = stdout.write_all(CLEAR_LINE.as_bytes());
-        println!("{NOT_SUPPORTED_MESSAGE}");
-        return Ok(ExitCode::FAILURE);
-    }
+    kitty::require(&mut stdout, stdin_fd)?;
     run(&mut stdout, stdin_fd, state)?;
     Ok(ExitCode::SUCCESS)
 }
