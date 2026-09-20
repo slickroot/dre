@@ -277,15 +277,28 @@ impl RoundedBox {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Crop {
+    col: i64,
+    row: i64,
+    first_x: i64,
+    last_x: i64,
+    first_y: i64,
+    last_y: i64,
+}
+
+impl Crop {
+    fn at_origin(&self) -> Crop {
+        Crop { col: 0, row: 0, ..*self }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SpriteKey {
     Box {
         width: i64,
         height: i64,
-        first_x: i64,
-        last_x: i64,
-        first_y: i64,
-        last_y: i64,
+        crop: Crop,
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
@@ -293,30 +306,19 @@ enum SpriteKey {
     Arrow {
         width: i64,
         height: i64,
-        first_x: i64,
-        last_x: i64,
-        first_y: i64,
-        last_y: i64,
+        crop: Crop,
         stops: Vec<i64>,
         shaft: i64,
     },
 }
 
-fn sprite_key(
-    placement: &Placement,
-    first_x: i64,
-    last_x: i64,
-    first_y: i64,
-    last_y: i64,
-) -> SpriteKey {
+fn sprite_key(placement: &Placement, crop: &Crop) -> SpriteKey {
+    let crop = crop.at_origin();
     match &placement.node {
         PlacementNode::Node(node) => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
-            first_x,
-            last_x,
-            first_y,
-            last_y,
+            crop,
             colour: node.colour,
             fill: if node.filled { node.colour } else { None },
             rounded: node.rounded,
@@ -324,10 +326,7 @@ fn sprite_key(
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
             height: placement.height,
-            first_x,
-            last_x,
-            first_y,
-            last_y,
+            crop,
             stops: arrow.stops.clone(),
             shaft: arrow.shaft,
         },
@@ -364,6 +363,29 @@ impl Screen {
             (self.terminal.cols - span).div_euclid(2),
             (self.terminal.rows - height).div_euclid(2),
         );
+    }
+
+    // Clipping happens by cropping: kitty::show cannot position at a negative
+    // column, and sends a=T without C=1, so an overhang would shift into view
+    // or scroll the screen instead of being cut off.
+    fn crop(&self, placement: &Placement) -> Option<Crop> {
+        let left = placement.x + self.origin.0;
+        let top = placement.y + self.origin.1;
+        let col = left.max(0);
+        let row = top.max(0);
+        let right = (left + placement.width).min(self.terminal.cols);
+        let bottom = (top + placement.height).min(self.terminal.rows);
+        if col >= right || row >= bottom {
+            return None;
+        }
+        Some(Crop {
+            col,
+            row,
+            first_x: (col - left) * self.terminal.cell_width,
+            last_x: (right - left) * self.terminal.cell_width,
+            first_y: (row - top) * self.terminal.cell_height,
+            last_y: (bottom - top) * self.terminal.cell_height,
+        })
     }
 
     fn write(&mut self, x: i64, y: i64, character: char) {
@@ -434,47 +456,27 @@ impl TerminalRenderer {
     }
 
     fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
-        let left = placement.x + screen.origin.0;
-        let top = placement.y + screen.origin.1;
-        let col = left.max(0);
-        let row = top.max(0);
-        let right = (left + placement.width).min(screen.terminal.cols);
-        let bottom = (top + placement.height).min(screen.terminal.rows);
-        if col >= right || row >= bottom {
+        let Some(crop) = screen.crop(placement) else {
             return;
-        }
-        let first_x = self.cells_to_pixels_x(col - left);
-        let last_x = self.cells_to_pixels_x(right - left);
-        let first_y = self.cells_to_pixels_y(row - top);
-        let last_y = self.cells_to_pixels_y(bottom - top);
-        let key = sprite_key(placement, first_x, last_x, first_y, last_y);
+        };
+        let key = sprite_key(placement, &crop);
         if !self.cache.contains_key(&key) {
-            let drawn = self.outline_box(placement, col, row, first_x, last_x, first_y, last_y);
+            let drawn = self.outline_box(placement, &crop);
             self.remember(key.clone(), drawn);
         }
-        screen.place(self.cached(&key, col, row));
+        screen.place(self.cached(&key, crop.col, crop.row));
     }
 
     fn draw_arrow(&mut self, screen: &mut Screen, placement: &Placement) {
-        let left = placement.x + screen.origin.0;
-        let top = placement.y + screen.origin.1;
-        let col = left.max(0);
-        let row = top.max(0);
-        let right = (left + placement.width).min(screen.terminal.cols);
-        let bottom = (top + placement.height).min(screen.terminal.rows);
-        if col >= right || row >= bottom {
+        let Some(crop) = screen.crop(placement) else {
             return;
-        }
-        let first_x = self.cells_to_pixels_x(col - left);
-        let last_x = self.cells_to_pixels_x(right - left);
-        let first_y = self.cells_to_pixels_y(row - top);
-        let last_y = self.cells_to_pixels_y(bottom - top);
-        let key = sprite_key(placement, first_x, last_x, first_y, last_y);
+        };
+        let key = sprite_key(placement, &crop);
         if !self.cache.contains_key(&key) {
-            let drawn = self.outline_arrow(placement, col, row, first_x, last_x, first_y, last_y);
+            let drawn = self.outline_arrow(placement, &crop);
             self.remember(key.clone(), drawn);
         }
-        screen.place(self.cached(&key, col, row));
+        screen.place(self.cached(&key, crop.col, crop.row));
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Sprite) {
@@ -503,16 +505,7 @@ impl TerminalRenderer {
         cells * self.terminal.cell_height
     }
 
-    fn outline_box(
-        &self,
-        placement: &Placement,
-        col: i64,
-        row: i64,
-        first_x: i64,
-        last_x: i64,
-        first_y: i64,
-        last_y: i64,
-    ) -> Sprite {
+    fn outline_box(&self, placement: &Placement, crop: &Crop) -> Sprite {
         let node = match &placement.node {
             PlacementNode::Node(node) => node,
             _ => unreachable!("outline_box is only called for Box placements"),
@@ -523,27 +516,26 @@ impl TerminalRenderer {
         let (r, g, b) = colour(node.colour);
         let edge = (r, g, b, OPAQUE);
         let fill = fill_colour(node.colour, node.filled);
-        let span = last_x - first_x;
         let radius = if node.rounded { ROUNDED_RADIUS } else { 0 };
         let pixels = if radius != 0 {
             RoundedBox::new(width, height, radius, border, edge, fill)
-                .pixels(first_x, last_x, first_y, last_y)
+                .pixels(crop.first_x, crop.last_x, crop.first_y, crop.last_y)
         } else {
-            square_pixels(width, height, border, edge, fill, first_x, last_x, first_y, last_y)
+            square_pixels(
+                width, height, border, edge, fill, crop.first_x, crop.last_x, crop.first_y,
+                crop.last_y,
+            )
         };
-        Sprite { pixels, width: span, height: last_y - first_y, col, row }
+        Sprite {
+            pixels,
+            width: crop.last_x - crop.first_x,
+            height: crop.last_y - crop.first_y,
+            col: crop.col,
+            row: crop.row,
+        }
     }
 
-    fn outline_arrow(
-        &self,
-        placement: &Placement,
-        col: i64,
-        row: i64,
-        first_x: i64,
-        last_x: i64,
-        first_y: i64,
-        last_y: i64,
-    ) -> Sprite {
+    fn outline_arrow(&self, placement: &Placement, crop: &Crop) -> Sprite {
         let arrow = match &placement.node {
             PlacementNode::Arrow(arrow) => arrow,
             _ => unreachable!("outline_arrow is only called for Arrow placements"),
@@ -560,7 +552,7 @@ impl TerminalRenderer {
         let midpoint = width / 2;
         let (r, g, b) = colour(None);
         let ink = [r, g, b, OPAQUE];
-        let mut canvas = Canvas::new(first_x, last_x, first_y, last_y, ink);
+        let mut canvas = Canvas::new(crop.first_x, crop.last_x, crop.first_y, crop.last_y, ink);
         canvas.horizontal(shaft_row, 0, midpoint, ARROW_STROKE);
         canvas.vertical(midpoint, trunk_top, trunk_bottom, ARROW_STROKE);
         for &stop_row in &stop_rows {
@@ -569,10 +561,10 @@ impl TerminalRenderer {
         }
         Sprite {
             pixels: canvas.pixels(),
-            width: last_x - first_x,
-            height: last_y - first_y,
-            col,
-            row,
+            width: crop.last_x - crop.first_x,
+            height: crop.last_y - crop.first_y,
+            col: crop.col,
+            row: crop.row,
         }
     }
 
@@ -1005,13 +997,17 @@ mod tests {
         }
     }
 
+    fn crop(first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Crop {
+        Crop { col: 0, row: 0, first_x, last_x, first_y, last_y }
+    }
+
     #[test]
     fn sprite_key_of_two_identically_shaped_boxes_is_equal() {
         let node_a = box_node(Some(1), true, true);
         let node_b = box_node(Some(1), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_eq!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
+        assert_eq!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
     }
 
     #[test]
@@ -1020,7 +1016,7 @@ mod tests {
         let node_b = box_node(Some(2), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
+        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
     }
 
     #[test]
@@ -1029,7 +1025,7 @@ mod tests {
         let node_b = box_node(Some(1), false, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
+        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
     }
 
     #[test]
@@ -1038,28 +1034,28 @@ mod tests {
         let node_b = box_node(Some(1), true, false);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&b, 0, 10, 0, 10));
+        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
     }
 
     #[test]
     fn sprite_key_differs_by_crop() {
         let node_a = box_node(Some(1), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, 0, 10, 0, 10), sprite_key(&a, 1, 10, 0, 10));
+        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&a, &crop(1, 10, 0, 10)));
     }
 
     #[test]
     fn sprite_key_of_arrows_with_different_stops_differs() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 3], 1, 0, 0, 4, 3);
-        assert_ne!(sprite_key(&a, 0, 4, 0, 3), sprite_key(&b, 0, 4, 0, 3));
+        assert_ne!(sprite_key(&a, &crop(0, 4, 0, 3)), sprite_key(&b, &crop(0, 4, 0, 3)));
     }
 
     #[test]
     fn sprite_key_of_identical_arrows_is_equal() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
-        assert_eq!(sprite_key(&a, 0, 4, 0, 3), sprite_key(&b, 0, 4, 0, 3));
+        assert_eq!(sprite_key(&a, &crop(0, 4, 0, 3)), sprite_key(&b, &crop(0, 4, 0, 3)));
     }
 
     fn terminal(cols: i64, rows: i64, cell_width: i64, cell_height: i64) -> Terminal {
@@ -1168,6 +1164,96 @@ mod tests {
         let mut screen = Screen::new(terminal(20, 10, 1, 1));
         screen.centre_on(&[]);
         assert_eq!(screen.origin, (0, 0));
+    }
+
+    #[test]
+    fn a_box_on_screen_is_cropped_to_the_whole_shape() {
+        let node = box_node(None, false, false);
+        let window = terminal(20, 10, 4, 8);
+        let (width, height) = (5, 4);
+        let screen = Screen::new(window);
+        assert_eq!(
+            screen.crop(&box_placement(&node, 2, 3, width, height)),
+            Some(Crop {
+                col: 2,
+                row: 3,
+                first_x: 0,
+                last_x: width * window.cell_width,
+                first_y: 0,
+                last_y: height * window.cell_height,
+            })
+        );
+    }
+
+    #[test]
+    fn a_crop_sits_at_the_placement_shifted_by_the_origin() {
+        let node = box_node(None, false, false);
+        let mut screen = Screen::new(terminal(20, 10, 4, 8));
+        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
+        let crop = screen.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
+        assert_eq!((crop.col, crop.row), (1 + screen.origin.0, 1 + screen.origin.1));
+    }
+
+    #[test]
+    fn a_crop_overhanging_the_left_drops_the_hidden_columns() {
+        let node = box_node(None, false, false);
+        let window = terminal(20, 10, 4, 8);
+        let (hidden, width) = (2, 5);
+        let screen = Screen::new(window);
+        let crop = screen.crop(&box_placement(&node, -hidden, 0, width, 3)).unwrap();
+        assert_eq!(crop.col, 0);
+        assert_eq!(crop.first_x, hidden * window.cell_width);
+        assert_eq!(crop.last_x, width * window.cell_width);
+    }
+
+    #[test]
+    fn a_crop_overhanging_the_top_drops_the_hidden_rows() {
+        let node = box_node(None, false, false);
+        let window = terminal(20, 10, 4, 8);
+        let (hidden, height) = (2, 5);
+        let screen = Screen::new(window);
+        let crop = screen.crop(&box_placement(&node, 0, -hidden, 3, height)).unwrap();
+        assert_eq!(crop.row, 0);
+        assert_eq!(crop.first_y, hidden * window.cell_height);
+        assert_eq!(crop.last_y, height * window.cell_height);
+    }
+
+    #[test]
+    fn a_crop_overhanging_the_right_stops_at_the_last_column() {
+        let node = box_node(None, false, false);
+        let window = terminal(20, 10, 4, 8);
+        let x = 18;
+        let screen = Screen::new(window);
+        let crop = screen.crop(&box_placement(&node, x, 0, 5, 3)).unwrap();
+        assert_eq!(crop.col, x);
+        assert_eq!(crop.first_x, 0);
+        assert_eq!(crop.last_x, (window.cols - x) * window.cell_width);
+    }
+
+    #[test]
+    fn a_crop_overhanging_the_bottom_stops_at_the_last_row() {
+        let node = box_node(None, false, false);
+        let window = terminal(20, 10, 4, 8);
+        let y = 8;
+        let screen = Screen::new(window);
+        let crop = screen.crop(&box_placement(&node, 0, y, 3, 5)).unwrap();
+        assert_eq!(crop.row, y);
+        assert_eq!(crop.first_y, 0);
+        assert_eq!(crop.last_y, (window.rows - y) * window.cell_height);
+    }
+
+    #[test]
+    fn a_box_beyond_the_right_edge_has_no_crop() {
+        let node = box_node(None, false, false);
+        let screen = Screen::new(terminal(20, 10, 4, 8));
+        assert_eq!(screen.crop(&box_placement(&node, 20, 0, 4, 3)), None);
+    }
+
+    #[test]
+    fn a_box_beyond_the_top_edge_has_no_crop() {
+        let node = box_node(None, false, false);
+        let screen = Screen::new(terminal(20, 10, 4, 8));
+        assert_eq!(screen.crop(&box_placement(&node, 0, -3, 4, 3)), None);
     }
 
     #[test]
@@ -1543,6 +1629,15 @@ mod tests {
     }
 
     #[test]
+    fn a_moved_box_reuses_its_cached_pixels() {
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        let first = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        let moved = sprites(&mut r, &[box_placement(&box_node(None, false, false), 5, 2, 4, 3)]);
+        assert_eq!(first[0].pixels, moved[0].pixels);
+        assert_eq!(r.cache.len(), 1);
+    }
+
+    #[test]
     fn a_differently_cropped_box_is_redrawn() {
         let mut r = renderer_on(terminal(4, 20, 2, 4));
         let whole = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
@@ -1571,7 +1666,7 @@ mod tests {
     fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Sprite {
         let placement = box_placement(node, 0, 0, width, height);
         let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
-        r.outline_box(&placement, 0, 0, 0, last_x, 0, last_y)
+        r.outline_box(&placement, &crop(0, last_x, 0, last_y))
     }
 
     fn pixel_of(sprite: &Sprite, x: i64, y: i64) -> (u8, u8, u8, u8) {
@@ -1624,12 +1719,7 @@ mod tests {
         let offset = r.cells_to_pixels_x(hidden_cols);
         let clipped = r.outline_box(
             &placement,
-            0,
-            0,
-            offset,
-            r.cells_to_pixels_x(10),
-            0,
-            r.cells_to_pixels_y(10),
+            &crop(offset, r.cells_to_pixels_x(10), 0, r.cells_to_pixels_y(10)),
         );
         for y in 0..clipped.height {
             for x in 0..clipped.width {
@@ -1641,7 +1731,7 @@ mod tests {
     fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Sprite {
         let placement = arrow_placement(stops, shaft, 0, 0, width, height);
         let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
-        r.outline_arrow(&placement, 0, 0, 0, last_x, 0, last_y)
+        r.outline_arrow(&placement, &crop(0, last_x, 0, last_y))
     }
 
     #[test]
