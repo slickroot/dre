@@ -31,9 +31,11 @@ Placement [cells] ──► Screen::crop ──► Crop ──► outline_box / 
 After this spec, a shape is rasterised at full size as if the screen were infinite, and the crop is the last thing that happens to it:
 
 ```
-Placement [cells] ──► cells × cell size ──► Canvas::fill(shape)   [full size]
-                                                  │
-                                                  ▼  cached by shape alone
+Placement [cells] ──► Screen::shows? ──► cells × cell size ──► Canvas::fill(shape)
+                            │ no                                    [full size]
+                            ▼                                            │
+                         skipped                                         ▼  cached by
+                                                                         │  shape alone
                                             Screen::place(canvas, placement)
                                                   │  crops and positions
                                                   ▼
@@ -97,14 +99,29 @@ This is a deliberate transcription, not an improvement. The arrowhead's stair pa
 
 Every clipping conditional inside the drawing code disappears: the four-way bounds test in `point`, the clamped spans in `horizontal` and `vertical`, the `left_edge`/`right_edge` arithmetic in `body_row`, the top and bottom equivalents in `square_pixels`, and the window bounds threaded through `RoundedBox::pixels` and `corner_row`.
 
-The cost is rasterising pixels that are then thrown away, and it is bounded: `Screen::crop` still returns `None` for a fully off-screen placement, a test in cells that stays exactly as cheap as it is now, so only the few shapes straddling an edge are over-drawn.
+"As if the screen were infinite" governs **how** a shape draws itself — always whole, never consulting the terminal — not **which** shapes are drawn. Whether a shape is worth drawing at all is a separate question, and it stays on `Screen`, so the shapes remain ignorant of the terminal either way.
+
+That question has to be asked *before* rasterising, which makes it distinct from cropping rather than a by-product of it:
+
+```rust
+fn shows(&self, placement: &Placement) -> bool
+```
+
+The same clamping `crop` does, in cells, without the pixel conversion. `draw_box` and `draw_arrow` ask it first and return early, before the cache lookup and before any canvas exists.
+
+Without it the skip would be worthless, since a canvas discarded by `place` has already been built. And it can't simply be dropped in favour of drawing everything: the cache would then hold every shape in the document after the first frame, so a diagram with more than `CACHE_LIMIT` shapes would overflow, clear, and thrash permanently no matter how few were visible.
+
+With it, the cost of full-size rasterising is bounded to the few shapes straddling an edge.
 
 ### `Screen` crops and places
 
 `Screen` already clips characters itself, bounds-checking each one inside `write`. It now clips images the same way, so there is one clipping policy in one type instead of two.
 
+- `shows(&self, placement: &Placement) -> bool` — worth drawing at all, asked before anything is rasterised.
 - `place(&mut self, canvas: &Canvas, placement: &Placement)` — crops with its own `crop(placement)`, returns without placing on `None`, and records the cut canvas at the crop's `col`/`row`.
 - `crop` keeps its six fields and becomes private to this path; `at_origin` is deleted with the cache key that needed it.
+
+`shows` and `crop` answer different questions — whether to bother, and what survives — which today's single `Option<Crop>` conflates. `place` keeps its `None` branch regardless of `shows`, so clipping stays correct on its own terms rather than depending on the optimisation having run.
 - `images` holds `Placed { canvas: Canvas, col: i64, row: i64 }`, private to `Screen`.
 
 `draw_box` and `draw_arrow` shrink to: look up the cache, build the full-size canvas on a miss, hand it to `Screen`. Neither learns where the shape landed, and `TerminalRenderer` is out of the screen-geometry business entirely.
@@ -133,7 +150,7 @@ The bytes out don't change, so the frame-level, centring, clipping and box-pixel
 
 - **Deleted**: the `Canvas` stamping tests (`point_*`, `horizontal_*`, `vertical_*`), which test a vocabulary that no longer exists. What they pin — stroke thickness and extent — is already covered by `the_shaft_is_arrow_stroke_pixels_thick`, `the_trunk_is_arrow_stroke_pixels_thick` and the arrowhead tests, which now exercise `ArrowShape::colour_at`.
 - **Rewritten**: `a_differently_cropped_box_is_redrawn` asserts the opposite of what it says now — the two placements share one cache entry — and is renamed to match. `clipping_via_outline_box_is_a_pure_crop_of_the_whole_box` moves to `Canvas::crop`, where it stops being a property to verify and becomes the definition.
-- **New**: `Canvas::fill` walks every pixel and stores what the shape returns; `Canvas::crop` cuts the right rows and columns; `BoxShape` with `radius: 0` matches the square pixels it replaces.
+- **New**: `Canvas::fill` walks every pixel and stores what the shape returns; `Canvas::crop` cuts the right rows and columns; `BoxShape` with `radius: 0` matches the square pixels it replaces; `Screen::shows` is false off screen and true for a shape straddling an edge, and an off-screen placement leaves the cache empty.
 - `box_outline` and `arrow_outline` return a `Canvas` instead of a `Sprite`, and `pixel_of` reads from one.
 
 ### Dependencies after this spec
