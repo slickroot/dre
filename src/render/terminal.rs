@@ -235,6 +235,15 @@ impl TerminalRenderer {
         TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
+    pub(crate) fn status_line(&mut self, text: Option<&str>, out: &mut impl Write) -> io::Result<()> {
+        let Some(text) = text else {
+            return Ok(());
+        };
+        let Terminal { cols, rows, .. } = self.terminal;
+        let line: String = text.chars().chain(std::iter::repeat(BLANK)).take(cols as usize).collect();
+        write!(out, "\x1b[{rows};1H{line}")
+    }
+
     fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
         if !screen.shows(placement) {
             return;
@@ -1409,5 +1418,46 @@ mod tests {
             let expected = if trunk_columns.contains(&x) { OPAQUE } else { 0 };
             assert_eq!(pixel_of(&sprite, x, row_between_stops).3, expected);
         }
+    }
+
+    fn status(terminal: Terminal, text: Option<&str>) -> String {
+        let mut r = renderer_on(terminal);
+        let mut out = Vec::new();
+        r.status_line(text, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn status_text(terminal: Terminal, text: &str) -> String {
+        let position = format!("\x1b[{};1H", terminal.rows);
+        status(terminal, Some(text)).strip_prefix(&position).unwrap().to_string()
+    }
+
+    #[test]
+    fn the_status_line_shows_the_text_as_given() {
+        let t = terminal(5, 2, 1, 1);
+        assert_eq!(status_text(t, "hello"), "hello");
+    }
+
+    #[test]
+    fn the_status_line_is_padded_to_the_terminal_width() {
+        let t = terminal(8, 2, 1, 1);
+        assert_eq!(status_text(t, "hi"), format!("hi{}", BLANK.to_string().repeat((t.cols - 2) as usize)));
+    }
+
+    #[test]
+    fn the_status_line_is_cut_to_the_terminal_width() {
+        let t = terminal(3, 2, 1, 1);
+        assert_eq!(status_text(t, "hello"), "hel");
+    }
+
+    #[test]
+    fn the_status_line_is_written_to_the_last_row() {
+        let t = terminal(5, 4, 1, 1);
+        assert!(status(t, Some("hi")).starts_with(&format!("\x1b[{};1H", t.rows)));
+    }
+
+    #[test]
+    fn no_status_line_is_written_without_text() {
+        assert_eq!(status(terminal(5, 4, 1, 1), None), "");
     }
 }

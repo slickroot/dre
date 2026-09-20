@@ -10,7 +10,7 @@ use crate::filesystem;
 use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::{self, handle_key, Mode, State};
-use crate::terminal::{self, Terminal};
+use crate::terminal;
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -52,26 +52,14 @@ impl<'a, W: Write> Drop for RawModeGuard<'a, W> {
     }
 }
 
-fn frame<W: Write>(
-    state: &State,
-    renderer: &mut TerminalRenderer,
-    stream: &mut W,
-    terminal: Terminal,
-) -> io::Result<()> {
+fn frame<W: Write>(state: &State, renderer: &mut TerminalRenderer, stream: &mut W) -> io::Result<()> {
     renderer.render(&state.doc, stream)?;
-    if let Mode::SavePrompt { filename } = &state.mode {
-        let Terminal { cols, rows, .. } = terminal;
-        write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
-    }
+    let prompt = match &state.mode {
+        Mode::SavePrompt { filename } => Some(format!("Save as: {filename}{CURSOR}")),
+        _ => None,
+    };
+    renderer.status_line(prompt.as_deref(), stream)?;
     stream.flush()
-}
-
-fn prompt_line(filename: &str, cols: i64) -> String {
-    format!("Save as: {filename}{CURSOR}")
-        .chars()
-        .chain(std::iter::repeat(' '))
-        .take(cols as usize)
-        .collect()
 }
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
@@ -80,7 +68,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
-        frame(&state, &mut renderer, &mut *guard.stream, terminal)?;
+        frame(&state, &mut renderer, &mut *guard.stream)?;
         let mut key_buffer = [0u8; 1];
         read(stdin, &mut key_buffer).map_err(io::Error::from)?;
         let key = std::str::from_utf8(&key_buffer).unwrap_or("").to_string();
@@ -128,6 +116,7 @@ mod tests {
     use super::*;
     use crate::diagram::Path;
     use crate::state::new_state;
+    use crate::terminal::Terminal;
     use std::fs;
     use std::io::Cursor;
 
@@ -145,7 +134,7 @@ mod tests {
         let terminal = terminal(3, 2);
         let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
+        frame(&state, &mut renderer, &mut stream).unwrap();
         assert_eq!(
             written(&stream),
             format!("\x1b[H   \r\n   {}", crate::kitty::clear())
@@ -158,23 +147,8 @@ mod tests {
         let terminal = terminal(3, 2);
         let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
+        frame(&state, &mut renderer, &mut stream).unwrap();
         assert!(written(&stream).starts_with("\x1b[H"));
-    }
-
-    #[test]
-    fn the_prompt_shows_the_filename_followed_by_the_cursor() {
-        assert_eq!(prompt_line("a.dre", 15), format!("Save as: a.dre{CURSOR}"));
-    }
-
-    #[test]
-    fn the_prompt_is_padded_to_the_terminal_width() {
-        assert_eq!(prompt_line("a", 14), format!("Save as: a{CURSOR}   "));
-    }
-
-    #[test]
-    fn the_prompt_is_cut_to_the_terminal_width() {
-        assert_eq!(prompt_line("abc", 10), "Save as: a");
     }
 
     #[test]
@@ -183,9 +157,9 @@ mod tests {
         let terminal = terminal(11, 2);
         let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
-        let Terminal { cols, rows, .. } = terminal;
-        assert!(written(&stream).ends_with(&format!("\x1b[{rows};1H{}", prompt_line("a", cols))));
+        frame(&state, &mut renderer, &mut stream).unwrap();
+        let Terminal { rows, .. } = terminal;
+        assert!(written(&stream).contains(&format!("\x1b[{rows};1HSave as: a{CURSOR}")));
     }
 
     #[test]
@@ -194,7 +168,7 @@ mod tests {
         let terminal = terminal(11, 2);
         let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
+        frame(&state, &mut renderer, &mut stream).unwrap();
         assert!(!written(&stream).contains("Save as:"));
     }
 
