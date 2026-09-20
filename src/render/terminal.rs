@@ -1,10 +1,10 @@
 use std::io::{self, Write};
 
-use super::{
-    arrowhead_depth, arrowhead_slope, colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS,
-};
+use super::shapes::{ArrowShape, BoxShape};
+use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
+use crate::canvas::Canvas;
 use crate::diagram::{palette, Document};
-use crate::kitty::{self, Sprite};
+use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
 use crate::terminal::Terminal;
 
@@ -34,81 +34,6 @@ fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
     }
 }
 
-struct Canvas {
-    pub(crate) first_x: i64,
-    pub(crate) last_x: i64,
-    pub(crate) first_y: i64,
-    pub(crate) last_y: i64,
-    ink: [u8; 4],
-    span: i64,
-    buffer: Vec<u8>,
-}
-
-impl Canvas {
-    pub(crate) fn new(first_x: i64, last_x: i64, first_y: i64, last_y: i64, ink: [u8; 4]) -> Self {
-        let span = last_x - first_x;
-        let buffer = vec![0u8; (span * (last_y - first_y) * 4) as usize];
-        Canvas {
-            first_x,
-            last_x,
-            first_y,
-            last_y,
-            ink,
-            span,
-            buffer,
-        }
-    }
-
-    pub(crate) fn point(&mut self, x: i64, y: i64, width: i64) {
-        for px in centered_span(x, width) {
-            for py in centered_span(y, width) {
-                if self.first_x <= px && px < self.last_x && self.first_y <= py && py < self.last_y
-                {
-                    let start = self.offset(px, py);
-                    self.buffer[start..start + 4].copy_from_slice(&self.ink);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn horizontal(&mut self, y: i64, x0: i64, x1: i64, width: i64) {
-        let start_x = x0.max(self.first_x);
-        let stop_x = (x1 + 1).min(self.last_x);
-        if start_x >= stop_x {
-            return;
-        }
-        for py in centered_span(y, width) {
-            if !(self.first_y <= py && py < self.last_y) {
-                continue;
-            }
-            let start = self.offset(start_x, py);
-            for i in 0..(stop_x - start_x) as usize {
-                self.buffer[start + i * 4..start + i * 4 + 4].copy_from_slice(&self.ink);
-            }
-        }
-    }
-
-    pub(crate) fn vertical(&mut self, x: i64, y0: i64, y1: i64, width: i64) {
-        for px in centered_span(x, width) {
-            if !(self.first_x <= px && px < self.last_x) {
-                continue;
-            }
-            for y in y0.max(self.first_y)..(y1 + 1).min(self.last_y) {
-                let start = self.offset(px, y);
-                self.buffer[start..start + 4].copy_from_slice(&self.ink);
-            }
-        }
-    }
-
-    pub(crate) fn pixels(&self) -> Vec<u8> {
-        self.buffer.clone()
-    }
-
-    fn offset(&self, x: i64, y: i64) -> usize {
-        (((y - self.first_y) * self.span + (x - self.first_x)) * 4) as usize
-    }
-}
-
 pub(super) fn python_round(value: f64) -> f64 {
     let floor = value.floor();
     let diff = value - floor;
@@ -123,160 +48,6 @@ pub(super) fn python_round(value: f64) -> f64 {
     }
 }
 
-fn body_row(
-    width: i64,
-    border: i64,
-    edge: (u8, u8, u8, u8),
-    fill: (u8, u8, u8, u8),
-    first_x: i64,
-    last_x: i64,
-) -> Vec<u8> {
-    let span = last_x - first_x;
-    let edge_px = [edge.0, edge.1, edge.2, edge.3];
-    let fill_px = [fill.0, fill.1, fill.2, fill.3];
-    if width <= 2 * border {
-        return edge_px.repeat(span.max(0) as usize);
-    }
-    let mut row = Vec::new();
-    let left_edge = (border - first_x).max(0);
-    row.extend(edge_px.repeat(left_edge as usize));
-    let right_edge = (border - (width - last_x)).max(0);
-    let fill_count = (span - left_edge - right_edge).max(0);
-    row.extend(fill_px.repeat(fill_count as usize));
-    row.extend(edge_px.repeat(right_edge as usize));
-    row
-}
-
-fn square_pixels(
-    width: i64,
-    height: i64,
-    border: i64,
-    edge: (u8, u8, u8, u8),
-    fill: (u8, u8, u8, u8),
-    first_x: i64,
-    last_x: i64,
-    first_y: i64,
-    last_y: i64,
-) -> Vec<u8> {
-    let edge_px = [edge.0, edge.1, edge.2, edge.3];
-    let edge_row = edge_px.repeat((last_x - first_x).max(0) as usize);
-    let body = body_row(width, border, edge, fill, first_x, last_x);
-    let mut pixels = Vec::new();
-    if height <= 2 * border {
-        pixels.extend(edge_row.repeat((last_y - first_y).max(0) as usize));
-    } else {
-        let top_edge = (border - first_y).max(0);
-        pixels.extend(edge_row.repeat(top_edge as usize));
-        let bottom_edge = (border - (height - last_y)).max(0);
-        let body_count = ((last_y - first_y) - top_edge - bottom_edge).max(0);
-        pixels.extend(body.repeat(body_count as usize));
-        pixels.extend(edge_row.repeat(bottom_edge as usize));
-    }
-    pixels
-}
-
-struct RoundedBox {
-    width: i64,
-    height: i64,
-    border: i64,
-    radius: i64,
-    outer: i64,
-    edge: (u8, u8, u8, u8),
-    fill: (u8, u8, u8, u8),
-}
-
-impl RoundedBox {
-    pub(crate) fn new(
-        width: i64,
-        height: i64,
-        radius: i64,
-        border: i64,
-        edge: (u8, u8, u8, u8),
-        fill: (u8, u8, u8, u8),
-    ) -> Self {
-        let outer = (radius + border).min(width / 2).min(height / 2);
-        RoundedBox { width, height, border, radius, outer, edge, fill }
-    }
-
-    pub(crate) fn pixels(&self, first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        let mut straight_row: Option<Vec<u8>> = None;
-        for y in first_y..last_y {
-            if self.outer <= y && y < self.height - self.outer {
-                if straight_row.is_none() {
-                    straight_row = Some(body_row(
-                        self.width, self.border, self.edge, self.fill, first_x, last_x,
-                    ));
-                }
-                buffer.extend(straight_row.as_ref().unwrap());
-            } else {
-                buffer.extend(self.corner_row(y, first_x, last_x));
-            }
-        }
-        buffer
-    }
-
-    fn corner_row(&self, y: i64, first_x: i64, last_x: i64) -> Vec<u8> {
-        let mut row = Vec::new();
-        for x in first_x..self.outer.min(last_x) {
-            row.extend(self.pixel(x, y));
-        }
-        let middle = (self.width - self.outer).min(last_x) - self.outer.max(first_x);
-        if middle > 0 {
-            let straight = if y < self.border || y >= self.height - self.border {
-                self.edge
-            } else {
-                self.fill
-            };
-            let straight_px = [straight.0, straight.1, straight.2, straight.3];
-            row.extend(straight_px.repeat(middle as usize));
-        }
-        for x in (self.width - self.outer).max(first_x)..last_x {
-            row.extend(self.pixel(x, y));
-        }
-        row
-    }
-
-    fn pixel(&self, x: i64, y: i64) -> [u8; 4] {
-        let px = x as f64 + 0.5;
-        let py = y as f64 + 0.5;
-        let outer_coverage =
-            Self::coverage(px, py, self.width as f64, self.height as f64, self.outer as f64);
-        let inner_coverage = Self::coverage(
-            px - self.border as f64,
-            py - self.border as f64,
-            (self.width - 2 * self.border) as f64,
-            (self.height - 2 * self.border) as f64,
-            self.radius as f64,
-        );
-        let edge_coverage = outer_coverage - inner_coverage;
-        let alpha = edge_coverage * self.edge.3 as f64 + inner_coverage * self.fill.3 as f64;
-        if alpha == 0.0 {
-            return [0, 0, 0, 0];
-        }
-        let edge_channels = [self.edge.0, self.edge.1, self.edge.2];
-        let fill_channels = [self.fill.0, self.fill.1, self.fill.2];
-        let mut channels = [0u8; 4];
-        for c in 0..3 {
-            let value = (edge_channels[c] as f64 * edge_coverage * self.edge.3 as f64
-                + fill_channels[c] as f64 * inner_coverage * self.fill.3 as f64)
-                / alpha;
-            channels[c] = python_round(value) as u8;
-        }
-        channels[3] = python_round(alpha) as u8;
-        channels
-    }
-
-    fn coverage(px: f64, py: f64, width: f64, height: f64, radius: f64) -> f64 {
-        let half_x = width / 2.0;
-        let half_y = height / 2.0;
-        let qx = (px - half_x).abs() - (half_x - radius);
-        let qy = (py - half_y).abs() - (half_y - radius);
-        let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
-        (0.5 - distance).max(0.0).min(1.0)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Crop {
     col: i64,
@@ -287,18 +58,11 @@ struct Crop {
     last_y: i64,
 }
 
-impl Crop {
-    fn at_origin(&self) -> Crop {
-        Crop { col: 0, row: 0, ..*self }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SpriteKey {
     Box {
         width: i64,
         height: i64,
-        crop: Crop,
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
@@ -306,19 +70,16 @@ enum SpriteKey {
     Arrow {
         width: i64,
         height: i64,
-        crop: Crop,
         stops: Vec<i64>,
         shaft: i64,
     },
 }
 
-fn sprite_key(placement: &Placement, crop: &Crop) -> SpriteKey {
-    let crop = crop.at_origin();
+fn sprite_key(placement: &Placement) -> SpriteKey {
     match &placement.node {
         PlacementNode::Node(node) => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
-            crop,
             colour: node.colour,
             fill: if node.filled { node.colour } else { None },
             rounded: node.rounded,
@@ -326,7 +87,6 @@ fn sprite_key(placement: &Placement, crop: &Crop) -> SpriteKey {
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
             height: placement.height,
-            crop,
             stops: arrow.stops.clone(),
             shaft: arrow.shaft,
         },
@@ -334,11 +94,17 @@ fn sprite_key(placement: &Placement, crop: &Crop) -> SpriteKey {
     }
 }
 
+struct Placed {
+    canvas: Canvas,
+    col: i64,
+    row: i64,
+}
+
 struct Screen {
     terminal: Terminal,
     origin: (i64, i64),
     characters: Vec<Vec<char>>,
-    images: Vec<Sprite>,
+    images: Vec<Placed>,
 }
 
 impl Screen {
@@ -388,6 +154,13 @@ impl Screen {
         })
     }
 
+    fn shows(&self, placement: &Placement) -> bool {
+        let left = placement.x + self.origin.0;
+        let top = placement.y + self.origin.1;
+        left.max(0) < (left + placement.width).min(self.terminal.cols)
+            && top.max(0) < (top + placement.height).min(self.terminal.rows)
+    }
+
     fn write(&mut self, x: i64, y: i64, character: char) {
         let (x, y) = (x + self.origin.0, y + self.origin.1);
         if 0 <= y && (y as usize) < self.characters.len() {
@@ -398,8 +171,15 @@ impl Screen {
         }
     }
 
-    fn place(&mut self, image: Sprite) {
-        self.images.push(image);
+    fn place(&mut self, canvas: &Canvas, placement: &Placement) {
+        let Some(crop) = self.crop(placement) else {
+            return;
+        };
+        self.images.push(Placed {
+            canvas: canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y),
+            col: crop.col,
+            row: crop.row,
+        });
     }
 
     fn into_bytes(self) -> Vec<u8> {
@@ -412,7 +192,7 @@ impl Screen {
         bytes.extend_from_slice(rows.join("\r\n").as_bytes());
         bytes.extend_from_slice(kitty::clear().to_string().as_bytes());
         for image in &self.images {
-            bytes.extend_from_slice(kitty::show(image).to_string().as_bytes());
+            bytes.extend_from_slice(kitty::show(&image.canvas, image.col, image.row).to_string().as_bytes());
         }
         bytes
     }
@@ -430,7 +210,7 @@ fn draw_cursor(screen: &mut Screen, placement: &Placement) {
 
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
-    cache: std::collections::HashMap<SpriteKey, Sprite>,
+    cache: std::collections::HashMap<SpriteKey, Canvas>,
 }
 
 impl Renderer for TerminalRenderer {
@@ -456,45 +236,34 @@ impl TerminalRenderer {
     }
 
     fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
-        let Some(crop) = screen.crop(placement) else {
+        if !screen.shows(placement) {
             return;
-        };
-        let key = sprite_key(placement, &crop);
+        }
+        let key = sprite_key(placement);
         if !self.cache.contains_key(&key) {
-            let drawn = self.outline_box(placement, &crop);
+            let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        screen.place(self.cached(&key, crop.col, crop.row));
+        screen.place(&self.cache[&key], placement);
     }
 
     fn draw_arrow(&mut self, screen: &mut Screen, placement: &Placement) {
-        let Some(crop) = screen.crop(placement) else {
+        if !screen.shows(placement) {
             return;
-        };
-        let key = sprite_key(placement, &crop);
+        }
+        let key = sprite_key(placement);
         if !self.cache.contains_key(&key) {
-            let drawn = self.outline_arrow(placement, &crop);
+            let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        screen.place(self.cached(&key, crop.col, crop.row));
+        screen.place(&self.cache[&key], placement);
     }
 
-    fn remember(&mut self, key: SpriteKey, drawn: Sprite) {
+    fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
         if self.cache.len() >= CACHE_LIMIT {
             self.cache.clear();
         }
         self.cache.insert(key, drawn);
-    }
-
-    fn cached(&self, key: &SpriteKey, col: i64, row: i64) -> Sprite {
-        let drawn = &self.cache[key];
-        Sprite {
-            pixels: drawn.pixels.clone(),
-            width: drawn.width,
-            height: drawn.height,
-            col,
-            row,
-        }
     }
 
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
@@ -505,84 +274,52 @@ impl TerminalRenderer {
         cells * self.terminal.cell_height
     }
 
-    fn outline_box(&self, placement: &Placement, crop: &Crop) -> Sprite {
+    fn outline_box(&self, placement: &Placement) -> Canvas {
         let node = match &placement.node {
             PlacementNode::Node(node) => node,
             _ => unreachable!("outline_box is only called for Box placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
-        let border = BORDER;
         let (r, g, b) = colour(node.colour);
-        let edge = (r, g, b, OPAQUE);
-        let fill = fill_colour(node.colour, node.filled);
-        let radius = if node.rounded { ROUNDED_RADIUS } else { 0 };
-        let pixels = if radius != 0 {
-            RoundedBox::new(width, height, radius, border, edge, fill)
-                .pixels(crop.first_x, crop.last_x, crop.first_y, crop.last_y)
-        } else {
-            square_pixels(
-                width, height, border, edge, fill, crop.first_x, crop.last_x, crop.first_y,
-                crop.last_y,
-            )
+        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(node.colour, node.filled);
+        let shape = BoxShape {
+            width,
+            height,
+            border: BORDER,
+            radius: if node.rounded { ROUNDED_RADIUS } else { 0 },
+            edge: [r, g, b, OPAQUE],
+            fill: [fill_r, fill_g, fill_b, fill_a],
         };
-        Sprite {
-            pixels,
-            width: crop.last_x - crop.first_x,
-            height: crop.last_y - crop.first_y,
-            col: crop.col,
-            row: crop.row,
-        }
+        Canvas::fill(width, height, &shape)
     }
 
-    fn outline_arrow(&self, placement: &Placement, crop: &Crop) -> Sprite {
+    fn outline_arrow(&self, placement: &Placement) -> Canvas {
         let arrow = match &placement.node {
             PlacementNode::Arrow(arrow) => arrow,
             _ => unreachable!("outline_arrow is only called for Arrow placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
         let stop_rows: Vec<i64> = arrow
             .stops
             .iter()
             .map(|stop| self.cells_to_pixels_y(*stop) + self.terminal.cell_height / 2)
             .collect();
-        let shaft_row = self.cells_to_pixels_y(arrow.shaft) + self.terminal.cell_height / 2;
-        let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
-        let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
-        let midpoint = width / 2;
+        let trunk = (
+            *stop_rows.iter().min().expect("an arrow always has at least one stop"),
+            *stop_rows.iter().max().expect("an arrow always has at least one stop"),
+        );
         let (r, g, b) = colour(None);
-        let ink = [r, g, b, OPAQUE];
-        let mut canvas = Canvas::new(crop.first_x, crop.last_x, crop.first_y, crop.last_y, ink);
-        canvas.horizontal(shaft_row, 0, midpoint, ARROW_STROKE);
-        canvas.vertical(midpoint, trunk_top, trunk_bottom, ARROW_STROKE);
-        for &stop_row in &stop_rows {
-            canvas.horizontal(stop_row, midpoint, width - 1, ARROW_STROKE);
-            self.arrowhead(&mut canvas, stop_row, midpoint, width - 1);
-        }
-        Sprite {
-            pixels: canvas.pixels(),
-            width: crop.last_x - crop.first_x,
-            height: crop.last_y - crop.first_y,
-            col: crop.col,
-            row: crop.row,
-        }
-    }
-
-    fn arrowhead(&self, canvas: &mut Canvas, stop_row: i64, midpoint: i64, right_edge: i64) {
-        let depth = arrowhead_depth();
-        let slope = arrowhead_slope();
-        for distance in 0..=(depth as i64) {
-            if distance as f64 >= depth {
-                break;
-            }
-            let x = right_edge - distance;
-            if x < midpoint {
-                break;
-            }
-            let spread = python_round(distance as f64 * slope) as i64;
-            canvas.point(x, stop_row - spread, ARROW_STROKE);
-            canvas.point(x, stop_row + spread, ARROW_STROKE);
-        }
+        let shape = ArrowShape {
+            width,
+            stop_rows,
+            shaft_row: self.cells_to_pixels_y(arrow.shaft) + self.terminal.cell_height / 2,
+            trunk,
+            stroke: ARROW_STROKE,
+            ink: [r, g, b, OPAQUE],
+        };
+        Canvas::fill(width, height, &shape)
     }
 }
 
@@ -591,125 +328,6 @@ mod tests {
     use super::*;
     use super::super::PLAIN_COLOUR;
     use crate::diagram::{node, node_with_children};
-
-    fn ink() -> [u8; 4] {
-        let (r, g, b) = colour(Some(1));
-        [r, g, b, OPAQUE]
-    }
-
-    fn canvas(first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Canvas {
-        Canvas::new(first_x, last_x, first_y, last_y, ink())
-    }
-
-    fn pixel(canvas: &Canvas, x: i64, y: i64) -> (u8, u8, u8, u8) {
-        let offset = (((y - canvas.first_y) * canvas.span + (x - canvas.first_x)) * 4) as usize;
-        (
-            canvas.buffer[offset],
-            canvas.buffer[offset + 1],
-            canvas.buffer[offset + 2],
-            canvas.buffer[offset + 3],
-        )
-    }
-
-    fn ink_pixel() -> (u8, u8, u8, u8) {
-        let [r, g, b, a] = ink();
-        (r, g, b, a)
-    }
-
-    fn blank() -> (u8, u8, u8, u8) {
-        TRANSPARENT
-    }
-
-    #[test]
-    fn point_with_width_one_stamps_a_single_pixel() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.point(10, 10, 1);
-        assert_eq!(pixel(&canvas, 10, 10), ink_pixel());
-        for (x, y) in [(9, 10), (11, 10), (10, 9), (10, 11)] {
-            assert_eq!(pixel(&canvas, x, y), blank());
-        }
-    }
-
-    #[test]
-    fn point_with_width_four_stamps_a_four_by_four_block() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.point(10, 10, 4);
-        for x in [9, 10, 11, 12] {
-            for y in [9, 10, 11, 12] {
-                assert_eq!(pixel(&canvas, x, y), ink_pixel());
-            }
-        }
-        for (x, y) in [(8, 10), (13, 10), (10, 8), (10, 13)] {
-            assert_eq!(pixel(&canvas, x, y), blank());
-        }
-    }
-
-    #[test]
-    fn horizontal_with_width_four_paints_four_rows() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.horizontal(10, 2, 6, 4);
-        for y in [9, 10, 11, 12] {
-            for x in 2..7 {
-                assert_eq!(pixel(&canvas, x, y), ink_pixel());
-            }
-        }
-        for y in [8, 13] {
-            for x in 2..7 {
-                assert_eq!(pixel(&canvas, x, y), blank());
-            }
-        }
-        assert_eq!(pixel(&canvas, 1, 10), blank());
-        assert_eq!(pixel(&canvas, 7, 10), blank());
-    }
-
-    #[test]
-    fn vertical_with_width_four_paints_four_columns() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.vertical(10, 2, 6, 4);
-        for x in [9, 10, 11, 12] {
-            for y in 2..7 {
-                assert_eq!(pixel(&canvas, x, y), ink_pixel());
-            }
-        }
-        for x in [8, 13] {
-            for y in 2..7 {
-                assert_eq!(pixel(&canvas, x, y), blank());
-            }
-        }
-        assert_eq!(pixel(&canvas, 10, 1), blank());
-        assert_eq!(pixel(&canvas, 10, 7), blank());
-    }
-
-    #[test]
-    fn a_thick_point_near_the_edge_is_clipped() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.point(0, 0, 4);
-        for x in [0, 1] {
-            for y in [0, 1] {
-                assert_eq!(pixel(&canvas, x, y), ink_pixel());
-            }
-        }
-    }
-
-    #[test]
-    fn a_thick_horizontal_near_the_edge_is_clipped() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.horizontal(0, 2, 6, 4);
-        for x in 2..7 {
-            assert_eq!(pixel(&canvas, x, 0), ink_pixel());
-            assert_eq!(pixel(&canvas, x, 1), ink_pixel());
-        }
-    }
-
-    #[test]
-    fn a_thick_vertical_near_the_edge_is_clipped() {
-        let mut canvas = canvas(0, 20, 0, 20);
-        canvas.vertical(0, 2, 6, 4);
-        for y in 2..7 {
-            assert_eq!(pixel(&canvas, 0, y), ink_pixel());
-            assert_eq!(pixel(&canvas, 1, y), ink_pixel());
-        }
-    }
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
@@ -735,6 +353,24 @@ mod tests {
         (r, g, b, OPAQUE)
     }
 
+    fn box_pixels(
+        width: i64,
+        height: i64,
+        radius: i64,
+        edge: (u8, u8, u8, u8),
+        fill: (u8, u8, u8, u8),
+    ) -> Vec<u8> {
+        let shape = BoxShape {
+            width,
+            height,
+            border: BORDER,
+            radius,
+            edge: [edge.0, edge.1, edge.2, edge.3],
+            fill: [fill.0, fill.1, fill.2, fill.3],
+        };
+        Canvas::fill(width, height, &shape).pixels
+    }
+
     fn pixel_at(pixels: &[u8], width: i64, x: i64, y: i64) -> (u8, u8, u8, u8) {
         let offset = ((y * width + x) * 4) as usize;
         (pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3])
@@ -745,7 +381,7 @@ mod tests {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
         let fill = fill_colour(None, false);
-        let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
+        let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), TRANSPARENT);
     }
 
@@ -754,7 +390,7 @@ mod tests {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
         let fill = fill_colour(Some(2), true);
-        let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
+        let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2), true));
     }
 
@@ -763,7 +399,7 @@ mod tests {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(Some(3));
         let fill = fill_colour(Some(2), true);
-        let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
+        let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(pixel_at(&pixels, size, 0, 0), edge_rgba(Some(3)));
         assert_eq!(pixel_at(&pixels, size, BORDER + 1, BORDER + 1), fill_colour(Some(2), true));
     }
@@ -773,7 +409,7 @@ mod tests {
         let size = 3 * 4;
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let pixels = square_pixels(size, size, BORDER, edge, fill, 0, size, 0, size);
+        let pixels = box_pixels(size, size, 0, edge, fill);
         for offset in 0..BORDER {
             assert_eq!(pixel_at(&pixels, size, 5, offset), edge);
             assert_eq!(pixel_at(&pixels, size, 5, size - 1 - offset), edge);
@@ -795,7 +431,7 @@ mod tests {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
         let pixels =
-            square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
+            box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
 
         let edge_px = [edge.0, edge.1, edge.2, edge.3];
         let fill_px = [fill.0, fill.1, fill.2, fill.3];
@@ -816,8 +452,7 @@ mod tests {
     fn a_rounded_box_cuts_away_its_extreme_corners() {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let rounded = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill);
-        let pixels = rounded.pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+        let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let (last_x, last_y) = (CORNER_SIZE - 1, CORNER_SIZE - 1);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 0, 0), TRANSPARENT);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, last_x, 0), TRANSPARENT);
@@ -829,10 +464,9 @@ mod tests {
     fn straight_edges_stay_as_crisp_as_a_square_box() {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let square = square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
+        let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded =
-            RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-                .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+            box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let middle_y = CORNER_SIZE / 2;
         let middle_x = CORNER_SIZE / 2;
         for x in 0..CORNER_SIZE {
@@ -853,10 +487,9 @@ mod tests {
     fn the_arc_is_anti_aliased() {
         let edge = edge_rgba(Some(1));
         let fill = TRANSPARENT;
-        let square = square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
+        let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded =
-            RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-                .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+            box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         assert!(!square.iter().skip(3).step_by(4).any(|&alpha| alpha > 0 && alpha < OPAQUE));
         assert!(rounded.iter().skip(3).step_by(4).any(|&alpha| alpha > 0 && alpha < OPAQUE));
     }
@@ -865,8 +498,7 @@ mod tests {
     fn arc_coverage_is_continuous_at_the_pixel_centre() {
         let edge = edge_rgba(Some(1));
         let fill = TRANSPARENT;
-        let pixels = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-            .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+        let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let (r, g, b) = colour(Some(1));
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 14, 2), (r, g, b, 254));
     }
@@ -875,8 +507,7 @@ mod tests {
     fn border_coverage_is_composed_over_the_opaque_fill() {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let pixels = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-            .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+        let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (131, 27, 25, OPAQUE));
     }
 
@@ -884,10 +515,9 @@ mod tests {
     fn a_rounded_box_cuts_away_more_than_a_square_one() {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let square = square_pixels(CORNER_SIZE, CORNER_SIZE, BORDER, edge, fill, 0, CORNER_SIZE, 0, CORNER_SIZE);
+        let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded =
-            RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-                .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+            box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let alpha_total = |pixels: &[u8]| pixels.iter().skip(3).step_by(4).map(|&a| a as u64).sum::<u64>();
         assert!(alpha_total(&rounded) < alpha_total(&square));
     }
@@ -896,8 +526,7 @@ mod tests {
     fn the_fringe_keeps_the_edge_colour_instead_of_fading_to_black() {
         let edge = edge_rgba(Some(1));
         let fill = TRANSPARENT;
-        let pixels = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-            .pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
+        let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let (r, g, b) = colour(Some(1));
         let mut found_partial = false;
         for y in 0..CORNER_SIZE {
@@ -912,58 +541,14 @@ mod tests {
         assert!(found_partial);
     }
 
-    #[test]
-    fn clipping_a_rounded_box_is_a_pure_crop_of_the_whole_box() {
-        let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), true);
-        let cell_width = 8;
-        let hidden_cols = 2;
-        let offset = hidden_cols * cell_width;
-        let rounded_box = RoundedBox::new(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, BORDER, edge, fill);
-        let whole = rounded_box.pixels(0, CORNER_SIZE, 0, CORNER_SIZE);
-        let clipped = rounded_box.pixels(offset, CORNER_SIZE, 0, CORNER_SIZE);
-        let clipped_width = CORNER_SIZE - offset;
-        for y in 0..CORNER_SIZE {
-            for x in 0..clipped_width {
-                assert_eq!(
-                    pixel_at(&clipped, clipped_width, x, y),
-                    pixel_at(&whole, CORNER_SIZE, x + offset, y)
-                );
-            }
-        }
-    }
-
     const SMALL_SIZE: i64 = 20;
 
     #[test]
     fn the_sprite_holds_exactly_one_pixel_per_cell_of_its_area() {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
-        let pixels = RoundedBox::new(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, BORDER, edge, fill)
-            .pixels(0, SMALL_SIZE, 0, SMALL_SIZE);
+        let pixels = box_pixels(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixels.len() as i64, SMALL_SIZE * SMALL_SIZE * 4);
-    }
-
-    #[test]
-    fn clipping_a_small_box_is_a_pure_crop_of_the_whole_box() {
-        let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), true);
-        let cell_width = 10;
-        let hidden_cols = 1;
-        let offset = hidden_cols * cell_width;
-        let small_box = RoundedBox::new(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, BORDER, edge, fill);
-        let whole = small_box.pixels(0, SMALL_SIZE, 0, SMALL_SIZE);
-        let clipped = small_box.pixels(offset, SMALL_SIZE, 0, SMALL_SIZE);
-        let clipped_width = SMALL_SIZE - offset;
-        assert_eq!(clipped.len() as i64, clipped_width * SMALL_SIZE * 4);
-        for y in 0..SMALL_SIZE {
-            for x in 0..clipped_width {
-                assert_eq!(
-                    pixel_at(&clipped, clipped_width, x, y),
-                    pixel_at(&whole, SMALL_SIZE, x + offset, y)
-                );
-            }
-        }
     }
 
     fn box_node(colour: Option<u8>, filled: bool, rounded: bool) -> crate::diagram::Node {
@@ -997,17 +582,13 @@ mod tests {
         }
     }
 
-    fn crop(first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Crop {
-        Crop { col: 0, row: 0, first_x, last_x, first_y, last_y }
-    }
-
     #[test]
     fn sprite_key_of_two_identically_shaped_boxes_is_equal() {
         let node_a = box_node(Some(1), true, true);
         let node_b = box_node(Some(1), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_eq!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
+        assert_eq!(sprite_key(&a), sprite_key(&b));
     }
 
     #[test]
@@ -1016,7 +597,7 @@ mod tests {
         let node_b = box_node(Some(2), true, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
+        assert_ne!(sprite_key(&a), sprite_key(&b));
     }
 
     #[test]
@@ -1025,7 +606,7 @@ mod tests {
         let node_b = box_node(Some(1), false, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
+        assert_ne!(sprite_key(&a), sprite_key(&b));
     }
 
     #[test]
@@ -1034,28 +615,21 @@ mod tests {
         let node_b = box_node(Some(1), true, false);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&b, &crop(0, 10, 0, 10)));
-    }
-
-    #[test]
-    fn sprite_key_differs_by_crop() {
-        let node_a = box_node(Some(1), true, true);
-        let a = box_placement(&node_a, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a, &crop(0, 10, 0, 10)), sprite_key(&a, &crop(1, 10, 0, 10)));
+        assert_ne!(sprite_key(&a), sprite_key(&b));
     }
 
     #[test]
     fn sprite_key_of_arrows_with_different_stops_differs() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 3], 1, 0, 0, 4, 3);
-        assert_ne!(sprite_key(&a, &crop(0, 4, 0, 3)), sprite_key(&b, &crop(0, 4, 0, 3)));
+        assert_ne!(sprite_key(&a), sprite_key(&b));
     }
 
     #[test]
     fn sprite_key_of_identical_arrows_is_equal() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
-        assert_eq!(sprite_key(&a, &crop(0, 4, 0, 3)), sprite_key(&b, &crop(0, 4, 0, 3)));
+        assert_eq!(sprite_key(&a), sprite_key(&b));
     }
 
     fn terminal(cols: i64, rows: i64, cell_width: i64, cell_height: i64) -> Terminal {
@@ -1095,7 +669,7 @@ mod tests {
         rows(&drawn_screen(r, placements))
     }
 
-    fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Sprite> {
+    fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
         drawn_screen(r, placements).images
     }
 
@@ -1282,7 +856,7 @@ mod tests {
         let images = sprites(&mut renderer_on(terminal), &placements);
         assert!(images.len() > 1);
         let expected: String = std::iter::once(kitty::clear())
-            .chain(images.iter().map(kitty::show))
+            .chain(images.iter().map(|image| kitty::show(&image.canvas, image.col, image.row)))
             .map(|command| command.to_string())
             .collect();
         let doc = Document { boxes: nodes.clone(), selected: None };
@@ -1536,7 +1110,7 @@ mod tests {
         let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), -2, 1, 5, 3)]);
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].col, 0);
-        assert_eq!(images[0].width, 3 * 4);
+        assert_eq!(images[0].canvas.width, 3 * 4);
     }
 
     #[test]
@@ -1544,7 +1118,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 4, 4));
         let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, -2, 4, 5)]);
         assert_eq!(images[0].row, 0);
-        assert_eq!(images[0].height, 3 * 4);
+        assert_eq!(images[0].canvas.height, 3 * 4);
     }
 
     #[test]
@@ -1552,7 +1126,7 @@ mod tests {
         let mut r = renderer_on(terminal(4, 20, 4, 4));
         let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, 0, 6, 3)]);
         assert_eq!(images[0].col, 1);
-        assert_eq!(images[0].width, 3 * 4);
+        assert_eq!(images[0].canvas.width, 3 * 4);
     }
 
     #[test]
@@ -1560,7 +1134,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 4, 4, 4));
         let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 1, 3, 6)]);
         assert_eq!(images[0].row, 1);
-        assert_eq!(images[0].height, 3 * 4);
+        assert_eq!(images[0].canvas.height, 3 * 4);
     }
 
     #[test]
@@ -1568,7 +1142,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 6, 12));
         let images = sprites(&mut r, &[box_placement(&box_node(None, false, false), 1, 2, 4, 3)]);
         assert_eq!((images[0].col, images[0].row), (1, 2));
-        assert_eq!((images[0].width, images[0].height), (24, 36));
+        assert_eq!((images[0].canvas.width, images[0].canvas.height), (24, 36));
     }
 
     #[test]
@@ -1577,7 +1151,7 @@ mod tests {
             let mut r = renderer_on(terminal(40, 20, 2, 4));
             let images = sprites(&mut r, &[box_placement(&box_node(Some(index), false, false), 0, 0, 2, 2)]);
             let (px, py, pz) = colour(Some(index));
-            assert_eq!(&images[0].pixels[0..4], &[px, py, pz, OPAQUE]);
+            assert_eq!(&images[0].canvas.pixels[0..4], &[px, py, pz, OPAQUE]);
         }
     }
 
@@ -1589,7 +1163,7 @@ mod tests {
         let first = sprites(&mut r, &[placement.clone()]);
         assert_eq!(r.cache.len(), 1);
         let second = sprites(&mut r, &[placement]);
-        assert_eq!(first[0].pixels, second[0].pixels);
+        assert_eq!(first[0].canvas.pixels, second[0].canvas.pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -1598,7 +1172,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let plain = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
         let blue = sprites(&mut r, &[box_placement(&box_node(Some(4), false, false), 0, 0, 4, 3)]);
-        assert_ne!(plain[0].pixels, blue[0].pixels);
+        assert_ne!(plain[0].canvas.pixels, blue[0].canvas.pixels);
         assert_eq!(r.cache.len(), 2);
     }
 
@@ -1616,7 +1190,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let first = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
         let second = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
-        assert_eq!(first[0].pixels, second[0].pixels);
+        assert_eq!(first[0].canvas.pixels, second[0].canvas.pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -1633,17 +1207,49 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let first = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
         let moved = sprites(&mut r, &[box_placement(&box_node(None, false, false), 5, 2, 4, 3)]);
-        assert_eq!(first[0].pixels, moved[0].pixels);
+        assert_eq!(first[0].canvas.pixels, moved[0].canvas.pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
-    fn a_differently_cropped_box_is_redrawn() {
+    fn a_differently_cropped_box_shares_one_cache_entry() {
         let mut r = renderer_on(terminal(4, 20, 2, 4));
         let whole = sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
         let cropped = sprites(&mut r, &[box_placement(&box_node(None, false, false), 2, 0, 4, 3)]);
-        assert_ne!(whole[0].width, cropped[0].width);
-        assert_eq!(r.cache.len(), 2);
+        assert_ne!(whole[0].canvas.width, cropped[0].canvas.width);
+        assert_eq!(r.cache.len(), 1);
+    }
+
+    #[test]
+    fn a_shape_beyond_the_screen_leaves_the_cache_empty() {
+        let mut r = renderer_on(terminal(4, 4, 2, 4));
+        sprites(&mut r, &[
+            box_placement(&box_node(None, false, false), 10, 0, 4, 3),
+            arrow_placement(vec![0], 0, 0, 10, 4, 2),
+        ]);
+        assert!(r.cache.is_empty());
+    }
+
+    #[test]
+    fn a_box_beyond_the_right_edge_is_not_shown() {
+        let node = box_node(None, false, false);
+        let screen = Screen::new(terminal(20, 10, 4, 8));
+        assert!(!screen.shows(&box_placement(&node, 20, 0, 4, 3)));
+    }
+
+    #[test]
+    fn a_box_beyond_the_top_edge_is_not_shown() {
+        let node = box_node(None, false, false);
+        let screen = Screen::new(terminal(20, 10, 4, 8));
+        assert!(!screen.shows(&box_placement(&node, 0, -3, 4, 3)));
+    }
+
+    #[test]
+    fn a_box_straddling_an_edge_is_shown() {
+        let node = box_node(None, false, false);
+        let screen = Screen::new(terminal(20, 10, 4, 8));
+        assert!(screen.shows(&box_placement(&node, 18, 0, 4, 3)));
+        assert!(screen.shows(&box_placement(&node, -2, 8, 4, 3)));
     }
 
     #[test]
@@ -1651,7 +1257,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
         let two = sprites(&mut r, &[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)]);
-        assert_ne!(one[0].pixels, two[0].pixels);
+        assert_ne!(one[0].canvas.pixels, two[0].canvas.pixels);
     }
 
     #[test]
@@ -1663,13 +1269,11 @@ mod tests {
         assert!(r.cache.len() <= CACHE_LIMIT);
     }
 
-    fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Sprite {
-        let placement = box_placement(node, 0, 0, width, height);
-        let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
-        r.outline_box(&placement, &crop(0, last_x, 0, last_y))
+    fn box_outline(r: &TerminalRenderer, node: &crate::diagram::Node, width: i64, height: i64) -> Canvas {
+        r.outline_box(&box_placement(node, 0, 0, width, height))
     }
 
-    fn pixel_of(sprite: &Sprite, x: i64, y: i64) -> (u8, u8, u8, u8) {
+    fn pixel_of(sprite: &Canvas, x: i64, y: i64) -> (u8, u8, u8, u8) {
         pixel_at(&sprite.pixels, sprite.width, x, y)
     }
 
@@ -1701,37 +1305,15 @@ mod tests {
     }
 
     #[test]
-    fn the_radius_leaves_the_sprite_size_and_position_alone() {
+    fn the_radius_leaves_the_sprite_size_alone() {
         let r = renderer(8, 8);
         let square = box_outline(&r, &box_node(Some(1), true, false), 10, 10);
         let rounded = box_outline(&r, &box_node(Some(1), true, true), 10, 10);
         assert_eq!((square.width, square.height), (rounded.width, rounded.height));
-        assert_eq!((square.col, square.row), (rounded.col, rounded.row));
     }
 
-    #[test]
-    fn clipping_via_outline_box_is_a_pure_crop_of_the_whole_box() {
-        let r = renderer(8, 8);
-        let node = box_node(Some(1), true, true);
-        let whole = box_outline(&r, &node, 10, 10);
-        let hidden_cols = 2;
-        let placement = box_placement(&node, 0, 0, 10, 10);
-        let offset = r.cells_to_pixels_x(hidden_cols);
-        let clipped = r.outline_box(
-            &placement,
-            &crop(offset, r.cells_to_pixels_x(10), 0, r.cells_to_pixels_y(10)),
-        );
-        for y in 0..clipped.height {
-            for x in 0..clipped.width {
-                assert_eq!(pixel_of(&clipped, x, y), pixel_of(&whole, x + offset, y));
-            }
-        }
-    }
-
-    fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Sprite {
-        let placement = arrow_placement(stops, shaft, 0, 0, width, height);
-        let (last_x, last_y) = (r.cells_to_pixels_x(width), r.cells_to_pixels_y(height));
-        r.outline_arrow(&placement, &crop(0, last_x, 0, last_y))
+    fn arrow_outline(r: &TerminalRenderer, stops: Vec<i64>, shaft: i64, width: i64, height: i64) -> Canvas {
+        r.outline_arrow(&arrow_placement(stops, shaft, 0, 0, width, height))
     }
 
     #[test]
@@ -1826,90 +1408,6 @@ mod tests {
         for x in 0..sprite.width {
             let expected = if trunk_columns.contains(&x) { OPAQUE } else { 0 };
             assert_eq!(pixel_of(&sprite, x, row_between_stops).3, expected);
-        }
-    }
-
-    mod shapes_match_the_old_drawing {
-        use super::*;
-        use crate::canvas::Canvas as NewCanvas;
-        use crate::render::shapes::{ArrowShape, BoxShape};
-
-        fn box_shape(width: i64, height: i64, radius: i64, edge: (u8, u8, u8, u8), fill: (u8, u8, u8, u8)) -> BoxShape {
-            BoxShape {
-                width,
-                height,
-                border: BORDER,
-                radius,
-                edge: [edge.0, edge.1, edge.2, edge.3],
-                fill: [fill.0, fill.1, fill.2, fill.3],
-            }
-        }
-
-        #[test]
-        fn a_square_box_shape_matches_square_pixels() {
-            let edge = edge_rgba(Some(1));
-            let sizes = [
-                (40, 40),
-                (3 * BORDER, 5 * BORDER),
-                (2 * BORDER, 30),
-                (BORDER, 30),
-                (30, 2 * BORDER),
-                (30, BORDER - 1),
-                (1, 1),
-            ];
-            for fill in [fill_colour(Some(2), true), fill_colour(None, false)] {
-                for (width, height) in sizes {
-                    let expected = square_pixels(width, height, BORDER, edge, fill, 0, width, 0, height);
-                    let canvas = NewCanvas::fill(width, height, &box_shape(width, height, 0, edge, fill));
-                    assert_eq!(canvas.pixels, expected, "{width}x{height}");
-                }
-            }
-        }
-
-        #[test]
-        fn a_rounded_box_shape_matches_rounded_box_pixels() {
-            let edge = edge_rgba(Some(1));
-            for fill in [fill_colour(Some(2), true), fill_colour(None, false)] {
-                for (width, height) in [(80, 48), (20, 20), (48, 80), (100, 100)] {
-                    let expected = RoundedBox::new(width, height, ROUNDED_RADIUS, BORDER, edge, fill)
-                        .pixels(0, width, 0, height);
-                    let canvas =
-                        NewCanvas::fill(width, height, &box_shape(width, height, ROUNDED_RADIUS, edge, fill));
-                    assert_eq!(canvas.pixels, expected, "{width}x{height}");
-                }
-            }
-        }
-
-        #[test]
-        fn an_arrow_shape_matches_outline_arrow() {
-            let r = renderer(8, 16);
-            let cases: [(Vec<i64>, i64, i64, i64); 5] = [
-                (vec![0], 0, 2, 1),
-                (vec![0, 2], 1, 4, 3),
-                (vec![0, 3], 0, 2, 4),
-                (vec![1, 2, 5], 3, 6, 7),
-                (vec![0, 1], 1, 9, 2),
-            ];
-            for (stops, shaft, width, height) in cases {
-                let expected = arrow_outline(&r, stops.clone(), shaft, width, height);
-                let stop_rows: Vec<i64> = stops
-                    .iter()
-                    .map(|stop| r.cells_to_pixels_y(*stop) + r.terminal.cell_height / 2)
-                    .collect();
-                let trunk = (*stop_rows.iter().min().unwrap(), *stop_rows.iter().max().unwrap());
-                let (r_, g, b) = colour(None);
-                let shape = ArrowShape {
-                    width: r.cells_to_pixels_x(width),
-                    stop_rows,
-                    shaft_row: r.cells_to_pixels_y(shaft) + r.terminal.cell_height / 2,
-                    trunk,
-                    stroke: ARROW_STROKE,
-                    ink: [r_, g, b, OPAQUE],
-                };
-                let canvas =
-                    NewCanvas::fill(r.cells_to_pixels_x(width), r.cells_to_pixels_y(height), &shape);
-                assert_eq!(canvas.pixels, expected.pixels, "{stops:?} {shaft}");
-            }
         }
     }
 }
