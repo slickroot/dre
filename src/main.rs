@@ -1,5 +1,6 @@
 use std::process::ExitCode;
 
+mod canvas;
 mod cli;
 mod command_mode;
 mod diagram;

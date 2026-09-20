@@ -12,13 +12,13 @@ const BLANK: char = ' ';
 const CURSOR: char = '\u{2588}';
 const HOME_CURSOR: &str = "\x1b[H";
 
-const ARROW_STROKE: i64 = 4;
+pub(super) const ARROW_STROKE: i64 = 4;
 
 const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
-fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
+pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
 }
@@ -109,7 +109,7 @@ impl Canvas {
     }
 }
 
-fn python_round(value: f64) -> f64 {
+pub(super) fn python_round(value: f64) -> f64 {
     let floor = value.floor();
     let diff = value - floor;
     if diff < 0.5 {
@@ -1826,6 +1826,90 @@ mod tests {
         for x in 0..sprite.width {
             let expected = if trunk_columns.contains(&x) { OPAQUE } else { 0 };
             assert_eq!(pixel_of(&sprite, x, row_between_stops).3, expected);
+        }
+    }
+
+    mod shapes_match_the_old_drawing {
+        use super::*;
+        use crate::canvas::Canvas as NewCanvas;
+        use crate::render::shapes::{ArrowShape, BoxShape};
+
+        fn box_shape(width: i64, height: i64, radius: i64, edge: (u8, u8, u8, u8), fill: (u8, u8, u8, u8)) -> BoxShape {
+            BoxShape {
+                width,
+                height,
+                border: BORDER,
+                radius,
+                edge: [edge.0, edge.1, edge.2, edge.3],
+                fill: [fill.0, fill.1, fill.2, fill.3],
+            }
+        }
+
+        #[test]
+        fn a_square_box_shape_matches_square_pixels() {
+            let edge = edge_rgba(Some(1));
+            let sizes = [
+                (40, 40),
+                (3 * BORDER, 5 * BORDER),
+                (2 * BORDER, 30),
+                (BORDER, 30),
+                (30, 2 * BORDER),
+                (30, BORDER - 1),
+                (1, 1),
+            ];
+            for fill in [fill_colour(Some(2), true), fill_colour(None, false)] {
+                for (width, height) in sizes {
+                    let expected = square_pixels(width, height, BORDER, edge, fill, 0, width, 0, height);
+                    let canvas = NewCanvas::fill(width, height, &box_shape(width, height, 0, edge, fill));
+                    assert_eq!(canvas.pixels, expected, "{width}x{height}");
+                }
+            }
+        }
+
+        #[test]
+        fn a_rounded_box_shape_matches_rounded_box_pixels() {
+            let edge = edge_rgba(Some(1));
+            for fill in [fill_colour(Some(2), true), fill_colour(None, false)] {
+                for (width, height) in [(80, 48), (20, 20), (48, 80), (33, 41)] {
+                    let expected = RoundedBox::new(width, height, ROUNDED_RADIUS, BORDER, edge, fill)
+                        .pixels(0, width, 0, height);
+                    let canvas =
+                        NewCanvas::fill(width, height, &box_shape(width, height, ROUNDED_RADIUS, edge, fill));
+                    assert_eq!(canvas.pixels, expected, "{width}x{height}");
+                }
+            }
+        }
+
+        #[test]
+        fn an_arrow_shape_matches_outline_arrow() {
+            let r = renderer(8, 16);
+            let cases: [(Vec<i64>, i64, i64, i64); 5] = [
+                (vec![0], 0, 2, 1),
+                (vec![0, 2], 1, 4, 3),
+                (vec![0, 3], 0, 2, 4),
+                (vec![1, 2, 5], 3, 6, 7),
+                (vec![0, 1], 1, 9, 2),
+            ];
+            for (stops, shaft, width, height) in cases {
+                let expected = arrow_outline(&r, stops.clone(), shaft, width, height);
+                let stop_rows: Vec<i64> = stops
+                    .iter()
+                    .map(|stop| r.cells_to_pixels_y(*stop) + r.terminal.cell_height / 2)
+                    .collect();
+                let trunk = (*stop_rows.iter().min().unwrap(), *stop_rows.iter().max().unwrap());
+                let (r_, g, b) = colour(None);
+                let shape = ArrowShape {
+                    width: r.cells_to_pixels_x(width),
+                    stop_rows,
+                    shaft_row: r.cells_to_pixels_y(shaft) + r.terminal.cell_height / 2,
+                    trunk,
+                    stroke: ARROW_STROKE,
+                    ink: [r_, g, b, OPAQUE],
+                };
+                let canvas =
+                    NewCanvas::fill(r.cells_to_pixels_x(width), r.cells_to_pixels_y(height), &shape);
+                assert_eq!(canvas.pixels, expected.pixels, "{stops:?} {shaft}");
+            }
         }
     }
 }

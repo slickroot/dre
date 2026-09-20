@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use crate::diagram::{palette, Document};
 
+mod shapes;
 mod svg;
 mod terminal;
 pub(crate) use svg::SvgRenderer;
