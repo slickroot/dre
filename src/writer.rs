@@ -1,4 +1,3 @@
-use nix::libc;
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::unistd::read;
 use std::fs;
@@ -12,6 +11,7 @@ use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::diagram::Path;
 use crate::state::{handle_key, Mode, State};
+use crate::terminal::{self, Terminal};
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -22,8 +22,6 @@ const INTERRUPT: &str = "\x03";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
 const CLEAR_LINE: &str = "\r\x1b[K";
-
-nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
 
 struct RawModeGuard<'a, W: Write> {
     fd: RawFd,
@@ -55,27 +53,15 @@ impl<'a, W: Write> Drop for RawModeGuard<'a, W> {
     }
 }
 
-fn cell_size() -> io::Result<(i64, i64)> {
-    let stdout_fd = io::stdout().as_raw_fd();
-    let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
-    unsafe { terminal_window_size(stdout_fd, &mut winsize) }.map_err(io::Error::from)?;
-    let cols = winsize.ws_col as f64;
-    let rows = winsize.ws_row as f64;
-    let xpixel = winsize.ws_xpixel as f64;
-    let ypixel = winsize.ws_ypixel as f64;
-    Ok(((xpixel / cols).round() as i64, (ypixel / rows).round() as i64))
-}
-
 fn frame<W: Write>(
     state: &State,
     renderer: &mut TerminalRenderer,
     stream: &mut W,
-    cols: i64,
-    rows: i64,
+    terminal: Terminal,
 ) -> io::Result<()> {
-    renderer.resize(cols, rows);
     renderer.render(&state.doc, stream)?;
     if let Mode::SavePrompt { filename } = &state.mode {
+        let Terminal { cols, rows, .. } = terminal;
         write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
     }
     stream.flush()
@@ -90,13 +76,12 @@ fn prompt_line(filename: &str, cols: i64) -> String {
 }
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
-    let (cell_width, cell_height) = cell_size()?;
-    let mut renderer = TerminalRenderer::new(cell_width, cell_height);
+    let terminal = terminal::probe()?;
+    let mut renderer = TerminalRenderer::new(terminal);
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
-        let (cols, rows) = terminal_size(stdin_fd)?;
-        frame(&state, &mut renderer, &mut *guard.stream, cols, rows)?;
+        frame(&state, &mut renderer, &mut *guard.stream, terminal)?;
         let mut key_buffer = [0u8; 1];
         read(stdin, &mut key_buffer).map_err(io::Error::from)?;
         let key = std::str::from_utf8(&key_buffer).unwrap_or("").to_string();
@@ -111,12 +96,6 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
         }
     }
     Ok(())
-}
-
-fn terminal_size(stdin_fd: RawFd) -> io::Result<(i64, i64)> {
-    let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
-    unsafe { terminal_window_size(stdin_fd, &mut winsize) }.map_err(io::Error::from)?;
-    Ok((winsize.ws_col as i64, winsize.ws_row as i64))
 }
 
 fn load_state(arg: Option<String>) -> io::Result<State> {
@@ -164,6 +143,10 @@ mod tests {
     use crate::state::new_state;
     use std::io::Cursor;
 
+    fn terminal(cols: i64, rows: i64) -> Terminal {
+        Terminal { cols, rows, cell_width: 1, cell_height: 1 }
+    }
+
     fn written(buffer: &Cursor<Vec<u8>>) -> String {
         String::from_utf8(buffer.get_ref().clone()).expect("test output is always ASCII")
     }
@@ -171,9 +154,10 @@ mod tests {
     #[test]
     fn the_renderer_is_given_the_terminal_size() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(3, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert_eq!(
             written(&stream),
             format!("\x1b[H   \r\n   {}", crate::kitty::clear())
@@ -183,9 +167,10 @@ mod tests {
     #[test]
     fn what_the_renderer_returned_is_painted() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(3, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert!(written(&stream).starts_with("\x1b[H"));
     }
 
@@ -207,19 +192,21 @@ mod tests {
     #[test]
     fn the_prompt_is_drawn_on_the_last_row_after_the_frame_in_save_prompt_mode() {
         let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(11, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        let (cols, rows) = (11, 2);
-        frame(&state, &mut renderer, &mut stream, cols, rows).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
+        let Terminal { cols, rows, .. } = terminal;
         assert!(written(&stream).ends_with(&format!("\x1b[{rows};1H{}", prompt_line("a", cols))));
     }
 
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
         let state = new_state(vec![], Mode::Command, None);
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(11, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert!(!written(&stream).contains("Save as:"));
     }
 
