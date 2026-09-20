@@ -24,6 +24,7 @@ pub(crate) enum Mode {
 #[derive(Clone)]
 pub(crate) struct State {
     pub(crate) doc: Document,
+    pub(crate) last_selected: Option<Path>,
     history: Vec<Document>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
@@ -36,6 +37,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             doc: Document::default(),
+            last_selected: None,
             history: Vec::new(),
             mode: Mode::default(),
             running: true,
@@ -56,6 +58,14 @@ pub(crate) fn load(doc: Document, save_to: Option<String>) -> State {
 
 pub(crate) fn new_file(path: String) -> State {
     State { save_to: Some(path), new_file: true, ..Default::default() }
+}
+
+pub(crate) fn hide_idle_cursor(mut state: State) -> State {
+    if state.mode == Mode::Command && state.doc.selected.is_some() {
+        state.last_selected = state.doc.selected.clone();
+        state.doc.selected = None;
+    }
+    state
 }
 
 pub(crate) fn snapshot(mut state: State) -> State {
@@ -109,6 +119,9 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
 }
 
 pub(crate) fn handle_key(mut state: State, key: &str) -> State {
+    if let Some(selected) = state.last_selected.take() {
+        state.doc.selected = Some(selected);
+    }
     match &state.mode {
         Mode::Command => {
             if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
@@ -144,7 +157,7 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
+    State { doc: Document { boxes, selected }, last_selected: None, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
 }
 
 #[cfg(test)]
@@ -316,5 +329,78 @@ mod tests {
         let state = handle_key(state, "x");
         let result = handle_key(state, "j");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn an_idle_hide_in_command_mode_clears_the_selection_and_stashes_it() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, Some(selected));
+    }
+
+    #[test]
+    fn an_idle_hide_in_insert_mode_leaves_the_selection_alone() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn an_idle_hide_in_save_prompt_mode_leaves_the_selection_alone() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::SavePrompt { filename: "a.dre".to_string() }, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn an_idle_hide_with_nothing_selected_is_a_noop() {
+        let state = new_state(vec![node("a")], Mode::Command, None);
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn repeating_idle_hides_keep_the_stashed_selection() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(hide_idle_cursor(state));
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, Some(selected.clone()));
+        let restored = handle_key(hidden, "z");
+        assert_eq!(restored.doc.selected, Some(selected));
+    }
+
+    #[test]
+    fn the_next_key_after_a_hide_lands_every_command_on_the_hidden_box() {
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let hidden = hide_idle_cursor(state);
+        let result = handle_key(hidden, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn any_key_after_a_hide_restores_the_selection() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        let result = handle_key(hidden, "z");
+        assert_eq!(result.doc.selected, Some(selected));
+    }
+
+    #[test]
+    fn an_idle_hide_is_not_undoable_and_does_not_pollute_history() {
+        let mut state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        state = snapshot(state);
+        state = snapshot(state);
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.history.len(), 2);
+        assert_eq!(hidden.doc.selected, None);
     }
 }

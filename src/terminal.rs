@@ -1,5 +1,7 @@
 use nix::libc;
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
+use nix::unistd::read;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 
@@ -67,9 +69,25 @@ fn measure(winsize: libc::winsize) -> Terminal {
     }
 }
 
+pub(crate) fn poll_read(fd: RawFd, timeout_ms: u16) -> io::Result<Option<String>> {
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    let mut fds = [PollFd::new(borrowed, PollFlags::POLLIN)];
+    let ready = poll(&mut fds, PollTimeout::from(timeout_ms)).map_err(io::Error::from)?;
+    if ready == 0 {
+        return Ok(None);
+    }
+    let mut byte = [0u8; 1];
+    let n = read(&borrowed, &mut byte).map_err(io::Error::from)?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
+    }
+    Ok(Some((byte[0] as char).to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     fn winsize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) -> libc::winsize {
         libc::winsize { ws_col: cols, ws_row: rows, ws_xpixel: xpixel, ws_ypixel: ypixel }
@@ -91,5 +109,32 @@ mod tests {
     fn a_cell_that_does_not_divide_evenly_is_rounded() {
         let terminal = measure(winsize(3, 3, 8, 7));
         assert_eq!((terminal.cell_width, terminal.cell_height), (3, 2));
+    }
+
+    #[test]
+    fn poll_read_returns_none_when_no_byte_arrives_within_the_timeout() {
+        use std::os::fd::AsRawFd;
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        let result = poll_read(read.as_raw_fd(), 1);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn poll_read_returns_the_byte_that_is_ready() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"x").unwrap();
+        let result = poll_read(read.as_raw_fd(), 1000);
+        assert_eq!(result.unwrap(), Some("x".to_string()));
+    }
+
+    #[test]
+    fn poll_read_error_when_the_input_is_closed() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        drop(write);
+        let result = poll_read(read.as_raw_fd(), 1000);
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
     }
 }

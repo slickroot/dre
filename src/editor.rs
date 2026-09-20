@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
@@ -9,16 +9,23 @@ use crate::{dre_format, file_document, filesystem, kitty, state, terminal};
 
 const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
+const IDLE_TIMEOUT_MS: u16 = 1000;
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let state = load(file)?;
     let mut stdout = io::stdout();
-    let mut stdin = io::stdin();
+    let stdin = io::stdin();
     kitty::require(&mut stdout, stdin.as_raw_fd())?;
     let mut renderer = TerminalRenderer::new(terminal::probe()?);
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
-    let state = edit(state, &mut stdin, &mut stdout, &mut renderer)?;
+    let fd = stdin.as_raw_fd();
+    let state = edit(
+        state,
+        || terminal::poll_read(fd, IDLE_TIMEOUT_MS),
+        &mut stdout,
+        &mut renderer,
+    )?;
 
     if let Some(path) = &state.save_to {
         filesystem::write(
@@ -31,7 +38,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
 
 fn edit(
     state: State,
-    input: &mut impl Read,
+    mut next_key: impl FnMut() -> io::Result<Option<String>>,
     output: &mut impl Write,
     renderer: &mut TerminalRenderer,
 ) -> io::Result<State> {
@@ -42,14 +49,14 @@ fn edit(
         renderer.status_line(status.as_deref(), output)?;
         output.flush()?;
 
-        let mut key = [0u8; 1];
-        input.read_exact(&mut key)?;
-        let key = (key[0] as char).to_string();
-        if key == INTERRUPT {
-            state.save_to = None;
-            break;
+        match next_key()? {
+            Some(key) if key == INTERRUPT => {
+                state.save_to = None;
+                break;
+            }
+            Some(key) => state = handle_key(state, &key),
+            None => state = state::hide_idle_cursor(state),
         }
-        state = handle_key(state, &key);
     }
     Ok(state)
 }
@@ -78,8 +85,8 @@ fn status(state: &State) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::Path;
-    use crate::state::new_state;
+    use crate::diagram::{self, Path};
+    use crate::state::{new_state, Mode};
     use crate::terminal::Terminal;
     use std::fs;
 
@@ -222,8 +229,8 @@ mod tests {
 
     fn renderer() -> TerminalRenderer {
         TerminalRenderer::new(Terminal {
-            cols: 4,
-            rows: 2,
+            cols: 20,
+            rows: 10,
             cell_width: 1,
             cell_height: 1,
         })
@@ -233,10 +240,19 @@ mod tests {
         state::load(Default::default(), Some(path.to_string()))
     }
 
-    fn run(state: State, keys: &str) -> (io::Result<State>, Vec<u8>) {
+    fn run_script(state: State, script: Vec<Option<&str>>) -> (io::Result<State>, Vec<u8>) {
+        let mut script = script.into_iter();
+        let next_key = || match script.next() {
+            Some(key) => Ok(key.map(str::to_string)),
+            None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "script ended")),
+        };
         let mut output = Vec::new();
-        let result = edit(state, &mut keys.as_bytes(), &mut output, &mut renderer());
+        let result = edit(state, next_key, &mut output, &mut renderer());
         (result, output)
+    }
+
+    fn run(state: State, key: &str) -> (io::Result<State>, Vec<u8>) {
+        run_script(state, vec![Some(key)])
     }
 
     #[test]
@@ -257,5 +273,33 @@ mod tests {
     fn a_frame_is_painted_before_the_first_key_is_read() {
         let (_, output) = run(state_saving_to("a.dre"), INTERRUPT);
         assert!(!output.is_empty());
+    }
+
+    #[test]
+    fn an_idle_second_hides_the_cursor_and_the_next_key_restores_it() {
+        let selected = Path {
+            ancestors: vec![],
+            index: 0,
+        };
+        let mut state = new_state(
+            vec![diagram::node("a"), diagram::node("b")],
+            Mode::Command,
+            Some(selected.clone()),
+        );
+        state.save_to = Some("a.dre".to_string());
+        let (result, output) = run_script(state, vec![None, Some("q")]);
+        let state = result.unwrap();
+        assert_eq!(state.doc.selected, Some(selected));
+        assert!(!state.running);
+        let output = String::from_utf8(output).unwrap();
+        let frames: Vec<&str> = output.split("\x1b[H").skip(1).collect();
+        assert!(
+            frames[0].contains(CURSOR),
+            "the cursor is visible before the idle second"
+        );
+        assert!(
+            !frames[1].contains(CURSOR),
+            "the cursor is hidden after the idle second"
+        );
     }
 }
