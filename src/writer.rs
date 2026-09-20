@@ -1,7 +1,5 @@
-use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
-use nix::unistd::read;
-use std::io::{self, Write};
-use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::io::{self, Read, Write};
+use std::os::fd::{AsRawFd, RawFd};
 use std::process::ExitCode;
 
 use crate::dre_format;
@@ -10,47 +8,13 @@ use crate::filesystem;
 use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::{self, handle_key, Mode, State};
-use crate::terminal;
+use crate::terminal::{self, RawScreen};
 
-const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
-const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
-const HIDE_CURSOR: &str = "\x1b[?25l";
-const SHOW_CURSOR: &str = "\x1b[?25h";
 const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
 const NOT_SUPPORTED_MESSAGE: &str =
     "Dre requires a terminal with Kitty graphics protocol support.";
 const CLEAR_LINE: &str = "\r\x1b[K";
-
-struct RawModeGuard<'a, W: Write> {
-    fd: RawFd,
-    saved: Termios,
-    stream: &'a mut W,
-}
-
-impl<'a, W: Write> RawModeGuard<'a, W> {
-    fn new(fd: RawFd, stream: &'a mut W) -> io::Result<Self> {
-        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-        let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
-        stream.write_all(ENTER_ALTERNATE_SCREEN.as_bytes())?;
-        stream.write_all(HIDE_CURSOR.as_bytes())?;
-        stream.flush()?;
-        let mut raw = saved.clone();
-        cfmakeraw(&mut raw);
-        tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
-        Ok(RawModeGuard { fd, saved, stream })
-    }
-}
-
-impl<'a, W: Write> Drop for RawModeGuard<'a, W> {
-    fn drop(&mut self) {
-        let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
-        let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
-        let _ = self.stream.write_all(SHOW_CURSOR.as_bytes());
-        let _ = self.stream.write_all(LEAVE_ALTERNATE_SCREEN.as_bytes());
-        let _ = self.stream.flush();
-    }
-}
 
 fn frame<W: Write>(state: &State, renderer: &mut TerminalRenderer, stream: &mut W) -> io::Result<()> {
     renderer.render(&state.doc, stream)?;
@@ -65,13 +29,12 @@ fn frame<W: Write>(state: &State, renderer: &mut TerminalRenderer, stream: &mut 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
     let terminal = terminal::probe()?;
     let mut renderer = TerminalRenderer::new(terminal);
-    let guard = RawModeGuard::new(stdin_fd, stream)?;
-    let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
+    let _screen = RawScreen::open(stdin_fd)?;
     while state.running {
-        frame(&state, &mut renderer, &mut *guard.stream)?;
-        let mut key_buffer = [0u8; 1];
-        read(stdin, &mut key_buffer).map_err(io::Error::from)?;
-        let key = std::str::from_utf8(&key_buffer).unwrap_or("").to_string();
+        frame(&state, &mut renderer, stream)?;
+        let mut key = [0u8; 1];
+        io::stdin().read_exact(&mut key)?;
+        let key = (key[0] as char).to_string();
         if key == INTERRUPT {
             return Ok(());
         }
