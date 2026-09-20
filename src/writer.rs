@@ -9,8 +9,7 @@ use crate::file_document;
 use crate::filesystem;
 use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
-use crate::diagram::Path;
-use crate::state::{handle_key, Mode, State};
+use crate::state::{self, handle_key, Mode, State};
 use crate::terminal::{self, Terminal};
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
@@ -103,22 +102,11 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
         return Ok(State::default());
     };
     let text = match filesystem::read(&path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let mut state = State::default();
-            state.save_to = Some(path);
-            state.new_file = true;
-            return Ok(state);
-        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(state::new_file(path)),
         result => result?,
     };
     let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&path))?;
-    let mut state = State::default();
-    state.doc = file_document::to_document(doc);
-    if !state.doc.boxes.is_empty() {
-        state.doc.selected = Some(Path { ancestors: vec![], index: 0 });
-    }
-    state.save_to = Some(path);
-    Ok(state)
+    Ok(state::load(file_document::to_document(doc), Some(path)))
 }
 
 pub fn write(file: Option<String>) -> io::Result<ExitCode> {
@@ -138,6 +126,7 @@ pub fn write(file: Option<String>) -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagram::Path;
     use crate::state::new_state;
     use std::fs;
     use std::io::Cursor;
