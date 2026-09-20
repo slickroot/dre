@@ -1,0 +1,261 @@
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
+use std::process::ExitCode;
+
+use crate::render::{Renderer, TerminalRenderer};
+use crate::state::{handle_key, Mode, State};
+use crate::terminal::RawScreen;
+use crate::{dre_format, file_document, filesystem, kitty, state, terminal};
+
+const CURSOR: char = '\u{2588}';
+const INTERRUPT: &str = "\x03";
+
+pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
+    let state = load(file)?;
+    let mut stdout = io::stdout();
+    let mut stdin = io::stdin();
+    kitty::require(&mut stdout, stdin.as_raw_fd())?;
+    let mut renderer = TerminalRenderer::new(terminal::probe()?);
+    let _screen = RawScreen::open(stdin.as_raw_fd())?;
+
+    let state = edit(state, &mut stdin, &mut stdout, &mut renderer)?;
+
+    if let Some(path) = &state.save_to {
+        filesystem::write(
+            path,
+            &dre_format::write(&file_document::from_document(&state.doc)),
+        )?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn edit(
+    state: State,
+    input: &mut impl Read,
+    output: &mut impl Write,
+    renderer: &mut TerminalRenderer,
+) -> io::Result<State> {
+    let mut state = state;
+    while state.running {
+        let status = status(&state);
+        renderer.render(&state.doc, output)?;
+        renderer.status_line(status.as_deref(), output)?;
+        output.flush()?;
+
+        let mut key = [0u8; 1];
+        input.read_exact(&mut key)?;
+        let key = (key[0] as char).to_string();
+        if key == INTERRUPT {
+            state.save_to = None;
+            break;
+        }
+        state = handle_key(state, &key);
+    }
+    Ok(state)
+}
+
+fn load(file: Option<String>) -> io::Result<State> {
+    let Some(path) = file else {
+        return Ok(State::default());
+    };
+    let text = match filesystem::read(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(state::new_file(path)),
+        result => result?,
+    };
+    let doc = dre_format::read(&text)
+        .map(file_document::to_document)
+        .ok_or_else(|| filesystem::invalid(&path))?;
+    Ok(state::load(doc, Some(path)))
+}
+
+fn status(state: &State) -> Option<String> {
+    match &state.mode {
+        Mode::SavePrompt { filename } => Some(format!("Save as: {filename}{CURSOR}")),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagram::Path;
+    use crate::state::new_state;
+    use crate::terminal::Terminal;
+    use std::fs;
+
+    #[test]
+    fn a_save_prompt_shows_the_filename_being_typed() {
+        let state = new_state(
+            vec![],
+            Mode::SavePrompt {
+                filename: "a".to_string(),
+            },
+            None,
+        );
+        assert_eq!(status(&state), Some(format!("Save as: a{CURSOR}")));
+    }
+
+    #[test]
+    fn command_mode_has_no_status_line() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(status(&state), None);
+    }
+
+    fn temp_path(name: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("dre-{}-{name}", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn temp_file(name: &str, contents: &str) -> String {
+        let path = temp_path(name);
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn no_argument_starts_from_an_empty_diagram() {
+        let state = load(None).unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, None);
+    }
+
+    #[test]
+    fn a_valid_file_loads_with_the_first_box_selected() {
+        let path = temp_file(
+            "valid.dre",
+            &dre_format::write(&dre_format::FileDoc {
+                boxes: vec![dre_format::FileBox {
+                    label: "API".to_string(),
+                    colour: None,
+                    fill: None,
+                    rounded: false,
+                    children: vec![],
+                }],
+            }),
+        );
+        let state = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let state = state.unwrap();
+        assert_eq!(state.doc.boxes.len(), 1);
+        assert_eq!(state.doc.boxes[0].label, "API");
+        assert_eq!(
+            state.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 0
+            })
+        );
+    }
+
+    #[test]
+    fn a_valid_file_loads_saving_back_to_the_given_path() {
+        let path = temp_file("save-to.dre", "<dre/>");
+        let state = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(state.unwrap().save_to, Some(path));
+    }
+
+    #[test]
+    fn a_file_with_no_boxes_loads_an_empty_canvas_with_nothing_selected() {
+        let path = temp_file("empty-dre.dre", "<dre/>");
+        let state = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let state = state.unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+    }
+
+    #[test]
+    fn a_zero_byte_file_is_invalid_data() {
+        let path = temp_file("zero.dre", "");
+        let result = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(
+            result.err().map(|e| e.kind()),
+            Some(io::ErrorKind::InvalidData)
+        );
+    }
+
+    #[test]
+    fn a_malformed_file_is_invalid_data() {
+        let path = temp_file("malformed.dre", "<dre><box");
+        let result = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(
+            result.err().map(|e| e.kind()),
+            Some(io::ErrorKind::InvalidData)
+        );
+    }
+
+    #[test]
+    fn an_invalid_file_has_an_exact_error_message() {
+        let path = temp_file(
+            "bad-colour.dre",
+            "<dre><box label=\"A\" colour=\"99\"/></dre>",
+        );
+        let result = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        let err = result.err().unwrap();
+        assert_eq!(err.to_string(), format!("{path}: not a valid diagram"));
+    }
+
+    #[test]
+    fn a_valid_file_is_not_a_new_file() {
+        let path = temp_file("not-new.dre", "<dre/>");
+        let state = load(Some(path.clone()));
+        fs::remove_file(&path).unwrap();
+        assert!(!state.unwrap().new_file);
+    }
+
+    #[test]
+    fn a_missing_file_loads_an_empty_canvas_saved_to_that_path() {
+        let path = temp_path("missing.dre");
+        let state = load(Some(path.clone())).unwrap();
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, Some(path));
+        assert!(state.new_file);
+    }
+
+    fn renderer() -> TerminalRenderer {
+        TerminalRenderer::new(Terminal {
+            cols: 4,
+            rows: 2,
+            cell_width: 1,
+            cell_height: 1,
+        })
+    }
+
+    fn state_saving_to(path: &str) -> State {
+        state::load(Default::default(), Some(path.to_string()))
+    }
+
+    fn run(state: State, keys: &str) -> (io::Result<State>, Vec<u8>) {
+        let mut output = Vec::new();
+        let result = edit(state, &mut keys.as_bytes(), &mut output, &mut renderer());
+        (result, output)
+    }
+
+    #[test]
+    fn an_interrupt_clears_where_to_save() {
+        let (result, _) = run(state_saving_to("a.dre"), INTERRUPT);
+        assert_eq!(result.unwrap().save_to, None);
+    }
+
+    #[test]
+    fn a_quit_stops_the_loop_and_keeps_where_to_save() {
+        let (result, _) = run(state_saving_to("a.dre"), "q");
+        let state = result.unwrap();
+        assert!(!state.running);
+        assert_eq!(state.save_to, Some("a.dre".to_string()));
+    }
+
+    #[test]
+    fn a_frame_is_painted_before_the_first_key_is_read() {
+        let (_, output) = run(state_saving_to("a.dre"), INTERRUPT);
+        assert!(!output.is_empty());
+    }
+}
