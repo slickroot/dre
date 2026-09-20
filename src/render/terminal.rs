@@ -5,6 +5,7 @@ use super::{
 };
 use crate::diagram::{palette, Document};
 use crate::kitty::{self, Sprite};
+use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
 const CURSOR: char = '\u{2588}';
@@ -357,36 +358,22 @@ fn sprite_key(
 const BLANK_CELL: (char, Option<u8>, Option<u8>) = (BLANK, None, None);
 
 pub(crate) struct TerminalRenderer {
-    pub(crate) cell_width: i64,
-    pub(crate) cell_height: i64,
+    terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Sprite>,
-    cols: i64,
-    rows: i64,
 }
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
         let placements = crate::layout::with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
-        let lines = self.draw(&placements, self.cols, self.rows);
+        let lines = self.draw(&placements, self.terminal.cols, self.terminal.rows);
         out.write_all(HOME_CURSOR.as_bytes())?;
         out.write_all(lines.join("\r\n").as_bytes())
     }
 }
 
 impl TerminalRenderer {
-    pub(crate) fn new(cell_width: i64, cell_height: i64) -> Self {
-        TerminalRenderer {
-            cell_width,
-            cell_height,
-            cache: std::collections::HashMap::new(),
-            cols: 0,
-            rows: 0,
-        }
-    }
-
-    pub(crate) fn resize(&mut self, cols: i64, rows: i64) {
-        self.cols = cols;
-        self.rows = rows;
+    pub(crate) fn new(terminal: Terminal) -> Self {
+        TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
     fn draw(
@@ -535,11 +522,11 @@ impl TerminalRenderer {
     }
 
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
-        cells * self.cell_width
+        cells * self.terminal.cell_width
     }
 
     fn cells_to_pixels_y(&self, cells: i64) -> i64 {
-        cells * self.cell_height
+        cells * self.terminal.cell_height
     }
 
     fn outline_box(
@@ -595,9 +582,9 @@ impl TerminalRenderer {
         let stop_rows: Vec<i64> = arrow
             .stops
             .iter()
-            .map(|stop| self.cells_to_pixels_y(*stop) + self.cell_height / 2)
+            .map(|stop| self.cells_to_pixels_y(*stop) + self.terminal.cell_height / 2)
             .collect();
-        let shaft_row = self.cells_to_pixels_y(arrow.shaft) + self.cell_height / 2;
+        let shaft_row = self.cells_to_pixels_y(arrow.shaft) + self.terminal.cell_height / 2;
         let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
         let midpoint = width / 2;
@@ -1130,7 +1117,11 @@ mod tests {
     }
 
     fn renderer(cell_width: i64, cell_height: i64) -> TerminalRenderer {
-        TerminalRenderer::new(cell_width, cell_height)
+        renderer_on(Terminal { cols: 0, rows: 0, cell_width, cell_height })
+    }
+
+    fn renderer_on(terminal: Terminal) -> TerminalRenderer {
+        TerminalRenderer::new(terminal)
     }
 
     fn label_placement(text: &str, x: i64, y: i64, width: i64, height: i64) -> crate::layout::Placement<'_> {
@@ -1254,8 +1245,7 @@ mod tests {
 
     #[test]
     fn the_cursor_goes_home_before_the_lines() {
-        let mut r = renderer(1, 1);
-        r.resize(2, 2);
+        let mut r = renderer_on(Terminal { cols: 2, rows: 2, cell_width: 1, cell_height: 1 });
         assert_eq!(
             rendered(&mut r, &empty_doc()),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
@@ -1264,34 +1254,33 @@ mod tests {
 
     #[test]
     fn no_newline_follows_the_last_line() {
-        let mut r = renderer(1, 1);
-        r.resize(2, 2);
+        let mut r = renderer_on(Terminal { cols: 2, rows: 2, cell_width: 1, cell_height: 1 });
         assert!(!rendered(&mut r, &empty_doc()).ends_with('\n'));
     }
 
     #[test]
-    fn the_output_is_sized_by_the_last_resize() {
-        let mut r = renderer(1, 1);
-        r.resize(3, 2);
-        r.resize(5, 4);
+    fn the_output_is_sized_by_the_terminal() {
+        let (cols, rows) = (5, 4);
+        let mut r = renderer_on(Terminal { cols, rows, cell_width: 1, cell_height: 1 });
         let output = rendered(&mut r, &empty_doc());
         let body = output.strip_prefix(HOME_CURSOR).unwrap().strip_suffix(&kitty::clear().to_string()).unwrap();
-        assert_eq!(body.split("\r\n").collect::<Vec<_>>(), vec![BLANK.to_string().repeat(5); 4]);
+        assert_eq!(
+            body.split("\r\n").collect::<Vec<_>>(),
+            vec![BLANK.to_string().repeat(cols as usize); rows as usize]
+        );
     }
 
     #[test]
     fn the_cursor_is_drawn_for_the_selected_box() {
         let boxes = vec![node("hi")];
-        let mut r = renderer(1, 1);
-        r.resize(20, 10);
+        let mut r = renderer_on(Terminal { cols: 20, rows: 10, cell_width: 1, cell_height: 1 });
         let selected = Document { boxes: boxes.clone(), selected: Some(crate::diagram::Path { ancestors: vec![], index: 0 }) };
         assert!(rendered(&mut r, &selected).contains(CURSOR));
     }
 
     #[test]
     fn no_cursor_is_drawn_without_a_selection() {
-        let mut r = renderer(1, 1);
-        r.resize(20, 10);
+        let mut r = renderer_on(Terminal { cols: 20, rows: 10, cell_width: 1, cell_height: 1 });
         let unselected = Document { boxes: vec![node("hi")], selected: None };
         assert!(!rendered(&mut r, &unselected).contains(CURSOR));
     }
@@ -1601,7 +1590,7 @@ mod tests {
             height: 10,
         };
         let clipped = r.outline_box(&placement, 0, 0, 10 - hidden_cols, 10);
-        let offset = hidden_cols * r.cell_width;
+        let offset = hidden_cols * r.terminal.cell_width;
         for y in 0..clipped.height {
             for x in 0..clipped.width {
                 assert_eq!(pixel_of(&clipped, x, y), pixel_of(&whole, x + offset, y));

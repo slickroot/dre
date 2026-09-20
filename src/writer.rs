@@ -11,7 +11,7 @@ use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::diagram::Path;
 use crate::state::{handle_key, Mode, State};
-use crate::terminal;
+use crate::terminal::{self, Terminal};
 
 const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
@@ -57,12 +57,11 @@ fn frame<W: Write>(
     state: &State,
     renderer: &mut TerminalRenderer,
     stream: &mut W,
-    cols: i64,
-    rows: i64,
+    terminal: Terminal,
 ) -> io::Result<()> {
-    renderer.resize(cols, rows);
     renderer.render(&state.doc, stream)?;
     if let Mode::SavePrompt { filename } = &state.mode {
+        let Terminal { cols, rows, .. } = terminal;
         write!(stream, "\x1b[{rows};1H{}", prompt_line(filename, cols))?;
     }
     stream.flush()
@@ -78,11 +77,11 @@ fn prompt_line(filename: &str, cols: i64) -> String {
 
 fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Result<()> {
     let terminal = terminal::probe()?;
-    let mut renderer = TerminalRenderer::new(terminal.cell_width, terminal.cell_height);
+    let mut renderer = TerminalRenderer::new(terminal);
     let guard = RawModeGuard::new(stdin_fd, stream)?;
     let stdin = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     while state.running {
-        frame(&state, &mut renderer, &mut *guard.stream, terminal.cols, terminal.rows)?;
+        frame(&state, &mut renderer, &mut *guard.stream, terminal)?;
         let mut key_buffer = [0u8; 1];
         read(stdin, &mut key_buffer).map_err(io::Error::from)?;
         let key = std::str::from_utf8(&key_buffer).unwrap_or("").to_string();
@@ -144,6 +143,10 @@ mod tests {
     use crate::state::new_state;
     use std::io::Cursor;
 
+    fn terminal(cols: i64, rows: i64) -> Terminal {
+        Terminal { cols, rows, cell_width: 1, cell_height: 1 }
+    }
+
     fn written(buffer: &Cursor<Vec<u8>>) -> String {
         String::from_utf8(buffer.get_ref().clone()).expect("test output is always ASCII")
     }
@@ -151,9 +154,10 @@ mod tests {
     #[test]
     fn the_renderer_is_given_the_terminal_size() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(3, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert_eq!(
             written(&stream),
             format!("\x1b[H   \r\n   {}", crate::kitty::clear())
@@ -163,9 +167,10 @@ mod tests {
     #[test]
     fn what_the_renderer_returned_is_painted() {
         let state = State::default();
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(3, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 3, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert!(written(&stream).starts_with("\x1b[H"));
     }
 
@@ -187,19 +192,21 @@ mod tests {
     #[test]
     fn the_prompt_is_drawn_on_the_last_row_after_the_frame_in_save_prompt_mode() {
         let state = new_state(vec![], Mode::SavePrompt { filename: "a".to_string() }, None);
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(11, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        let (cols, rows) = (11, 2);
-        frame(&state, &mut renderer, &mut stream, cols, rows).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
+        let Terminal { cols, rows, .. } = terminal;
         assert!(written(&stream).ends_with(&format!("\x1b[{rows};1H{}", prompt_line("a", cols))));
     }
 
     #[test]
     fn no_prompt_is_shown_in_command_mode() {
         let state = new_state(vec![], Mode::Command, None);
-        let mut renderer = TerminalRenderer::new(1, 1);
+        let terminal = terminal(11, 2);
+        let mut renderer = TerminalRenderer::new(terminal);
         let mut stream = Cursor::new(Vec::new());
-        frame(&state, &mut renderer, &mut stream, 11, 2).unwrap();
+        frame(&state, &mut renderer, &mut stream, terminal).unwrap();
         assert!(!written(&stream).contains("Save as:"));
     }
 
