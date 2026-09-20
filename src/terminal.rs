@@ -1,8 +1,45 @@
 use nix::libc;
-use std::io;
-use std::os::fd::AsRawFd;
+use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
+use std::io::{self, Write};
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 
 nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
+
+const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
+const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+const HIDE_CURSOR: &str = "\x1b[?25l";
+const SHOW_CURSOR: &str = "\x1b[?25h";
+
+pub(crate) struct RawScreen {
+    fd: RawFd,
+    saved: Termios,
+}
+
+impl RawScreen {
+    pub(crate) fn open(fd: RawFd) -> io::Result<Self> {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+        let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
+        let mut stdout = io::stdout();
+        stdout.write_all(ENTER_ALTERNATE_SCREEN.as_bytes())?;
+        stdout.write_all(HIDE_CURSOR.as_bytes())?;
+        stdout.flush()?;
+        let mut raw = saved.clone();
+        cfmakeraw(&mut raw);
+        tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+        Ok(RawScreen { fd, saved })
+    }
+}
+
+impl Drop for RawScreen {
+    fn drop(&mut self) {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
+        let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(SHOW_CURSOR.as_bytes());
+        let _ = stdout.write_all(LEAVE_ALTERNATE_SCREEN.as_bytes());
+        let _ = stdout.flush();
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Terminal {

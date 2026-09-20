@@ -46,6 +46,18 @@ impl Default for State {
     }
 }
 
+pub(crate) fn load(doc: Document, save_to: Option<String>) -> State {
+    let mut state = State { doc, save_to, ..Default::default() };
+    if !state.doc.boxes.is_empty() {
+        state.doc.selected = Some(Path { ancestors: vec![], index: 0 });
+    }
+    state
+}
+
+pub(crate) fn new_file(path: String) -> State {
+    State { save_to: Some(path), new_file: true, ..Default::default() }
+}
+
 pub(crate) fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
     state
@@ -139,6 +151,41 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
+
+    #[test]
+    fn load_selects_the_first_box() {
+        let state = load(Document { boxes: vec![node("a"), node("b")], selected: None }, None);
+        assert_eq!(state.doc.boxes, vec![node("a"), node("b")]);
+        assert_eq!(state.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
+    }
+
+    #[test]
+    fn load_of_an_empty_document_selects_nothing() {
+        let state = load(Document::default(), None);
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+    }
+
+    #[test]
+    fn load_records_where_to_save_back_to() {
+        let state = load(Document::default(), Some("diagram.dre".to_string()));
+        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
+    }
+
+    #[test]
+    fn load_is_not_a_new_file() {
+        let state = load(Document::default(), Some("diagram.dre".to_string()));
+        assert!(!state.new_file);
+    }
+
+    #[test]
+    fn new_file_is_empty_with_the_path_to_save_to() {
+        let state = new_file("diagram.dre".to_string());
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
+        assert!(state.new_file);
+    }
 
     #[test]
     fn blank_box_is_a_default_box_labelled_with_the_pad() {
