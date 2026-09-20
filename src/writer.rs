@@ -1,12 +1,12 @@
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::unistd::read;
-use std::fs;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
+use crate::filesystem;
 use crate::kitty;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::diagram::Path;
@@ -91,7 +91,7 @@ fn run<W: Write>(stream: &mut W, stdin_fd: RawFd, mut state: State) -> io::Resul
         state = handle_key(state, &key);
         if !state.running {
             if let Some(path) = &state.save_to {
-                fs::write(path, dre_format::write(&file_document::from_document(&state.doc)))?;
+                filesystem::write(path, &dre_format::write(&file_document::from_document(&state.doc)))?;
             }
         }
     }
@@ -102,7 +102,7 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
     let Some(path) = arg else {
         return Ok(State::default());
     };
-    let text = match fs::read_to_string(&path) {
+    let text = match filesystem::read(&path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let mut state = State::default();
             state.save_to = Some(path);
@@ -111,9 +111,7 @@ fn load_state(arg: Option<String>) -> io::Result<State> {
         }
         result => result?,
     };
-    let doc = dre_format::read(&text).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("{path}: not a valid diagram"))
-    })?;
+    let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&path))?;
     let mut state = State::default();
     state.doc = file_document::to_document(doc);
     if !state.doc.boxes.is_empty() {
@@ -141,6 +139,7 @@ pub fn write(file: Option<String>) -> io::Result<ExitCode> {
 mod tests {
     use super::*;
     use crate::state::new_state;
+    use std::fs;
     use std::io::Cursor;
 
     fn terminal(cols: i64, rows: i64) -> Terminal {

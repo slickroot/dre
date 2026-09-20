@@ -6,6 +6,7 @@ mod command_mode;
 mod diagram;
 mod dre_format;
 mod file_document;
+mod filesystem;
 mod insert_mode;
 mod kitty;
 mod layout;
