@@ -49,11 +49,7 @@ fn edit(
                 break;
             }
             Some(key) => state = handle_key(state, &key),
-            None => {
-                if state.doc.selected.is_some() {
-                    state = state::hide_idle_cursor(state);
-                }
-            }
+            None => state = state::hide_idle_cursor(state),
         }
     }
     Ok(state)

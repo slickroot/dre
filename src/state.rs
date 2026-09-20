@@ -61,7 +61,7 @@ pub(crate) fn new_file(path: String) -> State {
 }
 
 pub(crate) fn hide_idle_cursor(mut state: State) -> State {
-    if state.mode == Mode::Command {
+    if state.mode == Mode::Command && state.doc.selected.is_some() {
         state.last_selected = state.doc.selected.clone();
         state.doc.selected = None;
     }
@@ -364,6 +364,17 @@ mod tests {
         let hidden = hide_idle_cursor(state);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn repeating_idle_hides_keep_the_stashed_selection() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(hide_idle_cursor(state));
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, Some(selected.clone()));
+        let restored = handle_key(hidden, "z");
+        assert_eq!(restored.doc.selected, Some(selected));
     }
 
     #[test]
