@@ -1,6 +1,29 @@
-**dre** is a keyboard-driven diagram editor that runs in your terminal.
-Build a tree of boxes with a few keystrokes, style them, and save it to a
-`.dre` file — or export it to a crisp SVG.
+<!-- LOGO -->
+<h1 align="center">
+  <img src="docs/assets/dre-logo.png" alt="DRE logo" width="128">
+  <br>
+  dre
+</h1>
+
+<p align="center">
+  Keyboard-driven diagrams, directly in your terminal.
+  <br>
+  Build with a few keystrokes. Save as <code>.dre</code>. Export crisp SVG.
+  <br>
+  <a href="#install">Install</a>
+  ·
+  <a href="#getting-started">Getting started</a>
+  ·
+  <a href="#command-mode">Keymap</a>
+  ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+## About
+
+**dre** is a keyboard-driven diagram editor that runs in your terminal. Build
+a tree of boxes, style it as you work, and keep it in a compact `.dre` file—or
+export it to a crisp SVG when it is ready to share.
 
 ## Requirements
 
