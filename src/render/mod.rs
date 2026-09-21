@@ -5,10 +5,10 @@ use crate::diagram::{palette, Document};
 mod shapes;
 mod svg;
 mod terminal;
-pub(crate) use svg::SvgRenderer;
+pub use svg::SvgRenderer;
 pub(crate) use terminal::TerminalRenderer;
 
-pub(crate) trait Renderer {
+pub trait Renderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
 }
 

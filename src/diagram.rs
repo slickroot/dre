@@ -26,7 +26,7 @@ pub(crate) struct Path {
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct Document {
+pub struct Document {
     pub(crate) boxes: Vec<Node>,
     pub(crate) selected: Option<Path>,
 }

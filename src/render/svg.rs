@@ -8,7 +8,7 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const INK: (u8, u8, u8) = (0, 0, 0);
 
-pub(crate) struct SvgRenderer {}
+pub struct SvgRenderer {}
 
 impl SvgRenderer {
     fn draw(&self, placements: &[crate::layout::Placement]) -> String {
