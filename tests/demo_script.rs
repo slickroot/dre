@@ -7,7 +7,7 @@ const KEYS: &[&str] = &[
 
 fn svg(session: &Session) -> String {
     let mut out = Vec::new();
-    SvgRenderer {}.render(session.document(), &mut out).unwrap();
+    SvgRenderer::default().render(session.document(), &mut out).unwrap();
     String::from_utf8(out).unwrap()
 }
 

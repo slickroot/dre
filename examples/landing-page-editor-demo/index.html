@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <title>dre editor demo</title>
+<style>
+  body { margin: 16px; background: #f4f4f4; display: flex; justify-content: center; }
+  @media (prefers-color-scheme: dark) { body { background: #111; } }
+  #diagram { width: min(100%, calc((100vh - 32px) * 1.6), 1280px); border: 1px solid #888; line-height: 0; }
+  #diagram svg { width: 100%; height: auto; }
+</style>
 </head>
 <body>
 <div id="diagram"></div>

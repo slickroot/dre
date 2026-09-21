@@ -7,7 +7,7 @@ fn pressing_b_creates_a_renderable_box_through_the_session() {
     session.press_key("b");
 
     let mut svg = Vec::new();
-    SvgRenderer {}.render(session.document(), &mut svg).unwrap();
+    SvgRenderer::default().render(session.document(), &mut svg).unwrap();
     let svg = String::from_utf8(svg).unwrap();
     assert!(svg.starts_with("<svg"));
     assert!(svg.contains("<rect"));
@@ -18,7 +18,7 @@ fn a_session_document_can_be_rendered_as_svg() {
     let session = Session::new();
 
     let mut svg = Vec::new();
-    SvgRenderer {}.render(session.document(), &mut svg).unwrap();
+    SvgRenderer::default().render(session.document(), &mut svg).unwrap();
 
     let svg = String::from_utf8(svg).unwrap();
     assert!(svg.starts_with("<svg"));

@@ -1,6 +1,9 @@
 use dre::Renderer;
 use wasm_bindgen::prelude::*;
 
+const CANVAS_COLUMNS: i64 = 160;
+const CANVAS_ROWS: i64 = 50;
+
 #[wasm_bindgen]
 pub struct WebSession {
     session: dre::Session,
@@ -21,7 +24,7 @@ impl WebSession {
 
     pub fn svg(&self) -> String {
         let mut out = Vec::new();
-        let mut renderer = dre::SvgRenderer {};
+        let mut renderer = dre::SvgRenderer::with_canvas(CANVAS_COLUMNS, CANVAS_ROWS);
         renderer
             .render(self.session.document(), &mut out)
             .expect("rendering SVG to an in-memory buffer succeeds");
