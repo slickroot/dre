@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::layout::{layout, PlacementNode};
+use crate::layout::{layout, with_cursor, PlacementNode};
 use super::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
 use crate::diagram::Document;
 
@@ -76,6 +76,11 @@ impl SvgRenderer {
                 svg.push_str(&label_text(placement, label));
             }
         }
+        for placement in placements {
+            if let PlacementNode::Cursor(_) = &placement.node {
+                svg.push_str(&cursor_rect(placement));
+            }
+        }
         svg.push_str("</svg>");
         svg
     }
@@ -83,7 +88,8 @@ impl SvgRenderer {
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        out.write_all(self.draw(&layout(&doc.boxes)).as_bytes())
+        let placements = with_cursor(layout(&doc.boxes), doc.selected.clone());
+        out.write_all(self.draw(&placements).as_bytes())
     }
 }
 
@@ -97,6 +103,14 @@ fn style_block() -> String {
 fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
     format!(
         "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
+    )
+}
+
+fn cursor_rect(placement: &crate::layout::Placement) -> String {
+    format!(
+        "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"var(--ink)\"/>",
+        placement.x * CELL_WIDTH,
+        placement.y * CELL_HEIGHT
     )
 }
 
@@ -972,13 +986,85 @@ mod tests {
         assert_eq!(rendered(&doc), SvgRenderer::default().draw(&layout(&doc.boxes)));
     }
 
-    #[test]
-    fn a_selection_does_not_change_the_svg() {
-        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
-        let unselected = Document { boxes: boxes.clone(), selected: None };
-        let selected = Document { boxes, selected: Some(Path { ancestors: vec![0], index: 1 }) };
+    fn cursor_rect_at_label_end_of(doc: &Document, selected: &Path) -> String {
+        let boxes = layout(&doc.boxes);
+        let label = boxes
+            .iter()
+            .find(|placement| matches!(&placement.node, PlacementNode::Label(label) if &label.path == selected))
+            .unwrap();
+        cursor_rect_at_cell(label.x + label.width - 1, label.y)
+    }
 
-        assert_eq!(rendered(&selected), rendered(&unselected));
+    fn cursor_rect_at_cell(column: i64, row: i64) -> String {
+        format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"var(--ink)\"/>",
+            column * CELL_WIDTH,
+            row * CELL_HEIGHT
+        )
+    }
+
+    fn two_children_document(selected: Option<Path>) -> Document {
+        Document {
+            boxes: vec![node_with_children("root", vec![node("A"), node("B")])],
+            selected,
+        }
+    }
+
+    #[test]
+    fn a_selected_box_shows_the_cursor_at_the_end_of_its_label() {
+        let path = Path {
+            ancestors: vec![0],
+            index: 1,
+        };
+        let doc = two_children_document(Some(path.clone()));
+
+        assert!(rendered(&doc).contains(&cursor_rect_at_label_end_of(&doc, &path)));
+    }
+
+    #[test]
+    fn no_selection_shows_no_cursor() {
+        let doc = two_children_document(None);
+
+        assert!(!rendered(&doc).contains("fill=\"var(--ink)\"/>"));
+    }
+
+    #[test]
+    fn moving_the_selection_moves_the_cursor() {
+        let first = Path {
+            ancestors: vec![0],
+            index: 0,
+        };
+        let second = Path {
+            ancestors: vec![0],
+            index: 1,
+        };
+        let doc = two_children_document(Some(second.clone()));
+        let first_cursor = cursor_rect_at_label_end_of(&doc, &first);
+        let second_cursor = cursor_rect_at_label_end_of(&doc, &second);
+
+        let svg = rendered(&doc);
+
+        assert!(svg.contains(&second_cursor));
+        assert!(!svg.contains(&first_cursor));
+    }
+
+    #[test]
+    fn the_cursor_is_painted_after_the_labels() {
+        let placements = vec![
+            label_placement("hi", 1, 1),
+            crate::layout::Placement {
+                node: PlacementNode::Cursor(crate::layout::Cursor),
+                x: 2,
+                y: 1,
+                width: 1,
+                height: 1,
+            },
+        ];
+
+        let svg = SvgRenderer::default().draw(&placements);
+
+        let cursor = svg.find(&cursor_rect_at_cell(2, 1)).unwrap();
+        assert!(cursor > svg.find("<text").unwrap());
     }
 
     #[test]
