@@ -95,8 +95,6 @@ This is guidance for the consumer, not code in this repository:
 
 ### Tests
 
-- Rust tests for `Session`: `press_key("b")` creates a renderable box through the existing reducer, and a `Session` document can be rendered by `SvgRenderer`.
-- A test replaying the demo key script through `Session`.
 - Rust unit tests for `centered_on`, the label font size, and preserved label whitespace.
 - A Rust test for `WebSession::extent()` after `press_key("b")`, and for `svg` with the new signature.
 - The WASM artifact is checked by building it through `make wasm`.
