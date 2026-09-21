@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dre editor demo</title>
+</head>
+<body>
+<div id="diagram"></div>
+<script type="module">
+import init, { WebSession } from './pkg/dre_web.js';
+
+const KEYS = [
+  'b', 'P', 'l', 'a', 'n', '\x1b',
+  's', 'B', 'u', 'i', 'l', 'd', '\x1b',
+  's', 'S', 'h', 'i', 'p', '\x1b',
+  'c',
+  'f',
+];
+const DELAY_MS = 400;
+
+await init();
+const session = new WebSession();
+const container = document.getElementById('diagram');
+const show = () => { container.innerHTML = session.svg(); };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+show();
+for (const key of KEYS) {
+  await sleep(DELAY_MS);
+  session.press_key(key);
+  show();
+}
+</script>
+</body>
+</html>
