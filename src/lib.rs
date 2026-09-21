@@ -28,6 +28,8 @@ use std::process::ExitCode;
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
 
+pub const IDLE_TIMEOUT_MS: u16 = 1000;
+
 pub struct Session {
     state: state::State,
 }
@@ -41,6 +43,11 @@ impl Session {
 
     pub fn press_key(&mut self, key: &str) {
         self.state = state::handle_key(std::mem::take(&mut self.state), key);
+    }
+
+    #[doc(hidden)]
+    pub fn go_idle(&mut self) {
+        self.state = state::hide_idle_cursor(std::mem::take(&mut self.state));
     }
 
     pub fn is_running(&self) -> bool {
@@ -78,5 +85,38 @@ pub fn run() -> ExitCode {
             eprintln!("{e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_with_a_box_selected() -> Session {
+        let mut session = Session::new();
+        session.press_key("b");
+        session.press_key("\x1b");
+        session
+    }
+
+    #[test]
+    fn going_idle_hides_the_cursor_and_the_next_key_restores_it_on_the_same_box() {
+        let mut session = session_with_a_box_selected();
+        let selected = session.document().selected.clone();
+        assert!(selected.is_some());
+        session.go_idle();
+        assert_eq!(session.document().selected, None);
+        session.press_key("z");
+        assert_eq!(session.document().selected, selected);
+    }
+
+    #[test]
+    fn going_idle_in_insert_mode_leaves_the_caret() {
+        let mut session = Session::new();
+        session.press_key("b");
+        let selected = session.document().selected.clone();
+        assert!(selected.is_some());
+        session.go_idle();
+        assert_eq!(session.document().selected, selected);
     }
 }

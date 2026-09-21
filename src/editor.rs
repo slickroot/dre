@@ -5,11 +5,10 @@ use std::process::ExitCode;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::{handle_key, Mode, State};
 use crate::terminal::RawScreen;
-use crate::{dre_format, file_document, filesystem, kitty, state, terminal};
+use crate::{dre_format, IDLE_TIMEOUT_MS, file_document, filesystem, kitty, state, terminal};
 
 const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
-const IDLE_TIMEOUT_MS: u16 = 1000;
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let state = load(file)?;
