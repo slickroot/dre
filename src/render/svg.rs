@@ -222,7 +222,7 @@ fn label_text(
 ) -> String {
     let chars = label.text.chars().count() as i64;
     format!(
-        "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
+        "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
         label_font_size(),
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
@@ -499,13 +499,26 @@ mod tests {
         let svg = SvgRenderer::default().draw(&placements);
 
         assert!(svg.contains(&format!(
-            "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
+            "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
             label_font_size(),
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
             2 * CELL_WIDTH,
         )));
         assert!(svg.contains(">hi</text>"));
+    }
+
+    #[test]
+    fn label_with_trailing_space_preserves_whitespace_and_covers_it() {
+        let label_x = 3;
+        let label_y = 2;
+        let placements = vec![label_placement("Pl ", label_x, label_y)];
+
+        let svg = SvgRenderer::default().draw(&placements);
+
+        assert!(svg.contains("<text xml:space=\"preserve\" "));
+        assert!(svg.contains(&format!("textLength=\"{}\"", 3 * CELL_WIDTH)));
+        assert!(svg.contains(">Pl </text>"));
     }
 
     #[test]
@@ -855,7 +868,7 @@ mod tests {
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
         format!(
-            "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
+            "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
             label_font_size(),
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
