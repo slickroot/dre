@@ -7,6 +7,11 @@ use crate::diagram::Document;
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const INK: (u8, u8, u8) = (0, 0, 0);
+const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
+
+fn label_font_size() -> f64 {
+    (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
+}
 
 #[derive(Default)]
 pub struct SvgRenderer {
@@ -217,7 +222,8 @@ fn label_text(
 ) -> String {
     let chars = label.text.chars().count() as i64;
     format!(
-        "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
+        "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
+        label_font_size(),
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
@@ -493,7 +499,8 @@ mod tests {
         let svg = SvgRenderer::default().draw(&placements);
 
         assert!(svg.contains(&format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
+            "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\"",
+            label_font_size(),
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
             2 * CELL_WIDTH,
@@ -848,7 +855,8 @@ mod tests {
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
         format!(
-            "<text font-family=\"monospace\" font-size=\"{CELL_HEIGHT}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
+            "<text font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{text}</text>",
+            label_font_size(),
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
@@ -1045,5 +1053,15 @@ mod tests {
         let expected = format!("viewBox=\"0 0 {} {}\"", 100 * CELL_WIDTH, 40 * CELL_HEIGHT);
 
         assert!(SvgRenderer::with_canvas(100, 40).centered_on(30, 10).draw(&[]).contains(&expected));
+    }
+}
+
+#[cfg(test)]
+mod font_size_tests {
+    use super::label_font_size;
+
+    #[test]
+    fn label_font_size_makes_the_monospace_advance_equal_a_cell_width() {
+        assert_eq!(label_font_size(), 13.33);
     }
 }
