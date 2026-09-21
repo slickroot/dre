@@ -3,6 +3,10 @@ name = "dre"
 version = "0.3.0"
 edition = "2021"
 
+[workspace]
+members = [".", "web"]
+resolver = "2"
+
 [dependencies]
 base64 = "0.22"
 flate2 = "1"
