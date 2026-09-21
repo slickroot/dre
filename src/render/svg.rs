@@ -11,14 +11,39 @@ const INK: (u8, u8, u8) = (0, 0, 0);
 #[derive(Default)]
 pub struct SvgRenderer {
     canvas: Option<(i64, i64)>,
+    extent: Option<(i64, i64)>,
 }
 
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
-        SvgRenderer { canvas: Some((columns, rows)) }
+        SvgRenderer { canvas: Some((columns, rows)), extent: None }
+    }
+
+    pub fn centered_on(self, width: i64, height: i64) -> Self {
+        SvgRenderer { extent: Some((width, height)), ..self }
+    }
+
+    fn centering_offset(&self) -> (i64, i64) {
+        match (self.canvas, self.extent) {
+            (Some((columns, rows)), Some((width, height))) => (
+                ((columns - width) / 2).max(0),
+                ((rows - height) / 2).max(0),
+            ),
+            _ => (0, 0),
+        }
     }
 
     fn draw(&self, placements: &[crate::layout::Placement]) -> String {
+        let (offset_x, offset_y) = self.centering_offset();
+        let shifted: Vec<crate::layout::Placement> = placements
+            .iter()
+            .map(|placement| crate::layout::Placement {
+                x: placement.x + offset_x,
+                y: placement.y + offset_y,
+                ..placement.clone()
+            })
+            .collect();
+        let placements = shifted.as_slice();
         let (min_x, min_y, span_x, span_y) = match self.canvas {
             Some((columns, rows)) => (0, 0, columns * CELL_WIDTH, rows * CELL_HEIGHT),
             None => view_box(placements),
@@ -961,5 +986,64 @@ mod tests {
             2 * CELL_HEIGHT
         );
         assert!(SvgRenderer::default().draw(&[]).contains(&expected));
+    }
+
+    fn first_rect_origin(svg: &str) -> (i64, i64) {
+        let rect = svg.split("<rect x=\"").nth(2).unwrap();
+        let x: i64 = rect.split('"').next().unwrap().parse().unwrap();
+        let y: i64 = rect.split("y=\"").nth(1).unwrap().split('"').next().unwrap().parse().unwrap();
+        (x, y)
+    }
+
+    fn box_origin_when_centered(canvas: (i64, i64), extent: (i64, i64)) -> (i64, i64) {
+        let nodes = vec![node("hi")];
+        let placements = crate::layout::layout(&nodes);
+        let renderer = SvgRenderer::with_canvas(canvas.0, canvas.1).centered_on(extent.0, extent.1);
+        first_rect_origin(&renderer.draw(&placements))
+    }
+
+    #[test]
+    fn an_extent_smaller_than_the_canvas_is_centered_in_it() {
+        let uncentered = box_origin_when_centered((100, 40), (100, 40));
+
+        let (x, y) = box_origin_when_centered((100, 40), (30, 10));
+
+        assert_eq!((x - uncentered.0, y - uncentered.1), (35 * CELL_WIDTH, 15 * CELL_HEIGHT));
+    }
+
+    #[test]
+    fn an_odd_leftover_space_rounds_the_offset_down() {
+        let uncentered = box_origin_when_centered((100, 40), (100, 40));
+
+        let (x, y) = box_origin_when_centered((100, 40), (30, 9));
+
+        assert_eq!((x - uncentered.0, y - uncentered.1), (35 * CELL_WIDTH, 15 * CELL_HEIGHT));
+    }
+
+    #[test]
+    fn an_extent_equal_to_the_canvas_gets_no_offset() {
+        let nodes = vec![node("hi")];
+        let placements = crate::layout::layout(&nodes);
+
+        let centered = SvgRenderer::with_canvas(100, 40).centered_on(100, 40).draw(&placements);
+
+        assert_eq!(centered, SvgRenderer::with_canvas(100, 40).draw(&placements));
+    }
+
+    #[test]
+    fn an_extent_larger_than_the_canvas_is_clamped_to_no_offset() {
+        let nodes = vec![node("hi")];
+        let placements = crate::layout::layout(&nodes);
+
+        let centered = SvgRenderer::with_canvas(100, 40).centered_on(120, 50).draw(&placements);
+
+        assert_eq!(centered, SvgRenderer::with_canvas(100, 40).draw(&placements));
+    }
+
+    #[test]
+    fn centering_leaves_the_view_box_fixed() {
+        let expected = format!("viewBox=\"0 0 {} {}\"", 100 * CELL_WIDTH, 40 * CELL_HEIGHT);
+
+        assert!(SvgRenderer::with_canvas(100, 40).centered_on(30, 10).draw(&[]).contains(&expected));
     }
 }
