@@ -1,20 +1,29 @@
-use std::process::ExitCode;
-
+#[cfg(not(target_arch = "wasm32"))]
 mod canvas;
+#[cfg(not(target_arch = "wasm32"))]
 mod cli;
 mod command_mode;
 mod diagram;
+#[cfg(not(target_arch = "wasm32"))]
 mod dre_format;
+#[cfg(not(target_arch = "wasm32"))]
 mod editor;
+#[cfg(not(target_arch = "wasm32"))]
 mod file_document;
+#[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
 mod insert_mode;
+#[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
 mod render;
 mod save_prompt_mode;
 mod state;
+#[cfg(not(target_arch = "wasm32"))]
 mod terminal;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::process::ExitCode;
 
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
@@ -50,6 +59,7 @@ impl Default for Session {
 }
 
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
         cli::Command::Edit(file) => editor::open(file),

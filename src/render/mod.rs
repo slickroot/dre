@@ -2,10 +2,13 @@ use std::io::{self, Write};
 
 use crate::diagram::{palette, Document};
 
+#[cfg(not(target_arch = "wasm32"))]
 mod shapes;
 mod svg;
+#[cfg(not(target_arch = "wasm32"))]
 mod terminal;
 pub use svg::SvgRenderer;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use terminal::TerminalRenderer;
 
 pub trait Renderer {
