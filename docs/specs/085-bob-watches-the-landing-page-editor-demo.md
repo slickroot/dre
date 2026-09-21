@@ -104,3 +104,44 @@ Keep tests focused on new contracts rather than retesting all existing reducers:
 - Add a Rust test proving a `Session` document can be rendered by `SvgRenderer`.
 - Add a build check for the WASM/demo artifact through the new `make demo` path.
 - Do not add browser automation for this story.
+
+### Terminal viewport and centering
+
+The demo should read as a terminal: a fixed grid of cells that fills the whole window, with the diagram centered in it and no scrolling. The first implementation hardcoded a 160×50 canvas in `web/src/lib.rs` and stretched it with `min(100%, …, 1280px)` inside a bordered, margined body. That is replaced by the design below.
+
+**The page owns the grid size.**
+
+- `index.html` defines one constant, `SCALE = 2`, an integer scale of the renderer's native 8×16 cell, so a cell is 16×32 px.
+- `cols = floor(innerWidth / (8 * SCALE))` and `rows = floor(innerHeight / (16 * SCALE))`.
+- The SVG element is sized to exactly `cols*8*SCALE × rows*16*SCALE` px. Leftover pixels are under one cell and are absorbed by centering the SVG on a body with the same background.
+- CSS: `html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }`. No border, no margin, no scrollbars.
+- On `resize` the page recomputes `cols`/`rows` and re-renders the current session. The script keeps playing and is not restarted.
+- Remove `CANVAS_COLUMNS` and `CANVAS_ROWS` from `web/src/lib.rs`.
+
+**The renderer centers the composition.**
+
+- `SvgRenderer::with_canvas(cols, rows)` keeps producing a fixed `viewBox="0 0 cols*8 rows*16"`.
+- Add `SvgRenderer::centered_on(width, height)`, where width and height are a diagram extent in cells. The renderer translates the drawing by `((cols - width) / 2, (rows - height) / 2)` cells, rounded down and clamped at zero, so the extent sits in the middle of the canvas. Without `centered_on`, rendering is unchanged.
+- Centering is a pure rendering concern and has Rust unit tests: extent centered in a larger canvas, extent equal to the canvas gets zero offset, extent larger than the canvas is clamped to zero.
+
+**The adapter exposes the extent and takes the viewport.**
+
+```rust
+#[wasm_bindgen]
+impl WebSession {
+    pub fn extent(&self) -> Vec<i32>; // [width, height] in cells of the current document
+    pub fn svg(&self, cols: i32, rows: i32, extent_width: i32, extent_height: i32) -> String;
+}
+```
+
+`svg` builds `SvgRenderer::with_canvas(cols, rows).centered_on(extent_width, extent_height)`.
+
+**Stable placement while the demo plays.**
+
+- Before playback, the page runs the whole key script on a throwaway `WebSession` and reads `extent()` once. That is the final composition's size.
+- The visible session is rendered with that fixed extent on every step. The offset therefore never changes during playback, boxes appear where they will end up, and the finished diagram is centered.
+- After `resize`, the same extent is reused with the new `cols`/`rows`.
+
+**Tests.** Rust unit tests cover `centered_on` (above) and `WebSession::extent()` after `press_key("b")`. The page-side arithmetic (`cols`/`rows` from the window) is a few lines of JS and is not covered by browser automation, per the existing decision.
+
+**Open point.** Whether centering is better owned by the renderer or computed in the page was left as "go with the recommendation" and may be revisited once seen in a browser.
