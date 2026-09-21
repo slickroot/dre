@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <title>dre editor demo</title>
 <style>
-  body { margin: 16px; background: #f4f4f4; display: flex; justify-content: center; }
+  html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }
+  body { background: #f4f4f4; display: flex; justify-content: center; align-items: center; }
   @media (prefers-color-scheme: dark) { body { background: #111; } }
-  #diagram { width: min(100%, calc((100vh - 32px) * 1.6), 1280px); border: 1px solid #888; line-height: 0; }
-  #diagram svg { width: 100%; height: auto; }
+  #diagram { line-height: 0; }
+  #diagram svg { display: block; }
 </style>
 </head>
 <body>
@@ -23,12 +24,36 @@ const KEYS = [
   'f',
 ];
 const DELAY_MS = 400;
+const SCALE = 2;
+const CELL_WIDTH = 8 * SCALE;
+const CELL_HEIGHT = 16 * SCALE;
 
 await init();
-const session = new WebSession();
+
 const container = document.getElementById('diagram');
-const show = () => { container.innerHTML = session.svg(); };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const measureExtent = () => {
+  const throwaway = new WebSession();
+  for (const key of KEYS) {
+    throwaway.press_key(key);
+  }
+  return throwaway.extent();
+};
+
+const [extentWidth, extentHeight] = measureExtent();
+const session = new WebSession();
+
+const show = () => {
+  const cols = Math.floor(window.innerWidth / CELL_WIDTH);
+  const rows = Math.floor(window.innerHeight / CELL_HEIGHT);
+  container.innerHTML = session.svg(cols, rows, extentWidth, extentHeight);
+  const svg = container.firstElementChild;
+  svg.setAttribute('width', cols * CELL_WIDTH);
+  svg.setAttribute('height', rows * CELL_HEIGHT);
+};
+
+window.addEventListener('resize', show);
 
 show();
 for (const key of KEYS) {
