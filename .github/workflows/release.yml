@@ -60,8 +60,31 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
+  wasm:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-bindgen-cli
+        run: |
+          version=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+      - run: cargo build -p dre-web --target wasm32-unknown-unknown --release
+      - run: wasm-bindgen target/wasm32-unknown-unknown/release/dre_web.wasm --target web --out-dir web/pkg --out-name dre_web
+      - name: Zip the web build
+        working-directory: web/pkg
+        run: zip ../../dre-web.zip dre_web.js dre_web_bg.wasm dre_web.d.ts dre_web_bg.wasm.d.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dre-web
+          path: dre-web.zip
+
   publish:
-    needs: [check, build]
+    needs: [check, build, wasm]
     runs-on: ubuntu-latest
     permissions:
       contents: write

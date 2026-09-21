@@ -1,8 +1,8 @@
 use crate::command_mode;
+use crate::diagram::{append, at, children_at, palette, Document, Node, Path};
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
-pub(crate) const PALETTE_SIZE: u8 = 5;
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
@@ -13,27 +13,6 @@ pub(crate) struct KeyBinding<C> {
     pub(crate) description: &'static str,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Node {
-    pub(crate) label: String,
-    pub(crate) colour: Option<u8>,
-    pub(crate) filled: bool,
-    pub(crate) rounded: bool,
-    pub(crate) children: Vec<Node>,
-}
-
-impl Default for Node {
-    fn default() -> Self {
-        Node {
-            label: String::new(),
-            colour: None,
-            filled: false,
-            rounded: false,
-            children: Vec::new(),
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
 pub(crate) enum Mode {
     #[default]
@@ -42,21 +21,10 @@ pub(crate) enum Mode {
     SavePrompt { filename: String },
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Path {
-    pub(crate) ancestors: Vec<usize>,
-    pub(crate) index: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct Document {
-    pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Option<Path>,
-}
-
 #[derive(Clone)]
 pub(crate) struct State {
     pub(crate) doc: Document,
+    pub(crate) last_selected: Option<Path>,
     history: Vec<Document>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
@@ -69,6 +37,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             doc: Document::default(),
+            last_selected: None,
             history: Vec::new(),
             mode: Mode::default(),
             running: true,
@@ -77,6 +46,26 @@ impl Default for State {
             pending_count: None,
         }
     }
+}
+
+pub(crate) fn load(doc: Document, save_to: Option<String>) -> State {
+    let mut state = State { doc, save_to, ..Default::default() };
+    if !state.doc.boxes.is_empty() {
+        state.doc.selected = Some(Path { ancestors: vec![], index: 0 });
+    }
+    state
+}
+
+pub(crate) fn new_file(path: String) -> State {
+    State { save_to: Some(path), new_file: true, ..Default::default() }
+}
+
+pub(crate) fn hide_idle_cursor(mut state: State) -> State {
+    if state.mode == Mode::Command && state.doc.selected.is_some() {
+        state.last_selected = state.doc.selected.clone();
+        state.doc.selected = None;
+    }
+    state
 }
 
 pub(crate) fn snapshot(mut state: State) -> State {
@@ -94,21 +83,9 @@ pub(crate) fn undo(mut state: State) -> State {
 pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
     match colour {
         None => Some(0),
-        Some(i) if i + 1 < PALETTE_SIZE => Some(i + 1),
+        Some(i) if palette(i + 1).is_some() => Some(i + 1),
         Some(_) => None,
     }
-}
-
-pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
-    let mut children = boxes;
-    for &index in ancestors {
-        children = &mut children[index].children;
-    }
-    children
-}
-
-pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
-    &mut children_at(boxes, &path.ancestors)[path.index]
 }
 
 pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
@@ -121,20 +98,19 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
-pub(crate) fn grow(siblings: &mut Vec<Node>) -> usize {
-    siblings.push(Node { label: PAD.to_string(), ..Default::default() });
-    siblings.len() - 1
+pub(crate) fn blank_box() -> Node {
+    Node { label: PAD.to_string(), ..Default::default() }
 }
 
 pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state.doc.selected = match selected {
         Some(mut path) => {
-            let index = grow(&mut at(&mut state.doc.boxes, &path).children);
+            let index = append(&mut at(&mut state.doc.boxes, &path).children, blank_box());
             path.ancestors.push(path.index);
             Some(Path { ancestors: path.ancestors, index })
         }
         None => {
-            let index = grow(&mut state.doc.boxes);
+            let index = append(&mut state.doc.boxes, blank_box());
             Some(Path { ancestors: Vec::new(), index })
         }
     };
@@ -143,6 +119,9 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
 }
 
 pub(crate) fn handle_key(mut state: State, key: &str) -> State {
+    if let Some(selected) = state.last_selected.take() {
+        state.doc.selected = Some(selected);
+    }
     match &state.mode {
         Mode::Command => {
             if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
@@ -178,134 +157,52 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
 
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
-    State { doc: Document { boxes, selected }, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
+    State { doc: Document { boxes, selected }, last_selected: None, history: Vec::new(), mode, running: true, save_to: None, new_file: false, pending_count: None }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagram::{node, node_with_children};
 
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
+    #[test]
+    fn load_selects_the_first_box() {
+        let state = load(Document { boxes: vec![node("a"), node("b")], selected: None }, None);
+        assert_eq!(state.doc.boxes, vec![node("a"), node("b")]);
+        assert_eq!(state.doc.selected, Some(Path { ancestors: vec![], index: 0 }));
     }
 
     #[test]
-    fn boxes_are_equal() {
-        assert_eq!(Node::default(), Node::default());
+    fn load_of_an_empty_document_selects_nothing() {
+        let state = load(Document::default(), None);
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
     }
 
     #[test]
-    fn boxes_default_to_the_plain_colour() {
-        assert_eq!(Node::default().colour, None);
+    fn load_records_where_to_save_back_to() {
+        let state = load(Document::default(), Some("diagram.dre".to_string()));
+        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
     }
 
     #[test]
-    fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().filled, false);
+    fn load_is_not_a_new_file() {
+        let state = load(Document::default(), Some("diagram.dre".to_string()));
+        assert!(!state.new_file);
     }
 
     #[test]
-    fn boxes_default_to_an_empty_label() {
-        assert_eq!(Node::default(), node(""));
+    fn new_file_is_empty_with_the_path_to_save_to() {
+        let state = new_file("diagram.dre".to_string());
+        assert!(state.doc.boxes.is_empty());
+        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
+        assert!(state.new_file);
     }
 
     #[test]
-    fn boxes_with_different_labels_are_not_equal() {
-        assert_ne!(node("a"), node("b"));
-    }
-
-    #[test]
-    fn boxes_default_to_no_children() {
-        assert_eq!(Node::default().children, Vec::<Node>::new());
-    }
-
-    #[test]
-    fn boxes_with_different_children_are_not_equal() {
-        assert_ne!(
-            node_with_children("", vec![node("a")]),
-            node_with_children("", vec![node("b")])
-        );
-    }
-
-    #[test]
-    fn new_box_starts_with_square_corners() {
-        assert_eq!(node("a").rounded, false);
-    }
-
-    #[test]
-    fn children_at_no_ancestors_returns_the_top_level_boxes() {
-        let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*children_at(&mut boxes, &[]), vec![node("a"), node("b")]);
-    }
-
-    #[test]
-    fn children_at_ancestors_returns_the_addressed_nodes_children() {
-        let mut boxes = vec![node_with_children(
-            "a",
-            vec![node_with_children("b", vec![node("c"), node("d")])],
-        )];
-        assert_eq!(*children_at(&mut boxes, &[0]), vec![node_with_children("b", vec![node("c"), node("d")])]);
-        assert_eq!(*children_at(&mut boxes, &[0, 0]), vec![node("c"), node("d")]);
-    }
-
-    #[test]
-    fn at_a_single_index_returns_the_top_level_box() {
-        let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![], index: 1 }), node("b"));
-    }
-
-    #[test]
-    fn at_a_longer_path_walks_into_children() {
-        let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0], index: 1 }), node("d"));
-    }
-
-    #[test]
-    fn at_a_deep_path_walks_multiple_levels() {
-        let mut boxes = vec![node_with_children(
-            "a",
-            vec![node_with_children("b", vec![node("c")])],
-        )];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0, 0], index: 0 }), node("c"));
-    }
-
-    #[test]
-    fn grow_on_an_empty_list_appends_a_padded_node() {
-        let mut boxes = Vec::new();
-        let index = grow(&mut boxes);
-        assert_eq!(boxes, vec![node(PAD)]);
-        assert_eq!(index, 0);
-    }
-
-    #[test]
-    fn grow_appends_after_existing_nodes() {
-        let mut boxes = vec![node("a")];
-        let index = grow(&mut boxes);
-        assert_eq!(boxes, vec![node("a"), node(PAD)]);
-        assert_eq!(index, 1);
-    }
-
-    #[test]
-    fn grow_on_a_nodes_children_appends_a_child() {
-        let mut boxes = vec![node("a")];
-        let index = grow(&mut boxes[0].children);
-        assert_eq!(boxes, vec![node_with_children("a", vec![node(PAD)])]);
-        assert_eq!(index, 0);
-    }
-
-    #[test]
-    fn grow_on_a_nodes_children_appends_a_second_child() {
-        let mut boxes = vec![node_with_children("a", vec![node("c")])];
-        let index = grow(&mut boxes[0].children);
-        assert_eq!(
-            boxes,
-            vec![node_with_children("a", vec![node("c"), node(PAD)])]
-        );
-        assert_eq!(index, 1);
+    fn blank_box_is_a_default_box_labelled_with_the_pad() {
+        assert_eq!(blank_box(), Node { label: PAD.to_string(), ..Default::default() });
     }
 
     #[test]
@@ -329,7 +226,7 @@ mod tests {
     #[test]
     fn next_colour_cycles_through_the_palette_and_back_to_plain() {
         let mut colour = None;
-        for _ in 0..PALETTE_SIZE {
+        for _ in (0..).take_while(|&i| palette(i).is_some()) {
             colour = next_colour(colour);
         }
         assert_ne!(colour, None);
@@ -432,5 +329,78 @@ mod tests {
         let state = handle_key(state, "x");
         let result = handle_key(state, "j");
         assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn an_idle_hide_in_command_mode_clears_the_selection_and_stashes_it() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, Some(selected));
+    }
+
+    #[test]
+    fn an_idle_hide_in_insert_mode_leaves_the_selection_alone() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn an_idle_hide_in_save_prompt_mode_leaves_the_selection_alone() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::SavePrompt { filename: "a.dre".to_string() }, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn an_idle_hide_with_nothing_selected_is_a_noop() {
+        let state = new_state(vec![node("a")], Mode::Command, None);
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn repeating_idle_hides_keep_the_stashed_selection() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(hide_idle_cursor(state));
+        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.last_selected, Some(selected.clone()));
+        let restored = handle_key(hidden, "z");
+        assert_eq!(restored.doc.selected, Some(selected));
+    }
+
+    #[test]
+    fn the_next_key_after_a_hide_lands_every_command_on_the_hidden_box() {
+        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let hidden = hide_idle_cursor(state);
+        let result = handle_key(hidden, "j");
+        assert_eq!(result.doc.selected, Some(Path { ancestors: vec![], index: 1 }));
+    }
+
+    #[test]
+    fn any_key_after_a_hide_restores_the_selection() {
+        let selected = Path { ancestors: vec![], index: 0 };
+        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
+        let hidden = hide_idle_cursor(state);
+        let result = handle_key(hidden, "z");
+        assert_eq!(result.doc.selected, Some(selected));
+    }
+
+    #[test]
+    fn an_idle_hide_is_not_undoable_and_does_not_pollute_history() {
+        let mut state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        state = snapshot(state);
+        state = snapshot(state);
+        let hidden = hide_idle_cursor(state);
+        assert_eq!(hidden.history.len(), 2);
+        assert_eq!(hidden.doc.selected, None);
     }
 }

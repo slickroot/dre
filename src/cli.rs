@@ -1,12 +1,12 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::dre_format;
 use crate::file_document;
-use crate::render::Renderer;
-use crate::svg::SvgRenderer;
+use crate::filesystem;
+use crate::render::{Renderer, SvgRenderer};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Command {
@@ -31,24 +31,21 @@ fn output_path(input: &str) -> PathBuf {
 }
 
 pub(crate) fn export(input: String) -> io::Result<ExitCode> {
-    let text = match fs::read_to_string(&input) {
+    let text = match filesystem::read(&input) {
         Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(io::Error::new(io::ErrorKind::NotFound, format!("no such file: {input}")));
-        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(filesystem::missing(&input)),
         Err(e) => return Err(e),
     };
-    let doc = dre_format::read(&text).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("{input}: not a valid diagram"))
-    })?;
-    let doc = file_document::to_state(doc).doc;
-    SvgRenderer {}.render(&doc, &mut File::create(output_path(&input))?)?;
+    let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&input))?;
+    let doc = file_document::to_document(doc);
+    SvgRenderer::default().render(&doc, &mut File::create(output_path(&input))?)?;
     Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     fn parse(args: &[&str]) -> Command {

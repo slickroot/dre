@@ -1,3 +1,4 @@
+use crate::canvas::Canvas;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -8,15 +9,6 @@ use nix::unistd::read;
 use std::fmt;
 use std::io::{self, Write};
 use std::os::fd::{BorrowedFd, RawFd};
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Sprite {
-    pub(crate) pixels: Vec<u8>,
-    pub(crate) width: i64,
-    pub(crate) height: i64,
-    pub(crate) col: i64,
-    pub(crate) row: i64,
-}
 
 pub(crate) struct Command(String);
 
@@ -30,16 +22,16 @@ pub(crate) fn clear() -> Command {
     Command(DELETE_ALL.to_string())
 }
 
-pub(crate) fn show(sprite: &Sprite) -> Command {
+pub(crate) fn show(canvas: &Canvas, col: i64, row: i64) -> Command {
     Command(format!(
         "\x1b[{};{}H{}",
-        sprite.row + 1,
-        sprite.col + 1,
-        transmission(&sprite.pixels, sprite.width, sprite.height)
+        row + 1,
+        col + 1,
+        transmission(&canvas.pixels, canvas.width, canvas.height)
     ))
 }
 
-pub(crate) fn supported<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<bool> {
+pub(crate) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
     stream.write_all(QUERY.as_bytes())?;
@@ -65,12 +57,20 @@ pub(crate) fn supported<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result
     })();
 
     tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
-    result
+    if result? {
+        return Ok(());
+    }
+    stream.write_all(CLEAR_LINE.as_bytes())?;
+    stream.flush()?;
+    Err(io::Error::new(io::ErrorKind::Unsupported, NOT_SUPPORTED_MESSAGE))
 }
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
+const CLEAR_LINE: &str = "\r\x1b[K";
+const NOT_SUPPORTED_MESSAGE: &str =
+    "Dre requires a terminal with Kitty graphics protocol support.";
 const REPLY_TIMEOUT_MICROS: i64 = 500_000;
 
 fn is_supported(reply: &[u8]) -> bool {
@@ -242,10 +242,10 @@ mod tests {
 
     #[test]
     fn show_moves_the_cursor_to_the_sprite_cell_then_transmits_its_pixels() {
-        let sprite = Sprite { pixels: vec![1, 2, 3, 4, 5, 6, 7, 8], width: 2, height: 1, col: 3, row: 5 };
+        let canvas = Canvas { pixels: vec![1, 2, 3, 4, 5, 6, 7, 8], width: 2, height: 1 };
         assert_eq!(
-            show(&sprite).to_string(),
-            format!("\x1b[6;4H{}", transmission(&sprite.pixels, sprite.width, sprite.height))
+            show(&canvas, 3, 5).to_string(),
+            format!("\x1b[6;4H{}", transmission(&canvas.pixels, canvas.width, canvas.height))
         );
     }
 

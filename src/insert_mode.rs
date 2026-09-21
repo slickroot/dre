@@ -1,4 +1,5 @@
-use crate::state::{add_child_box, at, snapshot, KeyBinding, Mode, State, PAD};
+use crate::diagram::at;
+use crate::state::{add_child_box, snapshot, KeyBinding, Mode, State, PAD};
 
 fn drop_last_chars(s: &str, n: usize) -> String {
     let len = s.chars().count();
@@ -73,15 +74,8 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{handle_key, new_state, Node, Path};
-
-    fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
-    }
-
-    fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-        Node { label: label.to_string(), children, ..Default::default() }
-    }
+    use crate::diagram::{node, node_with_children, Path};
+    use crate::state::{handle_key, new_state};
 
     #[test]
     fn parse_maps_escape_to_commit() {
