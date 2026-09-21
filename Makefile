@@ -1,4 +1,4 @@
-.PHONY: build test fmt clippy install demo
+.PHONY: build test fmt clippy install wasm
 
 build:
 	nix develop --command cargo build
@@ -15,6 +15,8 @@ clippy:
 install:
 	nix develop --command cargo install --path . --debug --force --root $(HOME)/.local
 
-demo:
-	nix develop --command cargo build -p dre-web --target wasm32-unknown-unknown
-	nix develop --command wasm-bindgen target/wasm32-unknown-unknown/debug/dre_web.wasm --target web --out-dir examples/landing-page-editor-demo/pkg --out-name dre_web
+PROFILE_DIR = $(if $(RELEASE),release,debug)
+
+wasm:
+	nix develop --command cargo build -p dre-web --target wasm32-unknown-unknown $(if $(RELEASE),--release)
+	nix develop --command wasm-bindgen target/wasm32-unknown-unknown/$(PROFILE_DIR)/dre_web.wasm --target web --out-dir web/pkg --out-name dre_web
