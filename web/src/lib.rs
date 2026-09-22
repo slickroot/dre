@@ -86,7 +86,7 @@ impl WebSession {
         let mut renderer = dre::SvgRenderer::with_canvas(i64::from(cols), i64::from(rows))
             .centered_on(i64::from(extent_width), i64::from(extent_height));
         renderer
-            .render(self.session.borrow().document(), &mut out)
+            .render(self.session.borrow().state(), &mut out)
             .expect("rendering SVG to an in-memory buffer succeeds");
         String::from_utf8(out).expect("SvgRenderer writes UTF-8")
     }

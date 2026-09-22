@@ -27,6 +27,7 @@ use std::process::ExitCode;
 
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
+pub use state::State;
 
 pub const IDLE_TIMEOUT_MS: u16 = 1000;
 
@@ -56,6 +57,10 @@ impl Session {
 
     pub fn document(&self) -> &Document {
         &self.state.doc
+    }
+
+    pub fn state(&self) -> &State {
+        &self.state
     }
 
     pub fn extent(&self) -> (i64, i64) {

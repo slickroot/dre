@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
 use super::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
-use crate::diagram::Document;
 use crate::layout::{layout, with_cursor, PlacementNode};
+use crate::state::State;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -95,8 +95,8 @@ impl SvgRenderer {
 }
 
 impl Renderer for SvgRenderer {
-    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(layout(&doc.boxes), doc.selected.clone());
+    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
+        let placements = with_cursor(layout(&state.doc.boxes), state.doc.selected.clone());
         out.write_all(self.draw(&placements).as_bytes())
     }
 }
@@ -1033,7 +1033,9 @@ mod tests {
 
     fn rendered(doc: &Document) -> String {
         let mut out = Vec::new();
-        SvgRenderer::default().render(doc, &mut out).unwrap();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        SvgRenderer::default().render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 

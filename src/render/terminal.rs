@@ -3,9 +3,10 @@ use std::io::{self, Write};
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::{palette, Document};
+use crate::diagram::palette;
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
+use crate::state::State;
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -231,8 +232,11 @@ pub(crate) struct TerminalRenderer {
 }
 
 impl Renderer for TerminalRenderer {
-    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(crate::layout::layout(&doc.boxes), doc.selected.clone());
+    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
+        let placements = with_cursor(
+            crate::layout::layout(&state.doc.boxes),
+            state.doc.selected.clone(),
+        );
         let mut screen = Screen::new(self.terminal);
         screen.centre_on(&placements);
         for placement in &placements {
@@ -375,7 +379,7 @@ impl TerminalRenderer {
 mod tests {
     use super::super::PLAIN_COLOUR;
     use super::*;
-    use crate::diagram::{node, node_with_children};
+    use crate::diagram::{node, node_with_children, Document};
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
@@ -1118,7 +1122,9 @@ mod tests {
 
     fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
         let mut out = Vec::new();
-        r.render(doc, &mut out).unwrap();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        r.render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 

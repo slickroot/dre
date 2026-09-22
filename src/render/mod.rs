@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
-use crate::diagram::{palette, Document};
+use crate::diagram::palette;
+use crate::state::State;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod shapes;
@@ -12,7 +13,7 @@ pub use svg::SvgRenderer;
 pub(crate) use terminal::TerminalRenderer;
 
 pub trait Renderer {
-    fn render(&mut self, doc: &Document, out: &mut impl Write) -> io::Result<()>;
+    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()>;
 }
 
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;

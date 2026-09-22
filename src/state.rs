@@ -24,7 +24,7 @@ pub(crate) enum Mode {
 }
 
 #[derive(Clone)]
-pub(crate) struct State {
+pub struct State {
     pub(crate) doc: Document,
     pub(crate) last_selected: Option<Path>,
     history: Vec<Document>,

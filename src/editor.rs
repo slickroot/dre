@@ -45,7 +45,7 @@ fn edit(
     let mut state = state;
     while state.running {
         let status = status(&state);
-        renderer.render(&state.doc, output)?;
+        renderer.render(&state, output)?;
         renderer.status_line(status.as_deref(), output)?;
         output.flush()?;
 
