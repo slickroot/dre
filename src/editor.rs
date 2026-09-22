@@ -5,11 +5,10 @@ use std::process::ExitCode;
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
 use crate::render::{Renderer, TerminalRenderer};
-use crate::state::{handle_key, Mode, State};
+use crate::state::{handle_key, State};
 use crate::terminal::RawScreen;
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
-const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
@@ -112,14 +111,6 @@ fn load(file: Option<String>) -> io::Result<State> {
     Ok(state::load(doc, Some(path)))
 }
 
-#[allow(dead_code)]
-fn status(state: &State) -> Option<String> {
-    match &state.mode {
-        Mode::SavePrompt { filename } => Some(format!("Save as: {filename}{CURSOR}")),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,23 +119,7 @@ mod tests {
     use crate::terminal::Terminal;
     use std::fs;
 
-    #[test]
-    fn a_save_prompt_shows_the_filename_being_typed() {
-        let state = new_state(
-            vec![],
-            Mode::SavePrompt {
-                filename: "a".to_string(),
-            },
-            None,
-        );
-        assert_eq!(status(&state), Some(format!("Save as: a{CURSOR}")));
-    }
-
-    #[test]
-    fn command_mode_has_no_status_line() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status(&state), None);
-    }
+    const CURSOR: char = '\u{2588}';
 
     fn temp_path(name: &str) -> String {
         std::env::temp_dir()
