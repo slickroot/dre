@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use super::font::GlyphCache;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
@@ -218,12 +219,6 @@ impl Screen {
     }
 }
 
-fn draw_label(screen: &mut Screen, placement: &Placement, label: &Label) {
-    for (offset, character) in label.text.chars().enumerate() {
-        screen.write(placement.x + offset as i64, placement.y, character);
-    }
-}
-
 fn draw_cursor(screen: &mut Screen, placement: &Placement) {
     screen.write(placement.x, placement.y, CURSOR);
 }
@@ -231,6 +226,7 @@ fn draw_cursor(screen: &mut Screen, placement: &Placement) {
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
+    glyph_cache: GlyphCache,
 }
 
 impl Renderer for TerminalRenderer {
@@ -245,7 +241,7 @@ impl Renderer for TerminalRenderer {
             match &placement.node {
                 PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
                 PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
-                PlacementNode::Label(label) => draw_label(&mut screen, placement, label),
+                PlacementNode::Label(label) => self.draw_label(&mut screen, placement, label),
                 PlacementNode::Cursor(_) => draw_cursor(&mut screen, placement),
             }
         }
@@ -255,9 +251,11 @@ impl Renderer for TerminalRenderer {
 
 impl TerminalRenderer {
     pub(crate) fn new(terminal: Terminal) -> Self {
+        let glyph_cache = GlyphCache::new(terminal.cell_width, terminal.cell_height);
         TerminalRenderer {
             terminal,
             cache: std::collections::HashMap::new(),
+            glyph_cache,
         }
     }
 
@@ -309,6 +307,23 @@ impl TerminalRenderer {
             self.remember(key.clone(), drawn);
         }
         screen.place(&self.cache[&key], placement);
+    }
+
+    fn draw_label(&mut self, screen: &mut Screen, placement: &Placement, label: &Label) {
+        for (offset, character) in label.text.chars().enumerate() {
+            let char_placement = Placement {
+                node: PlacementNode::Label(label.clone()),
+                x: placement.x + offset as i64,
+                y: placement.y,
+                width: 1,
+                height: 1,
+            };
+            if !screen.shows(&char_placement) {
+                continue;
+            }
+            let glyph = self.glyph_cache.glyph(character);
+            screen.place(glyph, &char_placement);
+        }
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -747,7 +762,7 @@ mod tests {
             match &placement.node {
                 PlacementNode::Node(_) => r.draw_box(screen, placement),
                 PlacementNode::Arrow(_) => r.draw_arrow(screen, placement),
-                PlacementNode::Label(label) => draw_label(screen, placement, label),
+                PlacementNode::Label(label) => r.draw_label(screen, placement, label),
                 PlacementNode::Cursor(_) => draw_cursor(screen, placement),
             }
         }
@@ -773,13 +788,6 @@ mod tests {
 
     fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
         drawn_screen(r, placements).images
-    }
-
-    fn centred(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
-        let mut screen = Screen::new(r.terminal);
-        screen.centre_on(placements, 0);
-        draw_all(r, &mut screen, placements);
-        rows(&screen)
     }
 
     fn lines_of(frame: &str) -> Vec<&str> {
@@ -1050,16 +1058,23 @@ mod tests {
         let nodes = vec![leaf.clone()];
         let placements = crate::layout::layout(&nodes);
         let cols = 20;
-        let rows = 10;
+        let rows_count = 10;
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
-        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
-        let lines = centred(&mut renderer_on(terminal(cols, rows, 1, 1)), &placements);
+        let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut r, &mut screen, &placements);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
-        assert_eq!(
-            &lines[label_row as usize][label_x as usize..label_x as usize + 2],
-            "hi"
-        );
+        let label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == label_row)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(label_cols, vec![label_x, label_x + 1]);
+        let lines = rows(&screen);
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(
             lines[(top + crate::layout::BOX_HEIGHT) as usize],
@@ -1070,32 +1085,36 @@ mod tests {
     #[test]
     fn an_overflowing_diagram_uses_scroll_x_instead_of_centring() {
         let leaf = node("hi");
-        let doc = Document {
-            boxes: vec![leaf.clone()],
-            selected: None,
-        };
-        let (cols, rows) = (3, 10);
-        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let nodes = vec![leaf.clone()];
+        let placements = crate::layout::layout(&nodes);
+        let (cols, rows_count) = (3, 10);
+        let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
-
-        let mut r = renderer_on(terminal(cols, rows, 1, 1));
-        let unscrolled = rendered_with_scroll(&mut r, &doc, 0);
-        let unscrolled_lines = lines_of(&unscrolled);
         let label_x = crate::layout::centre(crate::layout::width(&leaf), "hi");
-        assert_eq!(
-            &unscrolled_lines[label_row as usize][label_x as usize..label_x as usize + 2],
-            "hi"
-        );
 
-        let mut r = renderer_on(terminal(cols, rows, 1, 1));
-        let scrolled = rendered_with_scroll(&mut r, &doc, 1);
-        let scrolled_lines = lines_of(&scrolled);
-        let scrolled_label_x = label_x - 1;
-        assert_eq!(
-            &scrolled_lines[label_row as usize]
-                [scrolled_label_x as usize..scrolled_label_x as usize + 2],
-            "hi"
-        );
+        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut r, &mut screen, &placements);
+        let unscrolled_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == label_row)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(unscrolled_cols, vec![label_x, label_x + 1]);
+
+        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(&placements, 1);
+        draw_all(&mut r, &mut screen, &placements);
+        let scrolled_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == label_row)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(scrolled_cols, vec![label_x - 1, label_x]);
     }
 
     #[test]
@@ -1104,15 +1123,19 @@ mod tests {
         let nodes = vec![parent.clone()];
         let placements = crate::layout::layout(&nodes);
         let cols = 40;
-        let rows = 12;
+        let rows_count = 12;
         let span = crate::layout::width(&parent)
             + crate::layout::GAP_WIDTH
             + crate::layout::width(&node("a"));
         let height =
             crate::layout::LEAF_STRIDE * crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT;
         let left = (cols - span).div_euclid(2);
-        let top = (rows - height).div_euclid(2);
-        let lines = centred(&mut renderer_on(terminal(cols, rows, 1, 1)), &placements);
+        let top = (rows_count - height).div_euclid(2);
+
+        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut r, &mut screen, &placements);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
         let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
@@ -1121,16 +1144,28 @@ mod tests {
             left + child_base_x + crate::layout::centre(crate::layout::width(&node("a")), "a");
         let child_a_label_row = top + crate::layout::BOX_HEIGHT / 2;
 
-        assert_eq!(
-            &lines[parent_label_row as usize]
-                [parent_label_x as usize..parent_label_x as usize + "parent".len()],
-            "parent"
-        );
-        assert_eq!(
-            &lines[child_a_label_row as usize]
-                [child_a_label_x as usize..child_a_label_x as usize + 1],
-            "a"
-        );
+        let is_glyph = |image: &&Placed| image.canvas.width == 1 && image.canvas.height == 1;
+        let parent_label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == parent_label_row)
+            .filter(is_glyph)
+            .map(|image| image.col)
+            .collect();
+        let expected_parent_cols: Vec<i64> =
+            (parent_label_x..parent_label_x + "parent".len() as i64).collect();
+        assert_eq!(parent_label_cols, expected_parent_cols);
+
+        let child_a_label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == child_a_label_row)
+            .filter(is_glyph)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(child_a_label_cols, vec![child_a_label_x]);
+
+        let lines = rows(&screen);
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
     }
@@ -1145,18 +1180,25 @@ mod tests {
         };
         let mut r = renderer_on(terminal(20, 10, 1, 1));
         rendered(&mut r, &doc);
-        let (cols, rows) = (40, 20);
-        r.on_resize(terminal(cols, rows, 1, 1));
-        let frame = rendered(&mut r, &doc);
-        let lines = lines_of(&frame);
+        let (cols, rows_count) = (40, 20);
+        r.on_resize(terminal(cols, rows_count, 1, 1));
+
+        let placements = crate::layout::layout(&doc.boxes);
+        let mut screen = Screen::new(r.terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut r, &mut screen, &placements);
+
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
-        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
-        assert_eq!(
-            &lines[label_row as usize][label_x as usize..label_x as usize + 2],
-            "hi"
-        );
+        let label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == label_row)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(label_cols, vec![label_x, label_x + 1]);
     }
 
     #[test]
@@ -1347,8 +1389,15 @@ mod tests {
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
         ];
-        let grid = grid(&mut renderer_on(terminal(5, 3, 1, 1)), &placements);
-        assert_eq!(grid[1], " hi  ");
+        let mut r = renderer_on(terminal(5, 3, 1, 1));
+        let screen = drawn_screen(&mut r, &placements);
+        let label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == 1)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(label_cols, vec![1, 2]);
     }
 
     #[test]
@@ -1359,8 +1408,16 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
-        let grid = grid(&mut renderer_on(terminal(5, 3, 1, 1)), &placements);
-        assert_eq!(grid[1], format!(" hi{} ", CURSOR));
+        let mut r = renderer_on(terminal(5, 3, 1, 1));
+        let screen = drawn_screen(&mut r, &placements);
+        assert_eq!(rows(&screen)[1], format!("   {} ", CURSOR));
+        let label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == 1)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(label_cols, vec![1, 2]);
     }
 
     #[test]
@@ -1371,8 +1428,16 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
             cursor_placement(3, 1, 1, 1),
         ];
-        let grid = grid(&mut renderer_on(terminal(3, 3, 1, 1)), &placements);
-        assert_eq!(grid[1], " hi");
+        let mut r = renderer_on(terminal(3, 3, 1, 1));
+        let screen = drawn_screen(&mut r, &placements);
+        let label_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == 1)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(label_cols, vec![1, 2]);
+        assert!(!rows(&screen)[1].contains(CURSOR));
     }
 
     #[test]
