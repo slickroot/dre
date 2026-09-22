@@ -230,8 +230,8 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
     if node.rounded {
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
-    if node.filled && node.colour.is_some() {
-        let (fr, fg, fb) = crate::diagram::palette(node.colour.unwrap()).unwrap();
+    if let Some(colour) = node.filled.then_some(node.colour).flatten() {
+        let (fr, fg, fb) = crate::diagram::palette(colour).unwrap();
         let opacity = super::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(
             rect,
@@ -925,8 +925,8 @@ mod tests {
         if rounded {
             write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
         }
-        if filled && colour_index.is_some() {
-            let (fr, fg, fb) = palette(colour_index.unwrap()).unwrap();
+        if let Some(colour_index) = filled.then_some(colour_index).flatten() {
+            let (fr, fg, fb) = palette(colour_index).unwrap();
             write!(
                 rect,
                 " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{}\"",

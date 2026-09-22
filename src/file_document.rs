@@ -173,21 +173,23 @@ mod tests {
 
     #[test]
     fn from_document_writes_fill_equal_to_border_colour_index_when_filled() {
-        let mut doc = Document::default();
-        doc.boxes = vec![
-            Node {
-                label: "A".to_string(),
-                colour: Some(2),
-                filled: true,
-                ..Node::default()
-            },
-            Node {
-                label: "B".to_string(),
-                colour: Some(2),
-                filled: false,
-                ..Node::default()
-            },
-        ];
+        let doc = Document {
+            boxes: vec![
+                Node {
+                    label: "A".to_string(),
+                    colour: Some(2),
+                    filled: true,
+                    ..Node::default()
+                },
+                Node {
+                    label: "B".to_string(),
+                    colour: Some(2),
+                    filled: false,
+                    ..Node::default()
+                },
+            ],
+            ..Document::default()
+        };
         let fd = from_document(&doc);
         assert_eq!(fd.boxes[0].fill, Some(2));
         assert_eq!(fd.boxes[1].fill, None);
@@ -195,29 +197,33 @@ mod tests {
 
     #[test]
     fn from_document_omits_fill_when_filled_but_colourless() {
-        let mut doc = Document::default();
-        doc.boxes = vec![Node {
-            label: "A".to_string(),
-            colour: None,
-            filled: true,
-            ..Node::default()
-        }];
+        let doc = Document {
+            boxes: vec![Node {
+                label: "A".to_string(),
+                colour: None,
+                filled: true,
+                ..Node::default()
+            }],
+            ..Document::default()
+        };
         let fd = from_document(&doc);
         assert_eq!(fd.boxes[0].fill, None);
     }
 
     #[test]
     fn filled_colourless_box_round_trips_as_unfilled() {
-        let mut doc = Document::default();
-        doc.boxes = vec![Node {
-            label: "A".to_string(),
-            colour: None,
-            filled: true,
-            ..Node::default()
-        }];
+        let doc = Document {
+            boxes: vec![Node {
+                label: "A".to_string(),
+                colour: None,
+                filled: true,
+                ..Node::default()
+            }],
+            ..Document::default()
+        };
         let fd = from_document(&doc);
         let reloaded = to_document(fd);
-        assert_eq!(reloaded.boxes[0].filled, false);
+        assert!(!reloaded.boxes[0].filled);
         assert_eq!(reloaded.boxes[0].label, "A");
         assert_eq!(reloaded.boxes[0].colour, None);
     }
@@ -234,6 +240,6 @@ mod tests {
             }],
         };
         let doc = to_document(fd);
-        assert_eq!(doc.boxes[0].filled, true);
+        assert!(doc.boxes[0].filled);
     }
 }
