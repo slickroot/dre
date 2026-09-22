@@ -33,6 +33,7 @@ pub(crate) struct State {
     pub(crate) save_to: Option<String>,
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
+    pub(crate) scroll_x: i64,
 }
 
 impl Default for State {
@@ -46,6 +47,7 @@ impl Default for State {
             save_to: None,
             new_file: false,
             pending_count: None,
+            scroll_x: 0,
         }
     }
 }
@@ -192,6 +194,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         save_to: None,
         new_file: false,
         pending_count: None,
+        scroll_x: 0,
     }
 }
 
@@ -571,6 +574,43 @@ mod tests {
         let hidden = hide_idle_cursor(state);
         let result = handle_key(hidden, "z");
         assert_eq!(result.doc.selected, Some(selected));
+    }
+
+    #[test]
+    fn a_default_state_starts_with_no_scroll() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(state.scroll_x, 0);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_shifts_scroll_x_and_leaves_selection_and_count_untouched() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(
+            boxes.clone(),
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL12");
+        assert_eq!(result.scroll_x, 12);
+        assert_eq!(result.doc.boxes, boxes);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1
+            })
+        );
+        assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = handle_key(state, "\x1bSCROLL-7");
+        assert_eq!(result.scroll_x, -7);
     }
 
     #[test]

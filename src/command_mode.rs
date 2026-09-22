@@ -21,9 +21,13 @@ pub(crate) enum Command {
     ToggleFill,
     ToggleRounded,
     Quit,
+    ScrollBy(i64),
 }
 
 pub(crate) fn parse(key: &str) -> Option<Command> {
+    if let Some(delta) = key.strip_prefix("\x1bSCROLL") {
+        return delta.parse::<i64>().ok().map(Command::ScrollBy);
+    }
     Some(match key {
         "u" => Command::Undo,
         "b" => Command::NewBox,
@@ -138,7 +142,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
 
 pub(crate) fn min_depth(command: Command) -> usize {
     match command {
-        Command::Undo | Command::NewBox | Command::Quit => 0,
+        Command::Undo | Command::NewBox | Command::Quit | Command::ScrollBy(_) => 0,
         Command::SelectParent | Command::CycleSiblingsColour | Command::ToggleSiblingsFill => 2,
         _ => 1,
     }
@@ -299,6 +303,10 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         (Command::Undo, selected) => undo(reselect(state, selected)),
         (Command::NewBox, selected) => add_child_box(state, selected),
         (Command::Quit, selected) => quit(reselect(state, selected)),
+        (Command::ScrollBy(delta), selected) => {
+            state.scroll_x += delta;
+            reselect(state, selected)
+        }
         (Command::NewSibling, Some(path)) => new_sibling(state, path),
         (Command::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
         (Command::SelectChild, Some(path)) => select_child(state, path),
@@ -404,6 +412,19 @@ mod tests {
         assert_eq!(parse("x"), None);
         assert_eq!(parse("\x1b"), None);
         assert_eq!(parse("é"), None);
+    }
+
+    #[test]
+    fn parse_reads_a_scroll_prefix_into_a_signed_delta() {
+        assert_eq!(parse("\x1bSCROLL5"), Some(Command::ScrollBy(5)));
+        assert_eq!(parse("\x1bSCROLL-5"), Some(Command::ScrollBy(-5)));
+        assert_eq!(parse("\x1bSCROLL0"), Some(Command::ScrollBy(0)));
+    }
+
+    #[test]
+    fn parse_returns_nothing_for_a_malformed_scroll_prefix() {
+        assert_eq!(parse("\x1bSCROLL"), None);
+        assert_eq!(parse("\x1bSCROLLx"), None);
     }
 
     #[test]
@@ -1720,6 +1741,56 @@ mod tests {
         assert_eq!(exhausted.doc.selected, start.doc.selected);
         assert_eq!(exhausted.mode, start.mode);
         assert_eq!(exhausted.running, start.running);
+    }
+
+    #[test]
+    fn scroll_by_command_shifts_scroll_x_by_the_given_delta_and_preserves_selection() {
+        let mut state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        state.scroll_x = 3;
+        let result = reduce(state, Command::ScrollBy(4));
+        assert_eq!(result.scroll_x, 7);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 0
+            })
+        );
+    }
+
+    #[test]
+    fn scroll_by_command_works_with_nothing_selected() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = reduce(state, Command::ScrollBy(-2));
+        assert_eq!(result.scroll_x, -2);
+        assert_eq!(result.doc.selected, None);
+    }
+
+    #[test]
+    fn scroll_by_is_not_undoable() {
+        assert!(!is_undoable(Command::ScrollBy(5)));
+    }
+
+    #[test]
+    fn u_after_a_scroll_leaves_scroll_x_untouched() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let scrolled = handle_key(state, "\x1bSCROLL9");
+        let after_undo = handle_key(scrolled, "u");
+        assert_eq!(after_undo.scroll_x, 9);
     }
 
     #[test]
