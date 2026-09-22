@@ -24,7 +24,7 @@ pub(crate) enum Mode {
 }
 
 #[derive(Clone)]
-pub(crate) struct State {
+pub struct State {
     pub(crate) doc: Document,
     pub(crate) last_selected: Option<Path>,
     history: Vec<Document>,
@@ -33,6 +33,7 @@ pub(crate) struct State {
     pub(crate) save_to: Option<String>,
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
+    pub(crate) scroll_x: i64,
 }
 
 impl Default for State {
@@ -46,6 +47,7 @@ impl Default for State {
             save_to: None,
             new_file: false,
             pending_count: None,
+            scroll_x: 0,
         }
     }
 }
@@ -148,6 +150,9 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
     if let Some(selected) = state.last_selected.take() {
         state.doc.selected = Some(selected);
     }
+    if let Some(command @ command_mode::Command::ScrollBy(_)) = command_mode::parse(key) {
+        return command_mode::reduce(state, command);
+    }
     match &state.mode {
         Mode::Command => {
             if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
@@ -192,6 +197,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         save_to: None,
         new_file: false,
         pending_count: None,
+        scroll_x: 0,
     }
 }
 
@@ -397,6 +403,58 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn a_default_state_starts_with_no_scroll() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(state.scroll_x, 0);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_shifts_scroll_x_and_leaves_selection_and_count_untouched() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(
+            boxes.clone(),
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL12");
+        assert_eq!(result.scroll_x, 12);
+        assert_eq!(result.doc.boxes, boxes);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1
+            })
+        );
+        assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = handle_key(state, "\x1bSCROLL-7");
+        assert_eq!(result.scroll_x, -7);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_takes_effect_in_insert_mode() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Insert,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL5");
+        assert_eq!(result.scroll_x, 5);
+        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]
