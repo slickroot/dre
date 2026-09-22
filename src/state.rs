@@ -150,6 +150,9 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
     if let Some(selected) = state.last_selected.take() {
         state.doc.selected = Some(selected);
     }
+    if let Some(command @ command_mode::Command::ScrollBy(_)) = command_mode::parse(key) {
+        return command_mode::reduce(state, command);
+    }
     match &state.mode {
         Mode::Command => {
             if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
@@ -611,6 +614,21 @@ mod tests {
         let state = new_state(vec![], Mode::Command, None);
         let result = handle_key(state, "\x1bSCROLL-7");
         assert_eq!(result.scroll_x, -7);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_takes_effect_in_insert_mode() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Insert,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL5");
+        assert_eq!(result.scroll_x, 5);
+        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]
