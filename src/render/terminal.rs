@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::diagram::palette;
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
-use crate::state::State;
+use crate::state::{Mode, State};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -223,6 +223,14 @@ fn draw_cursor(screen: &mut Screen, placement: &Placement) {
     screen.write(placement.x, placement.y, CURSOR);
 }
 
+fn status_text(mode: &Mode) -> String {
+    match mode {
+        Mode::Insert => "EDITING".into(),
+        Mode::Command => "COMMANDING".into(),
+        Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
+    }
+}
+
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -231,21 +239,8 @@ pub(crate) struct TerminalRenderer {
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(
-            crate::layout::layout(&state.doc.boxes),
-            state.doc.selected.clone(),
-        );
-        let mut screen = Screen::new(self.terminal);
-        screen.centre_on(&placements, state.scroll_x);
-        for placement in &placements {
-            match &placement.node {
-                PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
-                PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
-                PlacementNode::Label(label) => self.draw_label(&mut screen, placement, label),
-                PlacementNode::Cursor(_) => draw_cursor(&mut screen, placement),
-            }
-        }
-        out.write_all(&screen.into_bytes())
+        self.render_diagram(state, out)?;
+        self.render_status_line(state, out)
     }
 }
 
@@ -268,21 +263,33 @@ impl TerminalRenderer {
         self.terminal.cols
     }
 
-    pub(crate) fn status_line(
-        &mut self,
-        text: Option<&str>,
-        out: &mut impl Write,
-    ) -> io::Result<()> {
-        let Some(text) = text else {
-            return Ok(());
-        };
+    fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
+        let placements = with_cursor(
+            crate::layout::layout(&state.doc.boxes),
+            state.doc.selected.clone(),
+        );
+        let mut screen = Screen::new(self.terminal);
+        screen.centre_on(&placements, state.scroll_x);
+        for placement in &placements {
+            match &placement.node {
+                PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
+                PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
+                PlacementNode::Label(label) => self.draw_label(&mut screen, placement, label),
+                PlacementNode::Cursor(_) => draw_cursor(&mut screen, placement),
+            }
+        }
+        out.write_all(&screen.into_bytes())
+    }
+
+    fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
+        let text = status_text(&state.mode);
         let Terminal { cols, rows, .. } = self.terminal;
         let line: String = text
             .chars()
             .chain(std::iter::repeat(BLANK))
             .take(cols as usize)
             .collect();
-        write!(out, "\x1b[{rows};1H{line}")
+        write!(out, "\x1b[{rows};1H\x1b[7m{line}\x1b[0m")
     }
 
     fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
@@ -1010,7 +1017,7 @@ mod tests {
     #[test]
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
         let mut r = renderer_on(terminal(3, 2, 2, 4));
-        let frame = rendered(&mut r, &empty_doc());
+        let frame = rendered_diagram(&mut r, &empty_doc());
         let lines = lines_of(&frame);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(
@@ -1049,7 +1056,7 @@ mod tests {
             boxes: nodes.clone(),
             selected: None,
         };
-        assert!(rendered(&mut renderer_on(terminal), &doc).ends_with(&expected));
+        assert!(rendered_diagram(&mut renderer_on(terminal), &doc).ends_with(&expected));
     }
 
     #[test]
@@ -1215,12 +1222,21 @@ mod tests {
     }
 
     #[test]
-    fn on_resize_moves_the_status_line_to_the_new_last_row() {
-        let mut r = renderer_on(terminal(5, 4, 1, 1));
-        r.on_resize(terminal(5, 9, 1, 1));
-        let mut out = Vec::new();
-        r.status_line(Some("hi"), &mut out).unwrap();
-        assert!(String::from_utf8(out).unwrap().starts_with("\x1b[9;1H"));
+    fn status_text_for_insert_mode_is_editing() {
+        assert_eq!(status_text(&Mode::Insert), "EDITING");
+    }
+
+    #[test]
+    fn status_text_for_command_mode_is_commanding() {
+        assert_eq!(status_text(&Mode::Command), "COMMANDING");
+    }
+
+    #[test]
+    fn status_text_for_save_prompt_mode_shows_the_filename_and_cursor() {
+        let mode = Mode::SavePrompt {
+            filename: "diagram.dre".to_string(),
+        };
+        assert_eq!(status_text(&mode), format!("Save as: diagram.dre{CURSOR}"));
     }
 
     #[test]
@@ -1249,6 +1265,14 @@ mod tests {
         rendered_with_scroll(r, doc, 0)
     }
 
+    fn rendered_diagram(r: &mut TerminalRenderer, doc: &Document) -> String {
+        let mut out = Vec::new();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        r.render_diagram(&state, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
     fn rendered_with_scroll(r: &mut TerminalRenderer, doc: &Document, scroll_x: i64) -> String {
         let mut out = Vec::new();
         let mut state = State::default();
@@ -1274,7 +1298,7 @@ mod tests {
             cell_height: 1,
         });
         assert_eq!(
-            rendered(&mut r, &empty_doc()),
+            rendered_diagram(&mut r, &empty_doc()),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
         );
     }
@@ -1299,7 +1323,7 @@ mod tests {
             cell_width: 1,
             cell_height: 1,
         });
-        let output = rendered(&mut r, &empty_doc());
+        let output = rendered_diagram(&mut r, &empty_doc());
         let body = output
             .strip_prefix(HOME_CURSOR)
             .unwrap()
@@ -1921,50 +1945,90 @@ mod tests {
         }
     }
 
-    fn status(terminal: Terminal, text: Option<&str>) -> String {
-        let mut r = renderer_on(terminal);
+    fn status_line(r: &mut TerminalRenderer, mode: Mode) -> String {
+        let state = crate::state::new_state(vec![], mode, None);
         let mut out = Vec::new();
-        r.status_line(text, &mut out).unwrap();
+        r.render_status_line(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
-    fn status_text(terminal: Terminal, text: &str) -> String {
-        let position = format!("\x1b[{};1H", terminal.rows);
-        status(terminal, Some(text))
-            .strip_prefix(&position)
+    fn status_line_text(r: &mut TerminalRenderer, mode: Mode) -> String {
+        let prefix = format!("\x1b[{};1H\x1b[7m", r.terminal.rows);
+        status_line(r, mode)
+            .strip_prefix(&prefix)
+            .unwrap()
+            .strip_suffix("\x1b[0m")
             .unwrap()
             .to_string()
     }
 
     #[test]
     fn the_status_line_shows_the_text_as_given() {
-        let t = terminal(5, 2, 1, 1);
-        assert_eq!(status_text(t, "hello"), "hello");
+        let mut r = renderer_on(terminal(7, 2, 1, 1));
+        assert_eq!(status_line_text(&mut r, Mode::Insert), "EDITING");
     }
 
     #[test]
     fn the_status_line_is_padded_to_the_terminal_width() {
-        let t = terminal(8, 2, 1, 1);
+        let mut r = renderer_on(terminal(10, 2, 1, 1));
         assert_eq!(
-            status_text(t, "hi"),
-            format!("hi{}", BLANK.to_string().repeat((t.cols - 2) as usize))
+            status_line_text(&mut r, Mode::Insert),
+            format!("EDITING{}", BLANK.to_string().repeat(3))
         );
     }
 
     #[test]
     fn the_status_line_is_cut_to_the_terminal_width() {
-        let t = terminal(3, 2, 1, 1);
-        assert_eq!(status_text(t, "hello"), "hel");
+        let mut r = renderer_on(terminal(3, 2, 1, 1));
+        assert_eq!(status_line_text(&mut r, Mode::Insert), "EDI");
     }
 
     #[test]
     fn the_status_line_is_written_to_the_last_row() {
-        let t = terminal(5, 4, 1, 1);
-        assert!(status(t, Some("hi")).starts_with(&format!("\x1b[{};1H", t.rows)));
+        let mut r = renderer_on(terminal(5, 4, 1, 1));
+        assert!(status_line(&mut r, Mode::Command).starts_with("\x1b[4;1H"));
     }
 
     #[test]
-    fn no_status_line_is_written_without_text() {
-        assert_eq!(status(terminal(5, 4, 1, 1), None), "");
+    fn on_resize_moves_the_status_line_to_the_new_last_row() {
+        let mut r = renderer_on(terminal(5, 4, 1, 1));
+        r.on_resize(terminal(5, 9, 1, 1));
+        assert!(status_line(&mut r, Mode::Command).starts_with("\x1b[9;1H"));
+    }
+
+    #[test]
+    fn the_status_line_is_wrapped_in_reverse_video() {
+        let mut r = renderer_on(terminal(5, 4, 1, 1));
+        let line = status_line(&mut r, Mode::Command);
+        assert!(line.contains("\x1b[7m"));
+        assert!(line.contains("\x1b[0m"));
+    }
+
+    fn render_output(r: &mut TerminalRenderer, mode: Mode) -> String {
+        let state = crate::state::new_state(vec![], mode, None);
+        let mut out = Vec::new();
+        r.render(&state, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn render_shows_editing_in_insert_mode() {
+        let mut r = renderer_on(terminal(20, 4, 1, 1));
+        assert!(render_output(&mut r, Mode::Insert).contains("EDITING"));
+    }
+
+    #[test]
+    fn render_shows_commanding_in_command_mode() {
+        let mut r = renderer_on(terminal(20, 4, 1, 1));
+        assert!(render_output(&mut r, Mode::Command).contains("COMMANDING"));
+    }
+
+    #[test]
+    fn render_shows_the_filename_being_typed_in_save_prompt_mode() {
+        let mut r = renderer_on(terminal(30, 4, 1, 1));
+        let mode = Mode::SavePrompt {
+            filename: "diagram.dre".to_string(),
+        };
+        assert!(render_output(&mut r, mode).contains(&format!("Save as: diagram.dre{CURSOR}")));
     }
 }
