@@ -235,8 +235,13 @@ impl TerminalRenderer {
         TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
+    // Rounded cell_width/cell_height can drift slightly between probes of
+    // the same session (ws_ypixel/rows does not always divide evenly), so
+    // only cols/rows are adopted here; the original cell pixel size is kept
+    // so cached sprites (rasterized at that size) stay valid.
     pub(crate) fn on_resize(&mut self, terminal: Terminal) {
-        self.terminal = terminal;
+        self.terminal.cols = terminal.cols;
+        self.terminal.rows = terminal.rows;
     }
 
     pub(crate) fn status_line(&mut self, text: Option<&str>, out: &mut impl Write) -> io::Result<()> {
@@ -954,6 +959,16 @@ mod tests {
         let mut out = Vec::new();
         r.status_line(Some("hi"), &mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().starts_with("\x1b[9;1H"));
+    }
+
+    #[test]
+    fn on_resize_with_a_different_rounded_cell_height_does_not_panic_on_the_next_render() {
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        let node = box_node(None, false, false);
+        let placement = box_placement(&node, 0, 0, 4, 3);
+        sprites(&mut r, &[placement.clone()]);
+        r.on_resize(terminal(40, 20, 2, 5));
+        sprites(&mut r, &[placement]);
     }
 
     #[test]
