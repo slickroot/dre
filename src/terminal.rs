@@ -14,6 +14,8 @@ const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
 
+pub(crate) const RESIZE: &str = "\x1bRESIZE";
+
 pub(crate) struct RawScreen {
     fd: RawFd,
     saved: Termios,
@@ -102,15 +104,27 @@ pub(crate) fn install_resize_pipe() -> io::Result<RawFd> {
     Ok(read_raw_fd)
 }
 
-pub(crate) fn poll_read(fd: RawFd, timeout_ms: u16) -> io::Result<Option<String>> {
+pub(crate) fn poll_read(fd: RawFd, resize_fd: RawFd, timeout_ms: u16) -> io::Result<Option<String>> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-    let mut fds = [PollFd::new(borrowed, PollFlags::POLLIN)];
+    let resize_borrowed = unsafe { BorrowedFd::borrow_raw(resize_fd) };
+    let mut fds = [
+        PollFd::new(borrowed, PollFlags::POLLIN),
+        PollFd::new(resize_borrowed, PollFlags::POLLIN),
+    ];
     let ready = poll(&mut fds, PollTimeout::from(timeout_ms)).map_err(io::Error::from)?;
     if ready == 0 {
         return Ok(None);
     }
+    if fds[1]
+        .revents()
+        .is_some_and(|events| events.contains(PollFlags::POLLIN))
+    {
+        let mut byte = [0u8; 1];
+        read(resize_borrowed, &mut byte).map_err(io::Error::from)?;
+        return Ok(Some(RESIZE.to_string()));
+    }
     let mut byte = [0u8; 1];
-    let n = read(&borrowed, &mut byte).map_err(io::Error::from)?;
+    let n = read(borrowed, &mut byte).map_err(io::Error::from)?;
     if n == 0 {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
     }
@@ -153,7 +167,8 @@ mod tests {
     fn poll_read_returns_none_when_no_byte_arrives_within_the_timeout() {
         use std::os::fd::AsRawFd;
         let (read, _write) = nix::unistd::pipe().unwrap();
-        let result = poll_read(read.as_raw_fd(), 1);
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1);
         assert!(matches!(result, Ok(None)));
     }
 
@@ -162,7 +177,8 @@ mod tests {
         use std::os::fd::AsRawFd;
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"x").unwrap();
-        let result = poll_read(read.as_raw_fd(), 1000);
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
         assert_eq!(result.unwrap(), Some("x".to_string()));
     }
 
@@ -171,8 +187,32 @@ mod tests {
         use std::os::fd::AsRawFd;
         let (read, write) = nix::unistd::pipe().unwrap();
         drop(write);
-        let result = poll_read(read.as_raw_fd(), 1000);
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
         assert!(result.is_err());
         assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn poll_read_returns_resize_when_the_resize_fd_becomes_readable() {
+        use std::os::fd::AsRawFd;
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&resize_write, b"\0").unwrap();
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
+        assert_eq!(result.unwrap(), Some(RESIZE.to_string()));
+    }
+
+    #[test]
+    fn poll_read_drains_the_resize_byte_so_it_is_not_reported_twice() {
+        use std::os::fd::AsRawFd;
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&resize_write, b"\0").unwrap();
+        let first = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
+        assert_eq!(first.unwrap(), Some(RESIZE.to_string()));
+
+        let second = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1);
+        assert!(matches!(second, Ok(None)));
     }
 }

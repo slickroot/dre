@@ -19,9 +19,13 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
+    let (resize_read_fd, resize_write_fd) = nix::unistd::pipe().map_err(io::Error::from)?;
+    let resize_fd = resize_read_fd.as_raw_fd();
+    std::mem::forget(resize_read_fd);
+    std::mem::forget(resize_write_fd);
     let state = edit(
         state,
-        || terminal::poll_read(fd, IDLE_TIMEOUT_MS),
+        || terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
         &mut stdout,
         &mut renderer,
     )?;
