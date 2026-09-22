@@ -406,6 +406,58 @@ mod tests {
     }
 
     #[test]
+    fn a_default_state_starts_with_no_scroll() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(state.scroll_x, 0);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_shifts_scroll_x_and_leaves_selection_and_count_untouched() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(
+            boxes.clone(),
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL12");
+        assert_eq!(result.scroll_x, 12);
+        assert_eq!(result.doc.boxes, boxes);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1
+            })
+        );
+        assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
+        let state = new_state(vec![], Mode::Command, None);
+        let result = handle_key(state, "\x1bSCROLL-7");
+        assert_eq!(result.scroll_x, -7);
+    }
+
+    #[test]
+    fn a_synthesized_scroll_key_takes_effect_in_insert_mode() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Insert,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let result = handle_key(state, "\x1bSCROLL5");
+        assert_eq!(result.scroll_x, 5);
+        assert_eq!(result.mode, Mode::Insert);
+    }
+
+    #[test]
     fn digits_and_count_prefixed_movement_leave_mode_and_running_unchanged() {
         let boxes: Vec<Node> = (0..5).map(|i| node(&i.to_string())).collect();
         let state = new_state(
@@ -577,58 +629,6 @@ mod tests {
         let hidden = hide_idle_cursor(state);
         let result = handle_key(hidden, "z");
         assert_eq!(result.doc.selected, Some(selected));
-    }
-
-    #[test]
-    fn a_default_state_starts_with_no_scroll() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(state.scroll_x, 0);
-    }
-
-    #[test]
-    fn a_synthesized_scroll_key_shifts_scroll_x_and_leaves_selection_and_count_untouched() {
-        let boxes = vec![node("a"), node("b")];
-        let state = new_state(
-            boxes.clone(),
-            Mode::Command,
-            Some(Path {
-                ancestors: vec![],
-                index: 1,
-            }),
-        );
-        let result = handle_key(state, "\x1bSCROLL12");
-        assert_eq!(result.scroll_x, 12);
-        assert_eq!(result.doc.boxes, boxes);
-        assert_eq!(
-            result.doc.selected,
-            Some(Path {
-                ancestors: vec![],
-                index: 1
-            })
-        );
-        assert_eq!(result.pending_count, None);
-    }
-
-    #[test]
-    fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
-        let state = new_state(vec![], Mode::Command, None);
-        let result = handle_key(state, "\x1bSCROLL-7");
-        assert_eq!(result.scroll_x, -7);
-    }
-
-    #[test]
-    fn a_synthesized_scroll_key_takes_effect_in_insert_mode() {
-        let state = new_state(
-            vec![node("a")],
-            Mode::Insert,
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
-        let result = handle_key(state, "\x1bSCROLL5");
-        assert_eq!(result.scroll_x, 5);
-        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]
