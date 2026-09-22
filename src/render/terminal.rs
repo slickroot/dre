@@ -118,7 +118,7 @@ impl Screen {
         }
     }
 
-    fn centre_on(&mut self, placements: &[Placement]) {
+    fn centre_on(&mut self, placements: &[Placement], scroll_x: i64) {
         if placements.is_empty() {
             self.origin = (0, 0);
             return;
@@ -139,10 +139,12 @@ impl Screen {
             .map(|placement| placement.y + placement.height)
             .max()
             .unwrap();
-        self.origin = (
-            (self.terminal.cols - span).div_euclid(2),
-            (self.terminal.rows - height).div_euclid(2),
-        );
+        let horizontal = if span <= self.terminal.cols {
+            (self.terminal.cols - span).div_euclid(2)
+        } else {
+            -scroll_x
+        };
+        self.origin = (horizontal, (self.terminal.rows - height).div_euclid(2));
     }
 
     // Clipping happens by cropping: kitty::show cannot position at a negative
@@ -238,7 +240,7 @@ impl Renderer for TerminalRenderer {
             state.doc.selected.clone(),
         );
         let mut screen = Screen::new(self.terminal);
-        screen.centre_on(&placements);
+        screen.centre_on(&placements, state.scroll_x);
         for placement in &placements {
             match &placement.node {
                 PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
@@ -771,7 +773,7 @@ mod tests {
 
     fn centred(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
         let mut screen = Screen::new(r.terminal);
-        screen.centre_on(placements);
+        screen.centre_on(placements, 0);
         draw_all(r, &mut screen, placements);
         rows(&screen)
     }
@@ -827,7 +829,7 @@ mod tests {
         let (cols, rows) = (20, 10);
         let (width, height) = (6, 4);
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
+        screen.centre_on(&[box_placement(&node, 0, 0, width, height)], 0);
         assert_eq!(
             screen.origin,
             ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
@@ -843,7 +845,7 @@ mod tests {
             box_placement(&node, 5, 4, 3, 2),
         ];
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&placements);
+        screen.centre_on(&placements, 0);
         assert_eq!(
             screen.origin,
             ((cols - 8).div_euclid(2), (rows - 6).div_euclid(2))
@@ -853,8 +855,41 @@ mod tests {
     #[test]
     fn centre_on_nothing_leaves_the_origin_at_the_corner() {
         let mut screen = Screen::new(terminal(20, 10, 1, 1));
-        screen.centre_on(&[]);
+        screen.centre_on(&[], 0);
         assert_eq!(screen.origin, (0, 0));
+    }
+
+    #[test]
+    fn centre_on_uses_scroll_x_when_the_diagram_overflows() {
+        let node = box_node(None, false, false);
+        let (cols, rows) = (10, 10);
+        let placements = vec![box_placement(&node, 0, 0, 30, 4)];
+        let mut screen = Screen::new(terminal(cols, rows, 1, 1));
+        screen.centre_on(&placements, 0);
+        assert_eq!(screen.origin, (0, (rows - 4).div_euclid(2)));
+    }
+
+    #[test]
+    fn centre_on_shifts_left_as_scroll_x_grows() {
+        let node = box_node(None, false, false);
+        let (cols, rows) = (10, 10);
+        let placements = vec![box_placement(&node, 0, 0, 30, 4)];
+        let mut screen = Screen::new(terminal(cols, rows, 1, 1));
+        screen.centre_on(&placements, 5);
+        assert_eq!(screen.origin, (-5, (rows - 4).div_euclid(2)));
+    }
+
+    #[test]
+    fn centre_on_ignores_scroll_x_when_the_diagram_fits() {
+        let node = box_node(None, false, false);
+        let (cols, rows) = (20, 10);
+        let (width, height) = (6, 4);
+        let mut screen = Screen::new(terminal(cols, rows, 1, 1));
+        screen.centre_on(&[box_placement(&node, 0, 0, width, height)], 5);
+        assert_eq!(
+            screen.origin,
+            ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
+        );
     }
 
     #[test]
@@ -880,7 +915,7 @@ mod tests {
     fn a_crop_sits_at_the_placement_shifted_by_the_origin() {
         let node = box_node(None, false, false);
         let mut screen = Screen::new(terminal(20, 10, 4, 8));
-        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
+        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)], 0);
         let crop = screen.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
         assert_eq!(
             (crop.col, crop.row),
@@ -1029,6 +1064,37 @@ mod tests {
     }
 
     #[test]
+    fn an_overflowing_diagram_uses_scroll_x_instead_of_centring() {
+        let leaf = node("hi");
+        let doc = Document {
+            boxes: vec![leaf.clone()],
+            selected: None,
+        };
+        let (cols, rows) = (3, 10);
+        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let label_row = top + crate::layout::BOX_HEIGHT / 2;
+
+        let mut r = renderer_on(terminal(cols, rows, 1, 1));
+        let unscrolled = rendered_with_scroll(&mut r, &doc, 0);
+        let unscrolled_lines = lines_of(&unscrolled);
+        let label_x = crate::layout::centre(crate::layout::width(&leaf), "hi");
+        assert_eq!(
+            &unscrolled_lines[label_row as usize][label_x as usize..label_x as usize + 2],
+            "hi"
+        );
+
+        let mut r = renderer_on(terminal(cols, rows, 1, 1));
+        let scrolled = rendered_with_scroll(&mut r, &doc, 1);
+        let scrolled_lines = lines_of(&scrolled);
+        let scrolled_label_x = label_x - 1;
+        assert_eq!(
+            &scrolled_lines[label_row as usize]
+                [scrolled_label_x as usize..scrolled_label_x as usize + 2],
+            "hi"
+        );
+    }
+
+    #[test]
     fn centres_a_parent_and_children_as_a_group() {
         let parent = node_with_children("parent", vec![node("a"), node("b")]);
         let nodes = vec![parent.clone()];
@@ -1121,9 +1187,14 @@ mod tests {
     }
 
     fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
+        rendered_with_scroll(r, doc, 0)
+    }
+
+    fn rendered_with_scroll(r: &mut TerminalRenderer, doc: &Document, scroll_x: i64) -> String {
         let mut out = Vec::new();
         let mut state = State::default();
         state.doc = doc.clone();
+        state.scroll_x = scroll_x;
         r.render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
