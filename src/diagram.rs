@@ -1,22 +1,10 @@
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct Node {
     pub(crate) label: String,
     pub(crate) colour: Option<u8>,
     pub(crate) filled: bool,
     pub(crate) rounded: bool,
     pub(crate) children: Vec<Node>,
-}
-
-impl Default for Node {
-    fn default() -> Self {
-        Node {
-            label: String::new(),
-            colour: None,
-            filled: false,
-            rounded: false,
-            children: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -106,7 +94,7 @@ mod tests {
 
     #[test]
     fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().filled, false);
+        assert!(!Node::default().filled);
     }
 
     #[test]
@@ -134,7 +122,7 @@ mod tests {
 
     #[test]
     fn new_box_starts_with_square_corners() {
-        assert_eq!(node("a").rounded, false);
+        assert!(!node("a").rounded);
     }
 
     #[test]

@@ -26,13 +26,14 @@ pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
 }
 
 fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
-    if !filled || colour.is_none() {
-        TRANSPARENT
-    } else {
-        let (r, g, b) = palette(colour.unwrap()).unwrap();
-        let composite =
-            |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
-        (composite(r), composite(g), composite(b), OPAQUE)
+    match filled.then_some(colour).flatten() {
+        None => TRANSPARENT,
+        Some(colour) => {
+            let (r, g, b) = palette(colour).unwrap();
+            let composite =
+                |channel: u8| (channel as f64 * FILL_ALPHA as f64 / OPAQUE as f64).round() as u8;
+            (composite(r), composite(g), composite(b), OPAQUE)
+        }
     }
 }
 
@@ -1244,7 +1245,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let node = box_node(None, false, false);
         let placement = box_placement(&node, 0, 0, 4, 3);
-        sprites(&mut r, &[placement.clone()]);
+        sprites(&mut r, std::slice::from_ref(&placement));
         r.on_resize(terminal(40, 20, 2, 5));
         sprites(&mut r, &[placement]);
     }
@@ -1624,7 +1625,7 @@ mod tests {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let node = box_node(Some(1), true, false);
         let placement = box_placement(&node, 0, 0, 4, 3);
-        let first = sprites(&mut r, &[placement.clone()]);
+        let first = sprites(&mut r, std::slice::from_ref(&placement));
         assert_eq!(r.cache.len(), 1);
         let second = sprites(&mut r, &[placement]);
         assert_eq!(first[0].canvas.pixels, second[0].canvas.pixels);
@@ -1848,7 +1849,7 @@ mod tests {
         let ink = colour(None);
         let ink = (ink.0, ink.1, ink.2, OPAQUE);
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
-        let shaft_row = 1 * 10 + 5;
+        let shaft_row = 10 + 5;
         let rows: Vec<i64> = centered_span(shaft_row, ARROW_STROKE).collect();
         for &y in &rows {
             assert_eq!(pixel_of(&sprite, 5, y), ink);
@@ -1934,7 +1935,7 @@ mod tests {
         let midpoint = sprite.width / 2;
         let trunk_columns: std::collections::HashSet<i64> =
             centered_span(midpoint, ARROW_STROKE).collect();
-        let row_between_stops = 1 * 5 + 5 / 2;
+        let row_between_stops = 5 + 5 / 2;
         for x in 0..sprite.width {
             let expected = if trunk_columns.contains(&x) {
                 OPAQUE

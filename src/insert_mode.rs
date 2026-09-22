@@ -420,7 +420,7 @@ mod tests {
         let display_keys: Vec<&str> = INSERT_KEYMAP
             .iter()
             .flat_map(|binding| binding.keys)
-            .map(|key| *key)
+            .copied()
             .collect();
         assert_eq!(display_keys, vec!["Enter", "Esc", "Backspace"]);
         let mut unique = display_keys.clone();

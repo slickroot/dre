@@ -27,7 +27,7 @@ impl BoxShape {
         let qx = (px - half_x).abs() - (half_x - radius);
         let qy = (py - half_y).abs() - (half_y - radius);
         let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
-        (0.5 - distance).max(0.0).min(1.0)
+        (0.5 - distance).clamp(0.0, 1.0)
     }
 }
 
@@ -55,11 +55,11 @@ impl Shape for BoxShape {
             return None;
         }
         let mut colour = [0u8; 4];
-        for channel in 0..3 {
+        for (channel, colour) in colour.iter_mut().enumerate().take(3) {
             let value = (self.edge[channel] as f64 * edge_coverage * self.edge[3] as f64
                 + self.fill[channel] as f64 * inner_coverage * self.fill[3] as f64)
                 / alpha;
-            colour[channel] = python_round(value) as u8;
+            *colour = python_round(value) as u8;
         }
         colour[3] = python_round(alpha) as u8;
         Some(colour)

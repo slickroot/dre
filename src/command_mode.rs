@@ -1392,13 +1392,13 @@ mod tests {
         }
         assert_ne!(state.doc.boxes[0].colour, None);
         state = handle_key(state, "f");
-        assert_eq!(state.doc.boxes[0].filled, true);
+        assert!(state.doc.boxes[0].filled);
         let plain = handle_key(state, "c");
         assert_eq!(plain.doc.boxes[0].colour, None);
-        assert_eq!(plain.doc.boxes[0].filled, true);
+        assert!(plain.doc.boxes[0].filled);
         let re_coloured = handle_key(plain, "c");
         assert_ne!(re_coloured.doc.boxes[0].colour, None);
-        assert_eq!(re_coloured.doc.boxes[0].filled, true);
+        assert!(re_coloured.doc.boxes[0].filled);
     }
 
     #[test]
@@ -1412,7 +1412,7 @@ mod tests {
             }),
         );
         let result = handle_key(state, "r");
-        assert_eq!(result.doc.boxes[0].rounded, true);
+        assert!(result.doc.boxes[0].rounded);
         let state = new_state(
             result.doc.boxes.clone(),
             Mode::Command,
@@ -1422,7 +1422,7 @@ mod tests {
             }),
         );
         let result = handle_key(state, "r");
-        assert_eq!(result.doc.boxes[0].rounded, false);
+        assert!(!result.doc.boxes[0].rounded);
     }
 
     #[test]
@@ -1500,9 +1500,9 @@ mod tests {
             }),
         );
         let result = handle_key(state, "F");
-        assert_eq!(result.doc.boxes[0].children[0].filled, true);
+        assert!(result.doc.boxes[0].children[0].filled);
         assert_eq!(result.doc.boxes[0].children[0].colour, colour_one);
-        assert_eq!(result.doc.boxes[0].children[1].filled, true);
+        assert!(result.doc.boxes[0].children[1].filled);
         assert_eq!(result.doc.boxes[0].children[1].colour, colour_two);
         assert_eq!(
             result.doc.selected,
@@ -1521,9 +1521,9 @@ mod tests {
             }),
         );
         let result = handle_key(state, "F");
-        assert_eq!(result.doc.boxes[0].children[0].filled, false);
+        assert!(!result.doc.boxes[0].children[0].filled);
         assert_eq!(result.doc.boxes[0].children[0].colour, colour_one);
-        assert_eq!(result.doc.boxes[0].children[1].filled, false);
+        assert!(!result.doc.boxes[0].children[1].filled);
         assert_eq!(result.doc.boxes[0].children[1].colour, colour_two);
     }
 
@@ -1543,9 +1543,9 @@ mod tests {
             }),
         );
         let result = handle_key(state, "F");
-        assert_eq!(result.doc.boxes[0].children[0].filled, true);
+        assert!(result.doc.boxes[0].children[0].filled);
         assert_eq!(result.doc.boxes[0].children[0].colour, colour);
-        assert_eq!(result.doc.boxes[0].children[1].filled, true);
+        assert!(result.doc.boxes[0].children[1].filled);
         assert_eq!(result.doc.boxes[0].children[1].colour, None);
     }
 
