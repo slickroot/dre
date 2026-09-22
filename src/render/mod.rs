@@ -4,6 +4,8 @@ use crate::diagram::palette;
 use crate::state::State;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod font;
+#[cfg(not(target_arch = "wasm32"))]
 mod shapes;
 mod svg;
 #[cfg(not(target_arch = "wasm32"))]
