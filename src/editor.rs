@@ -46,9 +46,7 @@ fn edit(
 ) -> io::Result<State> {
     let mut state = state;
     while state.running {
-        let status = status(&state);
         renderer.render(&state, output)?;
-        renderer.status_line(status.as_deref(), output)?;
         output.flush()?;
 
         match next_key()? {
@@ -114,6 +112,7 @@ fn load(file: Option<String>) -> io::Result<State> {
     Ok(state::load(doc, Some(path)))
 }
 
+#[allow(dead_code)]
 fn status(state: &State) -> Option<String> {
     match &state.mode {
         Mode::SavePrompt { filename } => Some(format!("Save as: {filename}{CURSOR}")),
