@@ -34,7 +34,8 @@ pub(crate) fn write(doc: &FileDoc) -> String {
     let mut text = String::new();
     let mut serializer = Serializer::new(&mut text);
     serializer.indent(' ', 2);
-    doc.serialize(serializer).expect("a diagram always serialises");
+    doc.serialize(serializer)
+        .expect("a diagram always serialises");
     text.push('\n');
     text
 }
@@ -77,24 +78,41 @@ mod tests {
     use super::*;
 
     fn plain(label: &str) -> FileBox {
-        FileBox { label: label.to_string(), colour: None, fill: None, rounded: false, children: vec![] }
+        FileBox {
+            label: label.to_string(),
+            colour: None,
+            fill: None,
+            rounded: false,
+            children: vec![],
+        }
     }
 
     fn with_children(file_box: FileBox, children: Vec<FileBox>) -> FileBox {
-        FileBox { children, ..file_box }
+        FileBox {
+            children,
+            ..file_box
+        }
     }
 
     fn spec_example() -> FileDoc {
         let backup = plain("Backup");
         let replica = with_children(plain("Replica"), vec![backup]);
         let postgres = with_children(plain("Postgres"), vec![replica]);
-        let orders = with_children(FileBox { fill: Some(1), ..plain("Orders") }, vec![postgres]);
+        let orders = with_children(
+            FileBox {
+                fill: Some(1),
+                ..plain("Orders")
+            },
+            vec![postgres],
+        );
         let gateway = FileBox {
             colour: Some(2),
             rounded: true,
             ..with_children(plain("API gateway"), vec![plain("Auth"), orders])
         };
-        FileDoc { boxes: vec![gateway, plain("Billing")] }
+        FileDoc {
+            boxes: vec![gateway, plain("Billing")],
+        }
     }
 
     const SPEC_EXAMPLE_TEXT: &str = "\
@@ -120,7 +138,9 @@ mod tests {
 
     #[test]
     fn writing_a_single_plain_box_leaves_out_every_default_setting() {
-        let doc = FileDoc { boxes: vec![plain("Auth")] };
+        let doc = FileDoc {
+            boxes: vec![plain("Auth")],
+        };
         assert_eq!(write(&doc), "<dre>\n  <box label=\"Auth\"/>\n</dre>\n");
     }
 
@@ -131,9 +151,14 @@ mod tests {
 
     #[test]
     fn writing_a_label_with_quotes_angle_brackets_and_ampersands_escapes_them() {
-        let doc = FileDoc { boxes: vec![plain("say \"hi\" <to> A&B")] };
+        let doc = FileDoc {
+            boxes: vec![plain("say \"hi\" <to> A&B")],
+        };
         let text = write(&doc);
-        assert!(text.contains("label=\"say &quot;hi&quot; &lt;to&gt; A&amp;B\""), "{text}");
+        assert!(
+            text.contains("label=\"say &quot;hi&quot; &lt;to&gt; A&amp;B\""),
+            "{text}"
+        );
     }
 
     #[test]
@@ -144,7 +169,9 @@ mod tests {
 
     #[test]
     fn reading_what_was_written_gives_back_a_single_plain_box() {
-        let doc = FileDoc { boxes: vec![plain("Auth")] };
+        let doc = FileDoc {
+            boxes: vec![plain("Auth")],
+        };
         assert_eq!(read(&write(&doc)), Some(doc));
     }
 
@@ -155,7 +182,9 @@ mod tests {
 
     #[test]
     fn reading_what_was_written_gives_back_escaped_labels() {
-        let doc = FileDoc { boxes: vec![plain("say \"hi\" <to> A&B")] };
+        let doc = FileDoc {
+            boxes: vec![plain("say \"hi\" <to> A&B")],
+        };
         assert_eq!(read(&write(&doc)), Some(doc));
     }
 
@@ -165,7 +194,9 @@ mod tests {
         for depth in (0..20).rev() {
             deepest = with_children(plain(&format!("level {depth}")), vec![deepest]);
         }
-        let doc = FileDoc { boxes: vec![deepest] };
+        let doc = FileDoc {
+            boxes: vec![deepest],
+        };
         assert_eq!(read(&write(&doc)), Some(doc));
     }
 
@@ -192,7 +223,10 @@ mod tests {
 
     #[test]
     fn reading_a_non_numeric_colour_gives_nothing() {
-        assert_eq!(read("<dre><box label=\"Auth\" colour=\"red\"/></dre>"), None);
+        assert_eq!(
+            read("<dre><box label=\"Auth\" colour=\"red\"/></dre>"),
+            None
+        );
     }
 
     #[test]
@@ -238,13 +272,25 @@ mod tests {
 
     #[test]
     fn reading_a_bad_colour_on_a_nested_box_gives_nothing() {
-        assert_eq!(read("<dre><box label=\"A\"><box label=\"B\" colour=\"5\"/></box></dre>"), None);
+        assert_eq!(
+            read("<dre><box label=\"A\"><box label=\"B\" colour=\"5\"/></box></dre>"),
+            None
+        );
     }
 
     #[test]
     fn reading_accepts_colour_and_fill_at_the_edges_of_the_palette() {
-        let doc = FileDoc { boxes: vec![FileBox { colour: Some(4), fill: Some(0), ..plain("A") }] };
-        assert_eq!(read("<dre><box label=\"A\" colour=\"4\" fill=\"0\"/></dre>"), Some(doc));
+        let doc = FileDoc {
+            boxes: vec![FileBox {
+                colour: Some(4),
+                fill: Some(0),
+                ..plain("A")
+            }],
+        };
+        assert_eq!(
+            read("<dre><box label=\"A\" colour=\"4\" fill=\"0\"/></dre>"),
+            Some(doc)
+        );
     }
 
     #[test]

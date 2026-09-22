@@ -14,7 +14,10 @@ pub(crate) fn missing(path: &str) -> io::Error {
 }
 
 pub(crate) fn invalid(path: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("{path}: not a valid diagram"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("{path}: not a valid diagram"),
+    )
 }
 
 #[cfg(test)]
@@ -40,7 +43,10 @@ mod tests {
     #[test]
     fn reading_a_missing_path_is_not_found() {
         let path = temp_path("absent.dre");
-        assert_eq!(read(&path).err().map(|e| e.kind()), Some(io::ErrorKind::NotFound));
+        assert_eq!(
+            read(&path).err().map(|e| e.kind()),
+            Some(io::ErrorKind::NotFound)
+        );
     }
 
     #[test]

@@ -16,7 +16,9 @@ impl BoxShape {
         if self.radius == 0 {
             return 0;
         }
-        (self.radius + self.border).min(self.width / 2).min(self.height / 2)
+        (self.radius + self.border)
+            .min(self.width / 2)
+            .min(self.height / 2)
     }
 
     fn coverage(px: f64, py: f64, width: f64, height: f64, radius: f64) -> f64 {
@@ -130,12 +132,22 @@ mod tests {
     const FILL: Rgba = [1, 2, 3, OPAQUE];
 
     fn box_shape(width: i64, height: i64, radius: i64) -> BoxShape {
-        BoxShape { width, height, border: BORDER, radius, edge: EDGE, fill: FILL }
+        BoxShape {
+            width,
+            height,
+            border: BORDER,
+            radius,
+            edge: EDGE,
+            fill: FILL,
+        }
     }
 
     #[test]
     fn a_box_pixel_with_no_alpha_has_no_colour() {
-        let shape = BoxShape { fill: [0; 4], ..box_shape(40, 40, 10) };
+        let shape = BoxShape {
+            fill: [0; 4],
+            ..box_shape(40, 40, 10)
+        };
         assert_eq!(shape.colour_at(0, 0), None);
     }
 

@@ -62,12 +62,19 @@ pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {
 
 #[cfg(test)]
 pub(crate) fn node(label: &str) -> Node {
-    Node { label: label.to_string(), ..Default::default() }
+    Node {
+        label: label.to_string(),
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
 pub(crate) fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-    Node { label: label.to_string(), children, ..Default::default() }
+    Node {
+        label: label.to_string(),
+        children,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
@@ -142,20 +149,44 @@ mod tests {
             "a",
             vec![node_with_children("b", vec![node("c"), node("d")])],
         )];
-        assert_eq!(*children_at(&mut boxes, &[0]), vec![node_with_children("b", vec![node("c"), node("d")])]);
-        assert_eq!(*children_at(&mut boxes, &[0, 0]), vec![node("c"), node("d")]);
+        assert_eq!(
+            *children_at(&mut boxes, &[0]),
+            vec![node_with_children("b", vec![node("c"), node("d")])]
+        );
+        assert_eq!(
+            *children_at(&mut boxes, &[0, 0]),
+            vec![node("c"), node("d")]
+        );
     }
 
     #[test]
     fn at_a_single_index_returns_the_top_level_box() {
         let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![], index: 1 }), node("b"));
+        assert_eq!(
+            *at(
+                &mut boxes,
+                &Path {
+                    ancestors: vec![],
+                    index: 1
+                }
+            ),
+            node("b")
+        );
     }
 
     #[test]
     fn at_a_longer_path_walks_into_children() {
         let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0], index: 1 }), node("d"));
+        assert_eq!(
+            *at(
+                &mut boxes,
+                &Path {
+                    ancestors: vec![0],
+                    index: 1
+                }
+            ),
+            node("d")
+        );
     }
 
     #[test]
@@ -164,7 +195,16 @@ mod tests {
             "a",
             vec![node_with_children("b", vec![node("c")])],
         )];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0, 0], index: 0 }), node("c"));
+        assert_eq!(
+            *at(
+                &mut boxes,
+                &Path {
+                    ancestors: vec![0, 0],
+                    index: 0
+                }
+            ),
+            node("c")
+        );
     }
 
     #[test]
@@ -187,7 +227,10 @@ mod tests {
     fn append_on_a_nodes_children_appends_a_child() {
         let mut boxes = vec![node_with_children("a", vec![node("c")])];
         let index = append(&mut boxes[0].children, node("d"));
-        assert_eq!(boxes, vec![node_with_children("a", vec![node("c"), node("d")])]);
+        assert_eq!(
+            boxes,
+            vec![node_with_children("a", vec![node("c"), node("d")])]
+        );
         assert_eq!(index, 1);
     }
 }

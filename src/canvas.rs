@@ -23,17 +23,26 @@ impl Canvas {
                 }
             }
         }
-        Canvas { pixels, width, height }
+        Canvas {
+            pixels,
+            width,
+            height,
+        }
     }
 
     pub(crate) fn crop(&self, first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Canvas {
-        let mut pixels = Vec::with_capacity(((last_x - first_x) * (last_y - first_y)) as usize * CHANNELS);
+        let mut pixels =
+            Vec::with_capacity(((last_x - first_x) * (last_y - first_y)) as usize * CHANNELS);
         for y in first_y..last_y {
             let start = ((y * self.width + first_x) as usize) * CHANNELS;
             let end = ((y * self.width + last_x) as usize) * CHANNELS;
             pixels.extend_from_slice(&self.pixels[start..end]);
         }
-        Canvas { pixels, width: last_x - first_x, height: last_y - first_y }
+        Canvas {
+            pixels,
+            width: last_x - first_x,
+            height: last_y - first_y,
+        }
     }
 }
 
@@ -84,7 +93,11 @@ mod tests {
         let canvas = Canvas::fill(4, 4, &OnlyAt(2, 1));
         for y in 0..4 {
             for x in 0..4 {
-                let expected = if (x, y) == (2, 1) { [9, 8, 7, 6] } else { [0; 4] };
+                let expected = if (x, y) == (2, 1) {
+                    [9, 8, 7, 6]
+                } else {
+                    [0; 4]
+                };
                 assert_eq!(pixel(&canvas, x, y), expected);
             }
         }

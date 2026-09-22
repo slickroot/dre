@@ -62,15 +62,17 @@ pub(crate) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<(
     }
     stream.write_all(CLEAR_LINE.as_bytes())?;
     stream.flush()?;
-    Err(io::Error::new(io::ErrorKind::Unsupported, NOT_SUPPORTED_MESSAGE))
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        NOT_SUPPORTED_MESSAGE,
+    ))
 }
 
 const CHUNK_SIZE: usize = 4096;
 const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
 const CLEAR_LINE: &str = "\r\x1b[K";
-const NOT_SUPPORTED_MESSAGE: &str =
-    "Dre requires a terminal with Kitty graphics protocol support.";
+const NOT_SUPPORTED_MESSAGE: &str = "Dre requires a terminal with Kitty graphics protocol support.";
 const REPLY_TIMEOUT_MICROS: i64 = 500_000;
 
 fn is_supported(reply: &[u8]) -> bool {
@@ -99,14 +101,20 @@ fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
         .chunks(chunk_size)
         .map(|chunk| {
             std::str::from_utf8(chunk)
-                .expect("base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8")
+                .expect(
+                    "base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8",
+                )
                 .to_owned()
         })
         .collect()
 }
 
 fn more(chunks: &[String], index: usize) -> i32 {
-    if index == chunks.len() - 1 { 0 } else { 1 }
+    if index == chunks.len() - 1 {
+        0
+    } else {
+        1
+    }
 }
 
 fn escape(keys: &str, payload: &str) -> String {
@@ -217,7 +225,10 @@ mod tests {
 
         let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
-        assert!(chunk_list.len() > 1, "expected payload to span multiple chunks");
+        assert!(
+            chunk_list.len() > 1,
+            "expected payload to span multiple chunks"
+        );
 
         let header = format!(
             "a=T,f=32,s=100,v=100,o=z,q=2,z=-1,m={}",
@@ -242,10 +253,17 @@ mod tests {
 
     #[test]
     fn show_moves_the_cursor_to_the_sprite_cell_then_transmits_its_pixels() {
-        let canvas = Canvas { pixels: vec![1, 2, 3, 4, 5, 6, 7, 8], width: 2, height: 1 };
+        let canvas = Canvas {
+            pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            width: 2,
+            height: 1,
+        };
         assert_eq!(
             show(&canvas, 3, 5).to_string(),
-            format!("\x1b[6;4H{}", transmission(&canvas.pixels, canvas.width, canvas.height))
+            format!(
+                "\x1b[6;4H{}",
+                transmission(&canvas.pixels, canvas.width, canvas.height)
+            )
         );
     }
 

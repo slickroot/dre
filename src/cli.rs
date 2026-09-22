@@ -20,7 +20,9 @@ pub(crate) fn parse_args() -> Command {
 
 fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Command {
     match args.next() {
-        Some(arg) if arg == "--svg" => Command::Export { input: args.next().unwrap_or_default() },
+        Some(arg) if arg == "--svg" => Command::Export {
+            input: args.next().unwrap_or_default(),
+        },
         Some(arg) => Command::Edit(Some(arg)),
         None => Command::Edit(None),
     }
@@ -64,7 +66,12 @@ mod tests {
 
     #[test]
     fn an_svg_flag_yields_export_with_the_input() {
-        assert_eq!(parse(&["--svg", "diagram.dre"]), Command::Export { input: "diagram.dre".to_string() });
+        assert_eq!(
+            parse(&["--svg", "diagram.dre"]),
+            Command::Export {
+                input: "diagram.dre".to_string()
+            }
+        );
     }
 
     #[test]
@@ -112,6 +119,9 @@ mod tests {
         let path = temp_file("corrupt.dre", "this is not xml");
         let err = export(path.clone()).err();
         fs::remove_file(&path).unwrap();
-        assert_eq!(err.unwrap().to_string(), format!("{path}: not a valid diagram"));
+        assert_eq!(
+            err.unwrap().to_string(),
+            format!("{path}: not a valid diagram")
+        );
     }
 }
