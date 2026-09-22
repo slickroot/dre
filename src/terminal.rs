@@ -111,7 +111,12 @@ pub(crate) fn poll_read(fd: RawFd, resize_fd: RawFd, timeout_ms: u16) -> io::Res
         PollFd::new(borrowed, PollFlags::POLLIN),
         PollFd::new(resize_borrowed, PollFlags::POLLIN),
     ];
-    let ready = poll(&mut fds, PollTimeout::from(timeout_ms)).map_err(io::Error::from)?;
+    let ready = loop {
+        match poll(&mut fds, PollTimeout::from(timeout_ms)) {
+            Err(nix::errno::Errno::EINTR) => continue,
+            result => break result.map_err(io::Error::from)?,
+        }
+    };
     if ready == 0 {
         return Ok(None);
     }
@@ -169,6 +174,31 @@ mod tests {
         let (read, _write) = nix::unistd::pipe().unwrap();
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
         let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn poll_read_survives_a_signal_interrupting_the_poll() {
+        use std::os::fd::AsRawFd;
+        use std::time::Duration;
+
+        extern "C" fn ignore(_: libc::c_int) {}
+        let action = signal::SigAction::new(
+            SigHandler::Handler(ignore),
+            SaFlags::empty(),
+            SigSet::empty(),
+        );
+        unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.unwrap();
+
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let pid = nix::unistd::getpid();
+        let interrupter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            nix::sys::signal::kill(pid, Signal::SIGWINCH).unwrap();
+        });
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 200);
+        interrupter.join().unwrap();
         assert!(matches!(result, Ok(None)));
     }
 
