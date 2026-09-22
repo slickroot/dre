@@ -266,6 +266,10 @@ impl TerminalRenderer {
         self.terminal.rows = terminal.rows;
     }
 
+    pub(crate) fn columns(&self) -> i64 {
+        self.terminal.cols
+    }
+
     pub(crate) fn status_line(
         &mut self,
         text: Option<&str>,
@@ -1153,6 +1157,19 @@ mod tests {
             &lines[label_row as usize][label_x as usize..label_x as usize + 2],
             "hi"
         );
+    }
+
+    #[test]
+    fn columns_reports_the_terminals_column_count() {
+        let r = renderer_on(terminal(20, 10, 1, 1));
+        assert_eq!(r.columns(), 20);
+    }
+
+    #[test]
+    fn columns_reflects_a_resize() {
+        let mut r = renderer_on(terminal(20, 10, 1, 1));
+        r.on_resize(terminal(40, 10, 1, 1));
+        assert_eq!(r.columns(), 40);
     }
 
     #[test]
