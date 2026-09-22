@@ -55,16 +55,28 @@ mod tests {
     use crate::state::{handle_key, new_state, Mode, DEFAULT_FILENAME};
 
     fn node(label: &str) -> Node {
-        Node { label: label.to_string(), ..Default::default() }
+        Node {
+            label: label.to_string(),
+            ..Default::default()
+        }
     }
 
     fn prompt(filename: &str) -> Mode {
-        Mode::SavePrompt { filename: filename.to_string() }
+        Mode::SavePrompt {
+            filename: filename.to_string(),
+        }
     }
 
     #[test]
     fn q_in_command_mode_opens_the_prompt_with_the_default_filename() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
         let result = handle_key(state, "q");
         assert_eq!(result.mode, prompt(DEFAULT_FILENAME));
         assert!(result.running);
@@ -117,7 +129,14 @@ mod tests {
 
     #[test]
     fn escape_stops_without_saving_and_preserves_boxes() {
-        let state = new_state(vec![node("a")], prompt(DEFAULT_FILENAME), Some(Path { ancestors: vec![], index: 0 }));
+        let state = new_state(
+            vec![node("a")],
+            prompt(DEFAULT_FILENAME),
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);

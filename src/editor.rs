@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::{handle_key, Mode, State};
 use crate::terminal::RawScreen;
-use crate::{dre_format, IDLE_TIMEOUT_MS, file_document, filesystem, kitty, state, terminal};
+use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
 const CURSOR: char = '\u{2588}';
 const INTERRUPT: &str = "\x03";
@@ -264,7 +264,10 @@ mod tests {
 
     #[test]
     fn a_resize_key_re_probes_the_terminal_and_propagates_a_failed_probe() {
-        let (result, _) = run_script(state_saving_to("a.dre"), vec![Some(terminal::RESIZE), Some("q")]);
+        let (result, _) = run_script(
+            state_saving_to("a.dre"),
+            vec![Some(terminal::RESIZE), Some("q")],
+        );
         assert!(
             result.is_err(),
             "terminal::probe performs a real ioctl against stdout, which is not a TTY \

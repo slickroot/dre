@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
-use crate::layout::{layout, with_cursor, PlacementNode};
 use super::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
 use crate::diagram::Document;
+use crate::layout::{layout, with_cursor, PlacementNode};
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -21,19 +21,24 @@ pub struct SvgRenderer {
 
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
-        SvgRenderer { canvas: Some((columns, rows)), extent: None }
+        SvgRenderer {
+            canvas: Some((columns, rows)),
+            extent: None,
+        }
     }
 
     pub fn centered_on(self, width: i64, height: i64) -> Self {
-        SvgRenderer { extent: Some((width, height)), ..self }
+        SvgRenderer {
+            extent: Some((width, height)),
+            ..self
+        }
     }
 
     fn centering_offset(&self) -> (i64, i64) {
         match (self.canvas, self.extent) {
-            (Some((columns, rows)), Some((width, height))) => (
-                ((columns - width) / 2).max(0),
-                ((rows - height) / 2).max(0),
-            ),
+            (Some((columns, rows)), Some((width, height))) => {
+                (((columns - width) / 2).max(0), ((rows - height) / 2).max(0))
+            }
             _ => (0, 0),
         }
     }
@@ -58,7 +63,10 @@ impl SvgRenderer {
         );
         svg.push_str(&style_block());
         svg.push_str(&background_rect(min_x, min_y, span_x, span_y));
-        if placements.iter().any(|placement| matches!(placement.node, PlacementNode::Arrow(_))) {
+        if placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Arrow(_)))
+        {
             svg.push_str(&marker_defs());
         }
         for placement in placements {
@@ -163,10 +171,7 @@ fn marker_defs() -> String {
     )
 }
 
-fn arrow_paths(
-    placement: &crate::layout::Placement,
-    arrow: &crate::layout::Arrow,
-) -> String {
+fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arrow) -> String {
     let left = placement.x * CELL_WIDTH;
     let right = placement.x * CELL_WIDTH + placement.width * CELL_WIDTH - 1;
     let trunk_x = placement.x * CELL_WIDTH + (placement.width * CELL_WIDTH) / 2;
@@ -176,8 +181,14 @@ fn arrow_paths(
         .iter()
         .map(|stop| (placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
         .collect();
-    let trunk_top = *stop_rows.iter().min().expect("an arrow always has at least one stop");
-    let trunk_bottom = *stop_rows.iter().max().expect("an arrow always has at least one stop");
+    let trunk_top = *stop_rows
+        .iter()
+        .min()
+        .expect("an arrow always has at least one stop");
+    let trunk_bottom = *stop_rows
+        .iter()
+        .max()
+        .expect("an arrow always has at least one stop");
     let mut paths = format!(
         "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"var(--ink)\" stroke-width=\"{}\" fill=\"none\"/>",
         trunk_x + ARROW_JOIN_OVERLAP,
@@ -222,7 +233,11 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
     if node.filled && node.colour.is_some() {
         let (fr, fg, fb) = crate::diagram::palette(node.colour.unwrap()).unwrap();
         let opacity = super::FILL_ALPHA as f64 / OPAQUE as f64;
-        write!(rect, " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\"").unwrap();
+        write!(
+            rect,
+            " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\""
+        )
+        .unwrap();
     } else {
         rect.push_str(" fill=\"none\"");
     }
@@ -230,10 +245,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
     rect
 }
 
-fn label_text(
-    placement: &crate::layout::Placement,
-    label: &crate::layout::Label,
-) -> String {
+fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label) -> String {
     let chars = label.text.chars().count() as i64;
     format!(
         "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"var(--ink)\">{}</text>",
@@ -247,8 +259,6 @@ fn label_text(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::layout::BOX_HEIGHT;
     use super::super::arrowhead_depth;
     use super::super::arrowhead_slope;
     use super::super::colour;
@@ -258,10 +268,18 @@ mod tests {
     use super::super::FILL_ALPHA;
     use super::super::OPAQUE;
     use super::super::ROUNDED_RADIUS;
+    use super::*;
     use crate::diagram::{node, node_with_children, palette, Document, Node, Path};
+    use crate::layout::BOX_HEIGHT;
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
-        Node { label: label.to_string(), colour, filled, rounded, children: vec![] }
+        Node {
+            label: label.to_string(),
+            colour,
+            filled,
+            rounded,
+            children: vec![],
+        }
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -327,21 +345,25 @@ mod tests {
     fn empty_placements_render_a_document_with_the_empty_bbox_view_box() {
         let svg = SvgRenderer::default().draw(&[]);
 
-        let expected = view_box(
-            -CELL_HEIGHT,
-            -CELL_HEIGHT,
-            2 * CELL_HEIGHT,
-            2 * CELL_HEIGHT,
-        );
+        let expected = view_box(-CELL_HEIGHT, -CELL_HEIGHT, 2 * CELL_HEIGHT, 2 * CELL_HEIGHT);
         assert!(svg.contains(&format!("viewBox=\"{expected}\"")));
         let body = svg
             .split("</svg>")
             .next()
             .expect("the document closes the svg tag");
-        let rects: Vec<&str> =
-            body.split('<').filter(|element| element.starts_with("rect ")).collect();
-        assert_eq!(rects.len(), 1, "only the background rect is drawn on an empty document");
-        assert!(rects[0].contains("fill=\"var(--bg)\""), "the rect is the background rect");
+        let rects: Vec<&str> = body
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
+        assert_eq!(
+            rects.len(),
+            1,
+            "only the background rect is drawn on an empty document"
+        );
+        assert!(
+            rects[0].contains("fill=\"var(--bg)\""),
+            "the rect is the background rect"
+        );
         assert!(!svg.contains("stroke="), "no boxes means no strokes");
     }
 
@@ -353,10 +375,13 @@ mod tests {
         let background = format!(
             "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
         );
-        let style_end = svg.find("</style>").expect("every document has a style block")
+        let style_end = svg
+            .find("</style>")
+            .expect("every document has a style block")
             + "</style>".len();
         assert_eq!(
-            svg.find(&background).expect("the background rect is emitted"),
+            svg.find(&background)
+                .expect("the background rect is emitted"),
             style_end,
             "the background rect immediately follows the style block"
         );
@@ -365,8 +390,10 @@ mod tests {
             .split("</svg>")
             .next()
             .expect("the document closes the svg tag");
-        let rects: Vec<&str> =
-            body.split('<').filter(|element| element.starts_with("rect ")).collect();
+        let rects: Vec<&str> = body
+            .split('<')
+            .filter(|element| element.starts_with("rect "))
+            .collect();
         assert_eq!(rects.len(), 1, "the background rect is the only rect");
         assert!(rects[0].contains("fill=\"var(--bg)\""));
         assert!(!rects[0].contains("stroke"));
@@ -384,10 +411,13 @@ mod tests {
         let background = format!(
             "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"var(--bg)\"/>"
         );
-        let background_pos =
-            svg.find(&background).expect("the background rect is emitted");
-        let style_end =
-            svg.find("</style>").expect("every document has a style block") + "</style>".len();
+        let background_pos = svg
+            .find(&background)
+            .expect("the background rect is emitted");
+        let style_end = svg
+            .find("</style>")
+            .expect("every document has a style block")
+            + "</style>".len();
         assert_eq!(background_pos, style_end);
 
         let body = svg
@@ -398,12 +428,14 @@ mod tests {
             .split('<')
             .filter(|element| element.starts_with("rect "))
             .collect();
-        let background_rect =
-            rects.remove(0);
+        let background_rect = rects.remove(0);
         assert!(background_rect.contains("fill=\"var(--bg)\""));
         assert!(!background_rect.contains("stroke="));
         for rect in &rects {
-            assert!(rect.contains("stroke="), "each box rect is stroked and painted atop the background");
+            assert!(
+                rect.contains("stroke="),
+                "each box rect is stroked and painted atop the background"
+            );
         }
 
         assert!(
@@ -473,10 +505,21 @@ mod tests {
             .filter(|element| element.starts_with("rect ") && !element.contains("var(--bg)"))
             .collect();
 
-        assert!(rects.iter().all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
-        assert_eq!(rects.iter().filter(|rect| rect.contains(&coloured_stroke)).count(), 1);
+        assert!(rects
+            .iter()
+            .all(|rect| rect.contains(&ink_stroke) || rect.contains(&coloured_stroke)));
         assert_eq!(
-            rects.iter().filter(|rect| rect.contains(&ink_stroke)).count(),
+            rects
+                .iter()
+                .filter(|rect| rect.contains(&coloured_stroke))
+                .count(),
+            1
+        );
+        assert_eq!(
+            rects
+                .iter()
+                .filter(|rect| rect.contains(&ink_stroke))
+                .count(),
             rects.len() - 1
         );
     }
@@ -485,7 +528,10 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::diagram::Path { ancestors: vec![], index: 0 },
+                path: crate::diagram::Path {
+                    ancestors: vec![],
+                    index: 0,
+                },
             }),
             x,
             y,
@@ -599,11 +645,14 @@ mod tests {
         let text = svg.find("<text").expect("labels draw text");
         assert!(defs < rect, "defs are emitted before the first rect");
         assert!(defs < arm, "defs are emitted before the stop arms");
-        assert!(arm < rect, "stop arms are drawn before the boxes so box borders sit on top");
+        assert!(
+            arm < rect,
+            "stop arms are drawn before the boxes so box borders sit on top"
+        );
         assert!(arm < text, "arrow paths are drawn before labels");
-        assert!(svg.contains(
-            "<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\""
-        ));
+        assert!(
+            svg.contains("<marker id=\"arrowhead\" orient=\"auto\" markerUnits=\"userSpaceOnUse\"")
+        );
 
         let arrow_placement = placements
             .iter()
@@ -623,8 +672,14 @@ mod tests {
             .iter()
             .map(|stop| (arrow_placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
             .collect();
-        let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
-        let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
+        let trunk_top = *stop_rows
+            .iter()
+            .min()
+            .expect("arrows have at least one stop");
+        let trunk_bottom = *stop_rows
+            .iter()
+            .max()
+            .expect("arrows have at least one stop");
         let ink = "var(--ink)";
 
         assert_eq!(stop_rows.len(), 2);
@@ -672,8 +727,14 @@ mod tests {
             .iter()
             .map(|stop| (arrow_placement.y + stop) * CELL_HEIGHT + CELL_HEIGHT / 2)
             .collect();
-        let trunk_top = *stop_rows.iter().min().expect("arrows have at least one stop");
-        let trunk_bottom = *stop_rows.iter().max().expect("arrows have at least one stop");
+        let trunk_top = *stop_rows
+            .iter()
+            .min()
+            .expect("arrows have at least one stop");
+        let trunk_bottom = *stop_rows
+            .iter()
+            .max()
+            .expect("arrows have at least one stop");
         let ink = "var(--ink)";
 
         assert!(svg.contains(&format!(
@@ -764,12 +825,7 @@ mod tests {
 
         let opening = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">",
-            view_box(
-                -CELL_HEIGHT,
-                -CELL_HEIGHT,
-                2 * CELL_HEIGHT,
-                2 * CELL_HEIGHT,
-            )
+            view_box(-CELL_HEIGHT, -CELL_HEIGHT, 2 * CELL_HEIGHT, 2 * CELL_HEIGHT,)
         );
         assert!(svg.contains("<style>"));
         assert!(svg.contains("</style>"));
@@ -809,12 +865,17 @@ mod tests {
             .next()
             .expect("the document closes the svg tag");
         let elements: Vec<&str> = body.split('<').collect();
-        assert!(elements[1].starts_with("svg "), "the document opens with the svg tag");
+        assert!(
+            elements[1].starts_with("svg "),
+            "the document opens with the svg tag"
+        );
         assert!(
             elements[2].starts_with("style>"),
             "the style block immediately follows the opening svg tag"
         );
-        let style = svg.find("<style>").expect("the document emits a style block");
+        let style = svg
+            .find("<style>")
+            .expect("the document emits a style block");
         let defs = svg.find("<defs>").expect("arrows emit a defs block");
         let rect = svg.find("<rect").expect("a box draws a rect");
         assert!(style < defs, "the style block precedes any defs");
@@ -983,7 +1044,10 @@ mod tests {
             selected: None,
         };
 
-        assert_eq!(rendered(&doc), SvgRenderer::default().draw(&layout(&doc.boxes)));
+        assert_eq!(
+            rendered(&doc),
+            SvgRenderer::default().draw(&layout(&doc.boxes))
+        );
     }
 
     fn cursor_rect_at_label_end_of(doc: &Document, selected: &Path) -> String {
@@ -1069,18 +1133,18 @@ mod tests {
 
     #[test]
     fn a_fixed_canvas_sets_the_view_box_regardless_of_content() {
-        let expected = format!(
-            "viewBox=\"0 0 {} {}\"",
-            160 * CELL_WIDTH,
-            50 * CELL_HEIGHT
-        );
-        assert!(SvgRenderer::with_canvas(160, 50).draw(&[]).contains(&expected));
+        let expected = format!("viewBox=\"0 0 {} {}\"", 160 * CELL_WIDTH, 50 * CELL_HEIGHT);
+        assert!(SvgRenderer::with_canvas(160, 50)
+            .draw(&[])
+            .contains(&expected));
         let background = format!(
             "<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\"",
             160 * CELL_WIDTH,
             50 * CELL_HEIGHT
         );
-        assert!(SvgRenderer::with_canvas(160, 50).draw(&[]).contains(&background));
+        assert!(SvgRenderer::with_canvas(160, 50)
+            .draw(&[])
+            .contains(&background));
     }
 
     #[test]
@@ -1098,7 +1162,15 @@ mod tests {
     fn first_rect_origin(svg: &str) -> (i64, i64) {
         let rect = svg.split("<rect x=\"").nth(2).unwrap();
         let x: i64 = rect.split('"').next().unwrap().parse().unwrap();
-        let y: i64 = rect.split("y=\"").nth(1).unwrap().split('"').next().unwrap().parse().unwrap();
+        let y: i64 = rect
+            .split("y=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         (x, y)
     }
 
@@ -1115,7 +1187,10 @@ mod tests {
 
         let (x, y) = box_origin_when_centered((100, 40), (30, 10));
 
-        assert_eq!((x - uncentered.0, y - uncentered.1), (35 * CELL_WIDTH, 15 * CELL_HEIGHT));
+        assert_eq!(
+            (x - uncentered.0, y - uncentered.1),
+            (35 * CELL_WIDTH, 15 * CELL_HEIGHT)
+        );
     }
 
     #[test]
@@ -1124,7 +1199,10 @@ mod tests {
 
         let (x, y) = box_origin_when_centered((100, 40), (30, 9));
 
-        assert_eq!((x - uncentered.0, y - uncentered.1), (35 * CELL_WIDTH, 15 * CELL_HEIGHT));
+        assert_eq!(
+            (x - uncentered.0, y - uncentered.1),
+            (35 * CELL_WIDTH, 15 * CELL_HEIGHT)
+        );
     }
 
     #[test]
@@ -1132,9 +1210,14 @@ mod tests {
         let nodes = vec![node("hi")];
         let placements = crate::layout::layout(&nodes);
 
-        let centered = SvgRenderer::with_canvas(100, 40).centered_on(100, 40).draw(&placements);
+        let centered = SvgRenderer::with_canvas(100, 40)
+            .centered_on(100, 40)
+            .draw(&placements);
 
-        assert_eq!(centered, SvgRenderer::with_canvas(100, 40).draw(&placements));
+        assert_eq!(
+            centered,
+            SvgRenderer::with_canvas(100, 40).draw(&placements)
+        );
     }
 
     #[test]
@@ -1142,16 +1225,24 @@ mod tests {
         let nodes = vec![node("hi")];
         let placements = crate::layout::layout(&nodes);
 
-        let centered = SvgRenderer::with_canvas(100, 40).centered_on(120, 50).draw(&placements);
+        let centered = SvgRenderer::with_canvas(100, 40)
+            .centered_on(120, 50)
+            .draw(&placements);
 
-        assert_eq!(centered, SvgRenderer::with_canvas(100, 40).draw(&placements));
+        assert_eq!(
+            centered,
+            SvgRenderer::with_canvas(100, 40).draw(&placements)
+        );
     }
 
     #[test]
     fn centering_leaves_the_view_box_fixed() {
         let expected = format!("viewBox=\"0 0 {} {}\"", 100 * CELL_WIDTH, 40 * CELL_HEIGHT);
 
-        assert!(SvgRenderer::with_canvas(100, 40).centered_on(30, 10).draw(&[]).contains(&expected));
+        assert!(SvgRenderer::with_canvas(100, 40)
+            .centered_on(30, 10)
+            .draw(&[])
+            .contains(&expected));
     }
 }
 

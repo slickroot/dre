@@ -84,7 +84,10 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
         let start = x + centre(width, &node.label);
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
-            node: PlacementNode::Label(Label { text: &node.label, path: path.clone() }),
+            node: PlacementNode::Label(Label {
+                text: &node.label,
+                path: path.clone(),
+            }),
             x: start,
             y: middle,
             width: interior(&node.label),
@@ -92,12 +95,21 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
         });
 
         if !child_rows.is_empty() {
-            let child_ys: Vec<i64> = child_rows.iter().map(|&row| row as i64 * HALF_PITCH).collect();
+            let child_ys: Vec<i64> = child_rows
+                .iter()
+                .map(|&row| row as i64 * HALF_PITCH)
+                .collect();
             let origin = child_ys[0] + BOX_HEIGHT / 2;
-            let stops: Vec<i64> = child_ys.iter().map(|&child_y| child_y + BOX_HEIGHT / 2 - origin).collect();
+            let stops: Vec<i64> = child_ys
+                .iter()
+                .map(|&child_y| child_y + BOX_HEIGHT / 2 - origin)
+                .collect();
             let shaft = y + BOX_HEIGHT / 2 - origin;
             placements.push(Placement {
-                node: PlacementNode::Arrow(Arrow { stops: stops.clone(), shaft }),
+                node: PlacementNode::Arrow(Arrow {
+                    stops: stops.clone(),
+                    shaft,
+                }),
                 x: x + width,
                 y: origin,
                 width: GAP_WIDTH,
@@ -145,8 +157,16 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
     let mut placements = Vec::new();
     let mut free = 0usize;
     for (index, node) in nodes.iter().enumerate() {
-        let (node_placements, _) =
-            visit(node, 0, Path { ancestors: Vec::new(), index }, offsets, &mut free);
+        let (node_placements, _) = visit(
+            node,
+            0,
+            Path {
+                ancestors: Vec::new(),
+                index,
+            },
+            offsets,
+            &mut free,
+        );
         placements.extend(node_placements);
     }
     placements
@@ -214,7 +234,10 @@ pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
     boxes_first
 }
 
-pub(crate) fn with_cursor<'a>(placements: Vec<Placement<'a>>, selected: Option<Path>) -> Vec<Placement<'a>> {
+pub(crate) fn with_cursor<'a>(
+    placements: Vec<Placement<'a>>,
+    selected: Option<Path>,
+) -> Vec<Placement<'a>> {
     for placement in &placements {
         if let PlacementNode::Label(label) = &placement.node {
             if Some(&label.path) == selected.as_ref() {
@@ -261,7 +284,10 @@ mod tests {
     fn measure_columns_of_a_parent_and_child_has_parent_gap_child_widths() {
         let nodes = vec![node_with_children("parent", vec![node("a")])];
         let widths = measure_columns(&nodes);
-        assert_eq!(widths, vec![width(&node("parent")), GAP_WIDTH, width(&node("a"))]);
+        assert_eq!(
+            widths,
+            vec![width(&node("parent")), GAP_WIDTH, width(&node("a"))]
+        );
     }
 
     #[test]
@@ -272,7 +298,9 @@ mod tests {
             node("d"),
         ];
         let widths = measure_columns(&nodes);
-        let expected_col0 = width(&node("a")).max(width(&node("bb"))).max(width(&node("d")));
+        let expected_col0 = width(&node("a"))
+            .max(width(&node("bb")))
+            .max(width(&node("d")));
         assert_eq!(widths, vec![expected_col0, GAP_WIDTH, width(&node("ccc"))]);
     }
 
@@ -352,9 +380,18 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                Path { ancestors: vec![], index: 0 },
-                Path { ancestors: vec![0], index: 0 },
-                Path { ancestors: vec![0], index: 1 },
+                Path {
+                    ancestors: vec![],
+                    index: 0
+                },
+                Path {
+                    ancestors: vec![0],
+                    index: 0
+                },
+                Path {
+                    ancestors: vec![0],
+                    index: 1
+                },
             ]
         );
     }
@@ -373,7 +410,13 @@ mod tests {
         match &placements[1].node {
             PlacementNode::Label(label) => {
                 assert_eq!(label.text, "hi");
-                assert_eq!(label.path, Path { ancestors: vec![], index: 0 });
+                assert_eq!(
+                    label.path,
+                    Path {
+                        ancestors: vec![],
+                        index: 0
+                    }
+                );
             }
             _ => panic!("expected the second placement to be a label"),
         }
@@ -392,8 +435,10 @@ mod tests {
         let origin = child_a_y + BOX_HEIGHT / 2;
         let parent_row: i64 = 1;
         let parent_y = parent_row * HALF_PITCH;
-        let expected_stops =
-            vec![child_a_y + BOX_HEIGHT / 2 - origin, child_b_y + BOX_HEIGHT / 2 - origin];
+        let expected_stops = vec![
+            child_a_y + BOX_HEIGHT / 2 - origin,
+            child_b_y + BOX_HEIGHT / 2 - origin,
+        ];
         let expected_shaft = parent_y + BOX_HEIGHT / 2 - origin;
 
         let arrow = placements
@@ -409,7 +454,10 @@ mod tests {
 
     #[test]
     fn place_assigns_a_parents_row_as_the_middle_childs_row_when_odd() {
-        let nodes = vec![node_with_children("parent", vec![node("a"), node("b"), node("c")])];
+        let nodes = vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b"), node("c")],
+        )];
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
@@ -452,16 +500,24 @@ mod tests {
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
         let nodes = vec![node("hi")];
         let placements = layout(&nodes);
-        assert!(placements.iter().all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
-        assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Node(_))));
-        assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Label(_))));
+        assert!(placements
+            .iter()
+            .all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
+        assert!(placements
+            .iter()
+            .any(|p| matches!(p.node, PlacementNode::Node(_))));
+        assert!(placements
+            .iter()
+            .any(|p| matches!(p.node, PlacementNode::Label(_))));
     }
 
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
         let placements = layout(&boxes);
-        assert!(placements.iter().any(|p| matches!(p.node, PlacementNode::Arrow(_))));
+        assert!(placements
+            .iter()
+            .any(|p| matches!(p.node, PlacementNode::Arrow(_))));
     }
 
     #[test]
@@ -488,7 +544,13 @@ mod tests {
             .expect("layout of a leaf box includes a label placement")
             .clone();
 
-        let result = with_cursor(placements.clone(), Some(Path { ancestors: vec![], index: 0 }));
+        let result = with_cursor(
+            placements.clone(),
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
         assert_eq!(result.len(), placements.len() + 1);
         let cursor = result.last().unwrap();
         assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
@@ -500,20 +562,41 @@ mod tests {
     fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
         let nodes = vec![node("hi")];
         let placements = layout(&nodes);
-        let result = with_cursor(placements.clone(), Some(Path { ancestors: vec![], index: 99 }));
+        let result = with_cursor(
+            placements.clone(),
+            Some(Path {
+                ancestors: vec![],
+                index: 99,
+            }),
+        );
         assert_eq!(result, placements);
     }
 
     #[test]
     fn label_constructor_defaults_path_to_empty() {
-        let label = Label { text: "hi", path: Path { ancestors: vec![], index: 0 } };
+        let label = Label {
+            text: "hi",
+            path: Path {
+                ancestors: vec![],
+                index: 0,
+            },
+        };
         assert_eq!(label.text, "hi");
-        assert_eq!(label.path, Path { ancestors: vec![], index: 0 });
+        assert_eq!(
+            label.path,
+            Path {
+                ancestors: vec![],
+                index: 0
+            }
+        );
     }
 
     #[test]
     fn arrow_stores_stops_and_shaft_as_plain_fields() {
-        let arrow = Arrow { stops: vec![1, 2, 3], shaft: 5 };
+        let arrow = Arrow {
+            stops: vec![1, 2, 3],
+            shaft: 5,
+        };
         assert_eq!(arrow.stops, vec![1, 2, 3]);
         assert_eq!(arrow.shaft, 5);
     }
@@ -521,14 +604,26 @@ mod tests {
     #[test]
     fn placement_node_holds_the_matching_variants_inner_value() {
         let a = node("a");
-        let box_placement = Placement { node: PlacementNode::Node(&a), x: 0, y: 0, width: 3, height: 3 };
+        let box_placement = Placement {
+            node: PlacementNode::Node(&a),
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 3,
+        };
         match box_placement.node {
             PlacementNode::Node(n) => assert_eq!(n, &a),
             _ => panic!("expected a Node variant"),
         }
 
         let label_placement = Placement {
-            node: PlacementNode::Label(Label { text: "a", path: Path { ancestors: vec![], index: 0 } }),
+            node: PlacementNode::Label(Label {
+                text: "a",
+                path: Path {
+                    ancestors: vec![],
+                    index: 0,
+                },
+            }),
             x: 0,
             y: 0,
             width: 1,
@@ -536,24 +631,48 @@ mod tests {
         };
         match label_placement.node {
             PlacementNode::Label(label) => {
-                assert_eq!(label, Label { text: "a", path: Path { ancestors: vec![], index: 0 } })
+                assert_eq!(
+                    label,
+                    Label {
+                        text: "a",
+                        path: Path {
+                            ancestors: vec![],
+                            index: 0
+                        }
+                    }
+                )
             }
             _ => panic!("expected a Label variant"),
         }
 
         let arrow_placement = Placement {
-            node: PlacementNode::Arrow(Arrow { stops: vec![0], shaft: 0 }),
+            node: PlacementNode::Arrow(Arrow {
+                stops: vec![0],
+                shaft: 0,
+            }),
             x: 0,
             y: 0,
             width: 1,
             height: 1,
         };
         match arrow_placement.node {
-            PlacementNode::Arrow(arrow) => assert_eq!(arrow, Arrow { stops: vec![0], shaft: 0 }),
+            PlacementNode::Arrow(arrow) => assert_eq!(
+                arrow,
+                Arrow {
+                    stops: vec![0],
+                    shaft: 0
+                }
+            ),
             _ => panic!("expected an Arrow variant"),
         }
 
-        let cursor_placement = Placement { node: PlacementNode::Cursor(Cursor), x: 0, y: 0, width: 1, height: 1 };
+        let cursor_placement = Placement {
+            node: PlacementNode::Cursor(Cursor),
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
         assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
     }
 }

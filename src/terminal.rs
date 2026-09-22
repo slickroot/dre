@@ -113,7 +113,11 @@ pub(crate) fn install_resize_pipe() -> io::Result<RawFd> {
     Ok(read_raw_fd)
 }
 
-pub(crate) fn poll_read(fd: RawFd, resize_fd: RawFd, timeout_ms: u16) -> io::Result<Option<String>> {
+pub(crate) fn poll_read(
+    fd: RawFd,
+    resize_fd: RawFd,
+    timeout_ms: u16,
+) -> io::Result<Option<String>> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
     let resize_borrowed = unsafe { BorrowedFd::borrow_raw(resize_fd) };
     let mut fds = [
