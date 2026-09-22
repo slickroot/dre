@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::diagram::palette;
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
-use crate::state::State;
+use crate::state::{Mode, State};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -221,6 +221,15 @@ impl Screen {
 
 fn draw_cursor(screen: &mut Screen, placement: &Placement) {
     screen.write(placement.x, placement.y, CURSOR);
+}
+
+#[allow(dead_code)]
+fn status_text(mode: &Mode) -> String {
+    match mode {
+        Mode::Insert => "EDITING".into(),
+        Mode::Command => "COMMANDING".into(),
+        Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
+    }
 }
 
 pub(crate) struct TerminalRenderer {
@@ -1215,6 +1224,24 @@ mod tests {
     }
 
     #[test]
+    fn status_text_for_insert_mode_is_editing() {
+        assert_eq!(status_text(&Mode::Insert), "EDITING");
+    }
+
+    #[test]
+    fn status_text_for_command_mode_is_commanding() {
+        assert_eq!(status_text(&Mode::Command), "COMMANDING");
+    }
+
+    #[test]
+    fn status_text_for_save_prompt_mode_shows_the_filename_and_cursor() {
+        let mode = Mode::SavePrompt {
+            filename: "diagram.dre".to_string(),
+        };
+        assert_eq!(status_text(&mode), format!("Save as: diagram.dre{CURSOR}"));
+    }
+
+    #[test]
     fn on_resize_moves_the_status_line_to_the_new_last_row() {
         let mut r = renderer_on(terminal(5, 4, 1, 1));
         r.on_resize(terminal(5, 9, 1, 1));
@@ -1928,7 +1955,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
-    fn status_text(terminal: Terminal, text: &str) -> String {
+    fn status_line_text(terminal: Terminal, text: &str) -> String {
         let position = format!("\x1b[{};1H", terminal.rows);
         status(terminal, Some(text))
             .strip_prefix(&position)
@@ -1939,14 +1966,14 @@ mod tests {
     #[test]
     fn the_status_line_shows_the_text_as_given() {
         let t = terminal(5, 2, 1, 1);
-        assert_eq!(status_text(t, "hello"), "hello");
+        assert_eq!(status_line_text(t, "hello"), "hello");
     }
 
     #[test]
     fn the_status_line_is_padded_to_the_terminal_width() {
         let t = terminal(8, 2, 1, 1);
         assert_eq!(
-            status_text(t, "hi"),
+            status_line_text(t, "hi"),
             format!("hi{}", BLANK.to_string().repeat((t.cols - 2) as usize))
         );
     }
@@ -1954,7 +1981,7 @@ mod tests {
     #[test]
     fn the_status_line_is_cut_to_the_terminal_width() {
         let t = terminal(3, 2, 1, 1);
-        assert_eq!(status_text(t, "hello"), "hel");
+        assert_eq!(status_line_text(t, "hello"), "hel");
     }
 
     #[test]
