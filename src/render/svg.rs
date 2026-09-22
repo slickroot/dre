@@ -1033,7 +1033,9 @@ mod tests {
 
     fn rendered(doc: &Document) -> String {
         let mut out = Vec::new();
-        SvgRenderer::default().render(doc, &mut out).unwrap();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        SvgRenderer::default().render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
