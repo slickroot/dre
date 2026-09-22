@@ -235,10 +235,6 @@ impl TerminalRenderer {
         TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
-    // Rounded cell_width/cell_height can drift slightly between probes of
-    // the same session (ws_ypixel/rows does not always divide evenly), so
-    // only cols/rows are adopted here; the original cell pixel size is kept
-    // so cached sprites (rasterized at that size) stay valid.
     pub(crate) fn on_resize(&mut self, terminal: Terminal) {
         self.terminal.cols = terminal.cols;
         self.terminal.rows = terminal.rows;
