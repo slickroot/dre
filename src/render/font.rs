@@ -22,8 +22,18 @@ impl GlyphCache {
 
         // Iosevka is monospace, so every glyph shares one advance width: pick the
         // pixel size that makes that advance width equal cell_width, once, up front.
+        // Also cap it so the font's full ascent+descent fits within cell_height,
+        // otherwise descenders (g, q, y, p, j) get clipped at the bottom of the cell.
         let reference_metrics = font.metrics('M', REFERENCE_PX_SIZE);
-        let px_size = REFERENCE_PX_SIZE * cell_width as f32 / reference_metrics.advance_width;
+        let width_px_size = REFERENCE_PX_SIZE * cell_width as f32 / reference_metrics.advance_width;
+
+        let reference_line_metrics = font
+            .horizontal_line_metrics(REFERENCE_PX_SIZE)
+            .expect("Iosevka must provide horizontal line metrics");
+        let reference_line_height = reference_line_metrics.ascent - reference_line_metrics.descent;
+        let height_px_size = REFERENCE_PX_SIZE * cell_height as f32 / reference_line_height;
+
+        let px_size = width_px_size.min(height_px_size);
 
         let line_metrics = font
             .horizontal_line_metrics(px_size)
@@ -159,6 +169,21 @@ mod tests {
         let first = cache.glyph('B').pixels.clone();
         let second = cache.glyph('B').pixels.clone();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_descender_is_not_clipped_at_the_bottom_of_the_cell() {
+        let cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let (_metrics, bitmap) = cache.font.rasterize('g', cache.px_size);
+        let raw_coverage: u32 = bitmap.iter().map(|&byte| byte as u32).sum();
+        assert!(
+            raw_coverage > 0,
+            "test font must actually rasterize 'g' with some ink"
+        );
+
+        let canvas = cache.rasterize('g');
+        let placed_coverage: u32 = canvas.pixels.chunks(4).map(|pixel| pixel[3] as u32).sum();
+        assert_eq!(placed_coverage, raw_coverage);
     }
 
     #[test]
