@@ -1,4 +1,90 @@
-use crate::canvas::{Rgba, Shape};
+use std::collections::HashMap;
+
+use crate::canvas::{Canvas, Rgba, Shape};
+use crate::render::{OPAQUE, PLAIN_COLOUR};
+
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
+const REFERENCE_PX_SIZE: f32 = 100.0;
+
+pub(super) struct GlyphCache {
+    font: fontdue::Font,
+    cache: HashMap<char, Canvas>,
+    cell_width: i64,
+    cell_height: i64,
+    px_size: f32,
+    baseline_row: i64,
+}
+
+impl GlyphCache {
+    pub(super) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
+        let font = fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default())
+            .expect("bundled Iosevka font must parse");
+
+        // Iosevka is monospace, so every glyph shares one advance width: pick the
+        // pixel size that makes that advance width equal cell_width, once, up front.
+        let reference_metrics = font.metrics('M', REFERENCE_PX_SIZE);
+        let px_size = REFERENCE_PX_SIZE * cell_width as f32 / reference_metrics.advance_width;
+
+        let line_metrics = font
+            .horizontal_line_metrics(px_size)
+            .expect("Iosevka must provide horizontal line metrics");
+        let baseline_row = line_metrics.ascent.round() as i64;
+
+        GlyphCache {
+            font,
+            cache: HashMap::new(),
+            cell_width,
+            cell_height,
+            px_size,
+            baseline_row,
+        }
+    }
+
+    pub(super) fn glyph(&mut self, ch: char) -> &Canvas {
+        if !self.cache.contains_key(&ch) {
+            let canvas = self.rasterize(ch);
+            self.cache.insert(ch, canvas);
+        }
+        self.cache.get(&ch).unwrap()
+    }
+
+    fn rasterize(&self, ch: char) -> Canvas {
+        let (metrics, bitmap) = self.font.rasterize(ch, self.px_size);
+
+        let dest_x0 = metrics.xmin as i64;
+        let dest_y0 = self.baseline_row - metrics.ymin as i64 - metrics.height as i64;
+
+        let mut coverage = vec![0u8; (self.cell_width * self.cell_height) as usize];
+        for row in 0..metrics.height as i64 {
+            let dest_y = dest_y0 + row;
+            if dest_y < 0 || dest_y >= self.cell_height {
+                continue;
+            }
+            for col in 0..metrics.width as i64 {
+                let dest_x = dest_x0 + col;
+                if dest_x < 0 || dest_x >= self.cell_width {
+                    continue;
+                }
+                let source_index = (row * metrics.width as i64 + col) as usize;
+                let dest_index = (dest_y * self.cell_width + dest_x) as usize;
+                coverage[dest_index] = bitmap[source_index];
+            }
+        }
+
+        let (r, g, b) = PLAIN_COLOUR;
+        let ink: Rgba = [r, g, b, OPAQUE];
+        Canvas::fill(
+            self.cell_width,
+            self.cell_height,
+            &GlyphShape {
+                width: self.cell_width,
+                height: self.cell_height,
+                coverage,
+                ink,
+            },
+        )
+    }
+}
 
 pub(super) struct GlyphShape {
     pub(super) width: i64,
@@ -25,7 +111,7 @@ impl Shape for GlyphShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::OPAQUE;
+    use crate::render::{CELL_HEIGHT, CELL_WIDTH, OPAQUE};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
 
@@ -65,5 +151,23 @@ mod tests {
         let mut expected = INK;
         expected[3] = (OPAQUE as u16 * 128 / 255) as u8;
         assert_eq!(shape.colour_at(0, 0), Some(expected));
+    }
+
+    #[test]
+    fn the_same_character_rasterized_twice_is_pixel_identical() {
+        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let first = cache.glyph('B').pixels.clone();
+        let second = cache.glyph('B').pixels.clone();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn every_glyph_canvas_is_exactly_one_cell() {
+        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        for ch in ['M', 'i'] {
+            let canvas = cache.glyph(ch);
+            assert_eq!(canvas.width, CELL_WIDTH);
+            assert_eq!(canvas.height, CELL_HEIGHT);
+        }
     }
 }
