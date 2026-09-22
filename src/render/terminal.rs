@@ -235,6 +235,10 @@ impl TerminalRenderer {
         TerminalRenderer { terminal, cache: std::collections::HashMap::new() }
     }
 
+    pub(crate) fn on_resize(&mut self, terminal: Terminal) {
+        self.terminal = terminal;
+    }
+
     pub(crate) fn status_line(&mut self, text: Option<&str>, out: &mut impl Write) -> io::Result<()> {
         let Some(text) = text else {
             return Ok(());
@@ -923,6 +927,42 @@ mod tests {
         );
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
+    }
+
+    #[test]
+    fn on_resize_re_centres_the_next_render_on_the_new_size() {
+        let leaf = node("hi");
+        let boxes = vec![leaf.clone()];
+        let doc = Document { boxes, selected: None };
+        let mut r = renderer_on(terminal(20, 10, 1, 1));
+        rendered(&mut r, &doc);
+        let (cols, rows) = (40, 20);
+        r.on_resize(terminal(cols, rows, 1, 1));
+        let frame = rendered(&mut r, &doc);
+        let lines = lines_of(&frame);
+        let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
+        let top = (rows - crate::layout::BOX_HEIGHT).div_euclid(2);
+        let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
+        let label_row = top + crate::layout::BOX_HEIGHT / 2;
+        assert_eq!(&lines[label_row as usize][label_x as usize..label_x as usize + 2], "hi");
+    }
+
+    #[test]
+    fn on_resize_moves_the_status_line_to_the_new_last_row() {
+        let mut r = renderer_on(terminal(5, 4, 1, 1));
+        r.on_resize(terminal(5, 9, 1, 1));
+        let mut out = Vec::new();
+        r.status_line(Some("hi"), &mut out).unwrap();
+        assert!(String::from_utf8(out).unwrap().starts_with("\x1b[9;1H"));
+    }
+
+    #[test]
+    fn on_resize_leaves_the_sprite_cache_untouched() {
+        let mut r = renderer_on(terminal(40, 20, 2, 4));
+        sprites(&mut r, &[box_placement(&box_node(None, false, false), 0, 0, 4, 3)]);
+        assert_eq!(r.cache.len(), 1);
+        r.on_resize(terminal(80, 40, 2, 4));
+        assert_eq!(r.cache.len(), 1);
     }
 
     fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
