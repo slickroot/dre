@@ -19,10 +19,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
-    let (resize_read_fd, resize_write_fd) = nix::unistd::pipe().map_err(io::Error::from)?;
-    let resize_fd = resize_read_fd.as_raw_fd();
-    std::mem::forget(resize_read_fd);
-    std::mem::forget(resize_write_fd);
+    let resize_fd = terminal::install_resize_pipe()?;
     let state = edit(
         state,
         || terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
@@ -57,6 +54,7 @@ fn edit(
                 state.save_to = None;
                 break;
             }
+            Some(key) if key == terminal::RESIZE => renderer.on_resize(terminal::probe()?),
             Some(key) => state = handle_key(state, &key),
             None => state = state::hide_idle_cursor(state),
         }
@@ -262,6 +260,16 @@ mod tests {
     fn an_interrupt_clears_where_to_save() {
         let (result, _) = run(state_saving_to("a.dre"), INTERRUPT);
         assert_eq!(result.unwrap().save_to, None);
+    }
+
+    #[test]
+    fn a_resize_key_re_probes_the_terminal_and_propagates_a_failed_probe() {
+        let (result, _) = run_script(state_saving_to("a.dre"), vec![Some(terminal::RESIZE), Some("q")]);
+        assert!(
+            result.is_err(),
+            "terminal::probe performs a real ioctl against stdout, which is not a TTY \
+             in the test process, so the RESIZE arm's re-probe is expected to fail here"
+        );
     }
 
     #[test]
