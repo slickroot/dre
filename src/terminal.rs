@@ -55,10 +55,19 @@ pub(crate) struct Terminal {
     pub(crate) cell_height: i64,
 }
 
+fn retry_on_eintr<T>(mut syscall: impl FnMut() -> nix::Result<T>) -> io::Result<T> {
+    loop {
+        match syscall() {
+            Err(nix::errno::Errno::EINTR) => continue,
+            result => return result.map_err(io::Error::from),
+        }
+    }
+}
+
 pub(crate) fn probe() -> io::Result<Terminal> {
     let stdout_fd = io::stdout().as_raw_fd();
     let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
-    unsafe { terminal_window_size(stdout_fd, &mut winsize) }.map_err(io::Error::from)?;
+    retry_on_eintr(|| unsafe { terminal_window_size(stdout_fd, &mut winsize) })?;
     Ok(measure(winsize))
 }
 
@@ -111,12 +120,7 @@ pub(crate) fn poll_read(fd: RawFd, resize_fd: RawFd, timeout_ms: u16) -> io::Res
         PollFd::new(borrowed, PollFlags::POLLIN),
         PollFd::new(resize_borrowed, PollFlags::POLLIN),
     ];
-    let ready = loop {
-        match poll(&mut fds, PollTimeout::from(timeout_ms)) {
-            Err(nix::errno::Errno::EINTR) => continue,
-            result => break result.map_err(io::Error::from)?,
-        }
-    };
+    let ready = retry_on_eintr(|| poll(&mut fds, PollTimeout::from(timeout_ms)))?;
     if ready == 0 {
         return Ok(None);
     }
@@ -125,11 +129,11 @@ pub(crate) fn poll_read(fd: RawFd, resize_fd: RawFd, timeout_ms: u16) -> io::Res
         .is_some_and(|events| events.contains(PollFlags::POLLIN))
     {
         let mut byte = [0u8; 1];
-        read(resize_borrowed, &mut byte).map_err(io::Error::from)?;
+        retry_on_eintr(|| read(resize_borrowed, &mut byte))?;
         return Ok(Some(RESIZE.to_string()));
     }
     let mut byte = [0u8; 1];
-    let n = read(borrowed, &mut byte).map_err(io::Error::from)?;
+    let n = retry_on_eintr(|| read(borrowed, &mut byte))?;
     if n == 0 {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
     }
