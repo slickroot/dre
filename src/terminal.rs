@@ -1,9 +1,11 @@
 use nix::libc;
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use nix::sys::signal::{self, SaFlags, SigHandler, SigSet, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
 use nix::unistd::read;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::sync::atomic::{AtomicI32, Ordering};
 
 nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
 
@@ -69,6 +71,37 @@ fn measure(winsize: libc::winsize) -> Terminal {
     }
 }
 
+static RESIZE_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
+
+// Signal-safe: only touches the static fd and makes a raw async-signal-safe write(2) call.
+#[allow(dead_code)]
+extern "C" fn handle_sigwinch(_: libc::c_int) {
+    let fd = RESIZE_WRITE_FD.load(Ordering::Relaxed);
+    if fd >= 0 {
+        let byte = [0u8; 1];
+        unsafe {
+            libc::write(fd, byte.as_ptr() as *const libc::c_void, 1);
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn install_resize_pipe() -> io::Result<RawFd> {
+    let (read_fd, write_fd) = nix::unistd::pipe().map_err(io::Error::from)?;
+    let write_raw_fd = write_fd.as_raw_fd();
+    RESIZE_WRITE_FD.store(write_raw_fd, Ordering::Relaxed);
+    std::mem::forget(write_fd);
+    let action = signal::SigAction::new(
+        SigHandler::Handler(handle_sigwinch),
+        SaFlags::empty(),
+        SigSet::empty(),
+    );
+    unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.map_err(io::Error::from)?;
+    let read_raw_fd = read_fd.as_raw_fd();
+    std::mem::forget(read_fd);
+    Ok(read_raw_fd)
+}
+
 pub(crate) fn poll_read(fd: RawFd, timeout_ms: u16) -> io::Result<Option<String>> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
     let mut fds = [PollFd::new(borrowed, PollFlags::POLLIN)];
@@ -90,7 +123,12 @@ mod tests {
     use std::io;
 
     fn winsize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) -> libc::winsize {
-        libc::winsize { ws_col: cols, ws_row: rows, ws_xpixel: xpixel, ws_ypixel: ypixel }
+        libc::winsize {
+            ws_col: cols,
+            ws_row: rows,
+            ws_xpixel: xpixel,
+            ws_ypixel: ypixel,
+        }
     }
 
     #[test]
