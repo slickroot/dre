@@ -81,10 +81,6 @@ fn overflow_delta(_box_left: i64, box_right: i64, scroll_x: i64, cols: i64) -> O
     }
 }
 
-// `layout()` emits a `Node` placement (the box's real edges) and a `Label` placement
-// (the centred label, tagged with the box's `Path`) for each box in the same relative
-// order, then groups all `Node`s before all non-`Node`s while preserving that order
-// within each group — so zipping the two filtered groups pairs each box with its label.
 fn selected_box_edges(doc: &Document) -> Option<(i64, i64)> {
     let selected = doc.selected.as_ref()?;
     let placements = layout(&doc.boxes);
