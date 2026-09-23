@@ -35,6 +35,7 @@ pub struct State {
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
     pub(crate) scroll_x: i64,
+    pub(crate) dirty: bool,
 }
 
 pub type EditorInfo = HashMap<String, String>;
@@ -70,6 +71,7 @@ impl Default for State {
             new_file: false,
             pending_count: None,
             scroll_x: 0,
+            dirty: false,
         }
     }
 }
@@ -107,6 +109,7 @@ pub(crate) fn hide_idle_cursor(mut state: State) -> State {
 
 pub(crate) fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
+    state.dirty = true;
     state
 }
 
@@ -220,6 +223,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         new_file: false,
         pending_count: None,
         scroll_x: 0,
+        dirty: false,
     }
 }
 
@@ -227,6 +231,19 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
+
+    #[test]
+    fn a_default_state_is_not_dirty() {
+        assert!(!State::default().dirty);
+    }
+
+    #[test]
+    fn snapshot_marks_the_state_as_dirty() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert!(!state.dirty);
+        let result = snapshot(state);
+        assert!(result.dirty);
+    }
 
     #[test]
     fn load_selects_the_first_box() {
