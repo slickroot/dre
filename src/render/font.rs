@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::canvas::{Canvas, Rgba, Shape};
-use crate::render::{OPAQUE, PLAIN_COLOUR};
+use crate::render::{colour, OPAQUE};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
@@ -82,7 +82,7 @@ impl GlyphCache {
             }
         }
 
-        let (r, g, b) = PLAIN_COLOUR;
+        let (r, g, b) = colour(None);
         let ink: Rgba = [r, g, b, if hint { OPAQUE / 4 } else { OPAQUE }];
         Canvas::fill(
             self.cell_width,
@@ -197,6 +197,19 @@ mod tests {
         let canvas = cache.rasterize('g', false);
         let placed_coverage: u32 = canvas.pixels.chunks(4).map(|pixel| pixel[3] as u32).sum();
         assert_eq!(placed_coverage, raw_coverage);
+    }
+
+    #[test]
+    fn glyph_ink_matches_the_default_foreground_colour() {
+        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let canvas = cache.glyph('M', false);
+        let pixel = canvas
+            .pixels
+            .chunks(4)
+            .find(|pixel| pixel[3] == OPAQUE)
+            .expect("a fully opaque pixel must exist in a rasterized 'M'");
+        let (r, g, b) = colour(None);
+        assert_eq!(&pixel[0..3], [r, g, b]);
     }
 
     #[test]
