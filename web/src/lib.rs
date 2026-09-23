@@ -165,6 +165,6 @@ mod tests {
 
         session.press_key("b");
 
-        assert_eq!(session.status_line_right(), "1 boxes . dre");
+        assert_eq!(session.status_line_right(), "1 boxes • dre");
     }
 }
