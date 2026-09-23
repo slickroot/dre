@@ -32,19 +32,19 @@ pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
     &mut children_at(boxes, &path.ancestors)[path.index]
 }
 
-const PALETTE: [(u8, u8, u8); 6] = [
-    (255, 190, 11),
-    (251, 86, 7),
-    (255, 0, 110),
-    (131, 56, 236),
-    (58, 134, 255),
-    (232, 234, 237),
+const PALETTE: [(&str, (u8, u8, u8)); 6] = [
+    ("lime", (0xC6, 0xFF, 0x00)),
+    ("mint", (0x39, 0xFF, 0xB0)),
+    ("violet", (0xB3, 0x88, 0xFF)),
+    ("pink", (0xFF, 0x3D, 0xF5)),
+    ("amber", (0xFF, 0xB0, 0x20)),
+    ("foreground", (0xE8, 0xEA, 0xED)),
 ];
 
 pub(crate) const FOREGROUND: u8 = 5;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
-    PALETTE.get(index as usize).copied()
+    PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
 }
 
 pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {

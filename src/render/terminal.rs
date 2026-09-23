@@ -632,7 +632,10 @@ mod tests {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), true);
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
-        assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (131, 27, 25, OPAQUE));
+        assert_eq!(
+            pixel_at(&pixels, CORNER_SIZE, 20, 4),
+            (55, 108, 108, OPAQUE)
+        );
     }
 
     #[test]
