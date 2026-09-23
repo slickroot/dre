@@ -6,11 +6,11 @@ use crate::render::{colour, OPAQUE};
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
-pub(super) trait GlyphSource {
+pub(crate) trait GlyphSource {
     fn glyph(&mut self, ch: char, hint: bool) -> &Canvas;
 }
 
-pub(super) struct GlyphCache {
+pub(crate) struct GlyphCache {
     font: fontdue::Font,
     cache: HashMap<(char, bool), Canvas>,
     cell_width: i64,
@@ -20,7 +20,7 @@ pub(super) struct GlyphCache {
 }
 
 impl GlyphCache {
-    pub(super) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
+    pub(crate) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
         let font = fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default())
             .expect("bundled Iosevka font must parse");
 
@@ -126,7 +126,7 @@ impl Shape for GlyphShape {
 }
 
 #[cfg(test)]
-pub(super) struct FakeGlyphSource {
+pub(crate) struct FakeGlyphSource {
     cell_width: i64,
     cell_height: i64,
     blank: Canvas,
@@ -134,7 +134,7 @@ pub(super) struct FakeGlyphSource {
 
 #[cfg(test)]
 impl FakeGlyphSource {
-    pub(super) fn new(cell_width: i64, cell_height: i64) -> Self {
+    pub(crate) fn new(cell_width: i64, cell_height: i64) -> Self {
         let pixels = vec![0u8; (cell_width * cell_height) as usize * 4];
         FakeGlyphSource {
             cell_width,

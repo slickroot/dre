@@ -10,6 +10,10 @@ mod shapes;
 mod svg;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use font::FakeGlyphSource;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use font::GlyphCache;
 pub use svg::SvgRenderer;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use terminal::TerminalRenderer;
