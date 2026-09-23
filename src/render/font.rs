@@ -6,6 +6,10 @@ use crate::render::{colour, OPAQUE};
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
+pub(super) trait GlyphSource {
+    fn glyph(&mut self, ch: char, hint: bool) -> &Canvas;
+}
+
 pub(super) struct GlyphCache {
     font: fontdue::Font,
     cache: HashMap<(char, bool), Canvas>,
@@ -50,15 +54,6 @@ impl GlyphCache {
         }
     }
 
-    pub(super) fn glyph(&mut self, ch: char, hint: bool) -> &Canvas {
-        let key = (ch, hint);
-        if !self.cache.contains_key(&key) {
-            let canvas = self.rasterize(ch, hint);
-            self.cache.insert(key, canvas);
-        }
-        self.cache.get(&key).unwrap()
-    }
-
     fn rasterize(&self, ch: char, hint: bool) -> Canvas {
         let (metrics, bitmap) = self.font.rasterize(ch, self.px_size);
 
@@ -97,6 +92,17 @@ impl GlyphCache {
     }
 }
 
+impl GlyphSource for GlyphCache {
+    fn glyph(&mut self, ch: char, hint: bool) -> &Canvas {
+        let key = (ch, hint);
+        if !self.cache.contains_key(&key) {
+            let canvas = self.rasterize(ch, hint);
+            self.cache.insert(key, canvas);
+        }
+        self.cache.get(&key).unwrap()
+    }
+}
+
 pub(super) struct GlyphShape {
     pub(super) width: i64,
     pub(super) height: i64,
@@ -116,6 +122,36 @@ impl Shape for GlyphShape {
         let mut colour = self.ink;
         colour[3] = (self.ink[3] as u16 * coverage as u16 / 255) as u8;
         Some(colour)
+    }
+}
+
+#[cfg(test)]
+pub(super) struct FakeGlyphSource {
+    cell_width: i64,
+    cell_height: i64,
+    blank: Canvas,
+}
+
+#[cfg(test)]
+impl FakeGlyphSource {
+    pub(super) fn new(cell_width: i64, cell_height: i64) -> Self {
+        let pixels = vec![0u8; (cell_width * cell_height) as usize * 4];
+        FakeGlyphSource {
+            cell_width,
+            cell_height,
+            blank: Canvas {
+                pixels,
+                width: cell_width,
+                height: cell_height,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+impl GlyphSource for FakeGlyphSource {
+    fn glyph(&mut self, _ch: char, _hint: bool) -> &Canvas {
+        &self.blank
     }
 }
 
