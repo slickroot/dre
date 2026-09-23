@@ -329,7 +329,7 @@ impl TerminalRenderer {
             if !screen.shows(&char_placement) {
                 continue;
             }
-            let glyph = self.glyph_cache.glyph(character);
+            let glyph = self.glyph_cache.glyph(character, label.hint);
             screen.place(glyph, &char_placement);
         }
     }
