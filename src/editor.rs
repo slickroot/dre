@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
 use crate::render::{GlyphCache, Renderer, TerminalRenderer};
-use crate::state::{handle_key, State};
+use crate::state::{handle_key, insert_hint_box, remove_hint_box, State};
 use crate::terminal::RawScreen;
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
@@ -47,7 +47,9 @@ fn edit(
 ) -> io::Result<State> {
     let mut state = state;
     while state.running {
+        insert_hint_box(&mut state);
         renderer.render(&state, output)?;
+        remove_hint_box(&mut state);
         output.flush()?;
 
         match next_key()? {
@@ -431,5 +433,42 @@ mod tests {
         let (_, right) = selected_box_edges(&state.doc).unwrap();
         let visible_right_edge = right - state.scroll_x;
         assert_eq!(visible_right_edge, renderer().columns() - 1);
+    }
+
+    fn insert_mode_on_box_a() -> State {
+        let selected = Path {
+            ancestors: vec![],
+            index: 0,
+        };
+        let mut state = new_state(vec![diagram::node("a")], Mode::Insert, Some(selected));
+        state.save_to = Some("a.dre".to_string());
+        state
+    }
+
+    fn frame_after_home(state: &State, hinted: bool) -> String {
+        let mut state = state.clone();
+        if hinted {
+            insert_hint_box(&mut state);
+        }
+        let mut output = Vec::new();
+        renderer().render(&state, &mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        output.split("\x1b[H").nth(1).unwrap().to_string()
+    }
+
+    #[test]
+    fn insert_mode_paints_the_hint_before_any_text_is_typed_and_while_typing() {
+        let (result, output) = run_script(insert_mode_on_box_a(), vec![Some("x"), Some(INTERRUPT)]);
+        let output = String::from_utf8(output).unwrap();
+        let frames: Vec<&str> = output.split("\x1b[H").skip(1).collect();
+
+        let before_typing = insert_mode_on_box_a();
+        assert_eq!(frames[0], frame_after_home(&before_typing, true));
+        assert_ne!(frames[0], frame_after_home(&before_typing, false));
+
+        let after_typing = handle_key(before_typing, "x");
+        assert_eq!(frames[1], frame_after_home(&after_typing, true));
+        assert_ne!(frames[1], frame_after_home(&after_typing, false));
+        assert!(result.unwrap().doc.boxes[0].children.is_empty());
     }
 }
