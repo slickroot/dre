@@ -225,12 +225,14 @@ fn cycle_colour(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.colour = next_colour(node.colour);
     state.doc.selected = Some(path);
+    state.colour_overlay = true;
     state
 }
 
 fn cycle_siblings_colour(mut state: State, path: Path) -> State {
     colour_row(&mut state.doc.boxes, &path);
     state.doc.selected = Some(path);
+    state.colour_overlay = true;
     state
 }
 
@@ -286,6 +288,7 @@ fn reselect(mut state: State, selected: Option<Path>) -> State {
 }
 
 pub(crate) fn reduce(mut state: State, command: Command) -> State {
+    state.colour_overlay = false;
     let count = state.pending_count.take().unwrap_or(1);
     let depth = match &state.doc.selected {
         None => 0,
@@ -1271,6 +1274,76 @@ mod tests {
         let result = handle_key(state, "I");
         assert_eq!(result.mode, Mode::Insert);
         assert_eq!(result.doc.boxes, vec![node("a"), node(PAD)]);
+    }
+
+    #[test]
+    fn lowercase_c_opens_the_colour_overlay() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let result = handle_key(state, "c");
+        assert!(result.colour_overlay);
+    }
+
+    #[test]
+    fn capital_c_opens_the_colour_overlay() {
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let state = new_state(
+            boxes,
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![0],
+                index: 1,
+            }),
+        );
+        let result = handle_key(state, "C");
+        assert!(result.colour_overlay);
+    }
+
+    #[test]
+    fn an_unrelated_command_closes_the_colour_overlay() {
+        let state = new_state(
+            vec![node("a"), node("b")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        assert!(opened.colour_overlay);
+
+        let result = handle_key(opened, "j");
+        assert!(!result.colour_overlay);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn pressing_c_again_keeps_the_overlay_open() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        assert!(opened.colour_overlay);
+
+        let result = handle_key(opened, "c");
+        assert!(result.colour_overlay);
     }
 
     #[test]

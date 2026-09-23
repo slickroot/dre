@@ -35,6 +35,7 @@ pub struct State {
     pub(crate) pending_count: Option<usize>,
     pub(crate) scroll_x: i64,
     pub(crate) dirty: bool,
+    pub(crate) colour_overlay: bool,
 }
 
 const CURSOR: char = '\u{2588}';
@@ -87,6 +88,7 @@ impl Default for State {
             pending_count: None,
             scroll_x: 0,
             dirty: false,
+            colour_overlay: false,
         }
     }
 }
@@ -239,6 +241,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         pending_count: None,
         scroll_x: 0,
         dirty: false,
+        colour_overlay: false,
     }
 }
 
