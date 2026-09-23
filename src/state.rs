@@ -4,6 +4,7 @@ use crate::insert_mode;
 use crate::save_prompt_mode;
 
 pub(crate) const PAD: &str = " ";
+pub(crate) const INSERT_HINT_LABEL: &str = "Enter to add a child";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
 
 #[allow(dead_code)]
@@ -186,6 +187,23 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     };
     state.mode = Mode::Insert;
     state
+}
+
+pub(crate) fn insert_hint_box(state: &mut State) {
+    if let (Mode::Insert, Some(path)) = (&state.mode, &state.doc.selected) {
+        let hint = Node {
+            label: INSERT_HINT_LABEL.into(),
+            hint: true,
+            ..Default::default()
+        };
+        append(&mut at(&mut state.doc.boxes, path).children, hint);
+    }
+}
+
+pub(crate) fn remove_hint_box(state: &mut State) {
+    if let (Mode::Insert, Some(path)) = (&state.mode, &state.doc.selected) {
+        at(&mut state.doc.boxes, path).children.pop();
+    }
 }
 
 pub(crate) fn handle_key(mut state: State, key: &str) -> State {
@@ -778,5 +796,56 @@ mod tests {
         let line = status_line(&state);
         assert_eq!(line.left, format!("Save as: diagram.dre{CURSOR}"));
         assert_eq!(line.right, String::new());
+    }
+
+    fn selected_root() -> Option<Path> {
+        Some(Path {
+            ancestors: vec![],
+            index: 0,
+        })
+    }
+
+    #[test]
+    fn insert_hint_box_appends_a_hint_as_the_last_child_in_insert_mode() {
+        let mut state = new_state(
+            vec![node_with_children("a", vec![node("b")])],
+            Mode::Insert,
+            selected_root(),
+        );
+        insert_hint_box(&mut state);
+        let children = &state.doc.boxes[0].children;
+        assert_eq!(children.len(), 2);
+        let hint = children.last().unwrap();
+        assert!(hint.hint);
+        assert_eq!(hint.label, INSERT_HINT_LABEL);
+    }
+
+    #[test]
+    fn insert_then_remove_hint_box_leaves_the_document_unchanged() {
+        let boxes = vec![node_with_children("a", vec![node("b")]), node("c")];
+        let mut state = new_state(boxes.clone(), Mode::Insert, selected_root());
+        insert_hint_box(&mut state);
+        remove_hint_box(&mut state);
+        assert_eq!(state.doc.boxes, boxes);
+    }
+
+    #[test]
+    fn hint_box_functions_do_nothing_outside_insert_mode() {
+        let boxes = vec![node_with_children("a", vec![node("b")])];
+        let mut state = new_state(boxes.clone(), Mode::Command, selected_root());
+        insert_hint_box(&mut state);
+        assert_eq!(state.doc.boxes, boxes);
+        remove_hint_box(&mut state);
+        assert_eq!(state.doc.boxes, boxes);
+    }
+
+    #[test]
+    fn hint_box_functions_do_nothing_without_a_selection() {
+        let boxes = vec![node_with_children("a", vec![node("b")])];
+        let mut state = new_state(boxes.clone(), Mode::Insert, None);
+        insert_hint_box(&mut state);
+        assert_eq!(state.doc.boxes, boxes);
+        remove_hint_box(&mut state);
+        assert_eq!(state.doc.boxes, boxes);
     }
 }
