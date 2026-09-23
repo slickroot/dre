@@ -310,10 +310,14 @@ impl TerminalRenderer {
 
     fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let crate::state::StatusLine { left, right } = status_line(state);
+        let join = |segments: Vec<crate::state::Segment>| -> String {
+            segments.iter().map(|s| s.text.as_str()).collect()
+        };
+        let (left, right) = (join(left), join(right));
         let Terminal { cols, rows, .. } = self.terminal;
         let padding = (cols as usize)
-            .saturating_sub(left.len())
-            .saturating_sub(right.len());
+            .saturating_sub(left.chars().count())
+            .saturating_sub(right.chars().count());
         let assembled = format!("{left}{}{right}", BLANK.to_string().repeat(padding));
         let line: String = assembled
             .chars()
@@ -2173,9 +2177,10 @@ mod tests {
         let mut r = renderer_on(terminal(40, 2, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
         let text = status_line_text(&mut r, &state);
-        assert!(text.starts_with("COMMANDING | diagram.dre"));
-        assert!(text.ends_with("0 boxes . dre"));
-        let middle = &text["COMMANDING | diagram.dre".len()..text.len() - "0 boxes . dre".len()];
+        assert!(text.starts_with(" COMMANDING  \u{2502} diagram.dre"));
+        assert!(text.ends_with("0 boxes \u{2022} dre"));
+        let middle = &text
+            [" COMMANDING  \u{2502} diagram.dre".len()..text.len() - "0 boxes \u{2022} dre".len()];
         assert!(!middle.is_empty());
         assert!(middle.chars().all(|c| c == BLANK));
     }
@@ -2186,7 +2191,7 @@ mod tests {
         let mut state = crate::state::new_state(vec![], Mode::Command, None);
         state.dirty = true;
         let text = status_line_text(&mut r, &state);
-        assert!(text.starts_with("COMMANDING | diagram.dre[+]"));
+        assert!(text.starts_with(" COMMANDING  \u{2502} diagram.dre[+]"));
     }
 
     #[test]
@@ -2200,7 +2205,7 @@ mod tests {
     fn the_status_line_is_cut_to_the_terminal_width() {
         let mut r = renderer_on(terminal(3, 2, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line_text(&mut r, &state), "COM");
+        assert_eq!(status_line_text(&mut r, &state), " CO");
     }
 
     #[test]
@@ -2248,13 +2253,17 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_the_filename_being_typed_in_save_prompt_mode_with_an_empty_right_side() {
-        let mut r = renderer_on(terminal(30, 4, 1, 1));
+    fn render_shows_the_filename_being_typed_in_save_prompt_mode() {
+        let mut r = renderer_on(terminal(60, 4, 1, 1));
         let mode = Mode::SavePrompt {
             filename: "diagram.dre".to_string(),
         };
         let state = crate::state::new_state(vec![], mode, None);
-        let expected_left = crate::state::status_line(&state).left;
+        let expected_left: String = crate::state::status_line(&state)
+            .left
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         let text = status_line_text(&mut r, &state);
         assert!(text.starts_with(&expected_left));
         assert!(render_output(&mut r, &state).contains(&expected_left));
