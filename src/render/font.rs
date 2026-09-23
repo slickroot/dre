@@ -127,8 +127,6 @@ impl Shape for GlyphShape {
 
 #[cfg(test)]
 pub(crate) struct FakeGlyphSource {
-    cell_width: i64,
-    cell_height: i64,
     blank: Canvas,
 }
 
@@ -137,8 +135,6 @@ impl FakeGlyphSource {
     pub(crate) fn new(cell_width: i64, cell_height: i64) -> Self {
         let pixels = vec![0u8; (cell_width * cell_height) as usize * 4];
         FakeGlyphSource {
-            cell_width,
-            cell_height,
             blank: Canvas {
                 pixels,
                 width: cell_width,
