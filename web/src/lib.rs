@@ -91,11 +91,12 @@ impl WebSession {
         String::from_utf8(out).expect("SvgRenderer writes UTF-8")
     }
 
-    pub fn info(&self, key: &str) -> String {
-        dre::editor_info(self.session.borrow().state())
-            .get(key)
-            .cloned()
-            .unwrap_or_default()
+    pub fn status_line_left(&self) -> String {
+        dre::status_line(self.session.borrow().state()).left
+    }
+
+    pub fn status_line_right(&self) -> String {
+        dre::status_line(self.session.borrow().state()).right
     }
 }
 
@@ -132,41 +133,34 @@ mod tests {
     }
 
     #[test]
-    fn info_mode_starts_in_command_mode() {
+    fn status_line_left_starts_in_command_mode() {
         let session = session();
 
-        assert_eq!(session.info("mode"), "Command");
+        assert!(session.status_line_left().starts_with("COMMANDING"));
     }
 
     #[test]
-    fn info_mode_reflects_insert_mode_after_adding_a_box() {
+    fn status_line_left_reflects_insert_mode_after_adding_a_box() {
         let mut session = session();
 
         session.press_key("b");
 
-        assert_eq!(session.info("mode"), "Insert");
+        assert!(session.status_line_left().starts_with("EDITING"));
     }
 
     #[test]
-    fn info_box_count_starts_at_zero() {
+    fn status_line_right_starts_at_zero_boxes() {
         let session = session();
 
-        assert_eq!(session.info("box_count"), "0");
+        assert_eq!(session.status_line_right(), "0 boxes . dre");
     }
 
     #[test]
-    fn info_box_count_reflects_added_box() {
+    fn status_line_right_reflects_added_box() {
         let mut session = session();
 
         session.press_key("b");
 
-        assert_eq!(session.info("box_count"), "1");
-    }
-
-    #[test]
-    fn info_returns_empty_string_for_unrecognized_key() {
-        let session = session();
-
-        assert_eq!(session.info("unknown"), "");
+        assert_eq!(session.status_line_right(), "1 boxes . dre");
     }
 }
