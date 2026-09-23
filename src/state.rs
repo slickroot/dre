@@ -40,6 +40,12 @@ pub struct State {
 
 pub type EditorInfo = HashMap<String, String>;
 
+const CURSOR: char = '\u{2588}';
+
+fn count_boxes(nodes: &[Node]) -> usize {
+    nodes.iter().map(|n| 1 + count_boxes(&n.children)).sum()
+}
+
 pub fn editor_info(state: &State) -> EditorInfo {
     let mode = match &state.mode {
         Mode::Command => "Command",
@@ -48,15 +54,43 @@ pub fn editor_info(state: &State) -> EditorInfo {
     }
     .to_string();
 
-    fn count(nodes: &[Node]) -> usize {
-        nodes.iter().map(|n| 1 + count(&n.children)).sum()
-    }
-    let box_count = count(&state.doc.boxes).to_string();
+    let box_count = count_boxes(&state.doc.boxes).to_string();
 
     HashMap::from([
         ("mode".to_string(), mode),
         ("box_count".to_string(), box_count),
     ])
+}
+
+pub struct StatusLine {
+    pub left: String,
+    pub right: String,
+}
+
+pub fn status_line(state: &State) -> StatusLine {
+    match &state.mode {
+        Mode::SavePrompt { filename } => StatusLine {
+            left: format!("Save as: {filename}{CURSOR}"),
+            right: String::new(),
+        },
+        Mode::Command | Mode::Insert => {
+            let mode_text = match &state.mode {
+                Mode::Command => "COMMANDING",
+                Mode::Insert => "EDITING",
+                Mode::SavePrompt { .. } => unreachable!(),
+            };
+            let filename = state
+                .save_to
+                .clone()
+                .unwrap_or_else(|| DEFAULT_FILENAME.to_string());
+            let marker = if state.dirty { "[+]" } else { "" };
+            let box_count = count_boxes(&state.doc.boxes);
+            StatusLine {
+                left: format!("{mode_text} | {filename}{marker}"),
+                right: format!("{box_count} boxes . dre"),
+            }
+        }
+    }
 }
 
 impl Default for State {
@@ -725,5 +759,67 @@ mod tests {
             None,
         );
         assert_eq!(editor_info(&state)["box_count"], "3".to_string());
+    }
+
+    #[test]
+    fn status_line_shows_default_filename_in_command_mode() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line(&state).left, "COMMANDING | diagram.dre");
+    }
+
+    #[test]
+    fn status_line_marks_dirty_state_with_a_plus_marker() {
+        let mut state = new_state(vec![], Mode::Command, None);
+        state.dirty = true;
+        assert_eq!(status_line(&state).left, "COMMANDING | diagram.dre[+]");
+    }
+
+    #[test]
+    fn status_line_shows_the_save_to_path_as_is() {
+        let mut state = new_state(vec![], Mode::Command, None);
+        state.save_to = Some("/foo/bar.dre".to_string());
+        assert_eq!(status_line(&state).left, "COMMANDING | /foo/bar.dre");
+    }
+
+    #[test]
+    fn status_line_shows_editing_in_insert_mode() {
+        let state = new_state(vec![], Mode::Insert, None);
+        assert!(status_line(&state).left.starts_with("EDITING | "));
+    }
+
+    #[test]
+    fn status_line_shows_zero_boxes_when_empty() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line(&state).right, "0 boxes . dre");
+    }
+
+    #[test]
+    fn status_line_counts_nested_children_in_box_count() {
+        let state = new_state(
+            vec![node_with_children("a", vec![node("b"), node("c")])],
+            Mode::Command,
+            None,
+        );
+        assert_eq!(status_line(&state).right, "3 boxes . dre");
+    }
+
+    #[test]
+    fn status_line_always_pluralizes_box_count() {
+        let state = new_state(vec![node("a")], Mode::Command, None);
+        assert_eq!(status_line(&state).right, "1 boxes . dre");
+    }
+
+    #[test]
+    fn status_line_shows_save_prompt_text_and_empty_right() {
+        let state = new_state(
+            vec![],
+            Mode::SavePrompt {
+                filename: "diagram.dre".to_string(),
+            },
+            None,
+        );
+        let line = status_line(&state);
+        assert_eq!(line.left, format!("Save as: diagram.dre{CURSOR}"));
+        assert_eq!(line.right, String::new());
     }
 }
