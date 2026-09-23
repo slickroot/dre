@@ -4,10 +4,10 @@ use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::{palette, Node, Path};
+use crate::diagram::{palette, Node, Path, BACKGROUND};
 use crate::kitty;
 use crate::layout::{with_cursor, Cursor, Label, Placement, PlacementNode};
-use crate::state::{status_line, State};
+use crate::state::{status_line, Segment, State, StatusLine};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -53,6 +53,19 @@ fn fill_colour(colour: Option<u8>, filled: bool) -> (u8, u8, u8, u8) {
             (composite(r), composite(g), composite(b), OPAQUE)
         }
     }
+}
+
+fn composite(overlay: (u8, u8, u8, u8), backdrop: (u8, u8, u8)) -> (u8, u8, u8) {
+    let (r, g, b, alpha) = overlay;
+    let blend = |over: u8, under: u8| {
+        let weight = alpha as f64 / OPAQUE as f64;
+        (over as f64 * weight + under as f64 * (1.0 - weight)).round() as u8
+    };
+    (
+        blend(r, backdrop.0),
+        blend(g, backdrop.1),
+        blend(b, backdrop.2),
+    )
 }
 
 pub(super) fn python_round(value: f64) -> f64 {
@@ -309,22 +322,45 @@ impl TerminalRenderer {
     }
 
     fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let crate::state::StatusLine { left, right } = status_line(state);
-        let join = |segments: Vec<crate::state::Segment>| -> String {
-            segments.iter().map(|s| s.text.as_str()).collect()
-        };
-        let (left, right) = (join(left), join(right));
+        let StatusLine { left, right } = status_line(state);
         let Terminal { cols, rows, .. } = self.terminal;
-        let padding = (cols as usize)
-            .saturating_sub(left.chars().count())
-            .saturating_sub(right.chars().count());
-        let assembled = format!("{left}{}{right}", BLANK.to_string().repeat(padding));
-        let line: String = assembled
-            .chars()
-            .chain(std::iter::repeat(BLANK))
-            .take(cols as usize)
-            .collect();
-        write!(out, "\x1b[{rows};1H\x1b[7m{line}\x1b[0m")
+        let content_width: usize = left
+            .iter()
+            .chain(&right)
+            .map(|segment| segment.text.chars().count())
+            .sum();
+        let filler = Segment {
+            text: BLANK
+                .to_string()
+                .repeat((cols as usize).saturating_sub(content_width)),
+            style: right
+                .last()
+                .map(|segment| segment.style)
+                .unwrap_or_default(),
+        };
+        let backdrop = palette(BACKGROUND).unwrap();
+        write!(out, "\x1b[{rows};1H")?;
+        let mut remaining = cols as usize;
+        for segment in left.iter().chain(std::iter::once(&filler)).chain(&right) {
+            let text: String = segment.text.chars().take(remaining).collect();
+            remaining -= text.chars().count();
+            if text.is_empty() {
+                continue;
+            }
+            write!(out, "\x1b[0m")?;
+            if segment.style.bold {
+                write!(out, "\x1b[1m")?;
+            }
+            if let Some(overlay) = segment.style.background {
+                let (r, g, b) = composite(overlay, backdrop);
+                write!(out, "\x1b[48;2;{r};{g};{b}m")?;
+            }
+            if let Some((r, g, b)) = segment.style.foreground {
+                write!(out, "\x1b[38;2;{r};{g};{b}m")?;
+            }
+            write!(out, "{text}")?;
+        }
+        write!(out, "\x1b[0m")
     }
 
     // Uses screen.place only to get cropping for free; its images are sent
@@ -2162,14 +2198,54 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
+    fn strip_escapes(output: &str) -> String {
+        let mut visible = String::new();
+        let mut chars = output.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for skipped in chars.by_ref() {
+                    if skipped.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                visible.push(c);
+            }
+        }
+        visible
+    }
+
     fn status_line_text(r: &mut TerminalRenderer, state: &State) -> String {
-        let prefix = format!("\x1b[{};1H\x1b[7m", r.terminal.rows);
-        status_line_output(r, state)
-            .strip_prefix(&prefix)
+        strip_escapes(&status_line_output(r, state))
+    }
+
+    fn status_line_runs(r: &mut TerminalRenderer, state: &State) -> Vec<String> {
+        let output = status_line_output(r, state);
+        let body = output
+            .strip_prefix(&format!("\x1b[{};1H", r.terminal.rows))
+            .unwrap();
+        body.strip_suffix("\x1b[0m")
             .unwrap()
-            .strip_suffix("\x1b[0m")
-            .unwrap()
-            .to_string()
+            .split("\x1b[0m")
+            .skip(1)
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn background_escape(style: crate::state::Style) -> String {
+        let (r, g, b) = composite(style.background.unwrap(), palette(BACKGROUND).unwrap());
+        format!("\x1b[48;2;{r};{g};{b}m")
+    }
+
+    fn dim_run_prefix(state: &State) -> String {
+        background_escape(status_line(state).right[0].style)
+    }
+
+    #[test]
+    fn composite_blends_the_overlay_over_the_backdrop_by_its_alpha() {
+        assert_eq!(composite((200, 100, 0, 255), (10, 20, 30)), (200, 100, 0));
+        assert_eq!(composite((200, 100, 0, 0), (10, 20, 30)), (10, 20, 30));
+        assert_eq!(composite((0, 0, 0, 128), (100, 50, 10)), (50, 25, 5));
     }
 
     #[test]
@@ -2179,8 +2255,13 @@ mod tests {
         let text = status_line_text(&mut r, &state);
         assert!(text.starts_with(" COMMANDING  \u{2502} diagram.dre"));
         assert!(text.ends_with("0 boxes \u{2022} dre"));
-        let middle = &text
-            [" COMMANDING  \u{2502} diagram.dre".len()..text.len() - "0 boxes \u{2022} dre".len()];
+        let left = " COMMANDING  \u{2502} diagram.dre";
+        let right = "0 boxes \u{2022} dre";
+        let middle: String = text
+            .chars()
+            .skip(left.chars().count())
+            .take(text.chars().count() - left.chars().count() - right.chars().count())
+            .collect();
         assert!(!middle.is_empty());
         assert!(middle.chars().all(|c| c == BLANK));
     }
@@ -2195,7 +2276,7 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_is_padded_to_the_terminal_width() {
+    fn the_status_line_fills_the_terminal_width() {
         let mut r = renderer_on(terminal(40, 2, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
         assert_eq!(status_line_text(&mut r, &state).chars().count(), 40);
@@ -2206,6 +2287,15 @@ mod tests {
         let mut r = renderer_on(terminal(3, 2, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
         assert_eq!(status_line_text(&mut r, &state), " CO");
+    }
+
+    #[test]
+    fn the_status_line_is_cut_inside_a_multibyte_segment() {
+        let mut r = renderer_on(terminal(13, 2, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line_text(&mut r, &state), " COMMANDING  ");
+        let mut r = renderer_on(terminal(14, 2, 1, 1));
+        assert_eq!(status_line_text(&mut r, &state), " COMMANDING  \u{2502}");
     }
 
     #[test]
@@ -2224,12 +2314,99 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_is_wrapped_in_reverse_video() {
-        let mut r = renderer_on(terminal(5, 4, 1, 1));
+    fn the_status_line_moves_the_cursor_once() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
-        let line = status_line_output(&mut r, &state);
-        assert!(line.contains("\x1b[7m"));
-        assert!(line.contains("\x1b[0m"));
+        let output = status_line_output(&mut r, &state);
+        assert_eq!(output.matches("H").count(), 1);
+        assert!(output.starts_with("\x1b[4;1H"));
+    }
+
+    #[test]
+    fn the_status_line_never_uses_reverse_video() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert!(!status_line_output(&mut r, &state).contains("\x1b[7m"));
+    }
+
+    #[test]
+    fn the_status_line_ends_by_resetting_the_style() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert!(status_line_output(&mut r, &state).ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn the_mode_cell_is_bold_on_lime_with_the_background_colour_as_text() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let (lr, lg, lb) = palette(0).unwrap();
+        let (br, bg, bb) = palette(BACKGROUND).unwrap();
+        let expected =
+            format!("\x1b[1m\x1b[48;2;{lr};{lg};{lb}m\x1b[38;2;{br};{bg};{bb}m COMMANDING ");
+        assert_eq!(status_line_runs(&mut r, &state)[0], expected);
+    }
+
+    #[test]
+    fn everything_after_the_mode_cell_has_a_dim_background_and_no_foreground() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let runs = status_line_runs(&mut r, &state);
+        let dim = dim_run_prefix(&state);
+        assert!(runs.len() > 1);
+        for run in &runs[1..] {
+            assert!(run.starts_with(&dim), "{run:?}");
+            assert!(!run.contains("\x1b[38;"));
+            assert!(!run.contains("\x1b[1m"));
+        }
+    }
+
+    #[test]
+    fn the_filler_between_left_and_right_is_dim() {
+        let mut r = renderer_on(terminal(40, 4, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let runs = status_line_runs(&mut r, &state);
+        let content_width: usize = status_line(&state)
+            .left
+            .iter()
+            .chain(&status_line(&state).right)
+            .map(|segment| segment.text.chars().count())
+            .sum();
+        let filler = format!(
+            "{}{}",
+            dim_run_prefix(&state),
+            " ".repeat(40 - content_width)
+        );
+        assert!(runs.contains(&filler), "{runs:?}");
+    }
+
+    #[test]
+    fn the_status_line_can_be_cut_inside_the_mode_cell_keeping_its_style() {
+        let mut r = renderer_on(terminal(3, 2, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let runs = status_line_runs(&mut r, &state);
+        assert_eq!(runs.len(), 1);
+        let (lr, lg, lb) = palette(0).unwrap();
+        assert!(runs[0].starts_with(&format!("\x1b[1m\x1b[48;2;{lr};{lg};{lb}m")));
+        assert!(runs[0].ends_with(" CO"));
+    }
+
+    #[test]
+    fn the_save_prompt_keeps_the_mode_cell_styling_and_dims_the_rest() {
+        let mut r = renderer_on(terminal(60, 4, 1, 1));
+        let mode = Mode::SavePrompt {
+            filename: "diagram.dre".to_string(),
+        };
+        let state = crate::state::new_state(vec![], mode, None);
+        let runs = status_line_runs(&mut r, &state);
+        let mode_style = status_line(&state).left[0].style;
+        let mode_prefix = format!("\x1b[1m{}", background_escape(mode_style));
+        assert!(runs[0].starts_with(&mode_prefix));
+        let dim = dim_run_prefix(&state);
+        for run in &runs[1..] {
+            assert!(run.starts_with(&dim));
+        }
+        assert_eq!(strip_escapes(&runs.concat()).chars().count(), 60);
     }
 
     fn render_output(r: &mut TerminalRenderer, state: &State) -> String {
@@ -2266,7 +2443,7 @@ mod tests {
             .collect();
         let text = status_line_text(&mut r, &state);
         assert!(text.starts_with(&expected_left));
-        assert!(render_output(&mut r, &state).contains(&expected_left));
+        assert!(strip_escapes(&render_output(&mut r, &state)).contains(&expected_left));
     }
 
     fn overlay_state(colour: Option<u8>) -> State {
