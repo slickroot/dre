@@ -92,12 +92,10 @@ impl WebSession {
     }
 
     pub fn info(&self, key: &str) -> String {
-        let info = dre::editor_info(self.session.borrow().state());
-        match key {
-            "mode" => info.mode,
-            "box_count" => info.box_count,
-            _ => String::new(),
-        }
+        dre::editor_info(self.session.borrow().state())
+            .get(key)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

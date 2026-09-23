@@ -2,6 +2,7 @@ use crate::command_mode;
 use crate::diagram::{append, at, children_at, palette, Document, Node, Path};
 use crate::insert_mode;
 use crate::save_prompt_mode;
+use std::collections::HashMap;
 
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
@@ -36,10 +37,7 @@ pub struct State {
     pub(crate) scroll_x: i64,
 }
 
-pub struct EditorInfo {
-    pub mode: String,
-    pub box_count: String,
-}
+pub type EditorInfo = HashMap<String, String>;
 
 pub fn editor_info(state: &State) -> EditorInfo {
     let mode = match &state.mode {
@@ -54,7 +52,10 @@ pub fn editor_info(state: &State) -> EditorInfo {
     }
     let box_count = count(&state.doc.boxes).to_string();
 
-    EditorInfo { mode, box_count }
+    HashMap::from([
+        ("mode".to_string(), mode),
+        ("box_count".to_string(), box_count),
+    ])
 }
 
 impl Default for State {
@@ -672,13 +673,13 @@ mod tests {
     #[test]
     fn editor_info_reports_command_mode() {
         let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(editor_info(&state).mode, "Command".to_string());
+        assert_eq!(editor_info(&state)["mode"], "Command".to_string());
     }
 
     #[test]
     fn editor_info_reports_insert_mode() {
         let state = new_state(vec![], Mode::Insert, None);
-        assert_eq!(editor_info(&state).mode, "Insert".to_string());
+        assert_eq!(editor_info(&state)["mode"], "Insert".to_string());
     }
 
     #[test]
@@ -690,13 +691,13 @@ mod tests {
             },
             None,
         );
-        assert_eq!(editor_info(&state).mode, "SavePrompt".to_string());
+        assert_eq!(editor_info(&state)["mode"], "SavePrompt".to_string());
     }
 
     #[test]
     fn editor_info_counts_zero_boxes_when_empty() {
         let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(editor_info(&state).box_count, "0".to_string());
+        assert_eq!(editor_info(&state)["box_count"], "0".to_string());
     }
 
     #[test]
@@ -706,6 +707,6 @@ mod tests {
             Mode::Command,
             None,
         );
-        assert_eq!(editor_info(&state).box_count, "3".to_string());
+        assert_eq!(editor_info(&state)["box_count"], "3".to_string());
     }
 }
