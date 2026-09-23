@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn reading_a_colour_outside_the_palette_gives_nothing() {
-        assert_eq!(read("<dre><box label=\"A\" colour=\"5\"/></dre>"), None);
+        assert_eq!(read("<dre><box label=\"A\" colour=\"6\"/></dre>"), None);
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn reading_a_bad_colour_on_a_nested_box_gives_nothing() {
         assert_eq!(
-            read("<dre><box label=\"A\"><box label=\"B\" colour=\"5\"/></box></dre>"),
+            read("<dre><box label=\"A\"><box label=\"B\" colour=\"6\"/></box></dre>"),
             None
         );
     }
@@ -282,13 +282,13 @@ mod tests {
     fn reading_accepts_colour_and_fill_at_the_edges_of_the_palette() {
         let doc = FileDoc {
             boxes: vec![FileBox {
-                colour: Some(4),
+                colour: Some(5),
                 fill: Some(0),
                 ..plain("A")
             }],
         };
         assert_eq!(
-            read("<dre><box label=\"A\" colour=\"4\" fill=\"0\"/></dre>"),
+            read("<dre><box label=\"A\" colour=\"5\" fill=\"0\"/></dre>"),
             Some(doc)
         );
     }

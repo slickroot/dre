@@ -181,16 +181,6 @@ impl Screen {
             && top.max(0) < (top + placement.height).min(self.terminal.rows)
     }
 
-    fn write(&mut self, x: i64, y: i64, character: char) {
-        let (x, y) = (x + self.origin.0, y + self.origin.1);
-        if 0 <= y && (y as usize) < self.characters.len() {
-            let row = &mut self.characters[y as usize];
-            if 0 <= x && (x as usize) < row.len() {
-                row[x as usize] = character;
-            }
-        }
-    }
-
     fn place(&mut self, canvas: &Canvas, placement: &Placement) {
         let Some(crop) = self.crop(placement) else {
             return;
@@ -222,8 +212,14 @@ impl Screen {
     }
 }
 
-fn draw_cursor(screen: &mut Screen, placement: &Placement) {
-    screen.write(placement.x, placement.y, CURSOR);
+struct SolidShape {
+    colour: crate::canvas::Rgba,
+}
+
+impl crate::canvas::Shape for SolidShape {
+    fn colour_at(&self, _x: i64, _y: i64) -> Option<crate::canvas::Rgba> {
+        Some(self.colour)
+    }
 }
 
 const HINT_TEXT: &str = "press b to add a box";
@@ -293,7 +289,7 @@ impl TerminalRenderer {
                 PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
                 PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
                 PlacementNode::Label(label) => self.draw_label(&mut screen, placement, label),
-                PlacementNode::Cursor(_) => draw_cursor(&mut screen, placement),
+                PlacementNode::Cursor(_) => self.draw_cursor(&mut screen, placement),
             }
         }
         out.write_all(&screen.into_bytes())
@@ -349,6 +345,20 @@ impl TerminalRenderer {
             let glyph = self.glyph_cache.glyph(character, label.hint);
             screen.place(glyph, &char_placement);
         }
+    }
+
+    fn draw_cursor(&mut self, screen: &mut Screen, placement: &Placement) {
+        let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
+        let (r, g, b) = colour(None);
+        let canvas = Canvas::fill(
+            width,
+            height,
+            &SolidShape {
+                colour: [r, g, b, OPAQUE],
+            },
+        );
+        screen.place(&canvas, placement);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -423,7 +433,6 @@ impl TerminalRenderer {
 
 #[cfg(test)]
 mod tests {
-    use super::super::PLAIN_COLOUR;
     use super::*;
     use crate::diagram::{node, node_with_children, Document};
 
@@ -807,7 +816,7 @@ mod tests {
                 PlacementNode::Node(_) => r.draw_box(screen, placement),
                 PlacementNode::Arrow(_) => r.draw_arrow(screen, placement),
                 PlacementNode::Label(label) => r.draw_label(screen, placement, label),
-                PlacementNode::Cursor(_) => draw_cursor(screen, placement),
+                PlacementNode::Cursor(_) => r.draw_cursor(screen, placement),
             }
         }
     }
@@ -1382,14 +1391,27 @@ mod tests {
             cell_width: 1,
             cell_height: 1,
         });
-        let selected = Document {
-            boxes: boxes.clone(),
-            selected: Some(crate::diagram::Path {
+        let placements = with_cursor(
+            crate::layout::layout(&boxes),
+            Some(crate::diagram::Path {
                 ancestors: vec![],
                 index: 0,
             }),
-        };
-        assert!(rendered(&mut r, &selected).contains(CURSOR));
+        );
+        assert!(placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+        // with_cursor always appends the cursor placement last, so draw order
+        // (and thus screen.images order) puts its sprite at the end.
+        let images = sprites(&mut r, &placements);
+        let cursor_image = images.last().expect("a sprite is drawn for the cursor");
+        let (cr, cg, cb) = colour(None);
+        let solid = [cr, cg, cb, OPAQUE];
+        assert!(cursor_image
+            .canvas
+            .pixels
+            .chunks(4)
+            .all(|pixel| pixel == solid));
     }
 
     #[test]
@@ -1400,11 +1422,12 @@ mod tests {
             cell_width: 1,
             cell_height: 1,
         });
-        let unselected = Document {
-            boxes: vec![node("hi")],
-            selected: None,
-        };
-        assert!(!rendered(&mut r, &unselected).contains(CURSOR));
+        let boxes = vec![node("hi")];
+        let placements = with_cursor(crate::layout::layout(&boxes), None);
+        assert!(!placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+        sprites(&mut r, &placements);
     }
 
     #[test]
@@ -1457,7 +1480,20 @@ mod tests {
                 index: 0,
             }),
         };
-        assert!(!rendered(&mut r, &doc).contains(CURSOR));
+        let output = rendered_diagram(&mut r, &doc);
+
+        let mut expected_r = renderer_on(terminal(20, 10, 1, 1));
+        let hint_boxes = [hint_node()];
+        let placements = crate::layout::layout(&hint_boxes);
+        assert!(!placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+        let mut screen = Screen::new(terminal(20, 10, 1, 1));
+        screen.centre_on(&placements, 0);
+        draw_all(&mut expected_r, &mut screen, &placements);
+        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+
+        assert_eq!(output, expected);
     }
 
     #[test]
@@ -1525,11 +1561,23 @@ mod tests {
         ];
         let mut r = renderer_on(terminal(5, 3, 1, 1));
         let screen = drawn_screen(&mut r, &placements);
-        assert_eq!(rows(&screen)[1], format!("   {} ", CURSOR));
+        assert_eq!(rows(&screen)[1], "     ".to_string());
+        let (cr, cg, cb) = colour(None);
+        let solid = [cr, cg, cb, OPAQUE];
+        let is_cursor = |image: &&Placed| image.canvas.pixels.chunks(4).all(|pixel| pixel == solid);
+        let cursor_cols: Vec<i64> = screen
+            .images
+            .iter()
+            .filter(|image| image.row == 1)
+            .filter(is_cursor)
+            .map(|image| image.col)
+            .collect();
+        assert_eq!(cursor_cols, vec![3]);
         let label_cols: Vec<i64> = screen
             .images
             .iter()
             .filter(|image| image.row == 1)
+            .filter(|image| !is_cursor(image))
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![1, 2]);
@@ -1552,7 +1600,6 @@ mod tests {
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![1, 2]);
-        assert!(!rows(&screen)[1].contains(CURSOR));
     }
 
     #[test]
@@ -1566,27 +1613,19 @@ mod tests {
 
     #[test]
     fn cursor_placement_is_drawn_at_its_own_position() {
-        let grid = grid(
-            &mut renderer_on(terminal(4, 3, 1, 1)),
-            &[cursor_placement(2, 1, 1, 1)],
-        );
-        assert_eq!(
-            grid,
-            vec![
-                "    ".to_string(),
-                format!("  {} ", CURSOR),
-                "    ".to_string()
-            ]
-        );
+        let mut r = renderer_on(terminal(4, 3, 1, 1));
+        let images = sprites(&mut r, &[cursor_placement(2, 1, 1, 1)]);
+        assert_eq!(images.len(), 1);
+        assert_eq!((images[0].col, images[0].row), (2, 1));
+        let (cr, cg, cb) = colour(None);
+        assert_eq!(&images[0].canvas.pixels[0..4], &[cr, cg, cb, OPAQUE]);
     }
 
     #[test]
     fn a_cursor_outside_the_grid_is_clipped() {
-        let grid = grid(
-            &mut renderer_on(terminal(4, 3, 1, 1)),
-            &[cursor_placement(9, 9, 1, 1)],
-        );
-        assert_eq!(grid, vec!["    ".to_string(); 3]);
+        let mut r = renderer_on(terminal(4, 3, 1, 1));
+        let images = sprites(&mut r, &[cursor_placement(9, 9, 1, 1)]);
+        assert!(images.is_empty());
     }
 
     #[test]
@@ -1620,9 +1659,9 @@ mod tests {
     }
 
     #[test]
-    fn a_cursor_has_no_sprite() {
+    fn a_cursor_has_a_sprite() {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
-        assert!(sprites(&mut r, &[cursor_placement(1, 1, 1, 1)]).is_empty());
+        assert_eq!(sprites(&mut r, &[cursor_placement(1, 1, 1, 1)]).len(), 1);
     }
 
     #[test]
@@ -2012,10 +2051,10 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_is_plain_grey() {
+    fn an_arrow_is_the_default_foreground_colour() {
         let r = renderer(4, 5);
         let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
-        let (pr, pg, pb) = PLAIN_COLOUR;
+        let (pr, pg, pb) = colour(None);
         let shaft_row = sprite.height / 2;
         assert_eq!(pixel_of(&sprite, 0, shaft_row), (pr, pg, pb, OPAQUE));
     }

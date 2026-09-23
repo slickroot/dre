@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::diagram::palette;
+use crate::diagram::{palette, FOREGROUND};
 use crate::state::State;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -35,13 +35,9 @@ const BORDER: i64 = 4;
 
 const OPAQUE: u8 = 255;
 const FILL_ALPHA: u16 = 77;
-const PLAIN_COLOUR: (u8, u8, u8) = (128, 128, 128);
 
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
-    match colour {
-        None => PLAIN_COLOUR,
-        Some(i) => palette(i).unwrap(),
-    }
+    palette(colour.unwrap_or(FOREGROUND)).unwrap()
 }
 
 #[cfg(test)]
@@ -49,8 +45,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn colour_of_plain_is_the_plain_grey() {
-        assert_eq!(colour(None), PLAIN_COLOUR);
+    fn colour_of_plain_is_the_default_foreground() {
+        assert_eq!(colour(None), palette(FOREGROUND).unwrap());
     }
 
     #[test]
