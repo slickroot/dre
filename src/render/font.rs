@@ -6,7 +6,11 @@ use crate::render::{colour, OPAQUE};
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
-pub(super) struct GlyphCache {
+pub(crate) trait GlyphSource {
+    fn glyph(&mut self, ch: char, hint: bool) -> &Canvas;
+}
+
+pub(crate) struct GlyphCache {
     font: fontdue::Font,
     cache: HashMap<(char, bool), Canvas>,
     cell_width: i64,
@@ -16,7 +20,7 @@ pub(super) struct GlyphCache {
 }
 
 impl GlyphCache {
-    pub(super) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
+    pub(crate) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
         let font = fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default())
             .expect("bundled Iosevka font must parse");
 
@@ -48,15 +52,6 @@ impl GlyphCache {
             px_size,
             baseline_row,
         }
-    }
-
-    pub(super) fn glyph(&mut self, ch: char, hint: bool) -> &Canvas {
-        let key = (ch, hint);
-        if !self.cache.contains_key(&key) {
-            let canvas = self.rasterize(ch, hint);
-            self.cache.insert(key, canvas);
-        }
-        self.cache.get(&key).unwrap()
     }
 
     fn rasterize(&self, ch: char, hint: bool) -> Canvas {
@@ -97,6 +92,17 @@ impl GlyphCache {
     }
 }
 
+impl GlyphSource for GlyphCache {
+    fn glyph(&mut self, ch: char, hint: bool) -> &Canvas {
+        let key = (ch, hint);
+        if !self.cache.contains_key(&key) {
+            let canvas = self.rasterize(ch, hint);
+            self.cache.insert(key, canvas);
+        }
+        self.cache.get(&key).unwrap()
+    }
+}
+
 pub(super) struct GlyphShape {
     pub(super) width: i64,
     pub(super) height: i64,
@@ -116,6 +122,32 @@ impl Shape for GlyphShape {
         let mut colour = self.ink;
         colour[3] = (self.ink[3] as u16 * coverage as u16 / 255) as u8;
         Some(colour)
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct FakeGlyphSource {
+    blank: Canvas,
+}
+
+#[cfg(test)]
+impl FakeGlyphSource {
+    pub(crate) fn new(cell_width: i64, cell_height: i64) -> Self {
+        let pixels = vec![0u8; (cell_width * cell_height) as usize * 4];
+        FakeGlyphSource {
+            blank: Canvas {
+                pixels,
+                width: cell_width,
+                height: cell_height,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+impl GlyphSource for FakeGlyphSource {
+    fn glyph(&mut self, _ch: char, _hint: bool) -> &Canvas {
+        &self.blank
     }
 }
 

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
-use crate::render::{Renderer, TerminalRenderer};
+use crate::render::{GlyphCache, Renderer, TerminalRenderer};
 use crate::state::{handle_key, State};
 use crate::terminal::RawScreen;
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
@@ -16,7 +16,9 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let mut stdout = io::stdout();
     let stdin = io::stdin();
     kitty::require(&mut stdout, stdin.as_raw_fd())?;
-    let mut renderer = TerminalRenderer::new(terminal::probe()?);
+    let terminal = terminal::probe()?;
+    let glyph_source = Box::new(GlyphCache::new(terminal.cell_width, terminal.cell_height));
+    let mut renderer = TerminalRenderer::new(terminal, glyph_source);
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
@@ -115,6 +117,7 @@ fn load(file: Option<String>) -> io::Result<State> {
 mod tests {
     use super::*;
     use crate::diagram::{self, Path};
+    use crate::render::FakeGlyphSource;
     use crate::state::{new_state, Mode};
     use crate::terminal::Terminal;
     use std::fs;
@@ -239,12 +242,17 @@ mod tests {
     }
 
     fn renderer() -> TerminalRenderer {
-        TerminalRenderer::new(Terminal {
+        let terminal = Terminal {
             cols: 20,
             rows: 10,
             cell_width: 1,
             cell_height: 1,
-        })
+        };
+        let source = Box::new(FakeGlyphSource::new(
+            terminal.cell_width,
+            terminal.cell_height,
+        ));
+        TerminalRenderer::new(terminal, source)
     }
 
     fn state_saving_to(path: &str) -> State {

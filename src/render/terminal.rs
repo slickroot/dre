@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use super::font::GlyphCache;
+use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
@@ -234,7 +234,7 @@ fn hint_node() -> Node {
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
-    glyph_cache: GlyphCache,
+    glyph_source: Box<dyn GlyphSource>,
 }
 
 impl Renderer for TerminalRenderer {
@@ -245,12 +245,11 @@ impl Renderer for TerminalRenderer {
 }
 
 impl TerminalRenderer {
-    pub(crate) fn new(terminal: Terminal) -> Self {
-        let glyph_cache = GlyphCache::new(terminal.cell_width, terminal.cell_height);
+    pub(crate) fn new(terminal: Terminal, glyph_source: Box<dyn GlyphSource>) -> Self {
         TerminalRenderer {
             terminal,
             cache: std::collections::HashMap::new(),
-            glyph_cache,
+            glyph_source,
         }
     }
 
@@ -337,7 +336,7 @@ impl TerminalRenderer {
             if !screen.shows(&char_placement) {
                 continue;
             }
-            let glyph = self.glyph_cache.glyph(character, label.hint);
+            let glyph = self.glyph_source.glyph(character, label.hint);
             screen.place(glyph, &char_placement);
         }
     }
@@ -428,6 +427,7 @@ impl TerminalRenderer {
 
 #[cfg(test)]
 mod tests {
+    use super::super::font::FakeGlyphSource;
     use super::*;
     use crate::diagram::{node, node_with_children, Document};
     use crate::state::Mode;
@@ -803,7 +803,11 @@ mod tests {
     }
 
     fn renderer_on(terminal: Terminal) -> TerminalRenderer {
-        TerminalRenderer::new(terminal)
+        let source = Box::new(FakeGlyphSource::new(
+            terminal.cell_width,
+            terminal.cell_height,
+        ));
+        TerminalRenderer::new(terminal, source)
     }
 
     fn draw_all(r: &mut TerminalRenderer, screen: &mut Screen, placements: &[Placement]) {
