@@ -7,11 +7,10 @@ use crate::canvas::Canvas;
 use crate::diagram::{palette, Node};
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
-use crate::state::{Mode, State};
+use crate::state::{status_line, State};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
-const CURSOR: char = '\u{2588}';
 const HOME_CURSOR: &str = "\x1b[H";
 
 pub(super) const ARROW_STROKE: i64 = 4;
@@ -232,14 +231,6 @@ fn hint_node() -> Node {
     }
 }
 
-fn status_text(mode: &Mode) -> String {
-    match mode {
-        Mode::Insert => "EDITING".into(),
-        Mode::Command => "COMMANDING".into(),
-        Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
-    }
-}
-
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -296,9 +287,13 @@ impl TerminalRenderer {
     }
 
     fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let text = status_text(&state.mode);
+        let crate::state::StatusLine { left, right } = status_line(state);
         let Terminal { cols, rows, .. } = self.terminal;
-        let line: String = text
+        let padding = (cols as usize)
+            .saturating_sub(left.len())
+            .saturating_sub(right.len());
+        let assembled = format!("{left}{}{right}", BLANK.to_string().repeat(padding));
+        let line: String = assembled
             .chars()
             .chain(std::iter::repeat(BLANK))
             .take(cols as usize)
@@ -435,6 +430,7 @@ impl TerminalRenderer {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children, Document};
+    use crate::state::Mode;
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
@@ -1269,24 +1265,6 @@ mod tests {
     }
 
     #[test]
-    fn status_text_for_insert_mode_is_editing() {
-        assert_eq!(status_text(&Mode::Insert), "EDITING");
-    }
-
-    #[test]
-    fn status_text_for_command_mode_is_commanding() {
-        assert_eq!(status_text(&Mode::Command), "COMMANDING");
-    }
-
-    #[test]
-    fn status_text_for_save_prompt_mode_shows_the_filename_and_cursor() {
-        let mode = Mode::SavePrompt {
-            filename: "diagram.dre".to_string(),
-        };
-        assert_eq!(status_text(&mode), format!("Save as: diagram.dre{CURSOR}"));
-    }
-
-    #[test]
     fn on_resize_with_a_different_rounded_cell_height_does_not_panic_on_the_next_render() {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let node = box_node(None, false, false);
@@ -1608,7 +1586,7 @@ mod tests {
             &mut renderer_on(terminal(5, 3, 1, 1)),
             &[box_placement(&box_node(None, false, false), 0, 0, 5, 3)],
         );
-        assert!(!grid.join("").contains(CURSOR));
+        assert!(!grid.join("").contains('\u{2588}'));
     }
 
     #[test]
@@ -2090,16 +2068,15 @@ mod tests {
         }
     }
 
-    fn status_line(r: &mut TerminalRenderer, mode: Mode) -> String {
-        let state = crate::state::new_state(vec![], mode, None);
+    fn status_line_output(r: &mut TerminalRenderer, state: &State) -> String {
         let mut out = Vec::new();
-        r.render_status_line(&state, &mut out).unwrap();
+        r.render_status_line(state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
-    fn status_line_text(r: &mut TerminalRenderer, mode: Mode) -> String {
+    fn status_line_text(r: &mut TerminalRenderer, state: &State) -> String {
         let prefix = format!("\x1b[{};1H\x1b[7m", r.terminal.rows);
-        status_line(r, mode)
+        status_line_output(r, state)
             .strip_prefix(&prefix)
             .unwrap()
             .strip_suffix("\x1b[0m")
@@ -2108,72 +2085,94 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_shows_the_text_as_given() {
-        let mut r = renderer_on(terminal(7, 2, 1, 1));
-        assert_eq!(status_line_text(&mut r, Mode::Insert), "EDITING");
+    fn the_status_line_puts_the_mode_and_filename_on_the_left_and_the_box_count_on_the_right() {
+        let mut r = renderer_on(terminal(40, 2, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let text = status_line_text(&mut r, &state);
+        assert!(text.starts_with("COMMANDING | diagram.dre"));
+        assert!(text.ends_with("0 boxes . dre"));
+        let middle = &text["COMMANDING | diagram.dre".len()..text.len() - "0 boxes . dre".len()];
+        assert!(!middle.is_empty());
+        assert!(middle.chars().all(|c| c == BLANK));
+    }
+
+    #[test]
+    fn the_status_line_shows_a_dirty_marker_after_the_filename() {
+        let mut r = renderer_on(terminal(40, 2, 1, 1));
+        let mut state = crate::state::new_state(vec![], Mode::Command, None);
+        state.dirty = true;
+        let text = status_line_text(&mut r, &state);
+        assert!(text.starts_with("COMMANDING | diagram.dre[+]"));
     }
 
     #[test]
     fn the_status_line_is_padded_to_the_terminal_width() {
-        let mut r = renderer_on(terminal(10, 2, 1, 1));
-        assert_eq!(
-            status_line_text(&mut r, Mode::Insert),
-            format!("EDITING{}", BLANK.to_string().repeat(3))
-        );
+        let mut r = renderer_on(terminal(40, 2, 1, 1));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line_text(&mut r, &state).chars().count(), 40);
     }
 
     #[test]
     fn the_status_line_is_cut_to_the_terminal_width() {
         let mut r = renderer_on(terminal(3, 2, 1, 1));
-        assert_eq!(status_line_text(&mut r, Mode::Insert), "EDI");
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line_text(&mut r, &state), "COM");
     }
 
     #[test]
     fn the_status_line_is_written_to_the_last_row() {
         let mut r = renderer_on(terminal(5, 4, 1, 1));
-        assert!(status_line(&mut r, Mode::Command).starts_with("\x1b[4;1H"));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert!(status_line_output(&mut r, &state).starts_with("\x1b[4;1H"));
     }
 
     #[test]
     fn on_resize_moves_the_status_line_to_the_new_last_row() {
         let mut r = renderer_on(terminal(5, 4, 1, 1));
         r.on_resize(terminal(5, 9, 1, 1));
-        assert!(status_line(&mut r, Mode::Command).starts_with("\x1b[9;1H"));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert!(status_line_output(&mut r, &state).starts_with("\x1b[9;1H"));
     }
 
     #[test]
     fn the_status_line_is_wrapped_in_reverse_video() {
         let mut r = renderer_on(terminal(5, 4, 1, 1));
-        let line = status_line(&mut r, Mode::Command);
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        let line = status_line_output(&mut r, &state);
         assert!(line.contains("\x1b[7m"));
         assert!(line.contains("\x1b[0m"));
     }
 
-    fn render_output(r: &mut TerminalRenderer, mode: Mode) -> String {
-        let state = crate::state::new_state(vec![], mode, None);
+    fn render_output(r: &mut TerminalRenderer, state: &State) -> String {
         let mut out = Vec::new();
-        r.render(&state, &mut out).unwrap();
+        r.render(state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
     #[test]
     fn render_shows_editing_in_insert_mode() {
         let mut r = renderer_on(terminal(20, 4, 1, 1));
-        assert!(render_output(&mut r, Mode::Insert).contains("EDITING"));
+        let state = crate::state::new_state(vec![], Mode::Insert, None);
+        assert!(render_output(&mut r, &state).contains("EDITING"));
     }
 
     #[test]
     fn render_shows_commanding_in_command_mode() {
         let mut r = renderer_on(terminal(20, 4, 1, 1));
-        assert!(render_output(&mut r, Mode::Command).contains("COMMANDING"));
+        let state = crate::state::new_state(vec![], Mode::Command, None);
+        assert!(render_output(&mut r, &state).contains("COMMANDING"));
     }
 
     #[test]
-    fn render_shows_the_filename_being_typed_in_save_prompt_mode() {
+    fn render_shows_the_filename_being_typed_in_save_prompt_mode_with_an_empty_right_side() {
         let mut r = renderer_on(terminal(30, 4, 1, 1));
         let mode = Mode::SavePrompt {
             filename: "diagram.dre".to_string(),
         };
-        assert!(render_output(&mut r, mode).contains(&format!("Save as: diagram.dre{CURSOR}")));
+        let state = crate::state::new_state(vec![], mode, None);
+        let expected_left = crate::state::status_line(&state).left;
+        let text = status_line_text(&mut r, &state);
+        assert!(text.starts_with(&expected_left));
+        assert!(render_output(&mut r, &state).contains(&expected_left));
     }
 }
