@@ -1347,6 +1347,90 @@ mod tests {
     }
 
     #[test]
+    fn digit_two_while_the_overlay_is_open_applies_mint_and_closes_the_overlay() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        let result = handle_key(opened, "2");
+        assert_eq!(result.doc.boxes[0].colour, Some(1));
+        assert!(!result.colour_overlay);
+    }
+
+    #[test]
+    fn digit_seven_while_the_overlay_is_open_applies_the_last_palette_colour() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        let result = handle_key(opened, "7");
+        assert_eq!(result.doc.boxes[0].colour, Some(6));
+        assert!(!result.colour_overlay);
+    }
+
+    #[test]
+    fn digit_eight_while_the_overlay_is_open_leaves_the_colour_unchanged() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        let expected_colour = opened.doc.boxes[0].colour;
+        let result = handle_key(opened, "8");
+        assert_eq!(result.doc.boxes[0].colour, expected_colour);
+        assert!(!result.colour_overlay);
+    }
+
+    #[test]
+    fn digit_zero_while_the_overlay_is_open_leaves_the_colour_unchanged() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        let expected_colour = opened.doc.boxes[0].colour;
+        let result = handle_key(opened, "0");
+        assert_eq!(result.doc.boxes[0].colour, expected_colour);
+        assert!(!result.colour_overlay);
+    }
+
+    #[test]
+    fn u_after_applying_a_colour_by_digit_restores_the_previous_colour() {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        let opened = handle_key(state, "c");
+        let colour_before_digit = opened.doc.boxes[0].colour;
+        let applied = handle_key(opened, "2");
+        assert_eq!(applied.doc.boxes[0].colour, Some(1));
+        let undone = handle_key(applied, "u");
+        assert_eq!(undone.doc.boxes[0].colour, colour_before_digit);
+    }
+
+    #[test]
     fn cycle_colour_and_toggle_fill_advance_independently() {
         let state = new_state(
             vec![node("a")],
@@ -1784,7 +1868,7 @@ mod tests {
             }),
         );
         let after_command = handle_key(before.clone(), "c");
-        let navigated = handle_key(handle_key(after_command.clone(), "3"), "j");
+        let navigated = handle_key(after_command.clone(), "j");
         let navigated = handle_key(handle_key(navigated, "2"), "h");
         let navigated = handle_key(navigated, "k");
         let navigated = handle_key(handle_key(navigated, "2"), "l");

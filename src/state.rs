@@ -206,6 +206,19 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
                         .saturating_mul(10)
                         .saturating_add(digit as usize),
                 );
+                if state.colour_overlay {
+                    let count = state.pending_count.take().unwrap();
+                    state.colour_overlay = false;
+                    if (1..=7).contains(&count) {
+                        let path = state
+                            .doc
+                            .selected
+                            .clone()
+                            .expect("colour overlay implies a selection");
+                        state = snapshot(state);
+                        at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
+                    }
+                }
                 state
             } else {
                 match command_mode::parse(key) {
