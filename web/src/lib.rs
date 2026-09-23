@@ -90,6 +90,13 @@ impl WebSession {
             .expect("rendering SVG to an in-memory buffer succeeds");
         String::from_utf8(out).expect("SvgRenderer writes UTF-8")
     }
+
+    pub fn info(&self, key: &str) -> String {
+        dre::editor_info(self.session.borrow().state())
+            .get(key)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -122,5 +129,44 @@ mod tests {
         assert_eq!(extent.len(), 2);
         assert!(extent[0] > 0);
         assert!(extent[1] > 0);
+    }
+
+    #[test]
+    fn info_mode_starts_in_command_mode() {
+        let session = session();
+
+        assert_eq!(session.info("mode"), "Command");
+    }
+
+    #[test]
+    fn info_mode_reflects_insert_mode_after_adding_a_box() {
+        let mut session = session();
+
+        session.press_key("b");
+
+        assert_eq!(session.info("mode"), "Insert");
+    }
+
+    #[test]
+    fn info_box_count_starts_at_zero() {
+        let session = session();
+
+        assert_eq!(session.info("box_count"), "0");
+    }
+
+    #[test]
+    fn info_box_count_reflects_added_box() {
+        let mut session = session();
+
+        session.press_key("b");
+
+        assert_eq!(session.info("box_count"), "1");
+    }
+
+    #[test]
+    fn info_returns_empty_string_for_unrecognized_key() {
+        let session = session();
+
+        assert_eq!(session.info("unknown"), "");
     }
 }
