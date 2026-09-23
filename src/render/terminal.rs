@@ -4,7 +4,7 @@ use super::font::GlyphCache;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::palette;
+use crate::diagram::{palette, Node};
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
 use crate::state::{Mode, State};
@@ -226,6 +226,16 @@ fn draw_cursor(screen: &mut Screen, placement: &Placement) {
     screen.write(placement.x, placement.y, CURSOR);
 }
 
+const HINT_TEXT: &str = "press b to add a box";
+
+fn hint_node() -> Node {
+    Node {
+        label: HINT_TEXT.to_string(),
+        hint: true,
+        ..Default::default()
+    }
+}
+
 fn status_text(mode: &Mode) -> String {
     match mode {
         Mode::Insert => "EDITING".into(),
@@ -267,10 +277,15 @@ impl TerminalRenderer {
     }
 
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(
-            crate::layout::layout(&state.doc.boxes),
-            state.doc.selected.clone(),
-        );
+        let hint_boxes = [hint_node()];
+        let placements = if state.doc.boxes.is_empty() {
+            crate::layout::layout(&hint_boxes)
+        } else {
+            with_cursor(
+                crate::layout::layout(&state.doc.boxes),
+                state.doc.selected.clone(),
+            )
+        };
         let mut screen = Screen::new(self.terminal);
         screen.centre_on(&placements, state.scroll_x);
         for placement in &placements {
@@ -1036,8 +1051,8 @@ mod tests {
 
     #[test]
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
-        let mut r = renderer_on(terminal(3, 2, 2, 4));
-        let frame = rendered_diagram(&mut r, &empty_doc());
+        let screen = Screen::new(terminal(3, 2, 2, 4));
+        let frame = String::from_utf8(screen.into_bytes()).unwrap();
         let lines = lines_of(&frame);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(
@@ -1311,14 +1326,14 @@ mod tests {
 
     #[test]
     fn the_cursor_goes_home_before_the_lines() {
-        let mut r = renderer_on(Terminal {
+        let screen = Screen::new(Terminal {
             cols: 2,
             rows: 2,
             cell_width: 1,
             cell_height: 1,
         });
         assert_eq!(
-            rendered_diagram(&mut r, &empty_doc()),
+            String::from_utf8(screen.into_bytes()).unwrap(),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
         );
     }
@@ -1337,13 +1352,13 @@ mod tests {
     #[test]
     fn the_output_is_sized_by_the_terminal() {
         let (cols, rows) = (5, 4);
-        let mut r = renderer_on(Terminal {
+        let screen = Screen::new(Terminal {
             cols,
             rows,
             cell_width: 1,
             cell_height: 1,
         });
-        let output = rendered_diagram(&mut r, &empty_doc());
+        let output = String::from_utf8(screen.into_bytes()).unwrap();
         let body = output
             .strip_prefix(HOME_CURSOR)
             .unwrap()
@@ -1387,6 +1402,59 @@ mod tests {
             selected: None,
         };
         assert!(!rendered(&mut r, &unselected).contains(CURSOR));
+    }
+
+    #[test]
+    fn an_empty_canvas_renders_the_hint_box() {
+        let terminal = terminal(40, 10, 1, 1);
+        let mut r = renderer_on(terminal);
+        let output = rendered_diagram(&mut r, &empty_doc());
+
+        let mut expected_r = renderer_on(terminal);
+        let hint_boxes = [hint_node()];
+        let placements = crate::layout::layout(&hint_boxes);
+        let mut screen = Screen::new(terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut expected_r, &mut screen, &placements);
+        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn a_canvas_with_a_box_does_not_show_the_hint() {
+        let terminal = terminal(40, 10, 1, 1);
+        let mut r = renderer_on(terminal);
+        let doc = Document {
+            boxes: vec![node("hi")],
+            selected: None,
+        };
+        let output = rendered_diagram(&mut r, &doc);
+
+        let mut expected_r = renderer_on(terminal);
+        let placements = with_cursor(crate::layout::layout(&doc.boxes), None);
+        let mut screen = Screen::new(terminal);
+        screen.centre_on(&placements, 0);
+        draw_all(&mut expected_r, &mut screen, &placements);
+        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+        assert_eq!(output, expected);
+
+        let mut hint_r = renderer_on(terminal);
+        let hint_output = rendered_diagram(&mut hint_r, &empty_doc());
+        assert_ne!(output, hint_output);
+    }
+
+    #[test]
+    fn no_cursor_is_drawn_over_the_hint_even_with_a_selection() {
+        let mut r = renderer_on(terminal(20, 10, 1, 1));
+        let doc = Document {
+            boxes: vec![],
+            selected: Some(crate::diagram::Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        };
+        assert!(!rendered(&mut r, &doc).contains(CURSOR));
     }
 
     #[test]
