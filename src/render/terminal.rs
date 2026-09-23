@@ -69,6 +69,7 @@ enum SpriteKey {
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
+        hint: bool,
     },
     Arrow {
         width: i64,
@@ -86,6 +87,7 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             colour: node.colour,
             fill: if node.filled { node.colour } else { None },
             rounded: node.rounded,
+            hint: node.hint,
         },
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
@@ -363,7 +365,7 @@ impl TerminalRenderer {
             height,
             border: BORDER,
             radius: if node.rounded { ROUNDED_RADIUS } else { 0 },
-            edge: [r, g, b, OPAQUE],
+            edge: [r, g, b, if node.hint { OPAQUE / 4 } else { OPAQUE }],
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
         Canvas::fill(width, height, &shape)
@@ -730,6 +732,21 @@ mod tests {
     fn sprite_key_differs_by_rounded() {
         let node_a = box_node(Some(1), true, true);
         let node_b = box_node(Some(1), true, false);
+        let a = box_placement(&node_a, 0, 0, 10, 10);
+        let b = box_placement(&node_b, 0, 0, 10, 10);
+        assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_hint() {
+        let node_a = crate::diagram::Node {
+            hint: false,
+            ..box_node(Some(1), true, true)
+        };
+        let node_b = crate::diagram::Node {
+            hint: true,
+            ..box_node(Some(1), true, true)
+        };
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(sprite_key(&a), sprite_key(&b));
@@ -1811,6 +1828,21 @@ mod tests {
             pixel_of(&sprite, BORDER + 1, BORDER + 1),
             fill_colour(Some(2), true)
         );
+    }
+
+    #[test]
+    fn a_hint_boxs_edge_is_fainter_than_a_normal_boxs_edge() {
+        let r = renderer(1, 1);
+        let size = 2 * BORDER + 3;
+        let normal = box_outline(&r, &box_node(None, false, false), size, size);
+        let hint_node = crate::diagram::Node {
+            hint: true,
+            ..box_node(None, false, false)
+        };
+        let hint = box_outline(&r, &hint_node, size, size);
+        let (_, _, _, normal_alpha) = pixel_of(&normal, 0, size / 2);
+        let (_, _, _, hint_alpha) = pixel_of(&hint, 0, size / 2);
+        assert!(hint_alpha < normal_alpha);
     }
 
     #[test]
