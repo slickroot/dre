@@ -35,6 +35,7 @@ pub struct State {
     pub(crate) pending_count: Option<usize>,
     pub(crate) scroll_x: i64,
     pub(crate) dirty: bool,
+    pub(crate) colour_overlay: bool,
 }
 
 const CURSOR: char = '\u{2588}';
@@ -87,6 +88,7 @@ impl Default for State {
             pending_count: None,
             scroll_x: 0,
             dirty: false,
+            colour_overlay: false,
         }
     }
 }
@@ -204,6 +206,19 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
                         .saturating_mul(10)
                         .saturating_add(digit as usize),
                 );
+                if state.colour_overlay {
+                    let count = state.pending_count.take().unwrap();
+                    state.colour_overlay = false;
+                    if (1..=7).contains(&count) {
+                        let path = state
+                            .doc
+                            .selected
+                            .clone()
+                            .expect("colour overlay implies a selection");
+                        state = snapshot(state);
+                        at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
+                    }
+                }
                 state
             } else {
                 match command_mode::parse(key) {
@@ -239,6 +254,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         pending_count: None,
         scroll_x: 0,
         dirty: false,
+        colour_overlay: false,
     }
 }
 
