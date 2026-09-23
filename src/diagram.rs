@@ -32,13 +32,16 @@ pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
     &mut children_at(boxes, &path.ancestors)[path.index]
 }
 
-const PALETTE: [(u8, u8, u8); 5] = [
+const PALETTE: [(u8, u8, u8); 6] = [
     (255, 190, 11),
     (251, 86, 7),
     (255, 0, 110),
     (131, 56, 236),
     (58, 134, 255),
+    (232, 234, 237),
 ];
+
+pub(crate) const FOREGROUND: u8 = 5;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).copied()
@@ -73,6 +76,11 @@ mod tests {
     #[test]
     fn palette_has_a_colour_at_index_zero() {
         assert!(palette(0).is_some());
+    }
+
+    #[test]
+    fn palette_has_the_foreground_colour_at_its_index() {
+        assert_eq!(palette(FOREGROUND), Some((232, 234, 237)));
     }
 
     #[test]
