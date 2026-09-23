@@ -119,8 +119,6 @@ mod tests {
     use crate::terminal::Terminal;
     use std::fs;
 
-    const CURSOR: char = '\u{2588}';
-
     fn temp_path(name: &str) -> String {
         std::env::temp_dir()
             .join(format!("dre-{}-{name}", std::process::id()))
@@ -319,13 +317,11 @@ mod tests {
         assert!(!state.running);
         let output = String::from_utf8(output).unwrap();
         let frames: Vec<&str> = output.split("\x1b[H").skip(1).collect();
-        assert!(
-            frames[0].contains(CURSOR),
-            "the cursor is visible before the idle second"
-        );
-        assert!(
-            !frames[1].contains(CURSOR),
-            "the cursor is hidden after the idle second"
+        let sprite_count = |frame: &str| frame.matches("a=T,f=32").count();
+        assert_eq!(
+            sprite_count(frames[0]),
+            sprite_count(frames[1]) + 1,
+            "the cursor sprite is visible before the idle second, and hidden after it"
         );
     }
 
