@@ -8,7 +8,7 @@ const REFERENCE_PX_SIZE: f32 = 100.0;
 
 pub(super) struct GlyphCache {
     font: fontdue::Font,
-    cache: HashMap<char, Canvas>,
+    cache: HashMap<(char, bool), Canvas>,
     cell_width: i64,
     cell_height: i64,
     px_size: f32,
@@ -50,15 +50,16 @@ impl GlyphCache {
         }
     }
 
-    pub(super) fn glyph(&mut self, ch: char) -> &Canvas {
-        if !self.cache.contains_key(&ch) {
-            let canvas = self.rasterize(ch);
-            self.cache.insert(ch, canvas);
+    pub(super) fn glyph(&mut self, ch: char, hint: bool) -> &Canvas {
+        let key = (ch, hint);
+        if !self.cache.contains_key(&key) {
+            let canvas = self.rasterize(ch, hint);
+            self.cache.insert(key, canvas);
         }
-        self.cache.get(&ch).unwrap()
+        self.cache.get(&key).unwrap()
     }
 
-    fn rasterize(&self, ch: char) -> Canvas {
+    fn rasterize(&self, ch: char, hint: bool) -> Canvas {
         let (metrics, bitmap) = self.font.rasterize(ch, self.px_size);
 
         let dest_x0 = metrics.xmin as i64;
@@ -82,7 +83,7 @@ impl GlyphCache {
         }
 
         let (r, g, b) = PLAIN_COLOUR;
-        let ink: Rgba = [r, g, b, OPAQUE];
+        let ink: Rgba = [r, g, b, if hint { OPAQUE / 4 } else { OPAQUE }];
         Canvas::fill(
             self.cell_width,
             self.cell_height,
@@ -166,9 +167,21 @@ mod tests {
     #[test]
     fn the_same_character_rasterized_twice_is_pixel_identical() {
         let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
-        let first = cache.glyph('B').pixels.clone();
-        let second = cache.glyph('B').pixels.clone();
+        let first = cache.glyph('B', false).pixels.clone();
+        let second = cache.glyph('B', false).pixels.clone();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_hinted_glyph_is_faded_compared_to_a_plain_glyph() {
+        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let plain = cache.glyph('B', false).pixels.clone();
+        let hinted = cache.glyph('B', true).pixels.clone();
+        assert_ne!(plain, hinted);
+
+        let plain_alpha: u32 = plain.chunks(4).map(|pixel| pixel[3] as u32).sum();
+        let hinted_alpha: u32 = hinted.chunks(4).map(|pixel| pixel[3] as u32).sum();
+        assert!(hinted_alpha < plain_alpha);
     }
 
     #[test]
@@ -181,7 +194,7 @@ mod tests {
             "test font must actually rasterize 'g' with some ink"
         );
 
-        let canvas = cache.rasterize('g');
+        let canvas = cache.rasterize('g', false);
         let placed_coverage: u32 = canvas.pixels.chunks(4).map(|pixel| pixel[3] as u32).sum();
         assert_eq!(placed_coverage, raw_coverage);
     }
@@ -190,7 +203,7 @@ mod tests {
     fn every_glyph_canvas_is_exactly_one_cell() {
         let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
         for ch in ['M', 'i'] {
-            let canvas = cache.glyph(ch);
+            let canvas = cache.glyph(ch, false);
             assert_eq!(canvas.width, CELL_WIDTH);
             assert_eq!(canvas.height, CELL_HEIGHT);
         }

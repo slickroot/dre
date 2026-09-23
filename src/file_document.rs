@@ -28,6 +28,7 @@ fn node(file_box: FileBox) -> Node {
         filled: file_box.fill.is_some(),
         rounded: file_box.rounded,
         children: file_box.children.into_iter().map(node).collect(),
+        hint: false,
     }
 }
 
