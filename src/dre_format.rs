@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn reading_a_colour_outside_the_palette_gives_nothing() {
-        assert_eq!(read("<dre><box label=\"A\" colour=\"6\"/></dre>"), None);
+        assert_eq!(read("<dre><box label=\"A\" colour=\"7\"/></dre>"), None);
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn reading_a_bad_colour_on_a_nested_box_gives_nothing() {
         assert_eq!(
-            read("<dre><box label=\"A\"><box label=\"B\" colour=\"6\"/></box></dre>"),
+            read("<dre><box label=\"A\"><box label=\"B\" colour=\"7\"/></box></dre>"),
             None
         );
     }

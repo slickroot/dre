@@ -13,6 +13,7 @@ const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
+const RESET_BACKGROUND_COLOUR: &str = "\x1b]111\x1b\\";
 
 pub(crate) const RESIZE: &str = "\x1bRESIZE";
 
@@ -28,6 +29,8 @@ impl RawScreen {
         let mut stdout = io::stdout();
         stdout.write_all(ENTER_ALTERNATE_SCREEN.as_bytes())?;
         stdout.write_all(HIDE_CURSOR.as_bytes())?;
+        let (r, g, b) = crate::diagram::palette(crate::diagram::BACKGROUND).unwrap();
+        write!(stdout, "\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x1b\\", r, g, b)?;
         stdout.flush()?;
         let mut raw = saved.clone();
         cfmakeraw(&mut raw);
@@ -42,6 +45,7 @@ impl Drop for RawScreen {
         let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
         let mut stdout = io::stdout();
         let _ = stdout.write_all(SHOW_CURSOR.as_bytes());
+        let _ = stdout.write_all(RESET_BACKGROUND_COLOUR.as_bytes());
         let _ = stdout.write_all(LEAVE_ALTERNATE_SCREEN.as_bytes());
         let _ = stdout.flush();
     }
