@@ -87,6 +87,7 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
             node: PlacementNode::Label(Label {
                 text: &node.label,
                 path: path.clone(),
+                hint: node.hint,
             }),
             x: start,
             y: middle,
@@ -176,6 +177,7 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
 pub(crate) struct Label<'a> {
     pub(crate) text: &'a str,
     pub(crate) path: Path,
+    pub(crate) hint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -512,6 +514,23 @@ mod tests {
     }
 
     #[test]
+    fn a_hint_node_produces_a_hint_label() {
+        let nodes = vec![Node {
+            hint: true,
+            ..node("hi")
+        }];
+        let placements = layout(&nodes);
+        let label = placements
+            .iter()
+            .find_map(|p| match &p.node {
+                PlacementNode::Label(label) => Some(label),
+                _ => None,
+            })
+            .expect("expected a label placement");
+        assert!(label.hint);
+    }
+
+    #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = vec![node_with_children("parent", vec![node("child")])];
         let placements = layout(&boxes);
@@ -580,6 +599,7 @@ mod tests {
                 ancestors: vec![],
                 index: 0,
             },
+            hint: false,
         };
         assert_eq!(label.text, "hi");
         assert_eq!(
@@ -623,6 +643,7 @@ mod tests {
                     ancestors: vec![],
                     index: 0,
                 },
+                hint: false,
             }),
             x: 0,
             y: 0,
@@ -638,7 +659,8 @@ mod tests {
                         path: Path {
                             ancestors: vec![],
                             index: 0
-                        }
+                        },
+                        hint: false,
                     }
                 )
             }

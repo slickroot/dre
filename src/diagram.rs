@@ -5,6 +5,7 @@ pub(crate) struct Node {
     pub(crate) filled: bool,
     pub(crate) rounded: bool,
     pub(crate) children: Vec<Node>,
+    pub(crate) hint: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

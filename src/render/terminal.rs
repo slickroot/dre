@@ -662,6 +662,7 @@ mod tests {
             filled,
             rounded,
             children: vec![],
+            hint: false,
         }
     }
 
@@ -820,6 +821,7 @@ mod tests {
                     ancestors: vec![],
                     index: 0,
                 },
+                hint: false,
             }),
             x,
             y,
