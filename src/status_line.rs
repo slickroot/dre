@@ -12,21 +12,21 @@ pub(crate) struct StatusInput {
     pub(crate) box_count: usize,
 }
 
-pub struct StatusLine {
-    pub left: Vec<Segment>,
-    pub right: Vec<Segment>,
+pub(crate) struct StatusLine {
+    pub(crate) left: Vec<Segment>,
+    pub(crate) right: Vec<Segment>,
 }
 
-pub struct Segment {
-    pub text: String,
-    pub style: Style,
+pub(crate) struct Segment {
+    pub(crate) text: String,
+    pub(crate) style: Style,
 }
 
 #[derive(Default, Clone, Copy)]
-pub struct Style {
-    pub bold: bool,
-    pub background: Option<(u8, u8, u8, u8)>,
-    pub foreground: Option<(u8, u8, u8)>,
+pub(crate) struct Style {
+    pub(crate) bold: bool,
+    pub(crate) background: Option<(u8, u8, u8, u8)>,
+    pub(crate) foreground: Option<(u8, u8, u8)>,
 }
 
 pub(crate) const DIM_ALPHA: u8 = 0x40;

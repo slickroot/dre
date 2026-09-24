@@ -30,11 +30,6 @@ use std::process::ExitCode;
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
 pub use state::State;
-pub use status_line::{Segment, StatusLine, Style};
-
-pub fn status_line(state: &State) -> StatusLine {
-    status_line::status_line(&state.status_input())
-}
 
 pub const IDLE_TIMEOUT_MS: u16 = 1000;
 
