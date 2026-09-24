@@ -1,3 +1,6 @@
+mod store;
+mod terminal;
+
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
@@ -5,34 +8,32 @@ use std::process::ExitCode;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::state::{reduce, State};
 use crate::terminal::{RawScreen, Terminal};
-use crate::{dre_format, file_document, filesystem, kitty, terminal, IDLE_TIMEOUT_MS};
+use crate::{kitty, IDLE_TIMEOUT_MS};
+use store::{FileStateStore, StateStore};
+use terminal::DiskFiles;
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
-    let state = load(file)?;
+    let store = FileStateStore::new(Box::new(DiskFiles));
+    let state = store.load(file.as_deref())?;
     let mut stdout = io::stdout();
     let stdin = io::stdin();
     kitty::require(&mut stdout, stdin.as_raw_fd())?;
-    let terminal = terminal::probe()?;
+    let terminal = crate::terminal::probe()?;
     let glyph_source = Box::new(GlyphCache::new(terminal.cell_width, terminal.cell_height));
     let mut renderer = TerminalRenderer::new(terminal, glyph_source, CACHE_LIMIT);
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
-    let resize_fd = terminal::install_resize_pipe()?;
+    let resize_fd = crate::terminal::install_resize_pipe()?;
     let state = edit(
         state,
-        || terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
-        terminal::probe,
+        || crate::terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
+        crate::terminal::probe,
         &mut stdout,
         &mut renderer,
     )?;
 
-    if let Some(path) = &state.save_to {
-        filesystem::write(
-            path,
-            &dre_format::write(&file_document::from_document(&state.doc)),
-        )?;
-    }
+    store.save(&state)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -49,25 +50,11 @@ fn edit(
         output.flush()?;
 
         match next_key()? {
-            Some(key) if key == terminal::RESIZE => renderer.on_resize(probe()?),
+            Some(key) if key == crate::terminal::RESIZE => renderer.on_resize(probe()?),
             key => state = reduce(state, key.as_deref()),
         }
     }
     Ok(state)
-}
-
-fn load(file: Option<String>) -> io::Result<State> {
-    let Some(path) = file else {
-        return Ok(State::default());
-    };
-    let text = match filesystem::read(&path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(State::new_file(path)),
-        result => result?,
-    };
-    let doc = dre_format::read(&text)
-        .map(file_document::to_document)
-        .ok_or_else(|| filesystem::invalid(&path))?;
-    Ok(State::open(doc, Some(path)))
 }
 
 #[cfg(test)]
@@ -77,126 +64,6 @@ mod tests {
     use crate::render::FakeGlyphSource;
     use crate::state::INTERRUPT;
     use crate::terminal::Terminal;
-    use std::fs;
-
-    fn temp_path(name: &str) -> String {
-        std::env::temp_dir()
-            .join(format!("dre-{}-{name}", std::process::id()))
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    fn temp_file(name: &str, contents: &str) -> String {
-        let path = temp_path(name);
-        fs::write(&path, contents).unwrap();
-        path
-    }
-
-    #[test]
-    fn no_argument_starts_from_an_empty_diagram() {
-        let state = load(None).unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
-        assert_eq!(state.save_to, None);
-    }
-
-    #[test]
-    fn a_valid_file_loads_with_the_first_box_selected() {
-        let path = temp_file(
-            "valid.dre",
-            &dre_format::write(&dre_format::FileDoc {
-                boxes: vec![dre_format::FileBox {
-                    label: "API".to_string(),
-                    colour: None,
-                    fill: None,
-                    rounded: false,
-                    children: vec![],
-                }],
-            }),
-        );
-        let state = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        let state = state.unwrap();
-        assert_eq!(state.doc.boxes.len(), 1);
-        assert_eq!(state.doc.boxes[0].label, "API");
-        assert_eq!(
-            state.doc.selected,
-            Some(Path {
-                ancestors: vec![],
-                index: 0
-            })
-        );
-    }
-
-    #[test]
-    fn a_valid_file_loads_saving_back_to_the_given_path() {
-        let path = temp_file("save-to.dre", "<dre/>");
-        let state = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        assert_eq!(state.unwrap().save_to, Some(path));
-    }
-
-    #[test]
-    fn a_file_with_no_boxes_loads_an_empty_canvas_with_nothing_selected() {
-        let path = temp_file("empty-dre.dre", "<dre/>");
-        let state = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        let state = state.unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
-    }
-
-    #[test]
-    fn a_zero_byte_file_is_invalid_data() {
-        let path = temp_file("zero.dre", "");
-        let result = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        assert_eq!(
-            result.err().map(|e| e.kind()),
-            Some(io::ErrorKind::InvalidData)
-        );
-    }
-
-    #[test]
-    fn a_malformed_file_is_invalid_data() {
-        let path = temp_file("malformed.dre", "<dre><box");
-        let result = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        assert_eq!(
-            result.err().map(|e| e.kind()),
-            Some(io::ErrorKind::InvalidData)
-        );
-    }
-
-    #[test]
-    fn an_invalid_file_has_an_exact_error_message() {
-        let path = temp_file(
-            "bad-colour.dre",
-            "<dre><box label=\"A\" colour=\"99\"/></dre>",
-        );
-        let result = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        let err = result.err().unwrap();
-        assert_eq!(err.to_string(), format!("{path}: not a valid diagram"));
-    }
-
-    #[test]
-    fn a_valid_file_is_not_a_new_file() {
-        let path = temp_file("not-new.dre", "<dre/>");
-        let state = load(Some(path.clone()));
-        fs::remove_file(&path).unwrap();
-        assert!(!state.unwrap().new_file);
-    }
-
-    #[test]
-    fn a_missing_file_loads_an_empty_canvas_saved_to_that_path() {
-        let path = temp_path("missing.dre");
-        let state = load(Some(path.clone())).unwrap();
-        assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
-        assert_eq!(state.save_to, Some(path));
-        assert!(state.new_file);
-    }
 
     fn renderer() -> TerminalRenderer {
         let terminal = Terminal {
@@ -255,7 +122,7 @@ mod tests {
     fn a_resize_key_propagates_a_failed_probe() {
         let (result, _) = run_script_with_probe(
             state_saving_to("a.dre"),
-            vec![Some(terminal::RESIZE), Some("q")],
+            vec![Some(crate::terminal::RESIZE), Some("q")],
             || Err(io::Error::other("probe failed")),
         );
         let error = result.err().unwrap();
@@ -268,7 +135,7 @@ mod tests {
         let mut probe_calls = 0;
         let (result, _) = run_script_with_probe(
             state_saving_to("a.dre"),
-            vec![Some(terminal::RESIZE), Some("q")],
+            vec![Some(crate::terminal::RESIZE), Some("q")],
             || {
                 probe_calls += 1;
                 Ok(Terminal {
