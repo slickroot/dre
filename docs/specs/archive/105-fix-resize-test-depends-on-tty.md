@@ -1,5 +1,7 @@
 # 105: Fix the resize test that depends on a real TTY
 
+**Status: Done. Implemented in PR #125 and merged.**
+
 ## Problem
 
 `editor::tests::a_resize_key_re_probes_the_terminal_and_propagates_a_failed_probe`
