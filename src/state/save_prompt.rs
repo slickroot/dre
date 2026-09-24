@@ -1,4 +1,4 @@
-use crate::action::Action;
+use crate::state::action::Action;
 use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";

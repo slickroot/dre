@@ -1,26 +1,9 @@
-use crate::action::Action;
 use crate::diagram::{append, at, children_at, remove, Path};
+use crate::state::action::Action;
+use crate::state::history::undo;
 use crate::state::{
-    add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
-    Mode, State, DEFAULT_FILENAME, PAD,
+    add_child_box, blank_box, colour_row, next_colour, Mode, State, DEFAULT_FILENAME, PAD,
 };
-
-pub(crate) fn is_undoable(command: Action) -> bool {
-    matches!(
-        command,
-        Action::NewBox
-            | Action::Delete
-            | Action::Paste
-            | Action::CycleColour
-            | Action::ToggleFill
-            | Action::ToggleRounded
-            | Action::CycleSiblingsColour
-            | Action::ToggleSiblingsFill
-            | Action::RenameLabel
-            | Action::EditLabel
-            | Action::NewSibling
-    )
-}
 
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
@@ -28,6 +11,20 @@ pub(crate) fn min_depth(command: Action) -> usize {
         Action::SelectParent | Action::CycleSiblingsColour | Action::ToggleSiblingsFill => 2,
         _ => 1,
     }
+}
+
+fn hide_idle_cursor(mut state: State) -> State {
+    if state.mode == Mode::Command && state.doc.selected.is_some() {
+        state.last_selected = state.doc.selected.clone();
+        state.doc.selected = None;
+    }
+    state
+}
+
+fn interrupt(mut state: State) -> State {
+    state.save_to = None;
+    state.running = false;
+    state
 }
 
 fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
@@ -46,10 +43,8 @@ fn new_sibling(mut state: State, path: Path) -> State {
         ancestors: path.ancestors,
         index,
     };
-    at(&mut state.doc.boxes, &sibling).label.clear();
-    state.doc.selected = Some(sibling.clone());
-    let mut state = snapshot(state);
     at(&mut state.doc.boxes, &sibling).label = PAD.to_string();
+    state.doc.selected = Some(sibling);
     state.mode = Mode::Insert;
     state
 }
@@ -104,10 +99,8 @@ fn edit_label(mut state: State, path: Path) -> State {
 }
 
 fn rename_label(mut state: State, path: Path) -> State {
-    at(&mut state.doc.boxes, &path).label.clear();
-    state.doc.selected = Some(path.clone());
-    let mut state = snapshot(state);
     at(&mut state.doc.boxes, &path).label = PAD.to_string();
+    state.doc.selected = Some(path);
     state.mode = Mode::Insert;
     state
 }
@@ -172,7 +165,7 @@ fn delete_box(mut state: State, path: Path) -> State {
 fn paste_box(mut state: State, selected: Option<Path>, count: usize) -> State {
     let Some(node) = state.clipboard.clone() else {
         state.doc.selected = selected;
-        return drop_snapshot_if_unchanged(state);
+        return state;
     };
     let target = match selected {
         Some(path) => [path.ancestors, vec![path.index]].concat(),
@@ -232,7 +225,6 @@ fn accumulate_digit(mut state: State, digit: u8) -> State {
             .selected
             .clone()
             .expect("colour overlay implies a selection");
-        state = snapshot(state);
         at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
     }
     state
@@ -245,6 +237,8 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
             state.pending_count = None;
             return state;
         }
+        Action::Idle => return hide_idle_cursor(state),
+        Action::Interrupt => return interrupt(state),
         _ => {}
     }
     state.colour_overlay = false;
@@ -256,11 +250,6 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
     if depth < min_depth(command) {
         return state;
     }
-    let mut state = if is_undoable(command) {
-        snapshot(state)
-    } else {
-        state
-    };
     match (command, state.doc.selected.take()) {
         (Action::Undo, selected) => undo(reselect(state, selected)),
         (Action::NewBox, selected) => add_child_box(state, selected),
@@ -292,6 +281,7 @@ mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children, Node};
     use crate::palette::palette;
+    use crate::state::apply as reduce;
     use crate::state::new_state;
     use crate::test_support::handle_key;
 
@@ -1627,14 +1617,14 @@ mod tests {
     }
 
     #[test]
-    fn s_makes_the_sibling_and_its_text_separate_undo_steps() {
+    fn s_makes_the_sibling_and_its_text_one_undo_step() {
         let state = press(
             cache_box_selected(),
             &["s", "Q", "u", "e", "u", "e", "\x1b"],
         );
         assert_eq!(state.doc.boxes, vec![node("Cache"), node("Queue")]);
         let state = handle_key(state, "u");
-        assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
         let state = handle_key(state, "u");
         assert_eq!(state.doc.boxes, vec![node("Cache")]);
     }
@@ -1650,14 +1640,14 @@ mod tests {
     }
 
     #[test]
-    fn capital_i_makes_the_clearing_and_the_new_text_separate_undo_steps() {
+    fn capital_i_makes_the_clearing_and_the_new_text_one_undo_step() {
         let state = press(
             cache_box_selected(),
             &["I", "R", "e", "d", "i", "s", "\x1b"],
         );
         assert_eq!(state.doc.boxes, vec![node("Redis")]);
         let state = handle_key(state, "u");
-        assert_eq!(state.doc.boxes, vec![node("")]);
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
         let state = handle_key(state, "u");
         assert_eq!(state.doc.boxes, vec![node("Cache")]);
     }
@@ -1735,11 +1725,6 @@ mod tests {
         let result = reduce(state, Action::ScrollBy(-2));
         assert_eq!(result.scroll_x, -2);
         assert_eq!(result.doc.selected, None);
-    }
-
-    #[test]
-    fn scroll_by_is_not_undoable() {
-        assert!(!is_undoable(Action::ScrollBy(5)));
     }
 
     #[test]
@@ -2184,6 +2169,15 @@ mod tests {
         assert_eq!(crate::diagram::at(&mut boxes, &selected).colour, Some(2));
         assert!(!result.colour_overlay);
         assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn interrupt_stops_running_and_drops_the_save_path() {
+        let mut state = new_state(vec![node("a")], Mode::Command, None);
+        state.save_to = Some("a.dre".to_string());
+        let result = reduce(state, Action::Interrupt);
+        assert!(!result.running);
+        assert_eq!(result.save_to, None);
     }
 
     #[test]

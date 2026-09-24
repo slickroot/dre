@@ -17,6 +17,8 @@ pub(crate) enum Action {
     ToggleFill,
     ToggleRounded,
     Quit,
+    Idle,
+    Interrupt,
     ScrollBy(i64),
     Digit(u8),
     CancelCount,
@@ -65,6 +67,8 @@ impl Action {
             | Action::ToggleFill
             | Action::ToggleRounded
             | Action::Quit
+            | Action::Idle
+            | Action::Interrupt
             | Action::ScrollBy(_)
             | Action::Digit(_)
             | Action::CancelCount => ActionMode::Command,
@@ -81,5 +85,7 @@ mod tests {
         assert_eq!(Action::InsertAppend('a').mode(), ActionMode::Insert);
         assert_eq!(Action::Confirm.mode(), ActionMode::SavePrompt);
         assert_eq!(Action::ScrollBy(1).mode(), ActionMode::Command);
+        assert_eq!(Action::Idle.mode(), ActionMode::Command);
+        assert_eq!(Action::Interrupt.mode(), ActionMode::Command);
     }
 }

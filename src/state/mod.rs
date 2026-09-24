@@ -1,25 +1,32 @@
+mod action;
+mod command;
+mod history;
+mod input;
+mod insert;
+mod mode;
+mod save_prompt;
+
 use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::palette::palette;
+use crate::state::action::ActionMode;
+#[cfg(not(test))]
+use crate::state::input::INTERRUPT;
+#[cfg(test)]
+pub(crate) use crate::state::input::INTERRUPT;
+#[cfg(test)]
+pub(crate) use crate::state::mode::Mode;
+#[cfg(not(test))]
+use crate::state::mode::Mode;
 use crate::status_line::{ModeLabel, StatusInput};
 
-pub(crate) const PAD: &str = " ";
-pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
+const PAD: &str = " ";
+const DEFAULT_FILENAME: &str = "diagram.dre";
 
 #[allow(dead_code)]
-pub(crate) struct KeyBinding<C> {
+struct KeyBinding<C> {
     pub(crate) keys: &'static [&'static str],
     pub(crate) command: C,
     pub(crate) description: &'static str,
-}
-
-#[derive(Clone, PartialEq, Eq, Default, Debug)]
-pub(crate) enum Mode {
-    #[default]
-    Command,
-    Insert,
-    SavePrompt {
-        filename: String,
-    },
 }
 
 #[derive(Clone)]
@@ -45,6 +52,29 @@ fn count_boxes(nodes: &[Node]) -> usize {
 }
 
 impl State {
+    pub(crate) fn open(doc: Document, save_to: Option<String>) -> State {
+        let mut state = State {
+            doc,
+            save_to,
+            ..Default::default()
+        };
+        if !state.doc.boxes.is_empty() {
+            state.doc.selected = Some(Path {
+                ancestors: vec![],
+                index: 0,
+            });
+        }
+        state
+    }
+
+    pub(crate) fn new_file(path: String) -> State {
+        State {
+            save_to: Some(path),
+            new_file: true,
+            ..Default::default()
+        }
+    }
+
     pub(crate) fn status_input(&self) -> StatusInput {
         let mode = match &self.mode {
             Mode::Command | Mode::SavePrompt { .. } => ModeLabel::Commanding,
@@ -85,58 +115,30 @@ impl Default for State {
     }
 }
 
-pub(crate) fn load(doc: Document, save_to: Option<String>) -> State {
-    let mut state = State {
-        doc,
-        save_to,
-        ..Default::default()
+fn apply(mut state: State, action: action::Action) -> State {
+    if let Some(selected) = state.last_selected.take() {
+        state.doc.selected = Some(selected);
+    }
+    history::recorded(state, &action, |state| match action.mode() {
+        ActionMode::Insert => insert::reduce(state, action),
+        ActionMode::SavePrompt => save_prompt::reduce(state, action),
+        ActionMode::Command => command::reduce(state, action),
+    })
+}
+
+pub fn reduce(state: State, key: Option<&str>) -> State {
+    let action = match key {
+        None => Some(action::Action::Idle),
+        Some(INTERRUPT) => Some(action::Action::Interrupt),
+        Some(key) => input::parse(&state, key),
     };
-    if !state.doc.boxes.is_empty() {
-        state.doc.selected = Some(Path {
-            ancestors: vec![],
-            index: 0,
-        });
-    }
-    state
-}
-
-pub(crate) fn new_file(path: String) -> State {
-    State {
-        save_to: Some(path),
-        new_file: true,
-        ..Default::default()
+    match action {
+        Some(action) => apply(state, action),
+        None => state,
     }
 }
 
-pub(crate) fn hide_idle_cursor(mut state: State) -> State {
-    if state.mode == Mode::Command && state.doc.selected.is_some() {
-        state.last_selected = state.doc.selected.clone();
-        state.doc.selected = None;
-    }
-    state
-}
-
-pub(crate) fn snapshot(mut state: State) -> State {
-    state.history.push(state.doc.clone());
-    state.dirty = true;
-    state
-}
-
-pub(crate) fn drop_snapshot_if_unchanged(mut state: State) -> State {
-    if state.history.last() == Some(&state.doc) {
-        state.history.pop();
-    }
-    state
-}
-
-pub(crate) fn undo(mut state: State) -> State {
-    if let Some(previous) = state.history.pop() {
-        state.doc = previous;
-    }
-    state
-}
-
-pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
+fn next_colour(colour: Option<u8>) -> Option<u8> {
     match colour {
         None => Some(0),
         Some(i) if palette(i + 1).is_some() => Some(i + 1),
@@ -144,7 +146,7 @@ pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
     }
 }
 
-pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
+fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     let siblings = children_at(boxes, &path.ancestors);
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
@@ -158,14 +160,14 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
-pub(crate) fn blank_box() -> Node {
+fn blank_box() -> Node {
     Node {
         label: PAD.to_string(),
         ..Default::default()
     }
 }
 
-pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
+fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state.doc.selected = match selected {
         Some(mut path) => {
             let index = append(&mut at(&mut state.doc.boxes, &path).children, blank_box());
@@ -208,9 +210,9 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::Action;
     use crate::diagram::{node, node_with_children};
-    use crate::reduce::reduce;
+    use crate::state::action::Action;
+    use crate::state::apply as reduce;
     use crate::test_support::handle_key;
 
     #[test]
@@ -219,16 +221,8 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_marks_the_state_as_dirty() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert!(!state.dirty);
-        let result = snapshot(state);
-        assert!(result.dirty);
-    }
-
-    #[test]
-    fn load_selects_the_first_box() {
-        let state = load(
+    fn open_selects_the_first_box() {
+        let state = State::open(
             Document {
                 boxes: vec![node("a"), node("b")],
                 selected: None,
@@ -246,27 +240,27 @@ mod tests {
     }
 
     #[test]
-    fn load_of_an_empty_document_selects_nothing() {
-        let state = load(Document::default(), None);
+    fn open_of_an_empty_document_selects_nothing() {
+        let state = State::open(Document::default(), None);
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
     }
 
     #[test]
-    fn load_records_where_to_save_back_to() {
-        let state = load(Document::default(), Some("diagram.dre".to_string()));
+    fn open_records_where_to_save_back_to() {
+        let state = State::open(Document::default(), Some("diagram.dre".to_string()));
         assert_eq!(state.save_to, Some("diagram.dre".to_string()));
     }
 
     #[test]
-    fn load_is_not_a_new_file() {
-        let state = load(Document::default(), Some("diagram.dre".to_string()));
+    fn open_is_not_a_new_file() {
+        let state = State::open(Document::default(), Some("diagram.dre".to_string()));
         assert!(!state.new_file);
     }
 
     #[test]
     fn new_file_is_empty_with_the_path_to_save_to() {
-        let state = new_file("diagram.dre".to_string());
+        let state = State::new_file("diagram.dre".to_string());
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
         assert_eq!(state.save_to, Some("diagram.dre".to_string()));
@@ -561,7 +555,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, Some(selected));
     }
@@ -573,7 +567,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
@@ -591,7 +585,7 @@ mod tests {
             },
             Some(selected.clone()),
         );
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
@@ -599,7 +593,7 @@ mod tests {
     #[test]
     fn an_idle_hide_with_nothing_selected_is_a_noop() {
         let state = new_state(vec![node("a")], Mode::Command, None);
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, None);
     }
@@ -611,7 +605,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(hide_idle_cursor(state));
+        let hidden = reduce(reduce(state, Action::Idle), Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, Some(selected.clone()));
         let restored = handle_key(hidden, "z");
@@ -628,7 +622,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "j");
         assert_eq!(
             result.doc.selected,
@@ -646,7 +640,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "z");
         assert_eq!(result.doc.selected, Some(selected));
     }
@@ -661,11 +655,85 @@ mod tests {
                 index: 0,
             }),
         );
-        state = snapshot(state);
-        state = snapshot(state);
-        let hidden = hide_idle_cursor(state);
+        state = reduce(state, Action::ToggleRounded);
+        state = reduce(state, Action::ToggleRounded);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.history.len(), 2);
         assert_eq!(hidden.doc.selected, None);
+    }
+
+    fn selecting_first(boxes: Vec<Node>, mode: Mode) -> State {
+        new_state(
+            boxes,
+            mode,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        )
+    }
+
+    #[test]
+    fn commit_and_add_child_after_an_edit_leaves_two_snapshots() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let typed = reduce(reduce(before, Action::EditLabel), Action::InsertAppend('b'));
+        let result = reduce(typed, Action::CommitAndAddChild);
+        assert_eq!(result.history.len(), 2);
+    }
+
+    #[test]
+    fn commit_and_add_child_after_an_edit_needs_two_undos_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let typed = reduce(
+            reduce(before.clone(), Action::EditLabel),
+            Action::InsertAppend('b'),
+        );
+        let committed = reduce(typed, Action::CommitAndAddChild);
+        let once = reduce(committed, Action::Undo);
+        let twice = reduce(once.clone(), Action::Undo);
+        assert_ne!(once.doc.boxes, before.doc.boxes);
+        assert_eq!(twice.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn commit_and_add_child_without_a_change_keeps_the_edit_and_the_commit_snapshots() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let result = reduce(reduce(before, Action::EditLabel), Action::CommitAndAddChild);
+        assert_eq!(result.history.len(), 2);
+    }
+
+    #[test]
+    fn new_sibling_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let created = reduce(before.clone(), Action::NewSibling);
+        assert_eq!(created.history.len(), 1);
+        let once = reduce(created, Action::Undo);
+        assert_eq!(once.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn rename_label_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let renaming = reduce(before.clone(), Action::RenameLabel);
+        assert_eq!(renaming.history.len(), 1);
+        let once = reduce(renaming, Action::Undo);
+        assert_eq!(once.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn committing_an_edit_label_without_a_change_leaves_history_unchanged() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let editing = reduce(before.clone(), Action::EditLabel);
+        let committed = reduce(editing, Action::Commit);
+        assert_eq!(committed.history.len(), before.history.len());
+        assert_eq!(committed.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn undo_does_not_add_a_snapshot() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let edited = reduce(reduce(before, Action::NewBox), Action::Undo);
+        assert_eq!(edited.history.len(), 0);
     }
 
     fn save_prompt_state() -> State {
