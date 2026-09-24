@@ -292,13 +292,11 @@ fn toggle_fill(mut state: State, path: Path) -> State {
 
 fn delete_box(mut state: State, path: Path) -> State {
     state.clipboard = Some(remove(&mut state.doc.boxes, &path));
-    let siblings = children_at(&mut state.doc.boxes, &path.ancestors);
-    state.doc.selected = if path.index < siblings.len() {
-        Some(path)
-    } else if path.index > 0 {
+    let remaining = children_at(&mut state.doc.boxes, &path.ancestors).len();
+    state.doc.selected = if remaining > 0 {
         Some(Path {
+            index: path.index.min(remaining - 1),
             ancestors: path.ancestors,
-            index: path.index - 1,
         })
     } else {
         path.ancestors.split_last().map(|(&index, ancestors)| Path {
