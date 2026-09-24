@@ -41,8 +41,7 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     };
     let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&input))?;
     let doc = file_document::to_document(doc);
-    let mut state = State::default();
-    state.doc = doc;
+    let state = State::open(doc, None);
     SvgRenderer::default().render(&state, &mut File::create(output_path(&input))?)?;
     Ok(ExitCode::SUCCESS)
 }

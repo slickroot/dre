@@ -111,13 +111,13 @@ fn load(file: Option<String>) -> io::Result<State> {
         return Ok(State::default());
     };
     let text = match filesystem::read(&path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(state::new_file(path)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(State::new_file(path)),
         result => result?,
     };
     let doc = dre_format::read(&text)
         .map(file_document::to_document)
         .ok_or_else(|| filesystem::invalid(&path))?;
-    Ok(state::load(doc, Some(path)))
+    Ok(State::open(doc, Some(path)))
 }
 
 #[cfg(test)]
@@ -263,7 +263,7 @@ mod tests {
     }
 
     fn state_saving_to(path: &str) -> State {
-        state::load(Default::default(), Some(path.to_string()))
+        State::open(Default::default(), Some(path.to_string()))
     }
 
     fn run_script_with_probe(

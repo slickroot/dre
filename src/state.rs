@@ -45,6 +45,29 @@ fn count_boxes(nodes: &[Node]) -> usize {
 }
 
 impl State {
+    pub(crate) fn open(doc: Document, save_to: Option<String>) -> State {
+        let mut state = State {
+            doc,
+            save_to,
+            ..Default::default()
+        };
+        if !state.doc.boxes.is_empty() {
+            state.doc.selected = Some(Path {
+                ancestors: vec![],
+                index: 0,
+            });
+        }
+        state
+    }
+
+    pub(crate) fn new_file(path: String) -> State {
+        State {
+            save_to: Some(path),
+            new_file: true,
+            ..Default::default()
+        }
+    }
+
     pub(crate) fn status_input(&self) -> StatusInput {
         let mode = match &self.mode {
             Mode::Command | Mode::SavePrompt { .. } => ModeLabel::Commanding,
@@ -82,29 +105,6 @@ impl Default for State {
             dirty: false,
             colour_overlay: false,
         }
-    }
-}
-
-pub(crate) fn load(doc: Document, save_to: Option<String>) -> State {
-    let mut state = State {
-        doc,
-        save_to,
-        ..Default::default()
-    };
-    if !state.doc.boxes.is_empty() {
-        state.doc.selected = Some(Path {
-            ancestors: vec![],
-            index: 0,
-        });
-    }
-    state
-}
-
-pub(crate) fn new_file(path: String) -> State {
-    State {
-        save_to: Some(path),
-        new_file: true,
-        ..Default::default()
     }
 }
 
@@ -227,8 +227,8 @@ mod tests {
     }
 
     #[test]
-    fn load_selects_the_first_box() {
-        let state = load(
+    fn open_selects_the_first_box() {
+        let state = State::open(
             Document {
                 boxes: vec![node("a"), node("b")],
                 selected: None,
@@ -246,27 +246,27 @@ mod tests {
     }
 
     #[test]
-    fn load_of_an_empty_document_selects_nothing() {
-        let state = load(Document::default(), None);
+    fn open_of_an_empty_document_selects_nothing() {
+        let state = State::open(Document::default(), None);
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
     }
 
     #[test]
-    fn load_records_where_to_save_back_to() {
-        let state = load(Document::default(), Some("diagram.dre".to_string()));
+    fn open_records_where_to_save_back_to() {
+        let state = State::open(Document::default(), Some("diagram.dre".to_string()));
         assert_eq!(state.save_to, Some("diagram.dre".to_string()));
     }
 
     #[test]
-    fn load_is_not_a_new_file() {
-        let state = load(Document::default(), Some("diagram.dre".to_string()));
+    fn open_is_not_a_new_file() {
+        let state = State::open(Document::default(), Some("diagram.dre".to_string()));
         assert!(!state.new_file);
     }
 
     #[test]
     fn new_file_is_empty_with_the_path_to_save_to() {
-        let state = new_file("diagram.dre".to_string());
+        let state = State::new_file("diagram.dre".to_string());
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
         assert_eq!(state.save_to, Some("diagram.dre".to_string()));
