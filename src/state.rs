@@ -1,6 +1,7 @@
 use crate::command_mode;
-use crate::diagram::{append, at, children_at, palette, Document, Node, Path, BACKGROUND};
+use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::insert_mode;
+use crate::palette::{palette, BACKGROUND};
 use crate::save_prompt_mode;
 
 pub(crate) const PAD: &str = " ";

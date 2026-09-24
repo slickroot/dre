@@ -16,6 +16,7 @@ mod insert_mode;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
+mod palette;
 mod render;
 mod save_prompt_mode;
 mod state;

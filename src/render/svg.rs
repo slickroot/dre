@@ -103,7 +103,7 @@ impl Renderer for SvgRenderer {
 }
 
 fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
-    let (r, g, b) = crate::diagram::palette(crate::diagram::BACKGROUND).unwrap();
+    let (r, g, b) = crate::palette::palette(crate::palette::BACKGROUND).unwrap();
     format!(
         "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"rgb({r},{g},{b})\"/>"
     )
@@ -227,7 +227,7 @@ fn rect(placement: &crate::layout::Placement, node: &crate::diagram::Node) -> St
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
     if let Some(colour) = node.filled.then_some(node.colour).flatten() {
-        let (fr, fg, fb) = crate::diagram::palette(colour).unwrap();
+        let (fr, fg, fb) = crate::palette::palette(colour).unwrap();
         let opacity = super::FILL_ALPHA as f64 / OPAQUE as f64;
         write!(
             rect,
@@ -266,8 +266,9 @@ mod tests {
     use super::super::OPAQUE;
     use super::super::ROUNDED_RADIUS;
     use super::*;
-    use crate::diagram::{node, node_with_children, palette, Document, Node, Path, BACKGROUND};
+    use crate::diagram::{node, node_with_children, Document, Node, Path};
     use crate::layout::BOX_HEIGHT;
+    use crate::palette::{palette, BACKGROUND};
 
     fn boxed(label: &str, colour: Option<u8>, filled: bool, rounded: bool) -> Node {
         Node {

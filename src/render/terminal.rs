@@ -4,9 +4,10 @@ use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::{palette, Node, Path, BACKGROUND};
+use crate::diagram::{Node, Path};
 use crate::kitty;
 use crate::layout::{with_cursor, Cursor, Label, Placement, PlacementNode};
+use crate::palette::{palette, BACKGROUND};
 use crate::state::{status_line, Segment, State, StatusLine};
 use crate::terminal::Terminal;
 

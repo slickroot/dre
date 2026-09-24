@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::diagram::{palette, FOREGROUND};
+use crate::palette::{palette, FOREGROUND};
 use crate::state::State;
 
 #[cfg(not(target_arch = "wasm32"))]
