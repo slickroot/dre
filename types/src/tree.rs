@@ -54,6 +54,12 @@ impl<T> Tree<T> {
         }
     }
 
+    pub fn push(&mut self, parent: &[usize], child: Tree<T>) -> Vec<usize> {
+        let children = &mut self.get_mut(parent).children;
+        children.push(child);
+        [parent, &[children.len() - 1]].concat()
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -225,5 +231,62 @@ mod tests {
     #[should_panic]
     fn previous_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().previous(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn push_adds_the_child_last_and_leaves_the_others_alone() {
+        let mut tree = sample();
+        tree.push(&[0], Tree::leaf("a2"));
+        assert_eq!(tree.get(&[0]).children.len(), 3);
+        assert_eq!(tree.get(&[0, 0]).value, "a0");
+        assert_eq!(tree.get(&[0, 1]).value, "a1");
+        assert_eq!(tree.get(&[0, 2]).value, "a2");
+        assert_eq!(tree.get(&[1]).value, "b");
+    }
+
+    #[test]
+    fn push_returns_the_path_of_the_new_child() {
+        let mut tree = sample();
+        let path = tree.push(&[0], Tree::leaf("a2"));
+        assert_eq!(path, vec![0, 2]);
+        assert_eq!(tree.get(&path).value, "a2");
+    }
+
+    #[test]
+    fn push_under_the_root_path_adds_a_top_level_box() {
+        let mut tree = sample();
+        let path = tree.push(&[], Tree::leaf("c"));
+        assert_eq!(path, vec![2]);
+        assert_eq!(tree.get(&[2]).value, "c");
+        assert_eq!(tree.get(&[]).children.len(), 3);
+    }
+
+    #[test]
+    fn push_under_a_leaf_gives_it_its_first_child() {
+        let mut tree = sample();
+        let path = tree.push(&[1], Tree::leaf("b0"));
+        assert_eq!(path, vec![1, 0]);
+        assert_eq!(tree.get(&[1, 0]).value, "b0");
+        assert_eq!(tree.child(&[1]), vec![1, 0]);
+    }
+
+    #[test]
+    fn push_keeps_the_pushed_subtrees_own_children() {
+        let mut tree = sample();
+        let path = tree.push(&[1], Tree::new("c", vec![Tree::leaf("c0")]));
+        assert_eq!(tree.get(&path).value, "c");
+        assert_eq!(tree.get(&[1, 0, 0]).value, "c0");
+    }
+
+    #[test]
+    #[should_panic]
+    fn push_panics_on_a_parent_path_that_addresses_no_box() {
+        sample().push(&[0, 2], Tree::leaf("x"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn push_panics_on_a_parent_path_through_a_box_with_too_few_children() {
+        sample().push(&[0, 2, 0], Tree::leaf("x"));
     }
 }
