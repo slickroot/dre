@@ -54,23 +54,8 @@ pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {
     siblings.len() - 1
 }
 
-pub(crate) fn remove(boxes: &mut Vec<Node>, path: &Path) -> Option<Path> {
-    let siblings = children_at(boxes, &path.ancestors);
-    siblings.remove(path.index);
-    if path.index < siblings.len() {
-        return Some(path.clone());
-    }
-    if path.index > 0 {
-        return Some(Path {
-            ancestors: path.ancestors.clone(),
-            index: path.index - 1,
-        });
-    }
-    let (&index, ancestors) = path.ancestors.split_last()?;
-    Some(Path {
-        ancestors: ancestors.to_vec(),
-        index,
-    })
+pub(crate) fn remove(boxes: &mut Vec<Node>, path: &Path) -> Node {
+    children_at(boxes, &path.ancestors).remove(path.index)
 }
 
 #[cfg(test)]
@@ -265,50 +250,16 @@ mod tests {
     }
 
     #[test]
-    fn remove_selects_the_next_sibling_at_the_same_path() {
-        let mut boxes = vec![node("a"), node("b"), node("c")];
-        let selected = remove(&mut boxes, &path(&[], 1));
-        assert_eq!(boxes, vec![node("a"), node("c")]);
-        assert_eq!(selected, Some(path(&[], 1)));
-    }
-
-    #[test]
-    fn remove_the_last_sibling_selects_the_previous_sibling() {
-        let mut boxes = vec![node("a"), node("b"), node("c")];
-        let selected = remove(&mut boxes, &path(&[], 2));
-        assert_eq!(boxes, vec![node("a"), node("b")]);
-        assert_eq!(selected, Some(path(&[], 1)));
-    }
-
-    #[test]
-    fn remove_an_only_child_selects_the_parent() {
-        let mut boxes = vec![
-            node("a"),
-            node_with_children("b", vec![node_with_children("c", vec![node("d")])]),
-        ];
-        let selected = remove(&mut boxes, &path(&[1, 0], 0));
-        assert_eq!(
-            boxes,
-            vec![node("a"), node_with_children("b", vec![node("c")])]
-        );
-        assert_eq!(selected, Some(path(&[1], 0)));
-    }
-
-    #[test]
-    fn remove_the_only_top_level_box_selects_nothing() {
-        let mut boxes = vec![node("a")];
-        let selected = remove(&mut boxes, &path(&[], 0));
-        assert_eq!(boxes, vec![]);
-        assert_eq!(selected, None);
-    }
-
-    #[test]
-    fn remove_drops_the_descendants_with_the_box() {
+    fn remove_returns_the_node_with_its_descendants() {
         let mut boxes = vec![
             node_with_children("a", vec![node_with_children("b", vec![node("c")])]),
             node("d"),
         ];
-        remove(&mut boxes, &path(&[], 0));
+        let removed = remove(&mut boxes, &path(&[], 0));
+        assert_eq!(
+            removed,
+            node_with_children("a", vec![node_with_children("b", vec![node("c")])])
+        );
         assert_eq!(boxes, vec![node("d")]);
     }
 
@@ -318,7 +269,8 @@ mod tests {
             node_with_children("a", vec![node("b"), node("c")]),
             node_with_children("d", vec![node("e")]),
         ];
-        remove(&mut boxes, &path(&[0], 0));
+        let removed = remove(&mut boxes, &path(&[0], 0));
+        assert_eq!(removed, node("b"));
         assert_eq!(
             boxes,
             vec![

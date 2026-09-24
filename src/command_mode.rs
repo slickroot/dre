@@ -281,7 +281,21 @@ fn toggle_fill(mut state: State, path: Path) -> State {
 }
 
 fn delete_box(mut state: State, path: Path) -> State {
-    state.doc.selected = remove(&mut state.doc.boxes, &path);
+    state.clipboard = Some(remove(&mut state.doc.boxes, &path));
+    let siblings = children_at(&mut state.doc.boxes, &path.ancestors);
+    state.doc.selected = if path.index < siblings.len() {
+        Some(path)
+    } else if path.index > 0 {
+        Some(Path {
+            ancestors: path.ancestors,
+            index: path.index - 1,
+        })
+    } else {
+        path.ancestors.split_last().map(|(&index, ancestors)| Path {
+            ancestors: ancestors.to_vec(),
+            index,
+        })
+    };
     state
 }
 
@@ -2158,5 +2172,105 @@ mod tests {
         let result = handle_key(handle_key(state, "3"), "d");
         assert_eq!(result.doc.boxes, vec![node("a"), node("c"), node("d")]);
         assert_eq!(result.pending_count, None);
+    }
+
+    fn selecting(boxes: Vec<Node>, ancestors: &[usize], index: usize) -> State {
+        new_state(
+            boxes,
+            Mode::Command,
+            Some(Path {
+                ancestors: ancestors.to_vec(),
+                index,
+            }),
+        )
+    }
+
+    #[test]
+    fn d_selects_the_next_sibling_at_the_same_path() {
+        let result = handle_key(
+            selecting(vec![node("a"), node("b"), node("c")], &[], 1),
+            "d",
+        );
+        assert_eq!(result.doc.boxes, vec![node("a"), node("c")]);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_the_last_sibling_selects_the_previous_sibling() {
+        let result = handle_key(
+            selecting(vec![node("a"), node("b"), node("c")], &[], 2),
+            "d",
+        );
+        assert_eq!(result.doc.boxes, vec![node("a"), node("b")]);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_an_only_child_selects_the_parent() {
+        let boxes = vec![
+            node("a"),
+            node_with_children("b", vec![node_with_children("c", vec![node("d")])]),
+        ];
+        let result = handle_key(selecting(boxes, &[1, 0], 0), "d");
+        assert_eq!(
+            result.doc.boxes,
+            vec![node("a"), node_with_children("b", vec![node("c")])]
+        );
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![1],
+                index: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_the_only_top_level_box_selects_nothing() {
+        let result = handle_key(selecting(vec![node("a")], &[], 0), "d");
+        assert_eq!(result.doc.boxes, vec![]);
+        assert_eq!(result.doc.selected, None);
+    }
+
+    #[test]
+    fn d_puts_the_box_and_its_descendants_on_the_clipboard() {
+        let payments = node_with_children("Payments", vec![node("Stripe")]);
+        let boxes = vec![node_with_children(
+            "API gateway",
+            vec![node("Auth"), payments.clone()],
+        )];
+        let result = handle_key(selecting(boxes, &[0], 1), "d");
+        assert_eq!(result.clipboard, Some(payments));
+    }
+
+    #[test]
+    fn a_second_d_replaces_the_clipboard() {
+        let boxes = vec![node("a"), node("b")];
+        let result = handle_key(handle_key(selecting(boxes, &[], 0), "d"), "d");
+        assert_eq!(result.clipboard, Some(node("b")));
+    }
+
+    #[test]
+    fn u_after_d_restores_the_box_and_leaves_the_clipboard_filled() {
+        let boxes = vec![node_with_children("a", vec![node("b")]), node("c")];
+        let before = selecting(boxes, &[], 0);
+        let undone = handle_key(handle_key(before.clone(), "d"), "u");
+        assert_eq!(undone.doc, before.doc);
+        assert_eq!(
+            undone.clipboard,
+            Some(node_with_children("a", vec![node("b")]))
+        );
     }
 }
