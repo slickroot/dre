@@ -21,7 +21,11 @@ pub(crate) struct GlyphCache {
 
 impl GlyphCache {
     pub(crate) fn new(cell_width: i64, cell_height: i64) -> GlyphCache {
-        let font = fontdue::Font::from_bytes(FONT_BYTES, fontdue::FontSettings::default())
+        GlyphCache::with_font(FONT_BYTES, cell_width, cell_height)
+    }
+
+    fn with_font(font_bytes: &[u8], cell_width: i64, cell_height: i64) -> GlyphCache {
+        let font = fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default())
             .expect("bundled Iosevka font must parse");
 
         // Iosevka is monospace, so every glyph shares one advance width: pick the
@@ -157,6 +161,12 @@ mod tests {
     use crate::render::{CELL_HEIGHT, CELL_WIDTH, OPAQUE};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
+    // Iosevka cut down to M, B, i and g: parsing the full font is slow in a debug build.
+    const TEST_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/IosevkaSubset.ttf");
+
+    fn test_cache() -> GlyphCache {
+        GlyphCache::with_font(TEST_FONT_BYTES, CELL_WIDTH, CELL_HEIGHT)
+    }
 
     fn glyph_shape(width: i64, height: i64, coverage: Vec<u8>) -> GlyphShape {
         GlyphShape {
@@ -198,7 +208,7 @@ mod tests {
 
     #[test]
     fn the_same_character_rasterized_twice_is_pixel_identical() {
-        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let mut cache = test_cache();
         let first = cache.glyph('B', false).pixels.clone();
         let second = cache.glyph('B', false).pixels.clone();
         assert_eq!(first, second);
@@ -206,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_hinted_glyph_is_faded_compared_to_a_plain_glyph() {
-        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let mut cache = test_cache();
         let plain = cache.glyph('B', false).pixels.clone();
         let hinted = cache.glyph('B', true).pixels.clone();
         assert_ne!(plain, hinted);
@@ -218,7 +228,7 @@ mod tests {
 
     #[test]
     fn a_descender_is_not_clipped_at_the_bottom_of_the_cell() {
-        let cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let cache = test_cache();
         let (_metrics, bitmap) = cache.font.rasterize('g', cache.px_size);
         let raw_coverage: u32 = bitmap.iter().map(|&byte| byte as u32).sum();
         assert!(
@@ -233,7 +243,7 @@ mod tests {
 
     #[test]
     fn glyph_ink_matches_the_default_foreground_colour() {
-        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let mut cache = test_cache();
         let canvas = cache.glyph('M', false);
         let pixel = canvas
             .pixels
@@ -246,7 +256,7 @@ mod tests {
 
     #[test]
     fn every_glyph_canvas_is_exactly_one_cell() {
-        let mut cache = GlyphCache::new(CELL_WIDTH, CELL_HEIGHT);
+        let mut cache = test_cache();
         for ch in ['M', 'i'] {
             let canvas = cache.glyph(ch, false);
             assert_eq!(canvas.width, CELL_WIDTH);

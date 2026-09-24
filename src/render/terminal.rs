@@ -1994,7 +1994,7 @@ mod tests {
 
     #[test]
     fn the_cache_is_bounded() {
-        let mut r = renderer_on(terminal(4000, 20, 2, 4));
+        let mut r = renderer_on(terminal(4000, 20, 1, 1));
         for width in 0..(CACHE_LIMIT as i64 + 2) {
             sprites(
                 &mut r,
