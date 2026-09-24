@@ -57,77 +57,84 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::controller::{MockKeySource, MockReducer, MockScreen};
+    use super::store::MockStateStore;
     use super::*;
     use crate::state::State;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use mockall::Sequence;
 
-    struct FakeStore {
-        loaded: State,
-        fail_load: bool,
-        saved: Rc<RefCell<Vec<State>>>,
+    fn marked(count: usize) -> State {
+        let mut state = State::default();
+        state.pending_count = Some(count);
+        state
     }
 
-    impl StateStore for FakeStore {
-        fn load(&self, _path: Option<&str>) -> io::Result<State> {
-            if self.fail_load {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "bad file"));
-            }
-            Ok(self.loaded.clone())
-        }
-
-        fn save(&self, state: &State) -> io::Result<()> {
-            self.saved.borrow_mut().push(state.clone());
-            Ok(())
-        }
-    }
-
-    fn controller_rendering(frames: usize) -> DreController {
-        let mut keys = MockKeySource::new();
-        keys.expect_next_key()
-            .times(frames)
-            .returning(|| Ok(Some("q".to_string())));
-        let mut screen = MockScreen::new();
-        screen.expect_render().times(frames).returning(|_| Ok(()));
-        let mut reducer = MockReducer::new();
-        reducer
-            .expect_reduce()
-            .times(frames)
-            .returning(|mut state, _| {
-                state.running = false;
-                state
-            });
-        DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer))
-    }
-
-    fn editor_with(
-        fail_load: bool,
-        controller: DreController,
-    ) -> (Editor, Rc<RefCell<Vec<State>>>) {
-        let saved = Rc::new(RefCell::new(Vec::new()));
-        let store = FakeStore {
-            loaded: State::open(Default::default(), Some("a.dre".to_string())),
-            fail_load,
-            saved: saved.clone(),
-        };
-        (Editor::new(Box::new(store), controller), saved)
+    fn stopped(mut state: State) -> State {
+        state.running = false;
+        state
     }
 
     #[test]
-    fn running_loads_then_runs_then_saves_the_final_state() {
-        let (mut editor, saved) = editor_with(false, controller_rendering(1));
-        editor.run(Some("a.dre")).unwrap();
-        let saved = saved.borrow();
-        assert_eq!(saved.len(), 1);
-        assert!(!saved[0].running);
-        assert_eq!(saved[0].save_to, Some("a.dre".to_string()));
+    fn running_loads_then_runs_the_controller_then_saves_the_final_state() {
+        let mut seq = Sequence::new();
+        let mut store = MockStateStore::new();
+        store
+            .expect_load()
+            .withf(|path| *path == Some("a.dre"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(marked(1)));
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| state.pending_count == Some(1))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        let mut keys = MockKeySource::new();
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|| Ok(Some("q".to_string())));
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|state, key| state.pending_count == Some(1) && *key == Some("q"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| stopped(marked(2)));
+        store
+            .expect_save()
+            .withf(|state| !state.running && state.pending_count == Some(2))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        let controller = DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer));
+
+        Editor::new(Box::new(store), controller)
+            .run(Some("a.dre"))
+            .unwrap();
     }
 
     #[test]
     fn a_failed_load_neither_renders_nor_saves() {
-        let (mut editor, saved) = editor_with(true, controller_rendering(0));
-        let error = editor.run(Some("a.dre")).unwrap_err();
+        let mut store = MockStateStore::new();
+        store
+            .expect_load()
+            .times(1)
+            .returning(|_| Err(io::Error::new(io::ErrorKind::InvalidData, "bad file")));
+        store.expect_save().never();
+        let mut screen = MockScreen::new();
+        screen.expect_render().never();
+        let mut keys = MockKeySource::new();
+        keys.expect_next_key().never();
+        let mut reducer = MockReducer::new();
+        reducer.expect_reduce().never();
+        let controller = DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer));
+
+        let error = Editor::new(Box::new(store), controller)
+            .run(Some("a.dre"))
+            .unwrap_err();
+
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(saved.borrow().is_empty());
     }
 }
