@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
-use super::{colour, Renderer, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::diagram::{palette, Node, Path, BACKGROUND};
 use crate::kitty;
@@ -13,7 +13,7 @@ use crate::terminal::Terminal;
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
 
-pub(super) const ARROW_STROKE: i64 = 4;
+pub(super) const ARROW_STROKE: i64 = BORDER / 2;
 
 pub(crate) const CACHE_LIMIT: usize = 512;
 
@@ -545,7 +545,7 @@ impl TerminalRenderer {
             shaft_row: self.cells_to_pixels_y(arrow.shaft) + self.terminal.cell_height / 2,
             trunk,
             stroke: ARROW_STROKE,
-            ink: [r, g, b, OPAQUE],
+            ink: [r, g, b, (ARROW_OPACITY * OPAQUE as f64).round() as u8],
         };
         Canvas::fill(width, height, &shape)
     }
@@ -2087,6 +2087,10 @@ mod tests {
         );
     }
 
+    fn arrow_alpha() -> u8 {
+        (ARROW_OPACITY * OPAQUE as f64).round() as u8
+    }
+
     fn arrow_outline(
         r: &TerminalRenderer,
         stops: Vec<i64>,
@@ -2101,7 +2105,7 @@ mod tests {
     fn the_shaft_is_arrow_stroke_pixels_thick() {
         let r = renderer(10, 10);
         let ink = colour(None);
-        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let ink = (ink.0, ink.1, ink.2, arrow_alpha());
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let shaft_row = 10 + 5;
         let rows: Vec<i64> = centered_span(shaft_row, ARROW_STROKE).collect();
@@ -2116,7 +2120,7 @@ mod tests {
     fn the_trunk_is_arrow_stroke_pixels_thick() {
         let r = renderer(10, 10);
         let ink = colour(None);
-        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let ink = (ink.0, ink.1, ink.2, arrow_alpha());
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let midpoint = (4 * 10) / 2;
         let columns: Vec<i64> = centered_span(midpoint, ARROW_STROKE).collect();
@@ -2134,7 +2138,7 @@ mod tests {
     fn the_arrowhead_tip_sits_at_the_stop_row() {
         let r = renderer(10, 10);
         let ink = colour(None);
-        let ink = (ink.0, ink.1, ink.2, OPAQUE);
+        let ink = (ink.0, ink.1, ink.2, arrow_alpha());
         let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
         let right_edge = 4 * 10 - 1;
         for stop_row in [5, 25] {
@@ -2149,7 +2153,7 @@ mod tests {
         let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
         let shaft_row = sprite.height / 2;
         for x in 0..sprite.width {
-            assert_eq!(pixel_of(&sprite, x, shaft_row).3, OPAQUE);
+            assert_eq!(pixel_of(&sprite, x, shaft_row).3, arrow_alpha());
         }
     }
 
@@ -2166,7 +2170,7 @@ mod tests {
         let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
         let (pr, pg, pb) = colour(None);
         let shaft_row = sprite.height / 2;
-        assert_eq!(pixel_of(&sprite, 0, shaft_row), (pr, pg, pb, OPAQUE));
+        assert_eq!(pixel_of(&sprite, 0, shaft_row), (pr, pg, pb, arrow_alpha()));
     }
 
     #[test]
@@ -2177,7 +2181,7 @@ mod tests {
         for stop in [0, 3] {
             let row = stop * 5 + 5 / 2;
             for x in midpoint..sprite.width {
-                assert_eq!(pixel_of(&sprite, x, row).3, OPAQUE);
+                assert_eq!(pixel_of(&sprite, x, row).3, arrow_alpha());
             }
         }
     }
@@ -2192,12 +2196,38 @@ mod tests {
         let row_between_stops = 5 + 5 / 2;
         for x in 0..sprite.width {
             let expected = if trunk_columns.contains(&x) {
-                OPAQUE
+                arrow_alpha()
             } else {
                 0
             };
             assert_eq!(pixel_of(&sprite, x, row_between_stops).3, expected);
         }
+    }
+
+    #[test]
+    fn an_arrow_pixel_has_the_arrow_opacity_and_the_foreground_colour() {
+        let r = renderer(4, 5);
+        let sprite = arrow_outline(&r, vec![0], 0, 2, 1);
+        let (fr, fg, fb) = colour(None);
+        let shaft_row = sprite.height / 2;
+        assert_eq!(pixel_of(&sprite, 0, shaft_row), (fr, fg, fb, arrow_alpha()));
+    }
+
+    #[test]
+    fn the_shaft_meeting_the_trunk_has_the_same_colour_as_the_shaft_alone() {
+        let r = renderer(10, 10);
+        let sprite = arrow_outline(&r, vec![0, 2], 1, 4, 3);
+        let shaft_row = 10 + 5;
+        let midpoint = (4 * 10) / 2;
+        assert_eq!(
+            pixel_of(&sprite, midpoint, shaft_row),
+            pixel_of(&sprite, midpoint - ARROW_STROKE - 1, shaft_row)
+        );
+    }
+
+    #[test]
+    fn an_arrow_is_half_as_thick_as_a_box_border() {
+        assert_eq!(ARROW_STROKE * 2, BORDER);
     }
 
     fn status_line_output(r: &mut TerminalRenderer, state: &State) -> String {
