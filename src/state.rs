@@ -108,14 +108,6 @@ impl Default for State {
     }
 }
 
-pub(crate) fn hide_idle_cursor(mut state: State) -> State {
-    if state.mode == Mode::Command && state.doc.selected.is_some() {
-        state.last_selected = state.doc.selected.clone();
-        state.doc.selected = None;
-    }
-    state
-}
-
 pub(crate) fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
     state.dirty = true;
@@ -561,7 +553,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, Some(selected));
     }
@@ -573,7 +565,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
@@ -591,7 +583,7 @@ mod tests {
             },
             Some(selected.clone()),
         );
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
@@ -599,7 +591,7 @@ mod tests {
     #[test]
     fn an_idle_hide_with_nothing_selected_is_a_noop() {
         let state = new_state(vec![node("a")], Mode::Command, None);
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, None);
     }
@@ -611,7 +603,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(hide_idle_cursor(state));
+        let hidden = reduce(reduce(state, Action::Idle), Action::Idle);
         assert_eq!(hidden.doc.selected, None);
         assert_eq!(hidden.last_selected, Some(selected.clone()));
         let restored = handle_key(hidden, "z");
@@ -628,7 +620,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "j");
         assert_eq!(
             result.doc.selected,
@@ -646,7 +638,7 @@ mod tests {
             index: 0,
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "z");
         assert_eq!(result.doc.selected, Some(selected));
     }
@@ -663,7 +655,7 @@ mod tests {
         );
         state = snapshot(state);
         state = snapshot(state);
-        let hidden = hide_idle_cursor(state);
+        let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.history.len(), 2);
         assert_eq!(hidden.doc.selected, None);
     }

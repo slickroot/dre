@@ -30,6 +30,20 @@ pub(crate) fn min_depth(command: Action) -> usize {
     }
 }
 
+fn hide_idle_cursor(mut state: State) -> State {
+    if state.mode == Mode::Command && state.doc.selected.is_some() {
+        state.last_selected = state.doc.selected.clone();
+        state.doc.selected = None;
+    }
+    state
+}
+
+fn interrupt(mut state: State) -> State {
+    state.save_to = None;
+    state.running = false;
+    state
+}
+
 fn enter_insert(mut state: State, path: Path, base_label: &str) -> State {
     at(&mut state.doc.boxes, &path).label = format!("{base_label}{PAD}");
     state.doc.selected = Some(path);
@@ -245,6 +259,8 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
             state.pending_count = None;
             return state;
         }
+        Action::Idle => return hide_idle_cursor(state),
+        Action::Interrupt => return interrupt(state),
         _ => {}
     }
     state.colour_overlay = false;
@@ -2184,6 +2200,21 @@ mod tests {
         assert_eq!(crate::diagram::at(&mut boxes, &selected).colour, Some(2));
         assert!(!result.colour_overlay);
         assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn idle_and_interrupt_are_not_undoable() {
+        assert!(!is_undoable(Action::Idle));
+        assert!(!is_undoable(Action::Interrupt));
+    }
+
+    #[test]
+    fn interrupt_stops_running_and_drops_the_save_path() {
+        let mut state = new_state(vec![node("a")], Mode::Command, None);
+        state.save_to = Some("a.dre".to_string());
+        let result = reduce(state, Action::Interrupt);
+        assert!(!result.running);
+        assert_eq!(result.save_to, None);
     }
 
     #[test]

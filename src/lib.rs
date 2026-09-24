@@ -58,7 +58,7 @@ impl Session {
 
     #[doc(hidden)]
     pub fn go_idle(&mut self) {
-        self.state = state::hide_idle_cursor(std::mem::take(&mut self.state));
+        self.state = reduce::reduce(std::mem::take(&mut self.state), action::Action::Idle);
     }
 
     pub fn is_running(&self) -> bool {

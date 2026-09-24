@@ -10,7 +10,7 @@ use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::state::State;
 use crate::terminal::{RawScreen, Terminal};
-use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
+use crate::{dre_format, file_document, filesystem, kitty, terminal, IDLE_TIMEOUT_MS};
 
 const INTERRUPT: &str = "\x03";
 
@@ -56,10 +56,7 @@ fn edit(
         output.flush()?;
 
         match next_key()? {
-            Some(key) if key == INTERRUPT => {
-                state.save_to = None;
-                break;
-            }
+            Some(key) if key == INTERRUPT => state = reduce(state, Action::Interrupt),
             Some(key) if key == terminal::RESIZE => renderer.on_resize(probe()?),
             Some(key) => {
                 if let Some(action) = parse(&state, &key) {
@@ -73,7 +70,7 @@ fn edit(
                     }
                 }
             }
-            None => state = state::hide_idle_cursor(state),
+            None => state = reduce(state, Action::Idle),
         }
     }
     Ok(state)
