@@ -1,7 +1,7 @@
 use crate::diagram::{append, at, children_at, remove, Path};
 use crate::state::{
-    add_child_box, blank_box, colour_row, next_colour, snapshot, undo, KeyBinding, Mode, State,
-    DEFAULT_FILENAME, PAD,
+    add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
+    KeyBinding, Mode, State, DEFAULT_FILENAME, PAD,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -10,6 +10,7 @@ pub(crate) enum Command {
     NewBox,
     NewSibling,
     Delete,
+    Paste,
     SelectParent,
     SelectChild,
     SelectNext,
@@ -34,6 +35,7 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
         "b" => Command::NewBox,
         "s" => Command::NewSibling,
         "d" => Command::Delete,
+        "p" => Command::Paste,
         "h" => Command::SelectParent,
         "l" => Command::SelectChild,
         "j" => Command::SelectNext,
@@ -71,6 +73,11 @@ pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Command>] = &[
         keys: &["d"],
         command: Command::Delete,
         description: "Delete the selected box and its descendants",
+    },
+    KeyBinding {
+        keys: &["p"],
+        command: Command::Paste,
+        description: "Paste the cut box and its descendants as the last child of the selected box",
     },
     KeyBinding {
         keys: &["h"],
@@ -139,6 +146,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
         command,
         Command::NewBox
             | Command::Delete
+            | Command::Paste
             | Command::CycleColour
             | Command::ToggleFill
             | Command::ToggleRounded
@@ -152,7 +160,9 @@ pub(crate) fn is_undoable(command: Command) -> bool {
 
 pub(crate) fn min_depth(command: Command) -> usize {
     match command {
-        Command::Undo | Command::NewBox | Command::Quit | Command::ScrollBy(_) => 0,
+        Command::Undo | Command::NewBox | Command::Paste | Command::Quit | Command::ScrollBy(_) => {
+            0
+        }
         Command::SelectParent | Command::CycleSiblingsColour | Command::ToggleSiblingsFill => 2,
         _ => 1,
     }
@@ -281,7 +291,38 @@ fn toggle_fill(mut state: State, path: Path) -> State {
 }
 
 fn delete_box(mut state: State, path: Path) -> State {
-    state.doc.selected = remove(&mut state.doc.boxes, &path);
+    state.clipboard = Some(remove(&mut state.doc.boxes, &path));
+    let remaining = children_at(&mut state.doc.boxes, &path.ancestors).len();
+    state.doc.selected = if remaining > 0 {
+        Some(Path {
+            index: path.index.min(remaining - 1),
+            ancestors: path.ancestors,
+        })
+    } else {
+        path.ancestors.split_last().map(|(&index, ancestors)| Path {
+            ancestors: ancestors.to_vec(),
+            index,
+        })
+    };
+    state
+}
+
+fn paste_box(mut state: State, selected: Option<Path>, count: usize) -> State {
+    let Some(node) = state.clipboard.clone() else {
+        state.doc.selected = selected;
+        return drop_snapshot_if_unchanged(state);
+    };
+    let target = match selected {
+        Some(path) => [path.ancestors, vec![path.index]].concat(),
+        None => Vec::new(),
+    };
+    let list = children_at(&mut state.doc.boxes, &target);
+    let first = list.len();
+    list.extend(std::iter::repeat_n(node, count));
+    state.doc.selected = Some(Path {
+        ancestors: target,
+        index: first + count - 1,
+    });
     state
 }
 
@@ -346,6 +387,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         (Command::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
         (Command::ToggleFill, Some(path)) => toggle_fill(state, path),
         (Command::Delete, Some(path)) => delete_box(state, path),
+        (Command::Paste, selected) => paste_box(state, selected, count),
         (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
         (_, None) => state,
     }
@@ -371,11 +413,12 @@ mod tests {
     use crate::diagram::{node, node_with_children, palette, Node};
     use crate::state::{handle_key, new_state};
 
-    const COMMANDS: [Command; 16] = [
+    const COMMANDS: [Command; 17] = [
         Command::Undo,
         Command::NewBox,
         Command::NewSibling,
         Command::Delete,
+        Command::Paste,
         Command::SelectParent,
         Command::SelectChild,
         Command::SelectNext,
@@ -2158,5 +2201,186 @@ mod tests {
         let result = handle_key(handle_key(state, "3"), "d");
         assert_eq!(result.doc.boxes, vec![node("a"), node("c"), node("d")]);
         assert_eq!(result.pending_count, None);
+    }
+
+    fn selecting(boxes: Vec<Node>, ancestors: &[usize], index: usize) -> State {
+        new_state(
+            boxes,
+            Mode::Command,
+            Some(Path {
+                ancestors: ancestors.to_vec(),
+                index,
+            }),
+        )
+    }
+
+    #[test]
+    fn d_selects_the_next_sibling_at_the_same_path() {
+        let result = handle_key(
+            selecting(vec![node("a"), node("b"), node("c")], &[], 1),
+            "d",
+        );
+        assert_eq!(result.doc.boxes, vec![node("a"), node("c")]);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_the_last_sibling_selects_the_previous_sibling() {
+        let result = handle_key(
+            selecting(vec![node("a"), node("b"), node("c")], &[], 2),
+            "d",
+        );
+        assert_eq!(result.doc.boxes, vec![node("a"), node("b")]);
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_an_only_child_selects_the_parent() {
+        let boxes = vec![
+            node("a"),
+            node_with_children("b", vec![node_with_children("c", vec![node("d")])]),
+        ];
+        let result = handle_key(selecting(boxes, &[1, 0], 0), "d");
+        assert_eq!(
+            result.doc.boxes,
+            vec![node("a"), node_with_children("b", vec![node("c")])]
+        );
+        assert_eq!(
+            result.doc.selected,
+            Some(Path {
+                ancestors: vec![1],
+                index: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn d_on_the_only_top_level_box_selects_nothing() {
+        let result = handle_key(selecting(vec![node("a")], &[], 0), "d");
+        assert_eq!(result.doc.boxes, vec![]);
+        assert_eq!(result.doc.selected, None);
+    }
+
+    #[test]
+    fn d_puts_the_box_and_its_descendants_on_the_clipboard() {
+        let payments = node_with_children("Payments", vec![node("Stripe")]);
+        let boxes = vec![node_with_children(
+            "API gateway",
+            vec![node("Auth"), payments.clone()],
+        )];
+        let result = handle_key(selecting(boxes, &[0], 1), "d");
+        assert_eq!(result.clipboard, Some(payments));
+    }
+
+    #[test]
+    fn a_second_d_replaces_the_clipboard() {
+        let boxes = vec![node("a"), node("b")];
+        let result = handle_key(handle_key(selecting(boxes, &[], 0), "d"), "d");
+        assert_eq!(result.clipboard, Some(node("b")));
+    }
+
+    #[test]
+    fn u_after_d_restores_the_box_and_leaves_the_clipboard_filled() {
+        let boxes = vec![node_with_children("a", vec![node("b")]), node("c")];
+        let before = selecting(boxes, &[], 0);
+        let undone = handle_key(handle_key(before.clone(), "d"), "u");
+        assert_eq!(undone.doc, before.doc);
+        assert_eq!(
+            undone.clipboard,
+            Some(node_with_children("a", vec![node("b")]))
+        );
+    }
+
+    fn story() -> State {
+        let payments = node_with_children("Payments", vec![node("Stripe")]);
+        let boxes = vec![node_with_children(
+            "Orders",
+            vec![payments, node("Refunds")],
+        )];
+        selecting(boxes, &[0], 0)
+    }
+
+    fn orders_children(state: &State) -> Vec<Node> {
+        state.doc.boxes[0].children.clone()
+    }
+
+    fn selected_at(ancestors: &[usize], index: usize) -> Option<Path> {
+        Some(Path {
+            ancestors: ancestors.to_vec(),
+            index,
+        })
+    }
+
+    #[test]
+    fn p_parses_to_paste() {
+        assert_eq!(parse("p"), Some(Command::Paste));
+    }
+
+    #[test]
+    fn p_appends_the_cut_branch_as_the_last_child_of_the_selected_box() {
+        let payments = node_with_children("Payments", vec![node("Stripe")]);
+        let cut = handle_key(story(), "d");
+        let selected = handle_key(cut, "h");
+        let result = handle_key(selected, "p");
+        let children = orders_children(&result);
+        assert_eq!(children.last(), Some(&payments));
+        assert_eq!(result.doc.selected, selected_at(&[0], children.len() - 1));
+    }
+
+    #[test]
+    fn pasting_again_gives_a_second_copy() {
+        let payments = node_with_children("Payments", vec![node("Stripe")]);
+        let cut = handle_key(handle_key(story(), "d"), "h");
+        let result = handle_key(handle_key(handle_key(cut, "p"), "h"), "p");
+        let children = orders_children(&result);
+        assert_eq!(children[children.len() - 2..], [payments.clone(), payments]);
+        assert_eq!(result.doc.selected, selected_at(&[0], children.len() - 1));
+    }
+
+    #[test]
+    fn u_after_p_removes_the_branch_and_restores_the_earlier_selection() {
+        let cut = handle_key(handle_key(story(), "d"), "h");
+        let undone = handle_key(handle_key(cut.clone(), "p"), "u");
+        assert_eq!(undone.doc, cut.doc);
+    }
+
+    #[test]
+    fn p_with_an_empty_clipboard_changes_nothing_and_leaves_history_alone() {
+        let before = handle_key(story(), "r");
+        let pasted = handle_key(before.clone(), "p");
+        assert_eq!(pasted.doc, before.doc);
+        let undone = handle_key(pasted, "u");
+        assert_eq!(undone.doc, story().doc);
+    }
+
+    #[test]
+    fn p_after_deleting_the_only_top_level_box_restores_and_selects_it() {
+        let only = node_with_children("a", vec![node("b")]);
+        let deleted = handle_key(selecting(vec![only.clone()], &[], 0), "d");
+        let result = handle_key(deleted, "p");
+        assert_eq!(result.doc.boxes, vec![only]);
+        assert_eq!(result.doc.selected, selected_at(&[], 0));
+    }
+
+    #[test]
+    fn three_p_pastes_three_children_selects_the_last_and_one_u_removes_all() {
+        let cut = handle_key(handle_key(story(), "d"), "h");
+        let pasted = handle_key(handle_key(cut.clone(), "3"), "p");
+        let children = orders_children(&pasted);
+        assert_eq!(children.len(), orders_children(&cut).len() + 3);
+        assert_eq!(pasted.doc.selected, selected_at(&[0], children.len() - 1));
+        assert_eq!(handle_key(pasted, "u").doc, cut.doc);
     }
 }
