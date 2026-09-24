@@ -110,6 +110,15 @@ impl<T> Tree<T> {
         )
     }
 
+    pub fn contains(&self, path: &[usize]) -> bool {
+        !path.is_empty() && self.try_get(path).is_some()
+    }
+
+    fn try_get(&self, path: &[usize]) -> Option<&Tree<T>> {
+        path.iter()
+            .try_fold(self, |tree, &index| tree.children.get(index))
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -538,5 +547,34 @@ mod tests {
         let mapped = Tree::<&str>::root(Vec::new()).map(|value| value.len());
         assert_eq!(mapped.walk().count(), 0);
         assert_eq!(mapped.get(&[]).value, 0);
+    }
+
+    #[test]
+    fn contains_is_true_for_existing_boxes() {
+        let tree = sample();
+        assert!(tree.contains(&[0]));
+        assert!(tree.contains(&[1]));
+        assert!(tree.contains(&[0, 1]));
+    }
+
+    #[test]
+    fn contains_is_false_for_the_root_path() {
+        assert!(!sample().contains(&[]));
+    }
+
+    #[test]
+    fn contains_is_false_for_an_index_past_the_last_sibling() {
+        assert!(!sample().contains(&[2]));
+        assert!(!sample().contains(&[0, 2]));
+    }
+
+    #[test]
+    fn contains_is_false_for_a_path_through_a_box_with_too_few_children() {
+        assert!(!sample().contains(&[0, 2, 0]));
+    }
+
+    #[test]
+    fn contains_is_false_for_a_path_below_a_leaf() {
+        assert!(!sample().contains(&[1, 0]));
     }
 }
