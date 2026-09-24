@@ -16,7 +16,7 @@ pub(crate) use font::FakeGlyphSource;
 pub(crate) use font::GlyphCache;
 pub use svg::SvgRenderer;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use terminal::TerminalRenderer;
+pub(crate) use terminal::{TerminalRenderer, CACHE_LIMIT};
 
 pub trait Renderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()>;

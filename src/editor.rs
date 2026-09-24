@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
-use crate::render::{GlyphCache, Renderer, TerminalRenderer};
+use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::state::{handle_key, State};
 use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
@@ -18,7 +18,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     kitty::require(&mut stdout, stdin.as_raw_fd())?;
     let terminal = terminal::probe()?;
     let glyph_source = Box::new(GlyphCache::new(terminal.cell_width, terminal.cell_height));
-    let mut renderer = TerminalRenderer::new(terminal, glyph_source);
+    let mut renderer = TerminalRenderer::new(terminal, glyph_source, CACHE_LIMIT);
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
@@ -254,7 +254,7 @@ mod tests {
             terminal.cell_width,
             terminal.cell_height,
         ));
-        TerminalRenderer::new(terminal, source)
+        TerminalRenderer::new(terminal, source, CACHE_LIMIT)
     }
 
     fn state_saving_to(path: &str) -> State {
