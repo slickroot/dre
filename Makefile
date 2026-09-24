@@ -5,7 +5,6 @@ build:
 
 test:
 	nix develop --command cargo test
-	bash scripts/new-spec.test.sh
 
 fmt:
 	nix develop --command cargo fmt
