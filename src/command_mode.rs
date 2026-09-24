@@ -223,8 +223,13 @@ fn edit_label(mut state: State, path: Path) -> State {
     enter_insert(state, path, &label)
 }
 
-fn rename_label(state: State, path: Path) -> State {
-    enter_insert(state, path, "")
+fn rename_label(mut state: State, path: Path) -> State {
+    at(&mut state.doc.boxes, &path).label.clear();
+    state.doc.selected = Some(path.clone());
+    let mut state = snapshot(state);
+    at(&mut state.doc.boxes, &path).label = PAD.to_string();
+    state.mode = Mode::Insert;
+    state
 }
 
 fn cycle_colour(mut state: State, path: Path) -> State {
@@ -1800,6 +1805,27 @@ mod tests {
         assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
         let state = handle_key(state, "u");
         assert_eq!(state.doc.boxes, vec![node("Cache")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn capital_i_makes_the_clearing_and_the_new_text_separate_undo_steps() {
+        let state = press(
+            cache_box_selected(),
+            &["I", "R", "e", "d", "i", "s", "\x1b"],
+        );
+        assert_eq!(state.doc.boxes, vec![node("Redis")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn capital_i_then_esc_immediately_leaves_only_the_clearing_as_a_step() {
+        let state = press(cache_box_selected(), &["I", "\x1b"]);
+        assert_eq!(state.doc.boxes, vec![node("")]);
         let state = handle_key(state, "u");
         assert_eq!(state.doc.boxes, vec![node("Cache")]);
     }
