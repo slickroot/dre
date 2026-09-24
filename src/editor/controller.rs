@@ -37,10 +37,8 @@ impl DreController {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::diagram::{self, Path};
-    use crate::state::INTERRUPT;
     use crate::terminal::RESIZE;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     pub(in crate::editor) struct ScriptedKeys {
@@ -55,11 +53,32 @@ pub(super) mod tests {
         }
     }
 
+    struct CountingKeys {
+        keys: ScriptedKeys,
+        reads: Rc<Cell<usize>>,
+    }
+
+    impl KeySource for CountingKeys {
+        fn next_key(&mut self) -> io::Result<Option<String>> {
+            self.reads.set(self.reads.get() + 1);
+            self.keys.next_key()
+        }
+    }
+
+    struct BrokenKeys;
+
+    impl KeySource for BrokenKeys {
+        fn next_key(&mut self) -> io::Result<Option<String>> {
+            Err(io::Error::other("keys failed"))
+        }
+    }
+
     #[derive(Default)]
     pub(in crate::editor) struct Screenings {
         pub(in crate::editor) frames: Vec<State>,
         pub(in crate::editor) resizes: usize,
         pub(in crate::editor) fail_resize: bool,
+        pub(in crate::editor) fail_render: bool,
     }
 
     pub(in crate::editor) struct RecordingScreen {
@@ -68,7 +87,11 @@ pub(super) mod tests {
 
     impl Screen for RecordingScreen {
         fn render(&mut self, state: &State) -> io::Result<()> {
-            self.seen.borrow_mut().frames.push(state.clone());
+            let mut seen = self.seen.borrow_mut();
+            seen.frames.push(state.clone());
+            if seen.fail_render {
+                return Err(io::Error::other("render failed"));
+            }
             Ok(())
         }
 
@@ -82,100 +105,137 @@ pub(super) mod tests {
         }
     }
 
-    fn run_script(
-        state: State,
-        script: Vec<Option<&str>>,
-        fail_resize: bool,
-    ) -> (io::Result<State>, Rc<RefCell<Screenings>>) {
-        let seen = Rc::new(RefCell::new(Screenings {
-            fail_resize,
-            ..Default::default()
-        }));
-        let keys = ScriptedKeys {
-            script: script
-                .into_iter()
-                .map(|key| key.map(str::to_string))
-                .collect::<Vec<_>>()
-                .into_iter(),
+    struct Run {
+        result: io::Result<State>,
+        seen: Rc<RefCell<Screenings>>,
+        key_reads: usize,
+    }
+
+    fn run_with(screenings: Screenings, state: State, script: Vec<Option<&str>>) -> Run {
+        let seen = Rc::new(RefCell::new(screenings));
+        let reads = Rc::new(Cell::new(0));
+        let keys = CountingKeys {
+            keys: ScriptedKeys {
+                script: script
+                    .into_iter()
+                    .map(|key| key.map(str::to_string))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            },
+            reads: reads.clone(),
         };
         let mut controller = DreController::new(
             Box::new(keys),
             Box::new(RecordingScreen { seen: seen.clone() }),
         );
-        (controller.run(state), seen)
+        let result = controller.run(state);
+        Run {
+            result,
+            seen,
+            key_reads: reads.get(),
+        }
     }
 
-    fn state_saving_to(path: &str) -> State {
-        State::open(Default::default(), Some(path.to_string()))
+    fn run_script(state: State, script: Vec<Option<&str>>) -> Run {
+        run_with(Screenings::default(), state, script)
     }
 
-    #[test]
-    fn an_interrupt_clears_where_to_save() {
-        let (result, _) = run_script(state_saving_to("a.dre"), vec![Some(INTERRUPT)], false);
-        assert_eq!(result.unwrap().save_to, None);
+    fn state_that_saves_on_quit() -> State {
+        State::open(Default::default(), Some("a.dre".to_string()))
     }
 
-    #[test]
-    fn a_quit_stops_the_loop_and_keeps_where_to_save() {
-        let (result, _) = run_script(state_saving_to("a.dre"), vec![Some("q")], false);
-        let state = result.unwrap();
-        assert!(!state.running);
-        assert_eq!(state.save_to, Some("a.dre".to_string()));
+    fn state_with_pending_count(count: usize) -> State {
+        let mut state = state_that_saves_on_quit();
+        state.pending_count = Some(count);
+        state
+    }
+
+    fn stopped_state_with_pending_count(count: usize) -> State {
+        let mut state = state_with_pending_count(count);
+        state.running = false;
+        state
     }
 
     #[test]
     fn a_frame_is_rendered_before_the_first_key_is_read() {
-        let (result, seen) = run_script(state_saving_to("a.dre"), vec![], false);
-        assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
-        assert_eq!(seen.borrow().frames.len(), 1);
+        let run = run_script(state_that_saves_on_quit(), vec![]);
+        assert_eq!(
+            run.result.err().unwrap().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        assert_eq!(run.seen.borrow().frames.len(), 1);
     }
 
     #[test]
-    fn a_resize_key_resizes_the_screen_once_and_leaves_the_state_alone() {
-        let (result, seen) = run_script(
-            state_saving_to("a.dre"),
-            vec![Some(RESIZE), Some("q")],
-            false,
+    fn a_state_that_is_not_running_renders_nothing_reads_no_key_and_is_returned_as_given() {
+        let run = run_script(stopped_state_with_pending_count(7), vec![Some("q")]);
+        assert_eq!(run.result.unwrap().pending_count, Some(7));
+        assert_eq!(run.seen.borrow().frames.len(), 0);
+        assert_eq!(run.key_reads, 0);
+    }
+
+    #[test]
+    fn one_frame_is_rendered_per_key_read_until_the_state_stops_running() {
+        let run = run_script(
+            state_that_saves_on_quit(),
+            vec![None, None, Some("q"), None],
         );
-        let state = result.unwrap();
-        assert!(!state.running);
-        assert_eq!(state.save_to, Some("a.dre".to_string()));
-        let seen = seen.borrow();
+        assert!(!run.result.unwrap().running);
+        assert_eq!(run.seen.borrow().frames.len(), 3);
+        assert_eq!(run.key_reads, 3);
+    }
+
+    #[test]
+    fn a_resize_key_resizes_the_screen_once_and_does_not_reach_the_reducer() {
+        let run = run_script(state_with_pending_count(4), vec![Some(RESIZE), Some("q")]);
+        assert!(run.result.is_ok());
+        let seen = run.seen.borrow();
         assert_eq!(seen.resizes, 1);
         assert_eq!(seen.frames.len(), 2);
-        assert!(seen.frames[1].running);
-        assert_eq!(seen.frames[1].save_to, Some("a.dre".to_string()));
+        assert_eq!(seen.frames[1].pending_count, Some(4));
+    }
+
+    #[test]
+    fn a_key_other_than_resize_is_reduced_and_its_result_becomes_the_state() {
+        let run = run_script(state_that_saves_on_quit(), vec![Some("3"), Some("q")]);
+        assert!(run.result.is_ok());
+        assert_eq!(run.seen.borrow().frames[1].pending_count, Some(3));
     }
 
     #[test]
     fn a_failed_resize_propagates() {
-        let (result, _) = run_script(
-            state_saving_to("a.dre"),
+        let screenings = Screenings {
+            fail_resize: true,
+            ..Default::default()
+        };
+        let run = run_with(
+            screenings,
+            state_that_saves_on_quit(),
             vec![Some(RESIZE), Some("q")],
-            true,
         );
-        let error = result.err().unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(error.to_string(), "resize failed");
+        assert_eq!(run.result.err().unwrap().to_string(), "resize failed");
     }
 
     #[test]
-    fn an_idle_second_hides_the_selection_and_the_next_key_restores_it() {
-        let selected = Path {
-            ancestors: vec![],
-            index: 0,
+    fn a_failed_render_propagates_and_no_key_is_read() {
+        let screenings = Screenings {
+            fail_render: true,
+            ..Default::default()
         };
-        let state = State::open(
-            diagram::Document {
-                boxes: vec![diagram::node("a"), diagram::node("b")],
-                selected: None,
-            },
-            Some("a.dre".to_string()),
+        let run = run_with(screenings, state_that_saves_on_quit(), vec![Some("q")]);
+        assert_eq!(run.result.err().unwrap().to_string(), "render failed");
+        assert_eq!(run.key_reads, 0);
+    }
+
+    #[test]
+    fn a_failing_key_source_propagates_its_error() {
+        let mut controller = DreController::new(
+            Box::new(BrokenKeys),
+            Box::new(RecordingScreen {
+                seen: Rc::new(RefCell::new(Screenings::default())),
+            }),
         );
-        let (result, seen) = run_script(state, vec![None, Some("q")], false);
-        assert_eq!(result.unwrap().doc.selected, Some(selected.clone()));
-        let seen = seen.borrow();
-        assert_eq!(seen.frames[0].doc.selected, Some(selected.clone()));
-        assert_eq!(seen.frames[1].doc.selected, None);
+        let error = controller.run(state_that_saves_on_quit()).err().unwrap();
+        assert_eq!(error.to_string(), "keys failed");
     }
 }
