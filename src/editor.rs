@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
-use crate::action::{Action, CommandAction};
+use crate::action::Action;
 use crate::diagram::Document;
 use crate::input::parse;
 use crate::layout::{layout, PlacementNode};
@@ -69,7 +69,7 @@ fn edit(
                     if let Some(delta) =
                         overflow_delta(left, right, state.scroll_x, renderer.columns())
                     {
-                        state = reduce(state, Action::Command(CommandAction::ScrollBy(delta)));
+                        state = reduce(state, Action::ScrollBy(delta));
                     }
                 }
             }

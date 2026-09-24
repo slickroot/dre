@@ -1,12 +1,5 @@
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Action {
-    Command(CommandAction),
-    Insert(InsertAction),
-    SavePrompt(SavePromptAction),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum CommandAction {
     Undo,
     NewBox,
     NewSibling,
@@ -27,20 +20,12 @@ pub(crate) enum CommandAction {
     ScrollBy(i64),
     Digit(u8),
     CancelCount,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum InsertAction {
     Commit,
     CommitAndAddChild,
-    Backspace,
-    Append(char),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum SavePromptAction {
+    InsertBackspace,
+    InsertAppend(char),
     Confirm,
     Cancel,
-    Backspace,
-    Append(char),
+    SavePromptBackspace,
+    SavePromptAppend(char),
 }

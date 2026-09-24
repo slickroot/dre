@@ -9,8 +9,14 @@ pub(crate) fn reduce(mut state: State, action: Action) -> State {
         state.doc.selected = Some(selected);
     }
     match action {
-        Action::Command(command) => command_mode::reduce(state, command),
-        Action::Insert(command) => insert_mode::reduce(state, command),
-        Action::SavePrompt(command) => save_prompt_mode::reduce(state, command),
+        Action::Commit
+        | Action::CommitAndAddChild
+        | Action::InsertBackspace
+        | Action::InsertAppend(_) => insert_mode::reduce(state, action),
+        Action::Confirm
+        | Action::Cancel
+        | Action::SavePromptBackspace
+        | Action::SavePromptAppend(_) => save_prompt_mode::reduce(state, action),
+        _ => command_mode::reduce(state, action),
     }
 }

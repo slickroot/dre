@@ -208,7 +208,7 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::{Action, CommandAction};
+    use crate::action::Action;
     use crate::diagram::{node, node_with_children};
     use crate::reduce::reduce;
     use crate::test_support::handle_key;
@@ -442,7 +442,7 @@ mod tests {
                 index: 1,
             }),
         );
-        let result = reduce(state, Action::Command(CommandAction::ScrollBy(12)));
+        let result = reduce(state, Action::ScrollBy(12));
         assert_eq!(result.scroll_x, 12);
         assert_eq!(result.doc.boxes, boxes);
         assert_eq!(
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
         let state = new_state(vec![], Mode::Command, None);
-        let result = reduce(state, Action::Command(CommandAction::ScrollBy(-7)));
+        let result = reduce(state, Action::ScrollBy(-7));
         assert_eq!(result.scroll_x, -7);
     }
 
@@ -472,7 +472,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let result = reduce(state, Action::Command(CommandAction::ScrollBy(5)));
+        let result = reduce(state, Action::ScrollBy(5));
         assert_eq!(result.scroll_x, 5);
         assert_eq!(result.mode, Mode::Insert);
     }

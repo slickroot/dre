@@ -1,37 +1,31 @@
-use crate::action::CommandAction;
+use crate::action::Action;
 use crate::diagram::{append, at, children_at, remove, Path};
 use crate::state::{
     add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
     Mode, State, DEFAULT_FILENAME, PAD,
 };
 
-pub(crate) fn is_undoable(command: CommandAction) -> bool {
+pub(crate) fn is_undoable(command: Action) -> bool {
     matches!(
         command,
-        CommandAction::NewBox
-            | CommandAction::Delete
-            | CommandAction::Paste
-            | CommandAction::CycleColour
-            | CommandAction::ToggleFill
-            | CommandAction::ToggleRounded
-            | CommandAction::CycleSiblingsColour
-            | CommandAction::ToggleSiblingsFill
-            | CommandAction::RenameLabel
-            | CommandAction::EditLabel
-            | CommandAction::NewSibling
+        Action::NewBox
+            | Action::Delete
+            | Action::Paste
+            | Action::CycleColour
+            | Action::ToggleFill
+            | Action::ToggleRounded
+            | Action::CycleSiblingsColour
+            | Action::ToggleSiblingsFill
+            | Action::RenameLabel
+            | Action::EditLabel
+            | Action::NewSibling
     )
 }
 
-pub(crate) fn min_depth(command: CommandAction) -> usize {
+pub(crate) fn min_depth(command: Action) -> usize {
     match command {
-        CommandAction::Undo
-        | CommandAction::NewBox
-        | CommandAction::Paste
-        | CommandAction::Quit
-        | CommandAction::ScrollBy(_) => 0,
-        CommandAction::SelectParent
-        | CommandAction::CycleSiblingsColour
-        | CommandAction::ToggleSiblingsFill => 2,
+        Action::Undo | Action::NewBox | Action::Paste | Action::Quit | Action::ScrollBy(_) => 0,
+        Action::SelectParent | Action::CycleSiblingsColour | Action::ToggleSiblingsFill => 2,
         _ => 1,
     }
 }
@@ -244,10 +238,10 @@ fn accumulate_digit(mut state: State, digit: u8) -> State {
     state
 }
 
-pub(crate) fn reduce(mut state: State, command: CommandAction) -> State {
+pub(crate) fn reduce(mut state: State, command: Action) -> State {
     match command {
-        CommandAction::Digit(digit) => return accumulate_digit(state, digit),
-        CommandAction::CancelCount => {
+        Action::Digit(digit) => return accumulate_digit(state, digit),
+        Action::CancelCount => {
             state.pending_count = None;
             return state;
         }
@@ -268,28 +262,28 @@ pub(crate) fn reduce(mut state: State, command: CommandAction) -> State {
         state
     };
     match (command, state.doc.selected.take()) {
-        (CommandAction::Undo, selected) => undo(reselect(state, selected)),
-        (CommandAction::NewBox, selected) => add_child_box(state, selected),
-        (CommandAction::ScrollBy(delta), selected) => {
+        (Action::Undo, selected) => undo(reselect(state, selected)),
+        (Action::NewBox, selected) => add_child_box(state, selected),
+        (Action::ScrollBy(delta), selected) => {
             state.scroll_x += delta;
             reselect(state, selected)
         }
-        (CommandAction::Quit, selected) => quit(reselect(state, selected)),
-        (CommandAction::NewSibling, Some(path)) => new_sibling(state, path),
-        (CommandAction::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
-        (CommandAction::SelectChild, Some(path)) => select_child(state, path),
-        (CommandAction::SelectNext, Some(path)) => repeat(state, path, count, select_next),
-        (CommandAction::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
-        (CommandAction::EditLabel, Some(path)) => edit_label(state, path),
-        (CommandAction::RenameLabel, Some(path)) => rename_label(state, path),
-        (CommandAction::CycleColour, Some(path)) => cycle_colour(state, path),
-        (CommandAction::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
-        (CommandAction::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
-        (CommandAction::ToggleFill, Some(path)) => toggle_fill(state, path),
-        (CommandAction::Delete, Some(path)) => delete_box(state, path),
-        (CommandAction::Paste, selected) => paste_box(state, selected, count),
-        (CommandAction::ToggleRounded, Some(path)) => toggle_rounded(state, path),
-        (CommandAction::Digit(_) | CommandAction::CancelCount, _) | (_, None) => state,
+        (Action::Quit, selected) => quit(reselect(state, selected)),
+        (Action::NewSibling, Some(path)) => new_sibling(state, path),
+        (Action::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
+        (Action::SelectChild, Some(path)) => select_child(state, path),
+        (Action::SelectNext, Some(path)) => repeat(state, path, count, select_next),
+        (Action::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
+        (Action::EditLabel, Some(path)) => edit_label(state, path),
+        (Action::RenameLabel, Some(path)) => rename_label(state, path),
+        (Action::CycleColour, Some(path)) => cycle_colour(state, path),
+        (Action::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
+        (Action::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
+        (Action::ToggleFill, Some(path)) => toggle_fill(state, path),
+        (Action::Delete, Some(path)) => delete_box(state, path),
+        (Action::Paste, selected) => paste_box(state, selected, count),
+        (Action::ToggleRounded, Some(path)) => toggle_rounded(state, path),
+        _ => state,
     }
 }
 
@@ -301,24 +295,24 @@ mod tests {
     use crate::state::new_state;
     use crate::test_support::handle_key;
 
-    const COMMANDS: [CommandAction; 17] = [
-        CommandAction::Undo,
-        CommandAction::NewBox,
-        CommandAction::NewSibling,
-        CommandAction::Delete,
-        CommandAction::Paste,
-        CommandAction::SelectParent,
-        CommandAction::SelectChild,
-        CommandAction::SelectNext,
-        CommandAction::SelectPrevious,
-        CommandAction::EditLabel,
-        CommandAction::RenameLabel,
-        CommandAction::CycleColour,
-        CommandAction::CycleSiblingsColour,
-        CommandAction::ToggleSiblingsFill,
-        CommandAction::ToggleFill,
-        CommandAction::ToggleRounded,
-        CommandAction::Quit,
+    const COMMANDS: [Action; 17] = [
+        Action::Undo,
+        Action::NewBox,
+        Action::NewSibling,
+        Action::Delete,
+        Action::Paste,
+        Action::SelectParent,
+        Action::SelectChild,
+        Action::SelectNext,
+        Action::SelectPrevious,
+        Action::EditLabel,
+        Action::RenameLabel,
+        Action::CycleColour,
+        Action::CycleSiblingsColour,
+        Action::ToggleSiblingsFill,
+        Action::ToggleFill,
+        Action::ToggleRounded,
+        Action::Quit,
     ];
 
     #[test]
@@ -1724,7 +1718,7 @@ mod tests {
             }),
         );
         state.scroll_x = 3;
-        let result = reduce(state, CommandAction::ScrollBy(4));
+        let result = reduce(state, Action::ScrollBy(4));
         assert_eq!(result.scroll_x, 7);
         assert_eq!(
             result.doc.selected,
@@ -1738,14 +1732,14 @@ mod tests {
     #[test]
     fn scroll_by_command_works_with_nothing_selected() {
         let state = new_state(vec![], Mode::Command, None);
-        let result = reduce(state, CommandAction::ScrollBy(-2));
+        let result = reduce(state, Action::ScrollBy(-2));
         assert_eq!(result.scroll_x, -2);
         assert_eq!(result.doc.selected, None);
     }
 
     #[test]
     fn scroll_by_is_not_undoable() {
-        assert!(!is_undoable(CommandAction::ScrollBy(5)));
+        assert!(!is_undoable(Action::ScrollBy(5)));
     }
 
     #[test]
@@ -1758,7 +1752,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let scrolled = reduce(state, CommandAction::ScrollBy(9));
+        let scrolled = reduce(state, Action::ScrollBy(9));
         let after_undo = handle_key(scrolled, "u");
         assert_eq!(after_undo.scroll_x, 9);
     }
@@ -2169,25 +2163,22 @@ mod tests {
     #[test]
     fn digits_accumulate_into_the_pending_count() {
         let state = selecting(vec![node("a")], &[], 0);
-        let state = reduce(state, CommandAction::Digit(1));
-        let state = reduce(state, CommandAction::Digit(2));
+        let state = reduce(state, Action::Digit(1));
+        let state = reduce(state, Action::Digit(2));
         assert_eq!(state.pending_count, Some(12));
     }
 
     #[test]
     fn cancel_count_clears_the_pending_count() {
-        let state = reduce(story(), CommandAction::Digit(4));
-        assert_eq!(
-            reduce(state, CommandAction::CancelCount).pending_count,
-            None
-        );
+        let state = reduce(story(), Action::Digit(4));
+        assert_eq!(reduce(state, Action::CancelCount).pending_count, None);
     }
 
     #[test]
     fn a_digit_under_the_colour_overlay_colours_the_selected_box_and_closes_the_overlay() {
-        let state = reduce(story(), CommandAction::CycleColour);
+        let state = reduce(story(), Action::CycleColour);
         assert!(state.colour_overlay);
-        let result = reduce(state, CommandAction::Digit(3));
+        let result = reduce(state, Action::Digit(3));
         let selected = result.doc.selected.clone().unwrap();
         let mut boxes = result.doc.boxes.clone();
         assert_eq!(crate::diagram::at(&mut boxes, &selected).colour, Some(2));
@@ -2197,14 +2188,11 @@ mod tests {
 
     #[test]
     fn a_digit_under_the_colour_overlay_is_undoable() {
-        let coloured = reduce(
-            reduce(story(), CommandAction::CycleColour),
-            CommandAction::Digit(3),
-        );
-        let undone = reduce(coloured, CommandAction::Undo);
+        let coloured = reduce(reduce(story(), Action::CycleColour), Action::Digit(3));
+        let undone = reduce(coloured, Action::Undo);
         assert_eq!(
             undone.doc.boxes,
-            reduce(story(), CommandAction::CycleColour).doc.boxes
+            reduce(story(), Action::CycleColour).doc.boxes
         );
     }
 }

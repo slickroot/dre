@@ -1,4 +1,4 @@
-use crate::action::SavePromptAction;
+use crate::action::Action;
 use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";
@@ -11,20 +11,21 @@ fn with_extension(filename: &str) -> String {
     }
 }
 
-pub(crate) fn reduce(mut state: State, command: SavePromptAction) -> State {
+pub(crate) fn reduce(mut state: State, command: Action) -> State {
     let Mode::SavePrompt { filename } = &mut state.mode else {
         return state;
     };
     match command {
-        SavePromptAction::Confirm => {
+        Action::Confirm => {
             state.save_to = Some(with_extension(filename));
             state.running = false;
         }
-        SavePromptAction::Cancel => state.running = false,
-        SavePromptAction::Backspace => {
+        Action::Cancel => state.running = false,
+        Action::SavePromptBackspace => {
             filename.pop();
         }
-        SavePromptAction::Append(c) => filename.push(c),
+        Action::SavePromptAppend(c) => filename.push(c),
+        _ => {}
     }
     state
 }

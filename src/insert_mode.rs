@@ -1,4 +1,4 @@
-use crate::action::InsertAction;
+use crate::action::Action;
 use crate::diagram::at;
 use crate::state::{add_child_box, drop_snapshot_if_unchanged, snapshot, Mode, State, PAD};
 
@@ -7,19 +7,19 @@ fn drop_last_chars(s: &str, n: usize) -> String {
     s.chars().take(len.saturating_sub(n)).collect()
 }
 
-pub(crate) fn reduce(mut state: State, command: InsertAction) -> State {
+pub(crate) fn reduce(mut state: State, command: Action) -> State {
     let Some(path) = &state.doc.selected else {
         return state;
     };
     let node = at(&mut state.doc.boxes, path);
     let label = node.label.clone();
     match command {
-        InsertAction::Commit => {
+        Action::Commit => {
             node.label = drop_last_chars(&label, 1);
             state.mode = Mode::Command;
             drop_snapshot_if_unchanged(state)
         }
-        InsertAction::CommitAndAddChild => {
+        Action::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);
             let selected = state.doc.selected.clone();
             let mut state = add_child_box(snapshot(drop_snapshot_if_unchanged(state)), selected);
@@ -30,14 +30,15 @@ pub(crate) fn reduce(mut state: State, command: InsertAction) -> State {
             }
             state
         }
-        InsertAction::Backspace => {
+        Action::InsertBackspace => {
             node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
             state
         }
-        InsertAction::Append(c) => {
+        Action::InsertAppend(c) => {
             node.label = format!("{}{c}{PAD}", drop_last_chars(&label, 1));
             state
         }
+        _ => state,
     }
 }
 
