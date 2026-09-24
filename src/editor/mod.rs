@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use crate::kitty;
 use crate::render::{GlyphCache, TerminalRenderer, CACHE_LIMIT};
 use crate::tty::{self, RawMode};
-use controller::key_source::TerminalKeySource;
+use controller::key_source::TtyKeySource;
 use controller::reducer::StateReducer;
 use controller::screen::TerminalScreen;
 use controller::{Controller, DreController};
@@ -44,7 +44,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
 
     let store = FileStateStore::new(Box::new(DiskFiles));
     let controller = DreController::new(
-        Box::new(TerminalKeySource { fd, resize_fd }),
+        Box::new(TtyKeySource { fd, resize_fd }),
         Box::new(TerminalScreen {
             renderer,
             out: stdout,
