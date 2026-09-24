@@ -1,26 +1,7 @@
+use crate::action::Action;
 use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Command {
-    Confirm,
-    Cancel,
-    Backspace,
-    Append(char),
-}
-
-pub(crate) fn parse(key: &str) -> Option<Command> {
-    match key {
-        "\r" => Some(Command::Confirm),
-        "\x1b" => Some(Command::Cancel),
-        "\x7f" => Some(Command::Backspace),
-        _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Command::Append(c)),
-            _ => None,
-        },
-    }
-}
 
 fn with_extension(filename: &str) -> String {
     if filename.ends_with(EXTENSION) {
@@ -30,20 +11,21 @@ fn with_extension(filename: &str) -> String {
     }
 }
 
-pub(crate) fn reduce(mut state: State, command: Command) -> State {
+pub(crate) fn reduce(mut state: State, command: Action) -> State {
     let Mode::SavePrompt { filename } = &mut state.mode else {
         return state;
     };
     match command {
-        Command::Confirm => {
+        Action::Confirm => {
             state.save_to = Some(with_extension(filename));
             state.running = false;
         }
-        Command::Cancel => state.running = false,
-        Command::Backspace => {
+        Action::Cancel => state.running = false,
+        Action::SavePromptBackspace => {
             filename.pop();
         }
-        Command::Append(c) => filename.push(c),
+        Action::SavePromptAppend(c) => filename.push(c),
+        _ => {}
     }
     state
 }
@@ -52,7 +34,8 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
 mod tests {
     use super::*;
     use crate::diagram::{Node, Path};
-    use crate::state::{handle_key, new_state, Mode, DEFAULT_FILENAME};
+    use crate::state::{new_state, Mode, DEFAULT_FILENAME};
+    use crate::test_support::handle_key;
 
     fn node(label: &str) -> Node {
         Node {

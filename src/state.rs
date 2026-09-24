@@ -1,8 +1,5 @@
-use crate::command_mode;
 use crate::diagram::{append, at, children_at, Document, Node, Path};
-use crate::insert_mode;
 use crate::palette::palette;
-use crate::save_prompt_mode;
 use crate::status_line::{ModeLabel, StatusInput};
 
 pub(crate) const PAD: &str = " ";
@@ -190,59 +187,6 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state
 }
 
-pub(crate) fn handle_key(mut state: State, key: &str) -> State {
-    if let Some(selected) = state.last_selected.take() {
-        state.doc.selected = Some(selected);
-    }
-    if let Some(command @ command_mode::Command::ScrollBy(_)) = command_mode::parse(key) {
-        return command_mode::reduce(state, command);
-    }
-    match &state.mode {
-        Mode::Command => {
-            if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
-                let digit = key.as_bytes()[0] - b'0';
-                state.pending_count = Some(
-                    state
-                        .pending_count
-                        .unwrap_or(0)
-                        .saturating_mul(10)
-                        .saturating_add(digit as usize),
-                );
-                if state.colour_overlay {
-                    let count = state.pending_count.take().unwrap();
-                    state.colour_overlay = false;
-                    if (1..=7).contains(&count) {
-                        let path = state
-                            .doc
-                            .selected
-                            .clone()
-                            .expect("colour overlay implies a selection");
-                        state = snapshot(state);
-                        at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
-                    }
-                }
-                state
-            } else {
-                match command_mode::parse(key) {
-                    Some(command) => command_mode::reduce(state, command),
-                    None => {
-                        state.pending_count = None;
-                        state
-                    }
-                }
-            }
-        }
-        Mode::Insert => match insert_mode::parse(key) {
-            Some(command) => insert_mode::reduce(state, command),
-            None => state,
-        },
-        Mode::SavePrompt { .. } => match save_prompt_mode::parse(key) {
-            Some(command) => save_prompt_mode::reduce(state, command),
-            None => state,
-        },
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
     State {
@@ -264,7 +208,10 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::Action;
     use crate::diagram::{node, node_with_children};
+    use crate::reduce::reduce;
+    use crate::test_support::handle_key;
 
     #[test]
     fn a_default_state_is_not_dirty() {
@@ -495,7 +442,7 @@ mod tests {
                 index: 1,
             }),
         );
-        let result = handle_key(state, "\x1bSCROLL12");
+        let result = reduce(state, Action::ScrollBy(12));
         assert_eq!(result.scroll_x, 12);
         assert_eq!(result.doc.boxes, boxes);
         assert_eq!(
@@ -511,7 +458,7 @@ mod tests {
     #[test]
     fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
         let state = new_state(vec![], Mode::Command, None);
-        let result = handle_key(state, "\x1bSCROLL-7");
+        let result = reduce(state, Action::ScrollBy(-7));
         assert_eq!(result.scroll_x, -7);
     }
 
@@ -525,7 +472,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let result = handle_key(state, "\x1bSCROLL5");
+        let result = reduce(state, Action::ScrollBy(5));
         assert_eq!(result.scroll_x, 5);
         assert_eq!(result.mode, Mode::Insert);
     }

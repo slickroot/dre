@@ -2,10 +2,13 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
+use crate::action::Action;
 use crate::diagram::Document;
+use crate::input::parse;
 use crate::layout::{layout, PlacementNode};
+use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
-use crate::state::{handle_key, State};
+use crate::state::State;
 use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
@@ -59,12 +62,14 @@ fn edit(
             }
             Some(key) if key == terminal::RESIZE => renderer.on_resize(probe()?),
             Some(key) => {
-                state = handle_key(state, &key);
+                if let Some(action) = parse(&state, &key) {
+                    state = reduce(state, action);
+                }
                 if let Some((left, right)) = selected_box_edges(&state.doc) {
                     if let Some(delta) =
                         overflow_delta(left, right, state.scroll_x, renderer.columns())
                     {
-                        state = handle_key(state, &format!("\x1bSCROLL{delta}"));
+                        state = reduce(state, Action::ScrollBy(delta));
                     }
                 }
             }

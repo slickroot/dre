@@ -1,169 +1,31 @@
+use crate::action::Action;
 use crate::diagram::{append, at, children_at, remove, Path};
 use crate::state::{
     add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
-    KeyBinding, Mode, State, DEFAULT_FILENAME, PAD,
+    Mode, State, DEFAULT_FILENAME, PAD,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Command {
-    Undo,
-    NewBox,
-    NewSibling,
-    Delete,
-    Paste,
-    SelectParent,
-    SelectChild,
-    SelectNext,
-    SelectPrevious,
-    EditLabel,
-    RenameLabel,
-    CycleColour,
-    CycleSiblingsColour,
-    ToggleSiblingsFill,
-    ToggleFill,
-    ToggleRounded,
-    Quit,
-    ScrollBy(i64),
-}
-
-pub(crate) fn parse(key: &str) -> Option<Command> {
-    if let Some(delta) = key.strip_prefix("\x1bSCROLL") {
-        return delta.parse::<i64>().ok().map(Command::ScrollBy);
-    }
-    Some(match key {
-        "u" => Command::Undo,
-        "b" => Command::NewBox,
-        "s" => Command::NewSibling,
-        "d" => Command::Delete,
-        "p" => Command::Paste,
-        "h" => Command::SelectParent,
-        "l" => Command::SelectChild,
-        "j" => Command::SelectNext,
-        "k" => Command::SelectPrevious,
-        "i" => Command::EditLabel,
-        "I" => Command::RenameLabel,
-        "c" => Command::CycleColour,
-        "C" => Command::CycleSiblingsColour,
-        "F" => Command::ToggleSiblingsFill,
-        "f" => Command::ToggleFill,
-        "r" => Command::ToggleRounded,
-        "q" => Command::Quit,
-        _ => return None,
-    })
-}
-
-#[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Command>] = &[
-    KeyBinding {
-        keys: &["u"],
-        command: Command::Undo,
-        description: "Undo the last change",
-    },
-    KeyBinding {
-        keys: &["b"],
-        command: Command::NewBox,
-        description: "Add a child box",
-    },
-    KeyBinding {
-        keys: &["s"],
-        command: Command::NewSibling,
-        description: "Add a sibling box",
-    },
-    KeyBinding {
-        keys: &["d"],
-        command: Command::Delete,
-        description: "Delete the selected box and its descendants",
-    },
-    KeyBinding {
-        keys: &["p"],
-        command: Command::Paste,
-        description: "Paste the cut box and its descendants as the last child of the selected box",
-    },
-    KeyBinding {
-        keys: &["h"],
-        command: Command::SelectParent,
-        description: "Select the parent box",
-    },
-    KeyBinding {
-        keys: &["l"],
-        command: Command::SelectChild,
-        description: "Select the first child box",
-    },
-    KeyBinding {
-        keys: &["j"],
-        command: Command::SelectNext,
-        description: "Select the next sibling",
-    },
-    KeyBinding {
-        keys: &["k"],
-        command: Command::SelectPrevious,
-        description: "Select the previous sibling",
-    },
-    KeyBinding {
-        keys: &["i"],
-        command: Command::EditLabel,
-        description: "Edit the selected box's label",
-    },
-    KeyBinding {
-        keys: &["I"],
-        command: Command::RenameLabel,
-        description: "Rename the selected box's label",
-    },
-    KeyBinding {
-        keys: &["c"],
-        command: Command::CycleColour,
-        description: "Cycle the box's colour",
-    },
-    KeyBinding {
-        keys: &["C"],
-        command: Command::CycleSiblingsColour,
-        description: "Cycle the colour of every sibling",
-    },
-    KeyBinding {
-        keys: &["f"],
-        command: Command::ToggleFill,
-        description: "Toggle the box's fill",
-    },
-    KeyBinding {
-        keys: &["F"],
-        command: Command::ToggleSiblingsFill,
-        description: "Toggle the fill of every sibling",
-    },
-    KeyBinding {
-        keys: &["r"],
-        command: Command::ToggleRounded,
-        description: "Toggle rounded corners",
-    },
-    KeyBinding {
-        keys: &["q"],
-        command: Command::Quit,
-        description: "Save and quit (or choose where to save)",
-    },
-];
-
-pub(crate) fn is_undoable(command: Command) -> bool {
+pub(crate) fn is_undoable(command: Action) -> bool {
     matches!(
         command,
-        Command::NewBox
-            | Command::Delete
-            | Command::Paste
-            | Command::CycleColour
-            | Command::ToggleFill
-            | Command::ToggleRounded
-            | Command::CycleSiblingsColour
-            | Command::ToggleSiblingsFill
-            | Command::RenameLabel
-            | Command::EditLabel
-            | Command::NewSibling
+        Action::NewBox
+            | Action::Delete
+            | Action::Paste
+            | Action::CycleColour
+            | Action::ToggleFill
+            | Action::ToggleRounded
+            | Action::CycleSiblingsColour
+            | Action::ToggleSiblingsFill
+            | Action::RenameLabel
+            | Action::EditLabel
+            | Action::NewSibling
     )
 }
 
-pub(crate) fn min_depth(command: Command) -> usize {
+pub(crate) fn min_depth(command: Action) -> usize {
     match command {
-        Command::Undo | Command::NewBox | Command::Paste | Command::Quit | Command::ScrollBy(_) => {
-            0
-        }
-        Command::SelectParent | Command::CycleSiblingsColour | Command::ToggleSiblingsFill => 2,
+        Action::Undo | Action::NewBox | Action::Paste | Action::Quit | Action::ScrollBy(_) => 0,
+        Action::SelectParent | Action::CycleSiblingsColour | Action::ToggleSiblingsFill => 2,
         _ => 1,
     }
 }
@@ -352,7 +214,39 @@ fn reselect(mut state: State, selected: Option<Path>) -> State {
     state
 }
 
-pub(crate) fn reduce(mut state: State, command: Command) -> State {
+fn accumulate_digit(mut state: State, digit: u8) -> State {
+    let count = state
+        .pending_count
+        .unwrap_or(0)
+        .saturating_mul(10)
+        .saturating_add(digit as usize);
+    state.pending_count = Some(count);
+    if !state.colour_overlay {
+        return state;
+    }
+    state.pending_count = None;
+    state.colour_overlay = false;
+    if (1..=7).contains(&count) {
+        let path = state
+            .doc
+            .selected
+            .clone()
+            .expect("colour overlay implies a selection");
+        state = snapshot(state);
+        at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
+    }
+    state
+}
+
+pub(crate) fn reduce(mut state: State, command: Action) -> State {
+    match command {
+        Action::Digit(digit) => return accumulate_digit(state, digit),
+        Action::CancelCount => {
+            state.pending_count = None;
+            return state;
+        }
+        _ => {}
+    }
     state.colour_overlay = false;
     let count = state.pending_count.take().unwrap_or(1);
     let depth = match &state.doc.selected {
@@ -368,43 +262,29 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         state
     };
     match (command, state.doc.selected.take()) {
-        (Command::Undo, selected) => undo(reselect(state, selected)),
-        (Command::NewBox, selected) => add_child_box(state, selected),
-        (Command::ScrollBy(delta), selected) => {
+        (Action::Undo, selected) => undo(reselect(state, selected)),
+        (Action::NewBox, selected) => add_child_box(state, selected),
+        (Action::ScrollBy(delta), selected) => {
             state.scroll_x += delta;
             reselect(state, selected)
         }
-        (Command::Quit, selected) => quit(reselect(state, selected)),
-        (Command::NewSibling, Some(path)) => new_sibling(state, path),
-        (Command::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
-        (Command::SelectChild, Some(path)) => select_child(state, path),
-        (Command::SelectNext, Some(path)) => repeat(state, path, count, select_next),
-        (Command::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
-        (Command::EditLabel, Some(path)) => edit_label(state, path),
-        (Command::RenameLabel, Some(path)) => rename_label(state, path),
-        (Command::CycleColour, Some(path)) => cycle_colour(state, path),
-        (Command::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
-        (Command::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
-        (Command::ToggleFill, Some(path)) => toggle_fill(state, path),
-        (Command::Delete, Some(path)) => delete_box(state, path),
-        (Command::Paste, selected) => paste_box(state, selected, count),
-        (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
-        (_, None) => state,
+        (Action::Quit, selected) => quit(reselect(state, selected)),
+        (Action::NewSibling, Some(path)) => new_sibling(state, path),
+        (Action::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
+        (Action::SelectChild, Some(path)) => select_child(state, path),
+        (Action::SelectNext, Some(path)) => repeat(state, path, count, select_next),
+        (Action::SelectPrevious, Some(path)) => repeat(state, path, count, select_previous),
+        (Action::EditLabel, Some(path)) => edit_label(state, path),
+        (Action::RenameLabel, Some(path)) => rename_label(state, path),
+        (Action::CycleColour, Some(path)) => cycle_colour(state, path),
+        (Action::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
+        (Action::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
+        (Action::ToggleFill, Some(path)) => toggle_fill(state, path),
+        (Action::Delete, Some(path)) => delete_box(state, path),
+        (Action::Paste, selected) => paste_box(state, selected, count),
+        (Action::ToggleRounded, Some(path)) => toggle_rounded(state, path),
+        _ => state,
     }
-}
-
-#[allow(dead_code)]
-pub(crate) fn format_keymap_markdown() -> String {
-    let mut out = String::from("| Key | Description |\n| --- | --- |\n");
-    for binding in COMMAND_KEYMAP {
-        let keys: Vec<String> = binding.keys.iter().map(|k| format!("`{k}`")).collect();
-        out.push_str(&format!(
-            "| {} | {} |\n",
-            keys.join(", "),
-            binding.description
-        ));
-    }
-    out
 }
 
 #[cfg(test)]
@@ -412,128 +292,28 @@ mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children, Node};
     use crate::palette::palette;
-    use crate::state::{handle_key, new_state};
+    use crate::state::new_state;
+    use crate::test_support::handle_key;
 
-    const COMMANDS: [Command; 17] = [
-        Command::Undo,
-        Command::NewBox,
-        Command::NewSibling,
-        Command::Delete,
-        Command::Paste,
-        Command::SelectParent,
-        Command::SelectChild,
-        Command::SelectNext,
-        Command::SelectPrevious,
-        Command::EditLabel,
-        Command::RenameLabel,
-        Command::CycleColour,
-        Command::CycleSiblingsColour,
-        Command::ToggleSiblingsFill,
-        Command::ToggleFill,
-        Command::ToggleRounded,
-        Command::Quit,
+    const COMMANDS: [Action; 17] = [
+        Action::Undo,
+        Action::NewBox,
+        Action::NewSibling,
+        Action::Delete,
+        Action::Paste,
+        Action::SelectParent,
+        Action::SelectChild,
+        Action::SelectNext,
+        Action::SelectPrevious,
+        Action::EditLabel,
+        Action::RenameLabel,
+        Action::CycleColour,
+        Action::CycleSiblingsColour,
+        Action::ToggleSiblingsFill,
+        Action::ToggleFill,
+        Action::ToggleRounded,
+        Action::Quit,
     ];
-
-    #[test]
-    fn readme_keymap_table_stays_in_sync() {
-        let markdown = format!("\n\n{}\n", format_keymap_markdown());
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir).join("README.md");
-        let readme = std::fs::read_to_string(&path).unwrap();
-        let start_marker = "<!-- keymap:start -->";
-        let end_marker = "<!-- keymap:end -->";
-        let start = readme
-            .find(start_marker)
-            .expect("missing <!-- keymap:start --> in README.md");
-        let end = readme
-            .find(end_marker)
-            .expect("missing <!-- keymap:end --> in README.md");
-        let start_after = start + start_marker.len();
-        let between = &readme[start_after..end];
-        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
-            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
-            std::fs::write(&path, new_readme).unwrap();
-        } else {
-            assert_eq!(
-                between, markdown,
-                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
-            );
-        }
-    }
-
-    #[test]
-    fn parse_maps_known_keys_to_their_commands() {
-        assert_eq!(parse("u"), Some(Command::Undo));
-        assert_eq!(parse("b"), Some(Command::NewBox));
-        assert_eq!(parse("s"), Some(Command::NewSibling));
-        assert_eq!(parse("d"), Some(Command::Delete));
-        assert_eq!(parse("h"), Some(Command::SelectParent));
-        assert_eq!(parse("l"), Some(Command::SelectChild));
-        assert_eq!(parse("j"), Some(Command::SelectNext));
-        assert_eq!(parse("k"), Some(Command::SelectPrevious));
-        assert_eq!(parse("i"), Some(Command::EditLabel));
-        assert_eq!(parse("I"), Some(Command::RenameLabel));
-        assert_eq!(parse("c"), Some(Command::CycleColour));
-        assert_eq!(parse("C"), Some(Command::CycleSiblingsColour));
-        assert_eq!(parse("F"), Some(Command::ToggleSiblingsFill));
-        assert_eq!(parse("f"), Some(Command::ToggleFill));
-        assert_eq!(parse("r"), Some(Command::ToggleRounded));
-        assert_eq!(parse("q"), Some(Command::Quit));
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_an_unknown_key() {
-        assert_eq!(parse("x"), None);
-        assert_eq!(parse("\x1b"), None);
-        assert_eq!(parse("é"), None);
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_each_digit_key() {
-        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
-            assert_eq!(parse(key), None);
-        }
-    }
-
-    #[test]
-    fn parse_reads_a_scroll_prefix_into_a_signed_delta() {
-        assert_eq!(parse("\x1bSCROLL5"), Some(Command::ScrollBy(5)));
-        assert_eq!(parse("\x1bSCROLL-5"), Some(Command::ScrollBy(-5)));
-        assert_eq!(parse("\x1bSCROLL0"), Some(Command::ScrollBy(0)));
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_a_malformed_scroll_prefix() {
-        assert_eq!(parse("\x1bSCROLL"), None);
-        assert_eq!(parse("\x1bSCROLLx"), None);
-    }
-
-    #[test]
-    fn command_keymap_agrees_with_parse() {
-        let bound: Vec<String> = COMMAND_KEYMAP
-            .iter()
-            .flat_map(|binding| binding.keys)
-            .map(|key| key.to_string())
-            .collect();
-
-        for binding in COMMAND_KEYMAP {
-            for key in binding.keys {
-                assert_eq!(parse(key), Some(binding.command));
-            }
-        }
-
-        for ch in (b'a'..=b'z').chain(b'A'..=b'Z').chain(b'0'..=b'9') {
-            let key = (ch as char).to_string();
-            if !bound.contains(&key) {
-                assert_eq!(parse(&key), None);
-            }
-        }
-
-        let mut unique = bound.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), bound.len());
-    }
 
     #[test]
     fn a_command_below_its_minimum_depth_leaves_the_document_unchanged() {
@@ -1938,7 +1718,7 @@ mod tests {
             }),
         );
         state.scroll_x = 3;
-        let result = reduce(state, Command::ScrollBy(4));
+        let result = reduce(state, Action::ScrollBy(4));
         assert_eq!(result.scroll_x, 7);
         assert_eq!(
             result.doc.selected,
@@ -1952,14 +1732,14 @@ mod tests {
     #[test]
     fn scroll_by_command_works_with_nothing_selected() {
         let state = new_state(vec![], Mode::Command, None);
-        let result = reduce(state, Command::ScrollBy(-2));
+        let result = reduce(state, Action::ScrollBy(-2));
         assert_eq!(result.scroll_x, -2);
         assert_eq!(result.doc.selected, None);
     }
 
     #[test]
     fn scroll_by_is_not_undoable() {
-        assert!(!is_undoable(Command::ScrollBy(5)));
+        assert!(!is_undoable(Action::ScrollBy(5)));
     }
 
     #[test]
@@ -1972,7 +1752,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let scrolled = handle_key(state, "\x1bSCROLL9");
+        let scrolled = reduce(state, Action::ScrollBy(9));
         let after_undo = handle_key(scrolled, "u");
         assert_eq!(after_undo.scroll_x, 9);
     }
@@ -2325,11 +2105,6 @@ mod tests {
     }
 
     #[test]
-    fn p_parses_to_paste() {
-        assert_eq!(parse("p"), Some(Command::Paste));
-    }
-
-    #[test]
     fn p_appends_the_cut_branch_as_the_last_child_of_the_selected_box() {
         let payments = node_with_children("Payments", vec![node("Stripe")]);
         let cut = handle_key(story(), "d");
@@ -2383,5 +2158,41 @@ mod tests {
         assert_eq!(children.len(), orders_children(&cut).len() + 3);
         assert_eq!(pasted.doc.selected, selected_at(&[0], children.len() - 1));
         assert_eq!(handle_key(pasted, "u").doc, cut.doc);
+    }
+
+    #[test]
+    fn digits_accumulate_into_the_pending_count() {
+        let state = selecting(vec![node("a")], &[], 0);
+        let state = reduce(state, Action::Digit(1));
+        let state = reduce(state, Action::Digit(2));
+        assert_eq!(state.pending_count, Some(12));
+    }
+
+    #[test]
+    fn cancel_count_clears_the_pending_count() {
+        let state = reduce(story(), Action::Digit(4));
+        assert_eq!(reduce(state, Action::CancelCount).pending_count, None);
+    }
+
+    #[test]
+    fn a_digit_under_the_colour_overlay_colours_the_selected_box_and_closes_the_overlay() {
+        let state = reduce(story(), Action::CycleColour);
+        assert!(state.colour_overlay);
+        let result = reduce(state, Action::Digit(3));
+        let selected = result.doc.selected.clone().unwrap();
+        let mut boxes = result.doc.boxes.clone();
+        assert_eq!(crate::diagram::at(&mut boxes, &selected).colour, Some(2));
+        assert!(!result.colour_overlay);
+        assert_eq!(result.pending_count, None);
+    }
+
+    #[test]
+    fn a_digit_under_the_colour_overlay_is_undoable() {
+        let coloured = reduce(reduce(story(), Action::CycleColour), Action::Digit(3));
+        let undone = reduce(coloured, Action::Undo);
+        assert_eq!(
+            undone.doc.boxes,
+            reduce(story(), Action::CycleColour).doc.boxes
+        );
     }
 }
