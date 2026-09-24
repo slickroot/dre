@@ -7,7 +7,7 @@ use crate::state::{
 
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
-        Action::Undo | Action::NewBox | Action::Paste | Action::Quit | Action::ScrollBy(_) => 0,
+        Action::Undo | Action::NewBox | Action::Paste | Action::Quit => 0,
         Action::SelectParent | Action::CycleSiblingsColour | Action::ToggleSiblingsFill => 2,
         _ => 1,
     }
@@ -253,10 +253,6 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
     match (command, state.doc.selected.take()) {
         (Action::Undo, selected) => undo(reselect(state, selected)),
         (Action::NewBox, selected) => add_child_box(state, selected),
-        (Action::ScrollBy(delta), selected) => {
-            state.scroll_x += delta;
-            reselect(state, selected)
-        }
         (Action::Quit, selected) => quit(reselect(state, selected)),
         (Action::NewSibling, Some(path)) => new_sibling(state, path),
         (Action::SelectParent, Some(path)) => repeat(state, path, count, select_parent),
@@ -1695,51 +1691,6 @@ mod tests {
         let undone = handle_key(after, "u");
         assert_eq!(undone.doc.boxes, state.doc.boxes);
         assert_eq!(undone.doc.selected, state.doc.selected);
-    }
-
-    #[test]
-    fn scroll_by_command_shifts_scroll_x_by_the_given_delta_and_preserves_selection() {
-        let mut state = new_state(
-            vec![node("a")],
-            Mode::Command,
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
-        state.scroll_x = 3;
-        let result = reduce(state, Action::ScrollBy(4));
-        assert_eq!(result.scroll_x, 7);
-        assert_eq!(
-            result.doc.selected,
-            Some(Path {
-                ancestors: vec![],
-                index: 0
-            })
-        );
-    }
-
-    #[test]
-    fn scroll_by_command_works_with_nothing_selected() {
-        let state = new_state(vec![], Mode::Command, None);
-        let result = reduce(state, Action::ScrollBy(-2));
-        assert_eq!(result.scroll_x, -2);
-        assert_eq!(result.doc.selected, None);
-    }
-
-    #[test]
-    fn u_after_a_scroll_leaves_scroll_x_untouched() {
-        let state = new_state(
-            vec![node("a")],
-            Mode::Command,
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
-        let scrolled = reduce(state, Action::ScrollBy(9));
-        let after_undo = handle_key(scrolled, "u");
-        assert_eq!(after_undo.scroll_x, 9);
     }
 
     #[test]

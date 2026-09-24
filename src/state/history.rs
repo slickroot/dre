@@ -76,7 +76,6 @@ mod tests {
     #[test]
     fn scroll_idle_and_interrupt_are_not_undoable() {
         let state = command_state();
-        assert!(!is_undoable(&state, &Action::ScrollBy(5)));
         assert!(!is_undoable(&state, &Action::Idle));
         assert!(!is_undoable(&state, &Action::Interrupt));
     }

@@ -298,10 +298,6 @@ impl TerminalRenderer {
         self.terminal.rows = terminal.rows;
     }
 
-    pub(crate) fn columns(&self) -> i64 {
-        self.terminal.cols
-    }
-
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let hint_boxes = [hint_node()];
         let placements = if state.doc.boxes.is_empty() {
@@ -1371,19 +1367,6 @@ mod tests {
     }
 
     #[test]
-    fn columns_reports_the_terminals_column_count() {
-        let r = renderer_on(terminal(20, 10, 1, 1));
-        assert_eq!(r.columns(), 20);
-    }
-
-    #[test]
-    fn columns_reflects_a_resize() {
-        let mut r = renderer_on(terminal(20, 10, 1, 1));
-        r.on_resize(terminal(40, 10, 1, 1));
-        assert_eq!(r.columns(), 40);
-    }
-
-    #[test]
     fn on_resize_with_a_different_rounded_cell_height_does_not_panic_on_the_next_render() {
         let mut r = renderer_on(terminal(40, 20, 2, 4));
         let node = box_node(None, false, false);
@@ -1406,7 +1389,11 @@ mod tests {
     }
 
     fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
-        rendered_with_scroll(r, doc, 0)
+        let mut out = Vec::new();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        r.render(&state, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
     fn rendered_diagram(r: &mut TerminalRenderer, doc: &Document) -> String {
@@ -1414,15 +1401,6 @@ mod tests {
         let mut state = State::default();
         state.doc = doc.clone();
         r.render_diagram(&state, &mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
-    fn rendered_with_scroll(r: &mut TerminalRenderer, doc: &Document, scroll_x: i64) -> String {
-        let mut out = Vec::new();
-        let mut state = State::default();
-        state.doc = doc.clone();
-        state.scroll_x = scroll_x;
-        r.render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
