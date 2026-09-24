@@ -1,15 +1,18 @@
-pub(crate) mod action;
-pub(crate) mod command;
-pub(crate) mod input;
-pub(crate) mod insert;
-pub(crate) mod save_prompt;
+mod action;
+mod command;
+mod history;
+mod input;
+mod insert;
+mod save_prompt;
 
 use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::palette::palette;
+use crate::state::action::ActionMode;
 use crate::status_line::{ModeLabel, StatusInput};
 
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
+pub(crate) const INTERRUPT: &str = "\x03";
 
 #[allow(dead_code)]
 pub(crate) struct KeyBinding<C> {
@@ -114,24 +117,27 @@ impl Default for State {
     }
 }
 
-pub(crate) fn snapshot(mut state: State) -> State {
-    state.history.push(state.doc.clone());
-    state.dirty = true;
-    state
+fn apply(mut state: State, action: action::Action) -> State {
+    if let Some(selected) = state.last_selected.take() {
+        state.doc.selected = Some(selected);
+    }
+    history::recorded(state, &action, |state| match action.mode() {
+        ActionMode::Insert => insert::reduce(state, action),
+        ActionMode::SavePrompt => save_prompt::reduce(state, action),
+        ActionMode::Command => command::reduce(state, action),
+    })
 }
 
-pub(crate) fn drop_snapshot_if_unchanged(mut state: State) -> State {
-    if state.history.last() == Some(&state.doc) {
-        state.history.pop();
+pub fn reduce(state: State, key: Option<&str>) -> State {
+    let action = match key {
+        None => Some(action::Action::Idle),
+        Some(INTERRUPT) => Some(action::Action::Interrupt),
+        Some(key) => input::parse(&state, key),
+    };
+    match action {
+        Some(action) => apply(state, action),
+        None => state,
     }
-    state
-}
-
-pub(crate) fn undo(mut state: State) -> State {
-    if let Some(previous) = state.history.pop() {
-        state.doc = previous;
-    }
-    state
 }
 
 pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
@@ -207,21 +213,13 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::reduce::reduce;
     use crate::state::action::Action;
+    use crate::state::apply as reduce;
     use crate::test_support::handle_key;
 
     #[test]
     fn a_default_state_is_not_dirty() {
         assert!(!State::default().dirty);
-    }
-
-    #[test]
-    fn snapshot_marks_the_state_as_dirty() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert!(!state.dirty);
-        let result = snapshot(state);
-        assert!(result.dirty);
     }
 
     #[test]
@@ -659,8 +657,8 @@ mod tests {
                 index: 0,
             }),
         );
-        state = snapshot(state);
-        state = snapshot(state);
+        state = reduce(state, Action::ToggleRounded);
+        state = reduce(state, Action::ToggleRounded);
         let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.history.len(), 2);
         assert_eq!(hidden.doc.selected, None);
@@ -678,15 +676,15 @@ mod tests {
     }
 
     #[test]
-    fn commit_and_add_child_after_an_edit_leaves_three_snapshots() {
+    fn commit_and_add_child_after_an_edit_leaves_two_snapshots() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let typed = reduce(reduce(before, Action::EditLabel), Action::InsertAppend('b'));
         let result = reduce(typed, Action::CommitAndAddChild);
-        assert_eq!(result.history.len(), 3);
+        assert_eq!(result.history.len(), 2);
     }
 
     #[test]
-    fn commit_and_add_child_after_an_edit_needs_three_undos_to_restore_the_document() {
+    fn commit_and_add_child_after_an_edit_needs_two_undos_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let typed = reduce(
             reduce(before.clone(), Action::EditLabel),
@@ -695,39 +693,33 @@ mod tests {
         let committed = reduce(typed, Action::CommitAndAddChild);
         let once = reduce(committed, Action::Undo);
         let twice = reduce(once.clone(), Action::Undo);
-        let thrice = reduce(twice.clone(), Action::Undo);
         assert_ne!(once.doc.boxes, before.doc.boxes);
-        assert_ne!(twice.doc.boxes, before.doc.boxes);
-        assert_eq!(thrice.doc.boxes, before.doc.boxes);
+        assert_eq!(twice.doc.boxes, before.doc.boxes);
     }
 
     #[test]
-    fn commit_and_add_child_without_a_change_drops_only_the_entry_snapshot() {
+    fn commit_and_add_child_without_a_change_keeps_the_edit_and_the_commit_snapshots() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let result = reduce(reduce(before, Action::EditLabel), Action::CommitAndAddChild);
         assert_eq!(result.history.len(), 2);
     }
 
     #[test]
-    fn new_sibling_leaves_two_snapshots_and_needs_two_undos_to_restore_the_document() {
+    fn new_sibling_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let created = reduce(before.clone(), Action::NewSibling);
-        assert_eq!(created.history.len(), 2);
+        assert_eq!(created.history.len(), 1);
         let once = reduce(created, Action::Undo);
-        assert_ne!(once.doc.boxes, before.doc.boxes);
-        let twice = reduce(once, Action::Undo);
-        assert_eq!(twice.doc.boxes, before.doc.boxes);
+        assert_eq!(once.doc.boxes, before.doc.boxes);
     }
 
     #[test]
-    fn rename_label_leaves_two_snapshots_and_needs_two_undos_to_restore_the_document() {
+    fn rename_label_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let renaming = reduce(before.clone(), Action::RenameLabel);
-        assert_eq!(renaming.history.len(), 2);
+        assert_eq!(renaming.history.len(), 1);
         let once = reduce(renaming, Action::Undo);
-        assert_ne!(once.doc.boxes, before.doc.boxes);
-        let twice = reduce(once, Action::Undo);
-        assert_eq!(twice.doc.boxes, before.doc.boxes);
+        assert_eq!(once.doc.boxes, before.doc.boxes);
     }
 
     #[test]

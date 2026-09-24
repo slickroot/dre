@@ -2,15 +2,10 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
-use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
-use crate::state::action::Action;
-use crate::state::input::parse;
-use crate::state::State;
+use crate::state::{reduce, State};
 use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, terminal, IDLE_TIMEOUT_MS};
-
-const INTERRUPT: &str = "\x03";
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let state = load(file)?;
@@ -54,14 +49,8 @@ fn edit(
         output.flush()?;
 
         match next_key()? {
-            Some(key) if key == INTERRUPT => state = reduce(state, Action::Interrupt),
             Some(key) if key == terminal::RESIZE => renderer.on_resize(probe()?),
-            Some(key) => {
-                if let Some(action) = parse(&state, &key) {
-                    state = reduce(state, action);
-                }
-            }
-            None => state = reduce(state, Action::Idle),
+            key => state = reduce(state, key.as_deref()),
         }
     }
     Ok(state)
@@ -86,6 +75,7 @@ mod tests {
     use super::*;
     use crate::diagram::{self, Path};
     use crate::render::FakeGlyphSource;
+    use crate::state::INTERRUPT;
     use crate::terminal::Terminal;
     use std::fs;
 

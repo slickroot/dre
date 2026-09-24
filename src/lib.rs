@@ -15,7 +15,6 @@ mod filesystem;
 mod kitty;
 mod layout;
 mod palette;
-mod reduce;
 mod render;
 mod state;
 mod status_line;
@@ -45,15 +44,12 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = match state::input::parse(&self.state, key) {
-            Some(action) => reduce::reduce(std::mem::take(&mut self.state), action),
-            None => std::mem::take(&mut self.state),
-        };
+        self.state = state::reduce(std::mem::take(&mut self.state), Some(key));
     }
 
     #[doc(hidden)]
     pub fn go_idle(&mut self) {
-        self.state = reduce::reduce(std::mem::take(&mut self.state), state::action::Action::Idle);
+        self.state = state::reduce(std::mem::take(&mut self.state), None);
     }
 
     pub fn is_running(&self) -> bool {
