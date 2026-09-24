@@ -156,6 +156,12 @@ pub(crate) fn hide_idle_cursor(mut state: State) -> State {
     state
 }
 
+impl State {
+    pub(crate) fn history_len(&self) -> usize {
+        self.history.len()
+    }
+}
+
 pub(crate) fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
     state.dirty = true;

@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
-use crate::state::{handle_key, State};
+use crate::state::{handle_key, Mode, State};
 use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
@@ -27,27 +27,35 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
         state,
         || terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
         terminal::probe,
+        write_diagram,
         &mut stdout,
         &mut renderer,
     )?;
 
+    write_diagram(&state)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn write_diagram(state: &State) -> io::Result<()> {
     if let Some(path) = &state.save_to {
         filesystem::write(
             path,
             &dre_format::write(&file_document::from_document(&state.doc)),
         )?;
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
 fn edit(
     state: State,
     mut next_key: impl FnMut() -> io::Result<Option<String>>,
     mut probe: impl FnMut() -> io::Result<Terminal>,
+    mut save: impl FnMut(&State) -> io::Result<()>,
     output: &mut impl Write,
     renderer: &mut TerminalRenderer,
 ) -> io::Result<State> {
     let mut state = state;
+    let mut saved_len = 0;
     while state.running {
         renderer.render(&state, output)?;
         output.flush()?;
@@ -66,6 +74,13 @@ fn edit(
                     {
                         state = handle_key(state, &format!("\x1bSCROLL{delta}"));
                     }
+                }
+                if state.save_to.is_some()
+                    && state.mode != Mode::Insert
+                    && state.history_len() != saved_len
+                {
+                    save(&state)?;
+                    saved_len = state.history_len();
                 }
             }
             None => state = state::hide_idle_cursor(state),
@@ -266,13 +281,30 @@ mod tests {
         script: Vec<Option<&str>>,
         probe: impl FnMut() -> io::Result<Terminal>,
     ) -> (io::Result<State>, Vec<u8>) {
+        run_script_with_probe_and_save(state, script, probe, |_| Ok(()))
+    }
+
+    fn run_script_with_save(
+        state: State,
+        script: Vec<Option<&str>>,
+        save: impl FnMut(&State) -> io::Result<()>,
+    ) -> io::Result<State> {
+        run_script_with_probe_and_save(state, script, terminal::probe, save).0
+    }
+
+    fn run_script_with_probe_and_save(
+        state: State,
+        script: Vec<Option<&str>>,
+        probe: impl FnMut() -> io::Result<Terminal>,
+        save: impl FnMut(&State) -> io::Result<()>,
+    ) -> (io::Result<State>, Vec<u8>) {
         let mut script = script.into_iter();
         let next_key = || match script.next() {
             Some(key) => Ok(key.map(str::to_string)),
             None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "script ended")),
         };
         let mut output = Vec::new();
-        let result = edit(state, next_key, probe, &mut output, &mut renderer());
+        let result = edit(state, next_key, probe, save, &mut output, &mut renderer());
         (result, output)
     }
 
@@ -288,6 +320,89 @@ mod tests {
 
     fn run(state: State, key: &str) -> (io::Result<State>, Vec<u8>) {
         run_script(state, vec![Some(key)])
+    }
+
+    fn first() -> Path {
+        Path {
+            ancestors: Vec::new(),
+            index: 0,
+        }
+    }
+
+    fn changing_state() -> State {
+        let mut state = new_state(vec![diagram::Node::default()], Mode::Command, Some(first()));
+        state.save_to = Some("a.dre".to_string());
+        state
+    }
+
+    fn count_saves(state: State, script: Vec<Option<&str>>) -> usize {
+        let mut saves = 0;
+        run_script_with_save(state, script, |_| {
+            saves += 1;
+            Ok(())
+        })
+        .unwrap();
+        saves
+    }
+
+    #[test]
+    fn a_change_to_the_history_saves_once() {
+        assert_eq!(count_saves(changing_state(), vec![Some("c"), Some("q")]), 1);
+    }
+
+    #[test]
+    fn moving_the_selection_does_not_save() {
+        let mut state = new_state(
+            vec![diagram::Node::default(), diagram::Node::default()],
+            Mode::Command,
+            Some(first()),
+        );
+        state.save_to = Some("a.dre".to_string());
+        assert_eq!(count_saves(state, vec![Some("j"), Some("q")]), 0);
+    }
+
+    #[test]
+    fn typing_a_label_does_not_save_until_leaving_insert() {
+        let mut saves = Vec::new();
+        run_script_with_save(
+            state_saving_to("a.dre"),
+            vec![Some("b"), Some("x"), Some("y"), Some("\x1b"), Some("q")],
+            |state| {
+                saves.push(state.mode.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(saves, vec![Mode::Command]);
+    }
+
+    #[test]
+    fn nothing_is_saved_without_a_place_to_save_to() {
+        let state = new_state(vec![diagram::Node::default()], Mode::Command, Some(first()));
+        assert_eq!(count_saves(state, vec![Some("c"), Some(INTERRUPT)]), 0);
+    }
+
+    #[test]
+    fn a_failed_save_stops_the_editor_with_that_error() {
+        let error = run_script_with_save(changing_state(), vec![Some("c"), Some("q")], |_| {
+            Err(io::Error::other("disk full"))
+        })
+        .err()
+        .unwrap();
+        assert_eq!(error.to_string(), "disk full");
+    }
+
+    #[test]
+    fn an_interrupt_after_a_change_saves_nothing_more() {
+        let mut saves = 0;
+        let state =
+            run_script_with_save(changing_state(), vec![Some("c"), Some(INTERRUPT)], |_| {
+                saves += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(state.save_to, None);
+        assert_eq!(saves, 1);
     }
 
     #[test]
