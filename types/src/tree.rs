@@ -75,6 +75,25 @@ impl<T> Tree<T> {
         &mut self.get_mut(path).value
     }
 
+    pub fn walk(&self) -> impl Iterator<Item = (Vec<usize>, &T)> {
+        let mut visited = Vec::new();
+        self.collect_descendants(&mut Vec::new(), &mut visited);
+        visited.into_iter()
+    }
+
+    fn collect_descendants<'a>(
+        &'a self,
+        path: &mut Vec<usize>,
+        visited: &mut Vec<(Vec<usize>, &'a T)>,
+    ) {
+        for (index, child) in self.children.iter().enumerate() {
+            path.push(index);
+            visited.push((path.clone(), &child.value));
+            child.collect_descendants(path, visited);
+            path.pop();
+        }
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -425,5 +444,41 @@ mod tests {
     #[should_panic]
     fn value_mut_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().value_mut(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn walk_yields_every_box_in_pre_order() {
+        let tree = sample();
+        let visited: Vec<(Vec<usize>, &str)> =
+            tree.walk().map(|(path, &value)| (path, value)).collect();
+        assert_eq!(
+            visited,
+            vec![
+                (vec![0], "a"),
+                (vec![0, 0], "a0"),
+                (vec![0, 1], "a1"),
+                (vec![1], "b"),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_never_yields_the_root_path() {
+        assert!(sample().walk().all(|(path, _)| !path.is_empty()));
+    }
+
+    #[test]
+    fn walk_yields_nothing_for_a_root_without_children() {
+        assert_eq!(Tree::<&str>::root(Vec::new()).walk().count(), 0);
+    }
+
+    #[test]
+    fn walk_reaches_a_deep_chain_with_the_full_path_for_each_box() {
+        let tree = Tree::root(vec![Tree::new(
+            "a",
+            vec![Tree::new("a0", vec![Tree::leaf("a00")])],
+        )]);
+        let paths: Vec<Vec<usize>> = tree.walk().map(|(path, _)| path).collect();
+        assert_eq!(paths, vec![vec![0], vec![0, 0], vec![0, 0, 0]]);
     }
 }
