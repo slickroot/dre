@@ -60,6 +60,11 @@ impl<T> Tree<T> {
         [parent, &[children.len() - 1]].concat()
     }
 
+    pub fn remove(&mut self, path: &[usize]) -> Tree<T> {
+        let (&last, ancestors) = path.split_last().expect("the root cannot be removed");
+        self.get_mut(ancestors).children.remove(last)
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -288,5 +293,58 @@ mod tests {
     #[should_panic]
     fn push_panics_on_a_parent_path_through_a_box_with_too_few_children() {
         sample().push(&[0, 2, 0], Tree::leaf("x"));
+    }
+
+    #[test]
+    fn remove_returns_the_removed_box_with_its_subtree() {
+        let removed = sample().remove(&[0]);
+        assert_eq!(removed.value, "a");
+        assert_eq!(removed.children.len(), 2);
+        assert_eq!(removed.get(&[1]).value, "a1");
+    }
+
+    #[test]
+    fn remove_takes_the_box_out_and_later_siblings_move_down() {
+        let mut tree = Tree::root(vec![Tree::leaf("a"), Tree::leaf("b"), Tree::leaf("c")]);
+        tree.remove(&[1]);
+        assert_eq!(tree.get(&[]).children.len(), 2);
+        assert_eq!(tree.get(&[0]).value, "a");
+        assert_eq!(tree.get(&[1]).value, "c");
+    }
+
+    #[test]
+    fn remove_at_any_depth_leaves_the_other_branches_alone() {
+        let mut tree = sample();
+        let removed = tree.remove(&[0, 0]);
+        assert_eq!(removed.value, "a0");
+        assert_eq!(tree.get(&[0]).children.len(), 1);
+        assert_eq!(tree.get(&[0, 0]).value, "a1");
+        assert_eq!(tree.get(&[1]).value, "b");
+    }
+
+    #[test]
+    fn remove_of_the_only_child_leaves_its_parent_without_children() {
+        let mut tree = Tree::root(vec![Tree::new("a", vec![Tree::leaf("a0")])]);
+        tree.remove(&[0, 0]);
+        assert!(tree.get(&[0]).children.is_empty());
+        assert_eq!(tree.child(&[0]), vec![0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_the_root_path() {
+        sample().remove(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_an_index_past_the_last_sibling() {
+        sample().remove(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().remove(&[0, 2, 0]);
     }
 }
