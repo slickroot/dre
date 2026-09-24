@@ -6,7 +6,7 @@ use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
 use crate::render::{GlyphCache, Renderer, TerminalRenderer};
 use crate::state::{handle_key, State};
-use crate::terminal::RawScreen;
+use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, state, terminal, IDLE_TIMEOUT_MS};
 
 const INTERRUPT: &str = "\x03";
@@ -26,6 +26,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let state = edit(
         state,
         || terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
+        terminal::probe,
         &mut stdout,
         &mut renderer,
     )?;
@@ -42,6 +43,7 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
 fn edit(
     state: State,
     mut next_key: impl FnMut() -> io::Result<Option<String>>,
+    mut probe: impl FnMut() -> io::Result<Terminal>,
     output: &mut impl Write,
     renderer: &mut TerminalRenderer,
 ) -> io::Result<State> {
@@ -55,7 +57,7 @@ fn edit(
                 state.save_to = None;
                 break;
             }
-            Some(key) if key == terminal::RESIZE => renderer.on_resize(terminal::probe()?),
+            Some(key) if key == terminal::RESIZE => renderer.on_resize(probe()?),
             Some(key) => {
                 state = handle_key(state, &key);
                 if let Some((left, right)) = selected_box_edges(&state.doc) {
@@ -259,15 +261,29 @@ mod tests {
         state::load(Default::default(), Some(path.to_string()))
     }
 
-    fn run_script(state: State, script: Vec<Option<&str>>) -> (io::Result<State>, Vec<u8>) {
+    fn run_script_with_probe(
+        state: State,
+        script: Vec<Option<&str>>,
+        probe: impl FnMut() -> io::Result<Terminal>,
+    ) -> (io::Result<State>, Vec<u8>) {
         let mut script = script.into_iter();
         let next_key = || match script.next() {
             Some(key) => Ok(key.map(str::to_string)),
             None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "script ended")),
         };
         let mut output = Vec::new();
-        let result = edit(state, next_key, &mut output, &mut renderer());
+        let result = edit(state, next_key, probe, &mut output, &mut renderer());
         (result, output)
+    }
+
+    fn run_script(state: State, script: Vec<Option<&str>>) -> (io::Result<State>, Vec<u8>) {
+        run_script_with_probe(state, script, || {
+            panic!(
+                "unexpected terminal probe: only a RESIZE key makes edit() re-probe the terminal, \
+                 and this test's script has none. Use run_script_with_probe to supply a probe stub \
+                 for tests that send RESIZE."
+            )
+        })
     }
 
     fn run(state: State, key: &str) -> (io::Result<State>, Vec<u8>) {
@@ -281,16 +297,35 @@ mod tests {
     }
 
     #[test]
-    fn a_resize_key_re_probes_the_terminal_and_propagates_a_failed_probe() {
-        let (result, _) = run_script(
+    fn a_resize_key_propagates_a_failed_probe() {
+        let (result, _) = run_script_with_probe(
             state_saving_to("a.dre"),
             vec![Some(terminal::RESIZE), Some("q")],
+            || Err(io::Error::other("probe failed")),
         );
-        assert!(
-            result.is_err(),
-            "terminal::probe performs a real ioctl against stdout, which is not a TTY \
-             in the test process, so the RESIZE arm's re-probe is expected to fail here"
+        let error = result.err().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(error.to_string(), "probe failed");
+    }
+
+    #[test]
+    fn a_resize_key_re_probes_the_terminal_once() {
+        let mut probe_calls = 0;
+        let (result, _) = run_script_with_probe(
+            state_saving_to("a.dre"),
+            vec![Some(terminal::RESIZE), Some("q")],
+            || {
+                probe_calls += 1;
+                Ok(Terminal {
+                    cols: 30,
+                    rows: 12,
+                    cell_width: 1,
+                    cell_height: 1,
+                })
+            },
         );
+        assert!(!result.unwrap().running);
+        assert_eq!(probe_calls, 1);
     }
 
     #[test]
