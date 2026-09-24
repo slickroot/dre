@@ -49,7 +49,7 @@ The reducer is the only writer. Everything else reads.
 | `palette.rs` | the app's colours: `PALETTE`, `FOREGROUND`, `BACKGROUND`, `palette()` | nothing |
 | `state/` | the editing session and its one writer, `reduce` | `diagram` |
 | `input.rs` | keys to `Action`s: keymaps, `parse`, dispatch by `Mode`. Read-only on `State` | `state` (read), `Action` |
-| `status_line.rs` | presentation: `StatusLine`, `Segment`, `Style`, `status_line(&State)` | `state` (read), `palette` |
+| `status_line.rs` | presentation: `StatusLine`, `Segment`, `Style`, `StatusInput`, `status_line(&StatusInput)` | `palette`. Never `State` |
 | `layout` | the drawing to placements: `layout(&Document) -> Vec<Placement>` | `diagram` (getters), `Tree::walk` |
 | `render/` | placements to pixels and SVG | `layout`, `palette`. Never `Node` or `Document` |
 | `editor.rs` | the loop and the I/O: read a key, `input`, `reduce`, render, save on exit | all of the above |
@@ -158,9 +158,10 @@ as spec 114 decided.
 
 ### `status_line.rs` and `palette.rs`
 
-- `status_line.rs` holds `StatusLine`, `Segment`, `Style` and
-  `status_line(&State)`, moved out of `state.rs`. It is presentation. It reads
-  `State` through getters.
+- `status_line.rs` holds `StatusLine`, `Segment`, `Style`, `ModeLabel`,
+  `StatusInput` and `status_line(&StatusInput)`, moved out of `state.rs`. It is
+  presentation and never imports `State`. `state.rs` builds the `StatusInput`
+  (see spec 120).
 - `palette.rs` holds `PALETTE`, `FOREGROUND`, `BACKGROUND` and `palette()`.
   `Node.colour` stays an `Option<u8>`, an index into it, so `diagram.rs` does
   not import it.
