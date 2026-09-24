@@ -92,6 +92,7 @@ rounded corners, and arrows, but no cursor or selection.
 | `u` | Undo the last change |
 | `b` | Add a child box |
 | `s` | Add a sibling box |
+| `d` | Delete the selected box and its descendants |
 | `h` | Select the parent box |
 | `l` | Select the first child box |
 | `j` | Select the next sibling |
