@@ -3,9 +3,7 @@ use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
 use crate::action::Action;
-use crate::diagram::Document;
 use crate::input::parse;
-use crate::layout::{layout, PlacementNode};
 use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::state::State;
@@ -62,45 +60,11 @@ fn edit(
                 if let Some(action) = parse(&state, &key) {
                     state = reduce(state, action);
                 }
-                if let Some((left, right)) = selected_box_edges(&state.doc) {
-                    if let Some(delta) =
-                        overflow_delta(left, right, state.scroll_x, renderer.columns())
-                    {
-                        state = reduce(state, Action::ScrollBy(delta));
-                    }
-                }
             }
             None => state = reduce(state, Action::Idle),
         }
     }
     Ok(state)
-}
-
-fn overflow_delta(_box_left: i64, box_right: i64, scroll_x: i64, cols: i64) -> Option<i64> {
-    if box_right - scroll_x > cols {
-        Some(box_right - scroll_x - (cols - 1))
-    } else {
-        None
-    }
-}
-
-fn selected_box_edges(doc: &Document) -> Option<(i64, i64)> {
-    let selected = doc.selected.as_ref()?;
-    let placements = layout(&doc.boxes);
-    let nodes = placements
-        .iter()
-        .filter(|placement| matches!(placement.node, PlacementNode::Node(_)));
-    let labels = placements
-        .iter()
-        .filter(|placement| matches!(placement.node, PlacementNode::Label(_)));
-    nodes
-        .zip(labels)
-        .find_map(|(node, label)| match &label.node {
-            PlacementNode::Label(label) if &label.path == selected => {
-                Some((node.x, node.x + node.width))
-            }
-            _ => None,
-        })
 }
 
 fn load(file: Option<String>) -> io::Result<State> {
@@ -122,7 +86,6 @@ mod tests {
     use super::*;
     use crate::diagram::{self, Path};
     use crate::render::FakeGlyphSource;
-    use crate::state::{new_state, Mode};
     use crate::terminal::Terminal;
     use std::fs;
 
@@ -350,12 +313,13 @@ mod tests {
             ancestors: vec![],
             index: 0,
         };
-        let mut state = new_state(
-            vec![diagram::node("a"), diagram::node("b")],
-            Mode::Command,
-            Some(selected.clone()),
+        let state = State::open(
+            diagram::Document {
+                boxes: vec![diagram::node("a"), diagram::node("b")],
+                selected: None,
+            },
+            Some("a.dre".to_string()),
         );
-        state.save_to = Some("a.dre".to_string());
         let (result, output) = run_script(state, vec![None, Some("q")]);
         let state = result.unwrap();
         assert_eq!(state.doc.selected, Some(selected));
@@ -368,105 +332,5 @@ mod tests {
             sprite_count(frames[1]) + 1,
             "the cursor sprite is visible before the idle second, and hidden after it"
         );
-    }
-
-    #[test]
-    fn a_box_that_fits_within_the_columns_does_not_overflow() {
-        assert_eq!(overflow_delta(0, 20, 0, 20), None);
-    }
-
-    #[test]
-    fn a_box_whose_right_edge_lands_exactly_on_the_last_column_does_not_overflow() {
-        assert_eq!(overflow_delta(0, 19, 0, 20), None);
-    }
-
-    #[test]
-    fn a_box_one_column_past_the_edge_overflows_by_the_exact_amount_needed() {
-        assert_eq!(overflow_delta(0, 21, 0, 20), Some(2));
-    }
-
-    #[test]
-    fn a_box_far_past_the_edge_overflows_by_the_exact_amount_needed_to_land_on_the_last_column() {
-        assert_eq!(overflow_delta(11, 25, 0, 20), Some(6));
-    }
-
-    #[test]
-    fn an_existing_scroll_offset_is_taken_into_account() {
-        assert_eq!(overflow_delta(11, 25, 3, 20), Some(3));
-    }
-
-    #[test]
-    fn selected_box_edges_is_none_when_nothing_is_selected() {
-        let doc = diagram::Document {
-            boxes: vec![diagram::node("a")],
-            selected: None,
-        };
-        assert_eq!(selected_box_edges(&doc), None);
-    }
-
-    #[test]
-    fn selected_box_edges_returns_the_edges_of_the_selected_box() {
-        let doc = diagram::Document {
-            boxes: vec![diagram::node("a"), diagram::node("bb")],
-            selected: Some(Path {
-                ancestors: vec![],
-                index: 1,
-            }),
-        };
-        let placements = layout(&doc.boxes);
-        let bb_placement = placements
-            .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(node) if node.label == "bb"))
-            .unwrap();
-        assert_eq!(
-            selected_box_edges(&doc),
-            Some((bb_placement.x, bb_placement.x + bb_placement.width))
-        );
-    }
-
-    #[test]
-    fn selected_box_edges_matches_a_nested_selection() {
-        let doc = diagram::Document {
-            boxes: vec![diagram::node_with_children(
-                "parent",
-                vec![diagram::node("child")],
-            )],
-            selected: Some(Path {
-                ancestors: vec![0],
-                index: 0,
-            }),
-        };
-        let placements = layout(&doc.boxes);
-        let child_placement = placements
-            .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(node) if node.label == "child"))
-            .unwrap();
-        assert_eq!(
-            selected_box_edges(&doc),
-            Some((child_placement.x, child_placement.x + child_placement.width))
-        );
-    }
-
-    #[test]
-    fn a_normal_key_sequence_that_never_overflows_leaves_scroll_x_at_zero() {
-        let mut state = new_state(vec![], Mode::Command, None);
-        state.save_to = Some("a.dre".to_string());
-        let (result, _) = run_script(state, vec![Some("b"), Some("\x1b"), Some("q")]);
-        assert_eq!(result.unwrap().scroll_x, 0);
-    }
-
-    #[test]
-    fn adding_a_box_that_overflows_the_right_edge_scrolls_it_fully_into_view() {
-        let mut state = new_state(vec![], Mode::Command, None);
-        state.save_to = Some("a.dre".to_string());
-        let (result, _) = run_script(
-            state,
-            vec![Some("b"), Some("\r"), Some("\r"), Some("\x1b"), Some("q")],
-        );
-        let state = result.unwrap();
-        assert_ne!(state.scroll_x, 0);
-        let (_, right) = selected_box_edges(&state.doc).unwrap();
-        let visible_right_edge = right - state.scroll_x;
-        assert_eq!(visible_right_edge, renderer().columns() - 1);
     }
 }
