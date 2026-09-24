@@ -1,10 +1,10 @@
 use std::io::{self, Stdout, Write};
 use std::os::fd::RawFd;
 
-use super::controller::{KeySource, Screen};
+use super::controller::{KeySource, Reducer, Screen};
 use super::store::Files;
 use crate::render::{Renderer, TerminalRenderer};
-use crate::state::State;
+use crate::state::{self, State};
 use crate::{filesystem, IDLE_TIMEOUT_MS};
 
 pub(crate) struct DiskFiles;
@@ -44,5 +44,13 @@ impl Screen for TerminalScreen {
     fn resize(&mut self) -> io::Result<()> {
         self.renderer.on_resize(crate::terminal::probe()?);
         Ok(())
+    }
+}
+
+pub(crate) struct StateReducer;
+
+impl Reducer for StateReducer {
+    fn reduce(&self, state: State, key: Option<&str>) -> State {
+        state::reduce(state, key)
     }
 }
