@@ -65,6 +65,16 @@ impl<T> Tree<T> {
         self.get_mut(ancestors).children.remove(last)
     }
 
+    pub fn value(&self, path: &[usize]) -> &T {
+        assert!(!path.is_empty(), "the root has no value to read");
+        &self.get(path).value
+    }
+
+    pub fn value_mut(&mut self, path: &[usize]) -> &mut T {
+        assert!(!path.is_empty(), "the root has no value to edit");
+        &mut self.get_mut(path).value
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -346,5 +356,74 @@ mod tests {
     #[should_panic]
     fn remove_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().remove(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn value_of_a_top_level_box() {
+        assert_eq!(*sample().value(&[1]), "b");
+    }
+
+    #[test]
+    fn value_of_a_nested_box() {
+        assert_eq!(*sample().value(&[0, 1]), "a1");
+    }
+
+    #[test]
+    fn value_of_a_box_with_children_is_its_own() {
+        assert_eq!(*sample().value(&[0]), "a");
+    }
+
+    #[test]
+    fn value_mut_replaces_the_value_and_leaves_every_other_box_alone() {
+        let mut tree = sample();
+        *tree.value_mut(&[0, 1]) = "changed";
+        assert_eq!(*tree.value(&[0, 1]), "changed");
+        assert_eq!(*tree.value(&[0]), "a");
+        assert_eq!(*tree.value(&[0, 0]), "a0");
+        assert_eq!(*tree.value(&[1]), "b");
+        assert_eq!(tree.get(&[]).value, "");
+    }
+
+    #[test]
+    fn value_mut_edits_the_value_in_place() {
+        let mut tree = Tree::root(vec![Tree::leaf(String::from("a"))]);
+        tree.value_mut(&[0]).push_str("bc");
+        assert_eq!(tree.value(&[0]), "abc");
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_panics_on_the_root_path() {
+        sample().value(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_panics_on_an_index_past_the_last_sibling() {
+        sample().value(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().value(&[0, 2, 0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_mut_panics_on_the_root_path() {
+        sample().value_mut(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_mut_panics_on_an_index_past_the_last_sibling() {
+        sample().value_mut(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn value_mut_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().value_mut(&[0, 2, 0]);
     }
 }
