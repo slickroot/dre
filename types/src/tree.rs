@@ -3,14 +3,6 @@ pub struct Tree<T> {
     children: Vec<Tree<T>>,
 }
 
-pub fn parent(path: &[usize]) -> &[usize] {
-    match path {
-        [] => panic!("the root has no parent"),
-        [_] => path,
-        [ancestors @ .., _] => ancestors,
-    }
-}
-
 impl<T> Tree<T> {
     pub fn leaf(value: T) -> Self {
         Self::new(value, Vec::new())
@@ -36,6 +28,14 @@ impl<T> Tree<T> {
         }
     }
 
+    pub fn parent(&self, path: &[usize]) -> Vec<usize> {
+        self.position(path);
+        match path {
+            [_] => path.to_vec(),
+            _ => path[..path.len() - 1].to_vec(),
+        }
+    }
+
     pub fn next(&self, path: &[usize]) -> Vec<usize> {
         let (last, count) = self.position(path);
         if last + 1 < count {
@@ -52,6 +52,17 @@ impl<T> Tree<T> {
         } else {
             path.to_vec()
         }
+    }
+
+    pub fn push(&mut self, parent: &[usize], child: Tree<T>) -> Vec<usize> {
+        let children = &mut self.get_mut(parent).children;
+        children.push(child);
+        [parent, &[children.len() - 1]].concat()
+    }
+
+    pub fn remove(&mut self, path: &[usize]) -> Tree<T> {
+        let (&last, ancestors) = path.split_last().expect("the root cannot be removed");
+        self.get_mut(ancestors).children.remove(last)
     }
 
     fn position(&self, path: &[usize]) -> (usize, usize) {
@@ -84,18 +95,27 @@ mod tests {
 
     #[test]
     fn parent_of_a_nested_path_drops_the_last_step() {
-        assert_eq!(parent(&[1, 2, 3]), &[1, 2]);
+        let tree = sample();
+        let parent = tree.parent(&[0, 1]);
+        assert_eq!(parent, vec![0]);
+        assert_eq!(tree.get(&parent).value, "a");
     }
 
     #[test]
     fn parent_of_a_top_level_path_is_the_same_path() {
-        assert_eq!(parent(&[1]), &[1]);
+        assert_eq!(sample().parent(&[1]), vec![1]);
     }
 
     #[test]
     #[should_panic]
     fn parent_panics_on_the_root_path() {
-        parent(&[]);
+        sample().parent(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn parent_panics_on_a_path_that_addresses_no_box() {
+        sample().parent(&[0, 2]);
     }
 
     #[test]
@@ -216,5 +236,115 @@ mod tests {
     #[should_panic]
     fn previous_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().previous(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn push_adds_the_child_last_and_leaves_the_others_alone() {
+        let mut tree = sample();
+        tree.push(&[0], Tree::leaf("a2"));
+        assert_eq!(tree.get(&[0]).children.len(), 3);
+        assert_eq!(tree.get(&[0, 0]).value, "a0");
+        assert_eq!(tree.get(&[0, 1]).value, "a1");
+        assert_eq!(tree.get(&[0, 2]).value, "a2");
+        assert_eq!(tree.get(&[1]).value, "b");
+    }
+
+    #[test]
+    fn push_returns_the_path_of_the_new_child() {
+        let mut tree = sample();
+        let path = tree.push(&[0], Tree::leaf("a2"));
+        assert_eq!(path, vec![0, 2]);
+        assert_eq!(tree.get(&path).value, "a2");
+    }
+
+    #[test]
+    fn push_under_the_root_path_adds_a_top_level_box() {
+        let mut tree = sample();
+        let path = tree.push(&[], Tree::leaf("c"));
+        assert_eq!(path, vec![2]);
+        assert_eq!(tree.get(&[2]).value, "c");
+        assert_eq!(tree.get(&[]).children.len(), 3);
+    }
+
+    #[test]
+    fn push_under_a_leaf_gives_it_its_first_child() {
+        let mut tree = sample();
+        let path = tree.push(&[1], Tree::leaf("b0"));
+        assert_eq!(path, vec![1, 0]);
+        assert_eq!(tree.get(&[1, 0]).value, "b0");
+        assert_eq!(tree.child(&[1]), vec![1, 0]);
+    }
+
+    #[test]
+    fn push_keeps_the_pushed_subtrees_own_children() {
+        let mut tree = sample();
+        let path = tree.push(&[1], Tree::new("c", vec![Tree::leaf("c0")]));
+        assert_eq!(tree.get(&path).value, "c");
+        assert_eq!(tree.get(&[1, 0, 0]).value, "c0");
+    }
+
+    #[test]
+    #[should_panic]
+    fn push_panics_on_a_parent_path_that_addresses_no_box() {
+        sample().push(&[0, 2], Tree::leaf("x"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn push_panics_on_a_parent_path_through_a_box_with_too_few_children() {
+        sample().push(&[0, 2, 0], Tree::leaf("x"));
+    }
+
+    #[test]
+    fn remove_returns_the_removed_box_with_its_subtree() {
+        let removed = sample().remove(&[0]);
+        assert_eq!(removed.value, "a");
+        assert_eq!(removed.children.len(), 2);
+        assert_eq!(removed.get(&[1]).value, "a1");
+    }
+
+    #[test]
+    fn remove_takes_the_box_out_and_later_siblings_move_down() {
+        let mut tree = Tree::root(vec![Tree::leaf("a"), Tree::leaf("b"), Tree::leaf("c")]);
+        tree.remove(&[1]);
+        assert_eq!(tree.get(&[]).children.len(), 2);
+        assert_eq!(tree.get(&[0]).value, "a");
+        assert_eq!(tree.get(&[1]).value, "c");
+    }
+
+    #[test]
+    fn remove_at_any_depth_leaves_the_other_branches_alone() {
+        let mut tree = sample();
+        let removed = tree.remove(&[0, 0]);
+        assert_eq!(removed.value, "a0");
+        assert_eq!(tree.get(&[0]).children.len(), 1);
+        assert_eq!(tree.get(&[0, 0]).value, "a1");
+        assert_eq!(tree.get(&[1]).value, "b");
+    }
+
+    #[test]
+    fn remove_of_the_only_child_leaves_its_parent_without_children() {
+        let mut tree = Tree::root(vec![Tree::new("a", vec![Tree::leaf("a0")])]);
+        tree.remove(&[0, 0]);
+        assert!(tree.get(&[0]).children.is_empty());
+        assert_eq!(tree.child(&[0]), vec![0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_the_root_path() {
+        sample().remove(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_an_index_past_the_last_sibling() {
+        sample().remove(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn remove_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().remove(&[0, 2, 0]);
     }
 }

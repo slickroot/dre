@@ -21,7 +21,6 @@ mod save_prompt_mode;
 mod state;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
-mod tree;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;
