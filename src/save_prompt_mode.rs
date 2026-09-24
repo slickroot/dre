@@ -1,22 +1,15 @@
+use crate::action::SavePromptAction;
 use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Command {
-    Confirm,
-    Cancel,
-    Backspace,
-    Append(char),
-}
-
-pub(crate) fn parse(key: &str) -> Option<Command> {
+pub(crate) fn parse(key: &str) -> Option<SavePromptAction> {
     match key {
-        "\r" => Some(Command::Confirm),
-        "\x1b" => Some(Command::Cancel),
-        "\x7f" => Some(Command::Backspace),
+        "\r" => Some(SavePromptAction::Confirm),
+        "\x1b" => Some(SavePromptAction::Cancel),
+        "\x7f" => Some(SavePromptAction::Backspace),
         _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Command::Append(c)),
+            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(SavePromptAction::Append(c)),
             _ => None,
         },
     }
@@ -30,20 +23,20 @@ fn with_extension(filename: &str) -> String {
     }
 }
 
-pub(crate) fn reduce(mut state: State, command: Command) -> State {
+pub(crate) fn reduce(mut state: State, command: SavePromptAction) -> State {
     let Mode::SavePrompt { filename } = &mut state.mode else {
         return state;
     };
     match command {
-        Command::Confirm => {
+        SavePromptAction::Confirm => {
             state.save_to = Some(with_extension(filename));
             state.running = false;
         }
-        Command::Cancel => state.running = false,
-        Command::Backspace => {
+        SavePromptAction::Cancel => state.running = false,
+        SavePromptAction::Backspace => {
             filename.pop();
         }
-        Command::Append(c) => filename.push(c),
+        SavePromptAction::Append(c) => filename.push(c),
     }
     state
 }

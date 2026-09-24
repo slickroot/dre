@@ -1,3 +1,4 @@
+use crate::action::InsertAction;
 use crate::diagram::at;
 use crate::state::{
     add_child_box, drop_snapshot_if_unchanged, snapshot, KeyBinding, Mode, State, PAD,
@@ -8,41 +9,33 @@ fn drop_last_chars(s: &str, n: usize) -> String {
     s.chars().take(len.saturating_sub(n)).collect()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Command {
-    Commit,
-    CommitAndAddChild,
-    Backspace,
-    Append(char),
-}
-
-pub(crate) fn parse(key: &str) -> Option<Command> {
+pub(crate) fn parse(key: &str) -> Option<InsertAction> {
     match key {
-        "\x1b" => Some(Command::Commit),
-        "\r" => Some(Command::CommitAndAddChild),
-        "\x7f" => Some(Command::Backspace),
+        "\x1b" => Some(InsertAction::Commit),
+        "\r" => Some(InsertAction::CommitAndAddChild),
+        "\x7f" => Some(InsertAction::Backspace),
         _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Command::Append(c)),
+            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(InsertAction::Append(c)),
             _ => None,
         },
     }
 }
 
 #[allow(dead_code)]
-pub(crate) const INSERT_KEYMAP: &[KeyBinding<Command>] = &[
+pub(crate) const INSERT_KEYMAP: &[KeyBinding<InsertAction>] = &[
     KeyBinding {
         keys: &["Enter"],
-        command: Command::CommitAndAddChild,
+        command: InsertAction::CommitAndAddChild,
         description: "Finish the box and add a child box",
     },
     KeyBinding {
         keys: &["Esc"],
-        command: Command::Commit,
+        command: InsertAction::Commit,
         description: "Switch to command mode",
     },
     KeyBinding {
         keys: &["Backspace"],
-        command: Command::Backspace,
+        command: InsertAction::Backspace,
         description: "Remove the last character",
     },
 ];
@@ -61,19 +54,19 @@ pub(crate) fn format_keymap_markdown() -> String {
     out
 }
 
-pub(crate) fn reduce(mut state: State, command: Command) -> State {
+pub(crate) fn reduce(mut state: State, command: InsertAction) -> State {
     let Some(path) = &state.doc.selected else {
         return state;
     };
     let node = at(&mut state.doc.boxes, path);
     let label = node.label.clone();
     match command {
-        Command::Commit => {
+        InsertAction::Commit => {
             node.label = drop_last_chars(&label, 1);
             state.mode = Mode::Command;
             drop_snapshot_if_unchanged(state)
         }
-        Command::CommitAndAddChild => {
+        InsertAction::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);
             let selected = state.doc.selected.clone();
             let mut state = add_child_box(snapshot(drop_snapshot_if_unchanged(state)), selected);
@@ -84,11 +77,11 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
             }
             state
         }
-        Command::Backspace => {
+        InsertAction::Backspace => {
             node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
             state
         }
-        Command::Append(c) => {
+        InsertAction::Append(c) => {
             node.label = format!("{}{c}{PAD}", drop_last_chars(&label, 1));
             state
         }
@@ -103,22 +96,22 @@ mod tests {
 
     #[test]
     fn parse_maps_escape_to_commit() {
-        assert_eq!(parse("\x1b"), Some(Command::Commit));
+        assert_eq!(parse("\x1b"), Some(InsertAction::Commit));
     }
 
     #[test]
     fn parse_maps_delete_to_backspace() {
-        assert_eq!(parse("\x7f"), Some(Command::Backspace));
+        assert_eq!(parse("\x7f"), Some(InsertAction::Backspace));
     }
 
     #[test]
     fn parse_maps_the_lower_printable_boundary_to_append() {
-        assert_eq!(parse("\x20"), Some(Command::Append('\x20')));
+        assert_eq!(parse("\x20"), Some(InsertAction::Append('\x20')));
     }
 
     #[test]
     fn parse_maps_the_upper_printable_boundary_to_append() {
-        assert_eq!(parse("\x7e"), Some(Command::Append('\x7e')));
+        assert_eq!(parse("\x7e"), Some(InsertAction::Append('\x7e')));
     }
 
     #[test]
@@ -130,7 +123,7 @@ mod tests {
 
     #[test]
     fn parse_maps_enter_to_commit_and_add_child() {
-        assert_eq!(parse("\r"), Some(Command::CommitAndAddChild));
+        assert_eq!(parse("\r"), Some(InsertAction::CommitAndAddChild));
     }
 
     #[test]

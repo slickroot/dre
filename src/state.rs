@@ -1,3 +1,4 @@
+use crate::action::CommandAction;
 use crate::command_mode;
 use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::insert_mode;
@@ -234,41 +235,18 @@ pub(crate) fn handle_key(mut state: State, key: &str) -> State {
     if let Some(selected) = state.last_selected.take() {
         state.doc.selected = Some(selected);
     }
-    if let Some(command @ command_mode::Command::ScrollBy(_)) = command_mode::parse(key) {
+    if let Some(command @ CommandAction::ScrollBy(_)) = command_mode::parse(key) {
         return command_mode::reduce(state, command);
     }
     match &state.mode {
         Mode::Command => {
             if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
                 let digit = key.as_bytes()[0] - b'0';
-                state.pending_count = Some(
-                    state
-                        .pending_count
-                        .unwrap_or(0)
-                        .saturating_mul(10)
-                        .saturating_add(digit as usize),
-                );
-                if state.colour_overlay {
-                    let count = state.pending_count.take().unwrap();
-                    state.colour_overlay = false;
-                    if (1..=7).contains(&count) {
-                        let path = state
-                            .doc
-                            .selected
-                            .clone()
-                            .expect("colour overlay implies a selection");
-                        state = snapshot(state);
-                        at(&mut state.doc.boxes, &path).colour = Some((count - 1) as u8);
-                    }
-                }
-                state
+                command_mode::reduce(state, CommandAction::Digit(digit))
             } else {
                 match command_mode::parse(key) {
                     Some(command) => command_mode::reduce(state, command),
-                    None => {
-                        state.pending_count = None;
-                        state
-                    }
+                    None => command_mode::reduce(state, CommandAction::CancelCount),
                 }
             }
         }
