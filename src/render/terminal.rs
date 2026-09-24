@@ -13,7 +13,7 @@ use crate::terminal::Terminal;
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
 
-pub(super) const ARROW_STROKE: i64 = BORDER / 2;
+pub(super) const ARROW_STROKE: i64 = 3;
 
 pub(crate) const CACHE_LIMIT: usize = 512;
 
@@ -2226,8 +2226,9 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_is_half_as_thick_as_a_box_border() {
-        assert_eq!(ARROW_STROKE * 2, BORDER);
+    fn an_arrow_is_thinner_than_a_box_border_and_thicker_than_one_pixel() {
+        assert!(ARROW_STROKE < BORDER);
+        assert!(ARROW_STROKE > 1);
     }
 
     fn status_line_output(r: &mut TerminalRenderer, state: &State) -> String {
