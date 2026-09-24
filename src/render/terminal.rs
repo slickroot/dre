@@ -138,16 +138,16 @@ struct Placed {
     row: i64,
 }
 
-struct Screen {
+struct Frame {
     window: Window,
     origin: (i64, i64),
     characters: Vec<Vec<char>>,
     images: Vec<Placed>,
 }
 
-impl Screen {
+impl Frame {
     fn new(window: Window) -> Self {
-        Screen {
+        Frame {
             window,
             origin: (0, 0),
             characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
@@ -308,17 +308,17 @@ impl TerminalRenderer {
                 state.doc.selected.clone(),
             )
         };
-        let mut screen = Screen::new(self.window);
-        screen.centre_on(&placements);
+        let mut frame = Frame::new(self.window);
+        frame.centre_on(&placements);
         for placement in &placements {
             match &placement.node {
-                PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
-                PlacementNode::Arrow(_) => self.draw_arrow(&mut screen, placement),
-                PlacementNode::Label(label) => self.draw_label(&mut screen, placement, label),
-                PlacementNode::Cursor(_) => self.draw_cursor(&mut screen, placement),
+                PlacementNode::Node(_) => self.draw_box(&mut frame, placement),
+                PlacementNode::Arrow(_) => self.draw_arrow(&mut frame, placement),
+                PlacementNode::Label(label) => self.draw_label(&mut frame, placement, label),
+                PlacementNode::Cursor(_) => self.draw_cursor(&mut frame, placement),
             }
         }
-        out.write_all(&screen.into_bytes())
+        out.write_all(&frame.into_bytes())
     }
 
     fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
@@ -363,13 +363,13 @@ impl TerminalRenderer {
         write!(out, "\x1b[0m")
     }
 
-    // Uses screen.place only to get cropping for free; its images are sent
-    // directly via kitty::show rather than screen.into_bytes(), which would
+    // Uses frame.place only to get cropping for free; its images are sent
+    // directly via kitty::show rather than frame.into_bytes(), which would
     // reissue kitty::clear() and erase the diagram already drawn this frame.
     fn render_colour_overlay(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let marked = selected_colour(state);
         let top = (self.window.rows - PALETTE_ROWS).div_euclid(2);
-        let mut screen = Screen::new(self.window);
+        let mut frame = Frame::new(self.window);
         for index in 0..PALETTE_ROWS {
             let colour_index = index as u8;
             let row = top + index;
@@ -388,9 +388,9 @@ impl TerminalRenderer {
                 height: 1,
             };
             let canvas = self.swatch_canvas(colour_index, marked == Some(colour_index));
-            screen.place(&canvas, &placement);
+            frame.place(&canvas, &placement);
         }
-        for image in &screen.images {
+        for image in &frame.images {
             out.write_all(
                 kitty::show(&image.canvas, image.col, image.row)
                     .to_string()
@@ -420,8 +420,8 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &shape)
     }
 
-    fn draw_box(&mut self, screen: &mut Screen, placement: &Placement) {
-        if !screen.shows(placement) {
+    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement) {
+        if !frame.shows(placement) {
             return;
         }
         let key = sprite_key(placement);
@@ -429,11 +429,11 @@ impl TerminalRenderer {
             let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        screen.place(&self.cache[&key], placement);
+        frame.place(&self.cache[&key], placement);
     }
 
-    fn draw_arrow(&mut self, screen: &mut Screen, placement: &Placement) {
-        if !screen.shows(placement) {
+    fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement) {
+        if !frame.shows(placement) {
             return;
         }
         let key = sprite_key(placement);
@@ -441,10 +441,10 @@ impl TerminalRenderer {
             let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        screen.place(&self.cache[&key], placement);
+        frame.place(&self.cache[&key], placement);
     }
 
-    fn draw_label(&mut self, screen: &mut Screen, placement: &Placement, label: &Label) {
+    fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label) {
         for (offset, character) in label.text.chars().enumerate() {
             let char_placement = Placement {
                 node: PlacementNode::Label(label.clone()),
@@ -453,15 +453,15 @@ impl TerminalRenderer {
                 width: 1,
                 height: 1,
             };
-            if !screen.shows(&char_placement) {
+            if !frame.shows(&char_placement) {
                 continue;
             }
             let glyph = self.glyph_source.glyph(character, label.hint);
-            screen.place(glyph, &char_placement);
+            frame.place(glyph, &char_placement);
         }
     }
 
-    fn draw_cursor(&mut self, screen: &mut Screen, placement: &Placement) {
+    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement) {
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
         let (r, g, b) = colour(None);
@@ -472,7 +472,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        screen.place(&canvas, placement);
+        frame.place(&canvas, placement);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -927,25 +927,25 @@ mod tests {
         TerminalRenderer::new(window, source, CACHE_LIMIT)
     }
 
-    fn draw_all(r: &mut TerminalRenderer, screen: &mut Screen, placements: &[Placement]) {
+    fn draw_all(r: &mut TerminalRenderer, frame: &mut Frame, placements: &[Placement]) {
         for placement in placements {
             match &placement.node {
-                PlacementNode::Node(_) => r.draw_box(screen, placement),
-                PlacementNode::Arrow(_) => r.draw_arrow(screen, placement),
-                PlacementNode::Label(label) => r.draw_label(screen, placement, label),
-                PlacementNode::Cursor(_) => r.draw_cursor(screen, placement),
+                PlacementNode::Node(_) => r.draw_box(frame, placement),
+                PlacementNode::Arrow(_) => r.draw_arrow(frame, placement),
+                PlacementNode::Label(label) => r.draw_label(frame, placement, label),
+                PlacementNode::Cursor(_) => r.draw_cursor(frame, placement),
             }
         }
     }
 
-    fn drawn_screen(r: &mut TerminalRenderer, placements: &[Placement]) -> Screen {
-        let mut screen = Screen::new(r.window);
-        draw_all(r, &mut screen, placements);
-        screen
+    fn drawn_frame(r: &mut TerminalRenderer, placements: &[Placement]) -> Frame {
+        let mut frame = Frame::new(r.window);
+        draw_all(r, &mut frame, placements);
+        frame
     }
 
-    fn rows(screen: &Screen) -> Vec<String> {
-        screen
+    fn rows(frame: &Frame) -> Vec<String> {
+        frame
             .characters
             .iter()
             .map(|row| row.iter().collect())
@@ -953,11 +953,11 @@ mod tests {
     }
 
     fn grid(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
-        rows(&drawn_screen(r, placements))
+        rows(&drawn_frame(r, placements))
     }
 
     fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
-        drawn_screen(r, placements).images
+        drawn_frame(r, placements).images
     }
 
     fn lines_of(frame: &str) -> Vec<&str> {
@@ -1011,10 +1011,10 @@ mod tests {
         let node = box_node(None, false, false);
         let (cols, rows) = (20, 10);
         let (width, height) = (6, 4);
-        let mut screen = Screen::new(window(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
+        let mut frame = Frame::new(window(cols, rows, 1, 1));
+        frame.centre_on(&[box_placement(&node, 0, 0, width, height)]);
         assert_eq!(
-            screen.origin,
+            frame.origin,
             ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
         );
     }
@@ -1027,19 +1027,19 @@ mod tests {
             box_placement(&node, 0, 0, 3, 2),
             box_placement(&node, 5, 4, 3, 2),
         ];
-        let mut screen = Screen::new(window(cols, rows, 1, 1));
-        screen.centre_on(&placements);
+        let mut frame = Frame::new(window(cols, rows, 1, 1));
+        frame.centre_on(&placements);
         assert_eq!(
-            screen.origin,
+            frame.origin,
             ((cols - 8).div_euclid(2), (rows - 6).div_euclid(2))
         );
     }
 
     #[test]
     fn centre_on_nothing_leaves_the_origin_at_the_corner() {
-        let mut screen = Screen::new(window(20, 10, 1, 1));
-        screen.centre_on(&[]);
-        assert_eq!(screen.origin, (0, 0));
+        let mut frame = Frame::new(window(20, 10, 1, 1));
+        frame.centre_on(&[]);
+        assert_eq!(frame.origin, (0, 0));
     }
 
     #[test]
@@ -1047,13 +1047,13 @@ mod tests {
         let node = box_node(None, false, false);
         let (cols, rows) = (10, 10);
         let (span, height) = (30, 4);
-        let mut screen = Screen::new(window(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, span, height)]);
+        let mut frame = Frame::new(window(cols, rows, 1, 1));
+        frame.centre_on(&[box_placement(&node, 0, 0, span, height)]);
         assert_eq!(
-            screen.origin,
+            frame.origin,
             ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
         );
-        assert!(screen.origin.0 < 0);
+        assert!(frame.origin.0 < 0);
     }
 
     #[test]
@@ -1061,9 +1061,9 @@ mod tests {
         let node = box_node(None, false, false);
         let (cols, rows) = (10, 10);
         let span = cols + 3;
-        let mut screen = Screen::new(window(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, span, 4)]);
-        let cut_on_left = -screen.origin.0;
+        let mut frame = Frame::new(window(cols, rows, 1, 1));
+        frame.centre_on(&[box_placement(&node, 0, 0, span, 4)]);
+        let cut_on_left = -frame.origin.0;
         let cut_on_right = span - cols - cut_on_left;
         assert_eq!(cut_on_left, cut_on_right + 1);
     }
@@ -1073,10 +1073,10 @@ mod tests {
         let node = box_node(None, false, false);
         let (cols, rows) = (20, 10);
         let (width, height) = (6, 4);
-        let mut screen = Screen::new(window(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
+        let mut frame = Frame::new(window(cols, rows, 1, 1));
+        frame.centre_on(&[box_placement(&node, 0, 0, width, height)]);
         assert_eq!(
-            screen.origin,
+            frame.origin,
             ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
         );
     }
@@ -1086,9 +1086,9 @@ mod tests {
         let node = box_node(None, false, false);
         let window = window(20, 10, 4, 8);
         let (width, height) = (5, 4);
-        let screen = Screen::new(window);
+        let frame = Frame::new(window);
         assert_eq!(
-            screen.crop(&box_placement(&node, 2, 3, width, height)),
+            frame.crop(&box_placement(&node, 2, 3, width, height)),
             Some(Crop {
                 col: 2,
                 row: 3,
@@ -1103,12 +1103,12 @@ mod tests {
     #[test]
     fn a_crop_sits_at_the_placement_shifted_by_the_origin() {
         let node = box_node(None, false, false);
-        let mut screen = Screen::new(window(20, 10, 4, 8));
-        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
-        let crop = screen.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
+        let mut frame = Frame::new(window(20, 10, 4, 8));
+        frame.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
+        let crop = frame.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
         assert_eq!(
             (crop.col, crop.row),
-            (1 + screen.origin.0, 1 + screen.origin.1)
+            (1 + frame.origin.0, 1 + frame.origin.1)
         );
     }
 
@@ -1117,8 +1117,8 @@ mod tests {
         let node = box_node(None, false, false);
         let window = window(20, 10, 4, 8);
         let (hidden, width) = (2, 5);
-        let screen = Screen::new(window);
-        let crop = screen
+        let frame = Frame::new(window);
+        let crop = frame
             .crop(&box_placement(&node, -hidden, 0, width, 3))
             .unwrap();
         assert_eq!(crop.col, 0);
@@ -1131,8 +1131,8 @@ mod tests {
         let node = box_node(None, false, false);
         let window = window(20, 10, 4, 8);
         let (hidden, height) = (2, 5);
-        let screen = Screen::new(window);
-        let crop = screen
+        let frame = Frame::new(window);
+        let crop = frame
             .crop(&box_placement(&node, 0, -hidden, 3, height))
             .unwrap();
         assert_eq!(crop.row, 0);
@@ -1145,8 +1145,8 @@ mod tests {
         let node = box_node(None, false, false);
         let window = window(20, 10, 4, 8);
         let x = 18;
-        let screen = Screen::new(window);
-        let crop = screen.crop(&box_placement(&node, x, 0, 5, 3)).unwrap();
+        let frame = Frame::new(window);
+        let crop = frame.crop(&box_placement(&node, x, 0, 5, 3)).unwrap();
         assert_eq!(crop.col, x);
         assert_eq!(crop.first_x, 0);
         assert_eq!(crop.last_x, (window.cols - x) * window.cell_width);
@@ -1157,8 +1157,8 @@ mod tests {
         let node = box_node(None, false, false);
         let window = window(20, 10, 4, 8);
         let y = 8;
-        let screen = Screen::new(window);
-        let crop = screen.crop(&box_placement(&node, 0, y, 3, 5)).unwrap();
+        let frame = Frame::new(window);
+        let crop = frame.crop(&box_placement(&node, 0, y, 3, 5)).unwrap();
         assert_eq!(crop.row, y);
         assert_eq!(crop.first_y, 0);
         assert_eq!(crop.last_y, (window.rows - y) * window.cell_height);
@@ -1167,15 +1167,15 @@ mod tests {
     #[test]
     fn a_box_beyond_the_right_edge_has_no_crop() {
         let node = box_node(None, false, false);
-        let screen = Screen::new(window(20, 10, 4, 8));
-        assert_eq!(screen.crop(&box_placement(&node, 20, 0, 4, 3)), None);
+        let frame = Frame::new(window(20, 10, 4, 8));
+        assert_eq!(frame.crop(&box_placement(&node, 20, 0, 4, 3)), None);
     }
 
     #[test]
     fn a_box_beyond_the_top_edge_has_no_crop() {
         let node = box_node(None, false, false);
-        let screen = Screen::new(window(20, 10, 4, 8));
-        assert_eq!(screen.crop(&box_placement(&node, 0, -3, 4, 3)), None);
+        let frame = Frame::new(window(20, 10, 4, 8));
+        assert_eq!(frame.crop(&box_placement(&node, 0, -3, 4, 3)), None);
     }
 
     #[test]
@@ -1186,9 +1186,9 @@ mod tests {
 
     #[test]
     fn the_graphics_payload_is_appended_to_the_last_line_only() {
-        let screen = Screen::new(window(3, 2, 2, 4));
-        let frame = String::from_utf8(screen.into_bytes()).unwrap();
-        let lines = lines_of(&frame);
+        let frame = Frame::new(window(3, 2, 2, 4));
+        let output = String::from_utf8(frame.into_bytes()).unwrap();
+        let lines = lines_of(&output);
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(
             lines[1],
@@ -1239,19 +1239,19 @@ mod tests {
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
         let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
         let mut r = renderer_on(window(cols, rows_count, 1, 1));
-        let mut screen = Screen::new(r.window);
-        screen.centre_on(&placements);
-        draw_all(&mut r, &mut screen, &placements);
+        let mut frame = Frame::new(r.window);
+        frame.centre_on(&placements);
+        draw_all(&mut r, &mut frame, &placements);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
-        let label_cols: Vec<i64> = screen
+        let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == label_row)
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![label_x, label_x + 1]);
-        let lines = rows(&screen);
+        let lines = rows(&frame);
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(
             lines[(top + crate::layout::BOX_HEIGHT) as usize],
@@ -1268,13 +1268,13 @@ mod tests {
         let cut_each_side = 1;
         let cols = width - 2 * cut_each_side;
         let mut r = renderer_on(window(cols, 10, 1, 1));
-        let mut screen = Screen::new(r.window);
-        screen.centre_on(&placements);
-        draw_all(&mut r, &mut screen, &placements);
+        let mut frame = Frame::new(r.window);
+        frame.centre_on(&placements);
+        draw_all(&mut r, &mut frame, &placements);
         let box_placement = &placements[0];
-        let crop = screen.crop(box_placement).unwrap();
+        let crop = frame.crop(box_placement).unwrap();
         let cut_on_left = crop.first_x;
-        let cut_on_right = box_placement.width * screen.window.cell_width - crop.last_x;
+        let cut_on_right = box_placement.width * frame.window.cell_width - crop.last_x;
         assert_eq!(cut_on_left, cut_each_side);
         assert_eq!(cut_on_right, cut_each_side);
     }
@@ -1295,9 +1295,9 @@ mod tests {
         let top = (rows_count - height).div_euclid(2);
 
         let mut r = renderer_on(window(cols, rows_count, 1, 1));
-        let mut screen = Screen::new(r.window);
-        screen.centre_on(&placements);
-        draw_all(&mut r, &mut screen, &placements);
+        let mut frame = Frame::new(r.window);
+        frame.centre_on(&placements);
+        draw_all(&mut r, &mut frame, &placements);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
         let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
@@ -1307,7 +1307,7 @@ mod tests {
         let child_a_label_row = top + crate::layout::BOX_HEIGHT / 2;
 
         let is_glyph = |image: &&Placed| image.canvas.width == 1 && image.canvas.height == 1;
-        let parent_label_cols: Vec<i64> = screen
+        let parent_label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == parent_label_row)
@@ -1318,7 +1318,7 @@ mod tests {
             (parent_label_x..parent_label_x + "parent".len() as i64).collect();
         assert_eq!(parent_label_cols, expected_parent_cols);
 
-        let child_a_label_cols: Vec<i64> = screen
+        let child_a_label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == child_a_label_row)
@@ -1327,7 +1327,7 @@ mod tests {
             .collect();
         assert_eq!(child_a_label_cols, vec![child_a_label_x]);
 
-        let lines = rows(&screen);
+        let lines = rows(&frame);
         assert_eq!(lines[top as usize], " ".repeat(cols as usize));
         assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
     }
@@ -1346,15 +1346,15 @@ mod tests {
         r.on_resize(window(cols, rows_count, 1, 1));
 
         let placements = crate::layout::layout(&doc.boxes);
-        let mut screen = Screen::new(r.window);
-        screen.centre_on(&placements);
-        draw_all(&mut r, &mut screen, &placements);
+        let mut frame = Frame::new(r.window);
+        frame.centre_on(&placements);
+        draw_all(&mut r, &mut frame, &placements);
 
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
         let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
-        let label_cols: Vec<i64> = screen
+        let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == label_row)
@@ -1410,14 +1410,14 @@ mod tests {
 
     #[test]
     fn the_cursor_goes_home_before_the_lines() {
-        let screen = Screen::new(Window {
+        let frame = Frame::new(Window {
             cols: 2,
             rows: 2,
             cell_width: 1,
             cell_height: 1,
         });
         assert_eq!(
-            String::from_utf8(screen.into_bytes()).unwrap(),
+            String::from_utf8(frame.into_bytes()).unwrap(),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
         );
     }
@@ -1436,13 +1436,13 @@ mod tests {
     #[test]
     fn the_output_is_sized_by_the_terminal() {
         let (cols, rows) = (5, 4);
-        let screen = Screen::new(Window {
+        let frame = Frame::new(Window {
             cols,
             rows,
             cell_width: 1,
             cell_height: 1,
         });
-        let output = String::from_utf8(screen.into_bytes()).unwrap();
+        let output = String::from_utf8(frame.into_bytes()).unwrap();
         let body = output
             .strip_prefix(HOME_CURSOR)
             .unwrap()
@@ -1474,7 +1474,7 @@ mod tests {
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
         // with_cursor always appends the cursor placement last, so draw order
-        // (and thus screen.images order) puts its sprite at the end.
+        // (and thus frame.images order) puts its sprite at the end.
         let images = sprites(&mut r, &placements);
         let cursor_image = images.last().expect("a sprite is drawn for the cursor");
         let (cr, cg, cb) = colour(None);
@@ -1511,10 +1511,10 @@ mod tests {
         let mut expected_r = renderer_on(window);
         let hint_boxes = [hint_node()];
         let placements = crate::layout::layout(&hint_boxes);
-        let mut screen = Screen::new(window);
-        screen.centre_on(&placements);
-        draw_all(&mut expected_r, &mut screen, &placements);
-        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+        let mut frame = Frame::new(window);
+        frame.centre_on(&placements);
+        draw_all(&mut expected_r, &mut frame, &placements);
+        let expected = String::from_utf8(frame.into_bytes()).unwrap();
 
         assert_eq!(output, expected);
     }
@@ -1531,10 +1531,10 @@ mod tests {
 
         let mut expected_r = renderer_on(window);
         let placements = with_cursor(crate::layout::layout(&doc.boxes), None);
-        let mut screen = Screen::new(window);
-        screen.centre_on(&placements);
-        draw_all(&mut expected_r, &mut screen, &placements);
-        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+        let mut frame = Frame::new(window);
+        frame.centre_on(&placements);
+        draw_all(&mut expected_r, &mut frame, &placements);
+        let expected = String::from_utf8(frame.into_bytes()).unwrap();
         assert_eq!(output, expected);
 
         let mut hint_r = renderer_on(window);
@@ -1560,10 +1560,10 @@ mod tests {
         assert!(!placements
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
-        let mut screen = Screen::new(window(20, 10, 1, 1));
-        screen.centre_on(&placements);
-        draw_all(&mut expected_r, &mut screen, &placements);
-        let expected = String::from_utf8(screen.into_bytes()).unwrap();
+        let mut frame = Frame::new(window(20, 10, 1, 1));
+        frame.centre_on(&placements);
+        draw_all(&mut expected_r, &mut frame, &placements);
+        let expected = String::from_utf8(frame.into_bytes()).unwrap();
 
         assert_eq!(output, expected);
     }
@@ -1613,8 +1613,8 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
         ];
         let mut r = renderer_on(window(5, 3, 1, 1));
-        let screen = drawn_screen(&mut r, &placements);
-        let label_cols: Vec<i64> = screen
+        let frame = drawn_frame(&mut r, &placements);
+        let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
@@ -1632,12 +1632,12 @@ mod tests {
             cursor_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(5, 3, 1, 1));
-        let screen = drawn_screen(&mut r, &placements);
-        assert_eq!(rows(&screen)[1], "     ".to_string());
+        let frame = drawn_frame(&mut r, &placements);
+        assert_eq!(rows(&frame)[1], "     ".to_string());
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
         let is_cursor = |image: &&Placed| image.canvas.pixels.chunks(4).all(|pixel| pixel == solid);
-        let cursor_cols: Vec<i64> = screen
+        let cursor_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
@@ -1645,7 +1645,7 @@ mod tests {
             .map(|image| image.col)
             .collect();
         assert_eq!(cursor_cols, vec![3]);
-        let label_cols: Vec<i64> = screen
+        let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
@@ -1664,8 +1664,8 @@ mod tests {
             cursor_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(3, 3, 1, 1));
-        let screen = drawn_screen(&mut r, &placements);
-        let label_cols: Vec<i64> = screen
+        let frame = drawn_frame(&mut r, &placements);
+        let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
@@ -1935,23 +1935,23 @@ mod tests {
     #[test]
     fn a_box_beyond_the_right_edge_is_not_shown() {
         let node = box_node(None, false, false);
-        let screen = Screen::new(window(20, 10, 4, 8));
-        assert!(!screen.shows(&box_placement(&node, 20, 0, 4, 3)));
+        let frame = Frame::new(window(20, 10, 4, 8));
+        assert!(!frame.shows(&box_placement(&node, 20, 0, 4, 3)));
     }
 
     #[test]
     fn a_box_beyond_the_top_edge_is_not_shown() {
         let node = box_node(None, false, false);
-        let screen = Screen::new(window(20, 10, 4, 8));
-        assert!(!screen.shows(&box_placement(&node, 0, -3, 4, 3)));
+        let frame = Frame::new(window(20, 10, 4, 8));
+        assert!(!frame.shows(&box_placement(&node, 0, -3, 4, 3)));
     }
 
     #[test]
     fn a_box_straddling_an_edge_is_shown() {
         let node = box_node(None, false, false);
-        let screen = Screen::new(window(20, 10, 4, 8));
-        assert!(screen.shows(&box_placement(&node, 18, 0, 4, 3)));
-        assert!(screen.shows(&box_placement(&node, -2, 8, 4, 3)));
+        let frame = Frame::new(window(20, 10, 4, 8));
+        assert!(frame.shows(&box_placement(&node, 18, 0, 4, 3)));
+        assert!(frame.shows(&box_placement(&node, -2, 8, 4, 3)));
     }
 
     #[test]
