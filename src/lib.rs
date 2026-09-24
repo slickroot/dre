@@ -18,10 +18,10 @@ mod palette;
 mod render;
 mod state;
 mod status_line;
-#[cfg(not(target_arch = "wasm32"))]
-mod terminal;
 #[cfg(test)]
 mod test_support;
+#[cfg(not(target_arch = "wasm32"))]
+mod tty;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;

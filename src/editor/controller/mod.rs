@@ -5,7 +5,7 @@ pub(crate) mod screen;
 use std::io;
 
 use crate::state::State;
-use crate::terminal;
+use crate::tty;
 use key_source::KeySource;
 use reducer::Reducer;
 use screen::Screen;
@@ -41,7 +41,7 @@ impl Controller for DreController {
         while state.running {
             self.screen.render(&state)?;
             match self.keys.next_key()? {
-                Some(key) if key == terminal::RESIZE => self.screen.resize()?,
+                Some(key) if key == tty::RESIZE => self.screen.resize()?,
                 key => state = self.reducer.reduce(state, key.as_deref()),
             }
         }
@@ -55,7 +55,7 @@ mod tests {
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
-    use crate::terminal::RESIZE;
+    use crate::tty::RESIZE;
     use mockall::Sequence;
 
     fn controller(keys: MockKeySource, screen: MockScreen, reducer: MockReducer) -> DreController {
