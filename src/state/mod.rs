@@ -40,7 +40,6 @@ pub struct State {
     pub(crate) save_to: Option<String>,
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
-    pub(crate) scroll_x: i64,
     pub(crate) dirty: bool,
     pub(crate) colour_overlay: bool,
 }
@@ -108,7 +107,6 @@ impl Default for State {
             save_to: None,
             new_file: false,
             pending_count: None,
-            scroll_x: 0,
             dirty: false,
             colour_overlay: false,
         }
@@ -201,7 +199,6 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
         save_to: None,
         new_file: false,
         pending_count: None,
-        scroll_x: 0,
         dirty: false,
         colour_overlay: false,
     }
@@ -417,58 +414,6 @@ mod tests {
                 })
             );
         }
-    }
-
-    #[test]
-    fn a_default_state_starts_with_no_scroll() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(state.scroll_x, 0);
-    }
-
-    #[test]
-    fn a_synthesized_scroll_key_shifts_scroll_x_and_leaves_selection_and_count_untouched() {
-        let boxes = vec![node("a"), node("b")];
-        let state = new_state(
-            boxes.clone(),
-            Mode::Command,
-            Some(Path {
-                ancestors: vec![],
-                index: 1,
-            }),
-        );
-        let result = reduce(state, Action::ScrollBy(12));
-        assert_eq!(result.scroll_x, 12);
-        assert_eq!(result.doc.boxes, boxes);
-        assert_eq!(
-            result.doc.selected,
-            Some(Path {
-                ancestors: vec![],
-                index: 1
-            })
-        );
-        assert_eq!(result.pending_count, None);
-    }
-
-    #[test]
-    fn a_negative_synthesized_scroll_key_shifts_scroll_x_backwards() {
-        let state = new_state(vec![], Mode::Command, None);
-        let result = reduce(state, Action::ScrollBy(-7));
-        assert_eq!(result.scroll_x, -7);
-    }
-
-    #[test]
-    fn a_synthesized_scroll_key_takes_effect_in_insert_mode() {
-        let state = new_state(
-            vec![node("a")],
-            Mode::Insert,
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
-        let result = reduce(state, Action::ScrollBy(5));
-        assert_eq!(result.scroll_x, 5);
-        assert_eq!(result.mode, Mode::Insert);
     }
 
     #[test]

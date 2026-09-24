@@ -155,7 +155,7 @@ impl Screen {
         }
     }
 
-    fn centre_on(&mut self, placements: &[Placement], scroll_x: i64) {
+    fn centre_on(&mut self, placements: &[Placement]) {
         if placements.is_empty() {
             self.origin = (0, 0);
             return;
@@ -176,11 +176,7 @@ impl Screen {
             .map(|placement| placement.y + placement.height)
             .max()
             .unwrap();
-        let horizontal = if span <= self.terminal.cols {
-            (self.terminal.cols - span).div_euclid(2)
-        } else {
-            -scroll_x
-        };
+        let horizontal = (self.terminal.cols - span).div_euclid(2);
         self.origin = (horizontal, (self.terminal.rows - height).div_euclid(2));
     }
 
@@ -302,10 +298,6 @@ impl TerminalRenderer {
         self.terminal.rows = terminal.rows;
     }
 
-    pub(crate) fn columns(&self) -> i64 {
-        self.terminal.cols
-    }
-
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let hint_boxes = [hint_node()];
         let placements = if state.doc.boxes.is_empty() {
@@ -317,7 +309,7 @@ impl TerminalRenderer {
             )
         };
         let mut screen = Screen::new(self.terminal);
-        screen.centre_on(&placements, state.scroll_x);
+        screen.centre_on(&placements);
         for placement in &placements {
             match &placement.node {
                 PlacementNode::Node(_) => self.draw_box(&mut screen, placement),
@@ -1023,7 +1015,7 @@ mod tests {
         let (cols, rows) = (20, 10);
         let (width, height) = (6, 4);
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, width, height)], 0);
+        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
         assert_eq!(
             screen.origin,
             ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
@@ -1039,7 +1031,7 @@ mod tests {
             box_placement(&node, 5, 4, 3, 2),
         ];
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         assert_eq!(
             screen.origin,
             ((cols - 8).div_euclid(2), (rows - 6).div_euclid(2))
@@ -1049,37 +1041,43 @@ mod tests {
     #[test]
     fn centre_on_nothing_leaves_the_origin_at_the_corner() {
         let mut screen = Screen::new(terminal(20, 10, 1, 1));
-        screen.centre_on(&[], 0);
+        screen.centre_on(&[]);
         assert_eq!(screen.origin, (0, 0));
     }
 
     #[test]
-    fn centre_on_uses_scroll_x_when_the_diagram_overflows() {
+    fn centre_on_centres_an_overflowing_diagram_with_a_negative_origin() {
         let node = box_node(None, false, false);
         let (cols, rows) = (10, 10);
-        let placements = vec![box_placement(&node, 0, 0, 30, 4)];
+        let (span, height) = (30, 4);
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&placements, 0);
-        assert_eq!(screen.origin, (0, (rows - 4).div_euclid(2)));
+        screen.centre_on(&[box_placement(&node, 0, 0, span, height)]);
+        assert_eq!(
+            screen.origin,
+            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
+        );
+        assert!(screen.origin.0 < 0);
     }
 
     #[test]
-    fn centre_on_shifts_left_as_scroll_x_grows() {
+    fn centre_on_cuts_the_extra_column_of_an_odd_overflow_on_the_left() {
         let node = box_node(None, false, false);
         let (cols, rows) = (10, 10);
-        let placements = vec![box_placement(&node, 0, 0, 30, 4)];
+        let span = cols + 3;
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&placements, 5);
-        assert_eq!(screen.origin, (-5, (rows - 4).div_euclid(2)));
+        screen.centre_on(&[box_placement(&node, 0, 0, span, 4)]);
+        let cut_on_left = -screen.origin.0;
+        let cut_on_right = span - cols - cut_on_left;
+        assert_eq!(cut_on_left, cut_on_right + 1);
     }
 
     #[test]
-    fn centre_on_ignores_scroll_x_when_the_diagram_fits() {
+    fn centre_on_centres_a_diagram_that_fits() {
         let node = box_node(None, false, false);
         let (cols, rows) = (20, 10);
         let (width, height) = (6, 4);
         let mut screen = Screen::new(terminal(cols, rows, 1, 1));
-        screen.centre_on(&[box_placement(&node, 0, 0, width, height)], 5);
+        screen.centre_on(&[box_placement(&node, 0, 0, width, height)]);
         assert_eq!(
             screen.origin,
             ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
@@ -1109,7 +1107,7 @@ mod tests {
     fn a_crop_sits_at_the_placement_shifted_by_the_origin() {
         let node = box_node(None, false, false);
         let mut screen = Screen::new(terminal(20, 10, 4, 8));
-        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)], 0);
+        screen.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
         let crop = screen.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
         assert_eq!(
             (crop.col, crop.row),
@@ -1245,7 +1243,7 @@ mod tests {
         let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
         let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
         let mut screen = Screen::new(r.terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut r, &mut screen, &placements);
         let label_x = left + crate::layout::centre(crate::layout::width(&leaf), "hi");
         let label_row = top + crate::layout::BOX_HEIGHT / 2;
@@ -1265,38 +1263,23 @@ mod tests {
     }
 
     #[test]
-    fn an_overflowing_diagram_uses_scroll_x_instead_of_centring() {
+    fn an_overflowing_diagram_is_cropped_equally_on_both_sides() {
         let leaf = node("hi");
         let nodes = vec![leaf.clone()];
         let placements = crate::layout::layout(&nodes);
-        let (cols, rows_count) = (3, 10);
-        let top = (rows_count - crate::layout::BOX_HEIGHT).div_euclid(2);
-        let label_row = top + crate::layout::BOX_HEIGHT / 2;
-        let label_x = crate::layout::centre(crate::layout::width(&leaf), "hi");
-
-        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
+        let width = crate::layout::width(&leaf);
+        let cut_each_side = 1;
+        let cols = width - 2 * cut_each_side;
+        let mut r = renderer_on(terminal(cols, 10, 1, 1));
         let mut screen = Screen::new(r.terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut r, &mut screen, &placements);
-        let unscrolled_cols: Vec<i64> = screen
-            .images
-            .iter()
-            .filter(|image| image.row == label_row)
-            .map(|image| image.col)
-            .collect();
-        assert_eq!(unscrolled_cols, vec![label_x, label_x + 1]);
-
-        let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
-        let mut screen = Screen::new(r.terminal);
-        screen.centre_on(&placements, 1);
-        draw_all(&mut r, &mut screen, &placements);
-        let scrolled_cols: Vec<i64> = screen
-            .images
-            .iter()
-            .filter(|image| image.row == label_row)
-            .map(|image| image.col)
-            .collect();
-        assert_eq!(scrolled_cols, vec![label_x - 1, label_x]);
+        let box_placement = &placements[0];
+        let crop = screen.crop(box_placement).unwrap();
+        let cut_on_left = crop.first_x;
+        let cut_on_right = box_placement.width * screen.terminal.cell_width - crop.last_x;
+        assert_eq!(cut_on_left, cut_each_side);
+        assert_eq!(cut_on_right, cut_each_side);
     }
 
     #[test]
@@ -1316,7 +1299,7 @@ mod tests {
 
         let mut r = renderer_on(terminal(cols, rows_count, 1, 1));
         let mut screen = Screen::new(r.terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut r, &mut screen, &placements);
 
         let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
@@ -1367,7 +1350,7 @@ mod tests {
 
         let placements = crate::layout::layout(&doc.boxes);
         let mut screen = Screen::new(r.terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut r, &mut screen, &placements);
 
         let left = (cols - crate::layout::width(&leaf)).div_euclid(2);
@@ -1381,19 +1364,6 @@ mod tests {
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![label_x, label_x + 1]);
-    }
-
-    #[test]
-    fn columns_reports_the_terminals_column_count() {
-        let r = renderer_on(terminal(20, 10, 1, 1));
-        assert_eq!(r.columns(), 20);
-    }
-
-    #[test]
-    fn columns_reflects_a_resize() {
-        let mut r = renderer_on(terminal(20, 10, 1, 1));
-        r.on_resize(terminal(40, 10, 1, 1));
-        assert_eq!(r.columns(), 40);
     }
 
     #[test]
@@ -1419,7 +1389,11 @@ mod tests {
     }
 
     fn rendered(r: &mut TerminalRenderer, doc: &Document) -> String {
-        rendered_with_scroll(r, doc, 0)
+        let mut out = Vec::new();
+        let mut state = State::default();
+        state.doc = doc.clone();
+        r.render(&state, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
     fn rendered_diagram(r: &mut TerminalRenderer, doc: &Document) -> String {
@@ -1427,15 +1401,6 @@ mod tests {
         let mut state = State::default();
         state.doc = doc.clone();
         r.render_diagram(&state, &mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
-    fn rendered_with_scroll(r: &mut TerminalRenderer, doc: &Document, scroll_x: i64) -> String {
-        let mut out = Vec::new();
-        let mut state = State::default();
-        state.doc = doc.clone();
-        state.scroll_x = scroll_x;
-        r.render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -1550,7 +1515,7 @@ mod tests {
         let hint_boxes = [hint_node()];
         let placements = crate::layout::layout(&hint_boxes);
         let mut screen = Screen::new(terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut expected_r, &mut screen, &placements);
         let expected = String::from_utf8(screen.into_bytes()).unwrap();
 
@@ -1570,7 +1535,7 @@ mod tests {
         let mut expected_r = renderer_on(terminal);
         let placements = with_cursor(crate::layout::layout(&doc.boxes), None);
         let mut screen = Screen::new(terminal);
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut expected_r, &mut screen, &placements);
         let expected = String::from_utf8(screen.into_bytes()).unwrap();
         assert_eq!(output, expected);
@@ -1599,7 +1564,7 @@ mod tests {
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
         let mut screen = Screen::new(terminal(20, 10, 1, 1));
-        screen.centre_on(&placements, 0);
+        screen.centre_on(&placements);
         draw_all(&mut expected_r, &mut screen, &placements);
         let expected = String::from_utf8(screen.into_bytes()).unwrap();
 
