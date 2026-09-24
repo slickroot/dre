@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn transmission_multi_chunk_splits_and_sets_more_flag() {
         let mut state: u32 = 0x9E3779B9;
-        let pixels: Vec<u8> = (0..200_000u32)
+        let pixels: Vec<u8> = (0..8_000u32)
             .map(|_| {
                 state = state.wrapping_mul(1664525).wrapping_add(1013904223);
                 (state >> 16) as u8

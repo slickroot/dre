@@ -15,7 +15,7 @@ const HOME_CURSOR: &str = "\x1b[H";
 
 pub(super) const ARROW_STROKE: i64 = 4;
 
-const CACHE_LIMIT: usize = 512;
+pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
@@ -266,6 +266,7 @@ fn hint_node() -> Node {
 pub(crate) struct TerminalRenderer {
     terminal: Terminal,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
+    cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
 }
 
@@ -281,10 +282,15 @@ impl Renderer for TerminalRenderer {
 }
 
 impl TerminalRenderer {
-    pub(crate) fn new(terminal: Terminal, glyph_source: Box<dyn GlyphSource>) -> Self {
+    pub(crate) fn new(
+        terminal: Terminal,
+        glyph_source: Box<dyn GlyphSource>,
+        cache_limit: usize,
+    ) -> Self {
         TerminalRenderer {
             terminal,
             cache: std::collections::HashMap::new(),
+            cache_limit,
             glyph_source,
         }
     }
@@ -476,7 +482,7 @@ impl TerminalRenderer {
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
-        if self.cache.len() >= CACHE_LIMIT {
+        if self.cache.len() >= self.cache_limit {
             self.cache.clear();
         }
         self.cache.insert(key, drawn);
@@ -927,7 +933,7 @@ mod tests {
             terminal.cell_width,
             terminal.cell_height,
         ));
-        TerminalRenderer::new(terminal, source)
+        TerminalRenderer::new(terminal, source, CACHE_LIMIT)
     }
 
     fn draw_all(r: &mut TerminalRenderer, screen: &mut Screen, placements: &[Placement]) {
@@ -1994,8 +2000,10 @@ mod tests {
 
     #[test]
     fn the_cache_is_bounded() {
-        let mut r = renderer_on(terminal(4000, 20, 2, 4));
-        for width in 0..(CACHE_LIMIT as i64 + 2) {
+        let limit = 2;
+        let source = Box::new(FakeGlyphSource::new(1, 1));
+        let mut r = TerminalRenderer::new(terminal(20, 5, 1, 1), source, limit);
+        for width in 0..(limit as i64 + 2) {
             sprites(
                 &mut r,
                 &[box_placement(
@@ -2007,7 +2015,7 @@ mod tests {
                 )],
             );
         }
-        assert!(r.cache.len() <= CACHE_LIMIT);
+        assert!(r.cache.len() <= limit);
     }
 
     fn box_outline(

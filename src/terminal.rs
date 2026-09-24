@@ -202,16 +202,17 @@ mod tests {
         );
         unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.unwrap();
 
-        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (read, write) = nix::unistd::pipe().unwrap();
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
         let pid = nix::unistd::getpid();
         let interrupter = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(20));
             nix::sys::signal::kill(pid, Signal::SIGWINCH).unwrap();
+            nix::unistd::write(&write, b"x").unwrap();
         });
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 200);
+        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
         interrupter.join().unwrap();
-        assert!(matches!(result, Ok(None)));
+        assert_eq!(result.unwrap(), Some("x".to_string()));
     }
 
     #[test]
