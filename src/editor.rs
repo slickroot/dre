@@ -81,6 +81,7 @@ fn edit(
                 {
                     save(&state)?;
                     saved_len = state.history_len();
+                    state.dirty = false;
                 }
             }
             None => state = state::hide_idle_cursor(state),
@@ -348,6 +349,21 @@ mod tests {
     #[test]
     fn a_change_to_the_history_saves_once() {
         assert_eq!(count_saves(changing_state(), vec![Some("c"), Some("q")]), 1);
+    }
+
+    #[test]
+    fn a_change_that_was_saved_is_no_longer_dirty() {
+        let state =
+            run_script_with_save(changing_state(), vec![Some("c"), Some("q")], |_| Ok(())).unwrap();
+        assert!(!state.dirty);
+    }
+
+    #[test]
+    fn a_change_without_a_place_to_save_to_stays_dirty() {
+        let state = new_state(vec![diagram::Node::default()], Mode::Command, Some(first()));
+        let state =
+            run_script_with_save(state, vec![Some("c"), Some(INTERRUPT)], |_| Ok(())).unwrap();
+        assert!(state.dirty);
     }
 
     #[test]
