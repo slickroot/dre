@@ -668,6 +668,86 @@ mod tests {
         assert_eq!(hidden.doc.selected, None);
     }
 
+    fn selecting_first(boxes: Vec<Node>, mode: Mode) -> State {
+        new_state(
+            boxes,
+            mode,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        )
+    }
+
+    #[test]
+    fn commit_and_add_child_after_an_edit_leaves_three_snapshots() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let typed = reduce(reduce(before, Action::EditLabel), Action::InsertAppend('b'));
+        let result = reduce(typed, Action::CommitAndAddChild);
+        assert_eq!(result.history.len(), 3);
+    }
+
+    #[test]
+    fn commit_and_add_child_after_an_edit_needs_three_undos_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let typed = reduce(
+            reduce(before.clone(), Action::EditLabel),
+            Action::InsertAppend('b'),
+        );
+        let committed = reduce(typed, Action::CommitAndAddChild);
+        let once = reduce(committed, Action::Undo);
+        let twice = reduce(once.clone(), Action::Undo);
+        let thrice = reduce(twice.clone(), Action::Undo);
+        assert_ne!(once.doc.boxes, before.doc.boxes);
+        assert_ne!(twice.doc.boxes, before.doc.boxes);
+        assert_eq!(thrice.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn commit_and_add_child_without_a_change_drops_only_the_entry_snapshot() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let result = reduce(reduce(before, Action::EditLabel), Action::CommitAndAddChild);
+        assert_eq!(result.history.len(), 2);
+    }
+
+    #[test]
+    fn new_sibling_leaves_two_snapshots_and_needs_two_undos_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let created = reduce(before.clone(), Action::NewSibling);
+        assert_eq!(created.history.len(), 2);
+        let once = reduce(created, Action::Undo);
+        assert_ne!(once.doc.boxes, before.doc.boxes);
+        let twice = reduce(once, Action::Undo);
+        assert_eq!(twice.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn rename_label_leaves_two_snapshots_and_needs_two_undos_to_restore_the_document() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let renaming = reduce(before.clone(), Action::RenameLabel);
+        assert_eq!(renaming.history.len(), 2);
+        let once = reduce(renaming, Action::Undo);
+        assert_ne!(once.doc.boxes, before.doc.boxes);
+        let twice = reduce(once, Action::Undo);
+        assert_eq!(twice.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn committing_an_edit_label_without_a_change_leaves_history_unchanged() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let editing = reduce(before.clone(), Action::EditLabel);
+        let committed = reduce(editing, Action::Commit);
+        assert_eq!(committed.history.len(), before.history.len());
+        assert_eq!(committed.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn undo_does_not_add_a_snapshot() {
+        let before = selecting_first(vec![node("a")], Mode::Command);
+        let edited = reduce(reduce(before, Action::NewBox), Action::Undo);
+        assert_eq!(edited.history.len(), 0);
+    }
+
     fn save_prompt_state() -> State {
         let mode = Mode::SavePrompt {
             filename: "diagram.dre".to_string(),
