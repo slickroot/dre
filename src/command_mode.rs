@@ -410,7 +410,8 @@ pub(crate) fn format_keymap_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::{node, node_with_children, palette, Node};
+    use crate::diagram::{node, node_with_children, Node};
+    use crate::palette::palette;
     use crate::state::{handle_key, new_state};
 
     const COMMANDS: [Command; 17] = [
