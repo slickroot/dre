@@ -2,123 +2,8 @@ use crate::action::CommandAction;
 use crate::diagram::{append, at, children_at, remove, Path};
 use crate::state::{
     add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
-    KeyBinding, Mode, State, DEFAULT_FILENAME, PAD,
+    Mode, State, DEFAULT_FILENAME, PAD,
 };
-
-pub(crate) fn parse(key: &str) -> Option<CommandAction> {
-    if let Some(delta) = key.strip_prefix("\x1bSCROLL") {
-        return delta.parse::<i64>().ok().map(CommandAction::ScrollBy);
-    }
-    Some(match key {
-        "u" => CommandAction::Undo,
-        "b" => CommandAction::NewBox,
-        "s" => CommandAction::NewSibling,
-        "d" => CommandAction::Delete,
-        "p" => CommandAction::Paste,
-        "h" => CommandAction::SelectParent,
-        "l" => CommandAction::SelectChild,
-        "j" => CommandAction::SelectNext,
-        "k" => CommandAction::SelectPrevious,
-        "i" => CommandAction::EditLabel,
-        "I" => CommandAction::RenameLabel,
-        "c" => CommandAction::CycleColour,
-        "C" => CommandAction::CycleSiblingsColour,
-        "F" => CommandAction::ToggleSiblingsFill,
-        "f" => CommandAction::ToggleFill,
-        "r" => CommandAction::ToggleRounded,
-        "q" => CommandAction::Quit,
-        _ => return None,
-    })
-}
-
-#[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding<CommandAction>] = &[
-    KeyBinding {
-        keys: &["u"],
-        command: CommandAction::Undo,
-        description: "Undo the last change",
-    },
-    KeyBinding {
-        keys: &["b"],
-        command: CommandAction::NewBox,
-        description: "Add a child box",
-    },
-    KeyBinding {
-        keys: &["s"],
-        command: CommandAction::NewSibling,
-        description: "Add a sibling box",
-    },
-    KeyBinding {
-        keys: &["d"],
-        command: CommandAction::Delete,
-        description: "Delete the selected box and its descendants",
-    },
-    KeyBinding {
-        keys: &["p"],
-        command: CommandAction::Paste,
-        description: "Paste the cut box and its descendants as the last child of the selected box",
-    },
-    KeyBinding {
-        keys: &["h"],
-        command: CommandAction::SelectParent,
-        description: "Select the parent box",
-    },
-    KeyBinding {
-        keys: &["l"],
-        command: CommandAction::SelectChild,
-        description: "Select the first child box",
-    },
-    KeyBinding {
-        keys: &["j"],
-        command: CommandAction::SelectNext,
-        description: "Select the next sibling",
-    },
-    KeyBinding {
-        keys: &["k"],
-        command: CommandAction::SelectPrevious,
-        description: "Select the previous sibling",
-    },
-    KeyBinding {
-        keys: &["i"],
-        command: CommandAction::EditLabel,
-        description: "Edit the selected box's label",
-    },
-    KeyBinding {
-        keys: &["I"],
-        command: CommandAction::RenameLabel,
-        description: "Rename the selected box's label",
-    },
-    KeyBinding {
-        keys: &["c"],
-        command: CommandAction::CycleColour,
-        description: "Cycle the box's colour",
-    },
-    KeyBinding {
-        keys: &["C"],
-        command: CommandAction::CycleSiblingsColour,
-        description: "Cycle the colour of every sibling",
-    },
-    KeyBinding {
-        keys: &["f"],
-        command: CommandAction::ToggleFill,
-        description: "Toggle the box's fill",
-    },
-    KeyBinding {
-        keys: &["F"],
-        command: CommandAction::ToggleSiblingsFill,
-        description: "Toggle the fill of every sibling",
-    },
-    KeyBinding {
-        keys: &["r"],
-        command: CommandAction::ToggleRounded,
-        description: "Toggle rounded corners",
-    },
-    KeyBinding {
-        keys: &["q"],
-        command: CommandAction::Quit,
-        description: "Save and quit (or choose where to save)",
-    },
-];
 
 pub(crate) fn is_undoable(command: CommandAction) -> bool {
     matches!(
@@ -408,20 +293,6 @@ pub(crate) fn reduce(mut state: State, command: CommandAction) -> State {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn format_keymap_markdown() -> String {
-    let mut out = String::from("| Key | Description |\n| --- | --- |\n");
-    for binding in COMMAND_KEYMAP {
-        let keys: Vec<String> = binding.keys.iter().map(|k| format!("`{k}`")).collect();
-        out.push_str(&format!(
-            "| {} | {} |\n",
-            keys.join(", "),
-            binding.description
-        ));
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,107 +319,6 @@ mod tests {
         CommandAction::ToggleRounded,
         CommandAction::Quit,
     ];
-
-    #[test]
-    fn readme_keymap_table_stays_in_sync() {
-        let markdown = format!("\n\n{}\n", format_keymap_markdown());
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir).join("README.md");
-        let readme = std::fs::read_to_string(&path).unwrap();
-        let start_marker = "<!-- keymap:start -->";
-        let end_marker = "<!-- keymap:end -->";
-        let start = readme
-            .find(start_marker)
-            .expect("missing <!-- keymap:start --> in README.md");
-        let end = readme
-            .find(end_marker)
-            .expect("missing <!-- keymap:end --> in README.md");
-        let start_after = start + start_marker.len();
-        let between = &readme[start_after..end];
-        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
-            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
-            std::fs::write(&path, new_readme).unwrap();
-        } else {
-            assert_eq!(
-                between, markdown,
-                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
-            );
-        }
-    }
-
-    #[test]
-    fn parse_maps_known_keys_to_their_commands() {
-        assert_eq!(parse("u"), Some(CommandAction::Undo));
-        assert_eq!(parse("b"), Some(CommandAction::NewBox));
-        assert_eq!(parse("s"), Some(CommandAction::NewSibling));
-        assert_eq!(parse("d"), Some(CommandAction::Delete));
-        assert_eq!(parse("h"), Some(CommandAction::SelectParent));
-        assert_eq!(parse("l"), Some(CommandAction::SelectChild));
-        assert_eq!(parse("j"), Some(CommandAction::SelectNext));
-        assert_eq!(parse("k"), Some(CommandAction::SelectPrevious));
-        assert_eq!(parse("i"), Some(CommandAction::EditLabel));
-        assert_eq!(parse("I"), Some(CommandAction::RenameLabel));
-        assert_eq!(parse("c"), Some(CommandAction::CycleColour));
-        assert_eq!(parse("C"), Some(CommandAction::CycleSiblingsColour));
-        assert_eq!(parse("F"), Some(CommandAction::ToggleSiblingsFill));
-        assert_eq!(parse("f"), Some(CommandAction::ToggleFill));
-        assert_eq!(parse("r"), Some(CommandAction::ToggleRounded));
-        assert_eq!(parse("q"), Some(CommandAction::Quit));
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_an_unknown_key() {
-        assert_eq!(parse("x"), None);
-        assert_eq!(parse("\x1b"), None);
-        assert_eq!(parse("é"), None);
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_each_digit_key() {
-        for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
-            assert_eq!(parse(key), None);
-        }
-    }
-
-    #[test]
-    fn parse_reads_a_scroll_prefix_into_a_signed_delta() {
-        assert_eq!(parse("\x1bSCROLL5"), Some(CommandAction::ScrollBy(5)));
-        assert_eq!(parse("\x1bSCROLL-5"), Some(CommandAction::ScrollBy(-5)));
-        assert_eq!(parse("\x1bSCROLL0"), Some(CommandAction::ScrollBy(0)));
-    }
-
-    #[test]
-    fn parse_returns_nothing_for_a_malformed_scroll_prefix() {
-        assert_eq!(parse("\x1bSCROLL"), None);
-        assert_eq!(parse("\x1bSCROLLx"), None);
-    }
-
-    #[test]
-    fn command_keymap_agrees_with_parse() {
-        let bound: Vec<String> = COMMAND_KEYMAP
-            .iter()
-            .flat_map(|binding| binding.keys)
-            .map(|key| key.to_string())
-            .collect();
-
-        for binding in COMMAND_KEYMAP {
-            for key in binding.keys {
-                assert_eq!(parse(key), Some(binding.command));
-            }
-        }
-
-        for ch in (b'a'..=b'z').chain(b'A'..=b'Z').chain(b'0'..=b'9') {
-            let key = (ch as char).to_string();
-            if !bound.contains(&key) {
-                assert_eq!(parse(&key), None);
-            }
-        }
-
-        let mut unique = bound.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), bound.len());
-    }
 
     #[test]
     fn a_command_below_its_minimum_depth_leaves_the_document_unchanged() {
@@ -1987,7 +1757,7 @@ mod tests {
                 index: 0,
             }),
         );
-        let scrolled = handle_key(state, "\x1bSCROLL9");
+        let scrolled = reduce(state, CommandAction::ScrollBy(9));
         let after_undo = handle_key(scrolled, "u");
         assert_eq!(after_undo.scroll_x, 9);
     }
@@ -2337,11 +2107,6 @@ mod tests {
             ancestors: ancestors.to_vec(),
             index,
         })
-    }
-
-    #[test]
-    fn p_parses_to_paste() {
-        assert_eq!(parse("p"), Some(CommandAction::Paste));
     }
 
     #[test]

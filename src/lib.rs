@@ -13,11 +13,13 @@ mod editor;
 mod file_document;
 #[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
+mod input;
 mod insert_mode;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
 mod palette;
+mod reduce;
 mod render;
 mod save_prompt_mode;
 mod state;

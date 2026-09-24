@@ -2,8 +2,10 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
+use crate::action::{Action, CommandAction};
 use crate::diagram::Document;
 use crate::layout::{layout, PlacementNode};
+use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::state::{handle_key, State};
 use crate::terminal::{RawScreen, Terminal};
@@ -64,7 +66,7 @@ fn edit(
                     if let Some(delta) =
                         overflow_delta(left, right, state.scroll_x, renderer.columns())
                     {
-                        state = handle_key(state, &format!("\x1bSCROLL{delta}"));
+                        state = reduce(state, Action::Command(CommandAction::ScrollBy(delta)));
                     }
                 }
             }

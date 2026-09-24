@@ -3,18 +3,6 @@ use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";
 
-pub(crate) fn parse(key: &str) -> Option<SavePromptAction> {
-    match key {
-        "\r" => Some(SavePromptAction::Confirm),
-        "\x1b" => Some(SavePromptAction::Cancel),
-        "\x7f" => Some(SavePromptAction::Backspace),
-        _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(SavePromptAction::Append(c)),
-            _ => None,
-        },
-    }
-}
-
 fn with_extension(filename: &str) -> String {
     if filename.ends_with(EXTENSION) {
         filename.to_string()

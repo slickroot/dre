@@ -1,5 +1,4 @@
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)]
 pub(crate) enum Action {
     Command(CommandAction),
     Insert(InsertAction),
