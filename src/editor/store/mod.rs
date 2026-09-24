@@ -1,13 +1,10 @@
+pub(crate) mod files;
+
 use std::io;
 
 use crate::state::State;
 use crate::{dre_format, file_document, filesystem};
-
-#[cfg_attr(test, mockall::automock)]
-pub(crate) trait Files {
-    fn read(&self, path: &str) -> io::Result<String>;
-    fn write(&self, path: &str, contents: &str) -> io::Result<()>;
-}
+use files::Files;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait StateStore {
@@ -57,6 +54,7 @@ impl StateStore for FileStateStore {
 
 #[cfg(test)]
 mod tests {
+    use super::files::MockFiles;
     use super::*;
     use crate::diagram::{self, Path};
 

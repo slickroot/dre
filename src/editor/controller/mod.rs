@@ -1,24 +1,14 @@
+pub(crate) mod key_source;
+pub(crate) mod reducer;
+pub(crate) mod screen;
+
 use std::io;
 
 use crate::state::State;
-
-#[cfg_attr(test, mockall::automock)]
-pub(crate) trait KeySource {
-    fn next_key(&mut self) -> io::Result<Option<String>>;
-}
-
-#[cfg_attr(test, mockall::automock)]
-pub(crate) trait Screen {
-    fn render(&mut self, state: &State) -> io::Result<()>;
-    fn resize(&mut self) -> io::Result<()>;
-}
-
-#[cfg_attr(test, mockall::automock)]
-pub(crate) trait Reducer {
-    // automock needs the lifetime named: it cannot mock an elided reference inside Option.
-    #[allow(clippy::needless_lifetimes)]
-    fn reduce<'a>(&self, state: State, key: Option<&'a str>) -> State;
-}
+use crate::terminal;
+use key_source::KeySource;
+use reducer::Reducer;
+use screen::Screen;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Controller {
@@ -51,7 +41,7 @@ impl Controller for DreController {
         while state.running {
             self.screen.render(&state)?;
             match self.keys.next_key()? {
-                Some(key) if key == crate::terminal::RESIZE => self.screen.resize()?,
+                Some(key) if key == terminal::RESIZE => self.screen.resize()?,
                 key => state = self.reducer.reduce(state, key.as_deref()),
             }
         }
@@ -61,6 +51,9 @@ impl Controller for DreController {
 
 #[cfg(test)]
 mod tests {
+    use super::key_source::MockKeySource;
+    use super::reducer::MockReducer;
+    use super::screen::MockScreen;
     use super::*;
     use crate::terminal::RESIZE;
     use mockall::Sequence;
