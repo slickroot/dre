@@ -1,5 +1,7 @@
 use crate::diagram::at;
-use crate::state::{add_child_box, snapshot, KeyBinding, Mode, State, PAD};
+use crate::state::{
+    add_child_box, drop_snapshot_if_unchanged, snapshot, KeyBinding, Mode, State, PAD,
+};
 
 fn drop_last_chars(s: &str, n: usize) -> String {
     let len = s.chars().count();
@@ -69,7 +71,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         Command::Commit => {
             node.label = drop_last_chars(&label, 1);
             state.mode = Mode::Command;
-            state
+            drop_snapshot_if_unchanged(state)
         }
         Command::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);

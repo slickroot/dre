@@ -137,6 +137,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
             | Command::CycleSiblingsColour
             | Command::ToggleSiblingsFill
             | Command::RenameLabel
+            | Command::EditLabel
     )
 }
 
@@ -1746,6 +1747,50 @@ mod tests {
         let after = handle_key(before.clone(), "c");
         let undone = handle_key(after, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
+    }
+
+    fn coloured_box_a_selected() -> State {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        handle_key(state, "c")
+    }
+
+    fn press(state: State, keys: &[&str]) -> State {
+        keys.iter().fold(state, |state, key| handle_key(state, key))
+    }
+
+    #[test]
+    fn an_i_edit_session_is_undone_by_one_u() {
+        let coloured = coloured_box_a_selected();
+        let edited = press(coloured.clone(), &["i", "x", "y", "\x7f", "z", "\x1b"]);
+        assert_eq!(edited.doc.boxes[0].label, "axz");
+        let undone = handle_key(edited, "u");
+        assert_eq!(undone.doc.boxes, coloured.doc.boxes);
+    }
+
+    #[test]
+    fn i_then_esc_immediately_is_not_an_undo_step() {
+        let coloured = coloured_box_a_selected();
+        let undone = press(coloured.clone(), &["i", "\x1b", "u"]);
+        assert_eq!(undone.doc.boxes[0].colour, None);
+        assert_eq!(undone.doc.boxes[0].label, coloured.doc.boxes[0].label);
+    }
+
+    #[test]
+    fn i_typing_then_backspacing_back_to_the_original_is_not_an_undo_step() {
+        let coloured = coloured_box_a_selected();
+        let undone = press(
+            coloured.clone(),
+            &["i", "x", "y", "\x7f", "\x7f", "\x1b", "u"],
+        );
+        assert_eq!(undone.doc.boxes[0].colour, None);
+        assert_eq!(undone.doc.boxes[0].label, coloured.doc.boxes[0].label);
     }
 
     #[test]

@@ -162,6 +162,13 @@ pub(crate) fn snapshot(mut state: State) -> State {
     state
 }
 
+pub(crate) fn drop_snapshot_if_unchanged(mut state: State) -> State {
+    if state.history.last() == Some(&state.doc) {
+        state.history.pop();
+    }
+    state
+}
+
 pub(crate) fn undo(mut state: State) -> State {
     if let Some(previous) = state.history.pop() {
         state.doc = previous;
