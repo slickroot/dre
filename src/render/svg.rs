@@ -1,10 +1,13 @@
 use std::io::{self, Write};
 
-use super::{arrowhead_depth, arrowhead_slope, colour, Renderer, CELL_HEIGHT, CELL_WIDTH};
+use super::{
+    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, BORDER, CELL_HEIGHT,
+    CELL_WIDTH,
+};
 use crate::layout::{layout, with_cursor, PlacementNode};
 use crate::state::State;
 
-const ARROW_STROKE: i64 = 2;
+const ARROW_STROKE: i64 = BORDER / 4;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
 
@@ -185,11 +188,12 @@ fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arro
         .expect("an arrow always has at least one stop");
     let (r, g, b) = colour(None);
     let stroke = format!("rgb({r},{g},{b})");
-    let mut paths = format!(
+    let mut paths = format!("<g opacity=\"{ARROW_OPACITY}\">");
+    paths.push_str(&format!(
         "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{stroke}\" stroke-width=\"{}\" fill=\"none\"/>",
         trunk_x + ARROW_JOIN_OVERLAP,
         ARROW_STROKE
-    );
+    ));
     paths.push_str(&format!(
         "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{stroke}\" stroke-width=\"{}\" fill=\"none\"/>",
         ARROW_STROKE
@@ -201,6 +205,7 @@ fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arro
             ARROW_STROKE
         ));
     }
+    paths.push_str("</g>");
     paths
 }
 
@@ -746,6 +751,77 @@ mod tests {
     }
 
     #[test]
+    fn each_arrow_sits_inside_its_own_group_with_the_arrow_opacity() {
+        let nodes = vec![
+            node_with_children("first", vec![node("a"), node("b")]),
+            node_with_children("second", vec![node("c"), node("d")]),
+        ];
+        let placements = crate::layout::layout(&nodes);
+        let arrow_count = placements
+            .iter()
+            .filter(|placement| matches!(placement.node, PlacementNode::Arrow(_)))
+            .count();
+
+        let svg = SvgRenderer::default().draw(&placements);
+
+        let group_open = format!("<g opacity=\"{ARROW_OPACITY}\">");
+        assert_eq!(arrow_count, 2);
+        assert_eq!(svg.matches(&group_open).count(), arrow_count);
+        assert_eq!(svg.matches("</g>").count(), arrow_count);
+        for group in svg.split(&group_open).skip(1) {
+            let inside = group.split("</g>").next().expect("groups are closed");
+            assert!(inside.starts_with("<path"));
+            assert!(!inside.contains("<rect"));
+        }
+    }
+
+    #[test]
+    fn every_arrow_path_is_inside_an_arrow_group() {
+        let nodes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer::default().draw(&placements);
+
+        let group_open = format!("<g opacity=\"{ARROW_OPACITY}\">");
+        let without_defs = svg.split_once("</defs>").expect("arrows emit defs").1;
+        let outside_groups = without_defs
+            .split(&group_open)
+            .enumerate()
+            .map(|(index, part)| {
+                if index == 0 {
+                    part
+                } else {
+                    part.split_once("</g>").expect("groups are closed").1
+                }
+            })
+            .collect::<String>();
+        assert!(!outside_groups.contains("<path d=\"M"));
+    }
+
+    #[test]
+    fn arrow_paths_use_the_arrow_stroke_and_box_strokes_keep_the_border_stroke() {
+        let root = node_with_children("root", vec![node("A"), node("B")]);
+        let nodes = vec![root];
+        let placements = crate::layout::layout(&nodes);
+
+        let svg = SvgRenderer::default().draw(&placements);
+
+        let group_open = format!("<g opacity=\"{ARROW_OPACITY}\">");
+        let group = svg
+            .split(&group_open)
+            .nth(1)
+            .and_then(|part| part.split("</g>").next())
+            .expect("the arrow has a group");
+        let arrow_stroke = format!("stroke-width=\"{ARROW_STROKE}\"");
+        assert_eq!(
+            group.matches("<path").count(),
+            group.matches(&arrow_stroke).count()
+        );
+        assert_eq!(ARROW_STROKE, BORDER / 4);
+        assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
+    }
+
+    #[test]
     fn the_arrowhead_marker_geometry_is_computed_from_the_mirrored_constants() {
         let parent = node_with_children("parent", vec![node("a"), node("b")]);
         let nodes = vec![parent];
@@ -882,11 +958,12 @@ mod tests {
         let trunk_top = *stop_rows.iter().min().expect("an arrow has stops");
         let trunk_bottom = *stop_rows.iter().max().expect("an arrow has stops");
         let stroke = rgb(colour(None));
-        let mut paths = format!(
+        let mut paths = format!("<g opacity=\"{ARROW_OPACITY}\">");
+        paths.push_str(&format!(
             "<path d=\"M {left} {shaft_row} L {} {shaft_row}\" stroke=\"{stroke}\" stroke-width=\"{}\" fill=\"none\"/>",
             trunk_x + ARROW_JOIN_OVERLAP,
             ARROW_STROKE
-        );
+        ));
         paths.push_str(&format!(
             "<path d=\"M {trunk_x} {trunk_top} L {trunk_x} {trunk_bottom}\" stroke=\"{stroke}\" stroke-width=\"{}\" fill=\"none\"/>",
             ARROW_STROKE
@@ -898,6 +975,7 @@ mod tests {
                 ARROW_STROKE
             ));
         }
+        paths.push_str("</g>");
         paths
     }
 

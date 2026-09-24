@@ -39,6 +39,7 @@ const BORDER: i64 = 4;
 
 const OPAQUE: u8 = 255;
 const FILL_ALPHA: u16 = 77;
+const ARROW_OPACITY: f64 = 0.5;
 
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
     palette(colour.unwrap_or(FOREGROUND)).unwrap()
