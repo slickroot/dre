@@ -20,6 +20,11 @@ pub(crate) trait Reducer {
     fn reduce<'a>(&self, state: State, key: Option<&'a str>) -> State;
 }
 
+#[cfg_attr(test, mockall::automock)]
+pub(crate) trait Controller {
+    fn run(&mut self, state: State) -> io::Result<State>;
+}
+
 pub(crate) struct DreController {
     keys: Box<dyn KeySource>,
     screen: Box<dyn Screen>,
@@ -38,8 +43,10 @@ impl DreController {
             reducer,
         }
     }
+}
 
-    pub(crate) fn run(&mut self, state: State) -> io::Result<State> {
+impl Controller for DreController {
+    fn run(&mut self, state: State) -> io::Result<State> {
         let mut state = state;
         while state.running {
             self.screen.render(&state)?;

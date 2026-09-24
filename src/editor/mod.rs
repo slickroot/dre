@@ -9,17 +9,17 @@ use std::process::ExitCode;
 use crate::kitty;
 use crate::render::{GlyphCache, TerminalRenderer, CACHE_LIMIT};
 use crate::terminal::RawScreen;
-use controller::DreController;
+use controller::{Controller, DreController};
 use store::{FileStateStore, StateStore};
 use terminal::{DiskFiles, StateReducer, TerminalKeys, TerminalScreen};
 
 pub(crate) struct Editor {
     store: Box<dyn StateStore>,
-    controller: DreController,
+    controller: Box<dyn Controller>,
 }
 
 impl Editor {
-    pub(crate) fn new(store: Box<dyn StateStore>, controller: DreController) -> Self {
+    pub(crate) fn new(store: Box<dyn StateStore>, controller: Box<dyn Controller>) -> Self {
         Self { store, controller }
     }
 
@@ -49,14 +49,14 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
         }),
         Box::new(StateReducer),
     );
-    let mut editor = Editor::new(Box::new(store), controller);
+    let mut editor = Editor::new(Box::new(store), Box::new(controller));
     editor.run(file.as_deref())?;
     Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::controller::{MockKeySource, MockReducer, MockScreen};
+    use super::controller::MockController;
     use super::store::MockStateStore;
     use super::*;
     use crate::state::State;
@@ -68,13 +68,8 @@ mod tests {
         state
     }
 
-    fn stopped(mut state: State) -> State {
-        state.running = false;
-        state
-    }
-
     #[test]
-    fn running_loads_then_runs_the_controller_then_saves_the_final_state() {
+    fn running_loads_then_runs_the_controller_then_saves_the_state_it_returns() {
         let mut seq = Sequence::new();
         let mut store = MockStateStore::new();
         store
@@ -83,58 +78,58 @@ mod tests {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(marked(1)));
-        let mut screen = MockScreen::new();
-        screen
-            .expect_render()
+        let mut controller = MockController::new();
+        controller
+            .expect_run()
             .withf(|state| state.pending_count == Some(1))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
-        let mut keys = MockKeySource::new();
-        keys.expect_next_key()
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|| Ok(Some("q".to_string())));
-        let mut reducer = MockReducer::new();
-        reducer
-            .expect_reduce()
-            .withf(|state, key| state.pending_count == Some(1) && *key == Some("q"))
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_, _| stopped(marked(2)));
+            .returning(|_| Ok(marked(2)));
         store
             .expect_save()
-            .withf(|state| !state.running && state.pending_count == Some(2))
+            .withf(|state| state.pending_count == Some(2))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
-        let controller = DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer));
 
-        Editor::new(Box::new(store), controller)
+        Editor::new(Box::new(store), Box::new(controller))
             .run(Some("a.dre"))
             .unwrap();
     }
 
     #[test]
-    fn a_failed_load_neither_renders_nor_saves() {
+    fn a_failed_load_neither_runs_the_controller_nor_saves() {
         let mut store = MockStateStore::new();
         store
             .expect_load()
             .times(1)
             .returning(|_| Err(io::Error::new(io::ErrorKind::InvalidData, "bad file")));
         store.expect_save().never();
-        let mut screen = MockScreen::new();
-        screen.expect_render().never();
-        let mut keys = MockKeySource::new();
-        keys.expect_next_key().never();
-        let mut reducer = MockReducer::new();
-        reducer.expect_reduce().never();
-        let controller = DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer));
+        let mut controller = MockController::new();
+        controller.expect_run().never();
 
-        let error = Editor::new(Box::new(store), controller)
+        let error = Editor::new(Box::new(store), Box::new(controller))
             .run(Some("a.dre"))
             .unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_failed_controller_run_propagates_and_nothing_is_saved() {
+        let mut store = MockStateStore::new();
+        store.expect_load().times(1).returning(|_| Ok(marked(1)));
+        store.expect_save().never();
+        let mut controller = MockController::new();
+        controller
+            .expect_run()
+            .times(1)
+            .returning(|_| Err(io::Error::other("controller failed")));
+
+        let error = Editor::new(Box::new(store), Box::new(controller))
+            .run(Some("a.dre"))
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "controller failed");
     }
 }
