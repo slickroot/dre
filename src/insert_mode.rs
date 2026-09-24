@@ -45,7 +45,8 @@ pub(crate) fn reduce(mut state: State, command: InsertAction) -> State {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children, Path};
-    use crate::state::{handle_key, new_state};
+    use crate::state::new_state;
+    use crate::test_support::handle_key;
 
     #[test]
     fn enter_finishes_the_box_and_adds_an_empty_child_ready_for_typing() {

@@ -298,7 +298,8 @@ mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children, Node};
     use crate::palette::palette;
-    use crate::state::{handle_key, new_state};
+    use crate::state::new_state;
+    use crate::test_support::handle_key;
 
     const COMMANDS: [CommandAction; 17] = [
         CommandAction::Undo,

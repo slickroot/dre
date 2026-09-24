@@ -25,6 +25,8 @@ mod save_prompt_mode;
 mod state;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
+#[cfg(test)]
+mod test_support;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;
@@ -47,7 +49,10 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = state::handle_key(std::mem::take(&mut self.state), key);
+        self.state = match input::parse(&self.state, key) {
+            Some(action) => reduce::reduce(std::mem::take(&mut self.state), action),
+            None => std::mem::take(&mut self.state),
+        };
     }
 
     #[doc(hidden)]

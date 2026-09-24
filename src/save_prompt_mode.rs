@@ -33,7 +33,8 @@ pub(crate) fn reduce(mut state: State, command: SavePromptAction) -> State {
 mod tests {
     use super::*;
     use crate::diagram::{Node, Path};
-    use crate::state::{handle_key, new_state, Mode, DEFAULT_FILENAME};
+    use crate::state::{new_state, Mode, DEFAULT_FILENAME};
+    use crate::test_support::handle_key;
 
     fn node(label: &str) -> Node {
         Node {

@@ -227,18 +227,6 @@ pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state
 }
 
-pub(crate) fn handle_key(mut state: State, key: &str) -> State {
-    match crate::input::parse(&state, key) {
-        Some(action) => crate::reduce::reduce(state, action),
-        None => {
-            if let Some(selected) = state.last_selected.take() {
-                state.doc.selected = Some(selected);
-            }
-            state
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
     State {
@@ -263,6 +251,7 @@ mod tests {
     use crate::action::{Action, CommandAction};
     use crate::diagram::{node, node_with_children};
     use crate::reduce::reduce;
+    use crate::test_support::handle_key;
 
     #[test]
     fn a_default_state_is_not_dirty() {
