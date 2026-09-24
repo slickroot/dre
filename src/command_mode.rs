@@ -145,6 +145,8 @@ pub(crate) fn is_undoable(command: Command) -> bool {
             | Command::CycleSiblingsColour
             | Command::ToggleSiblingsFill
             | Command::RenameLabel
+            | Command::EditLabel
+            | Command::NewSibling
     )
 }
 
@@ -168,10 +170,14 @@ fn new_sibling(mut state: State, path: Path) -> State {
         children_at(&mut state.doc.boxes, &path.ancestors),
         blank_box(),
     );
-    state.doc.selected = Some(Path {
+    let sibling = Path {
         ancestors: path.ancestors,
         index,
-    });
+    };
+    at(&mut state.doc.boxes, &sibling).label.clear();
+    state.doc.selected = Some(sibling.clone());
+    let mut state = snapshot(state);
+    at(&mut state.doc.boxes, &sibling).label = PAD.to_string();
     state.mode = Mode::Insert;
     state
 }
@@ -225,8 +231,13 @@ fn edit_label(mut state: State, path: Path) -> State {
     enter_insert(state, path, &label)
 }
 
-fn rename_label(state: State, path: Path) -> State {
-    enter_insert(state, path, "")
+fn rename_label(mut state: State, path: Path) -> State {
+    at(&mut state.doc.boxes, &path).label.clear();
+    state.doc.selected = Some(path.clone());
+    let mut state = snapshot(state);
+    at(&mut state.doc.boxes, &path).label = PAD.to_string();
+    state.mode = Mode::Insert;
+    state
 }
 
 fn cycle_colour(mut state: State, path: Path) -> State {
@@ -1762,6 +1773,105 @@ mod tests {
         let after = handle_key(before.clone(), "c");
         let undone = handle_key(after, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
+    }
+
+    fn coloured_box_a_selected() -> State {
+        let state = new_state(
+            vec![node("a")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        );
+        handle_key(state, "c")
+    }
+
+    fn press(state: State, keys: &[&str]) -> State {
+        keys.iter().fold(state, |state, key| handle_key(state, key))
+    }
+
+    fn cache_box_selected() -> State {
+        new_state(
+            vec![node("Cache")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        )
+    }
+
+    #[test]
+    fn s_makes_the_sibling_and_its_text_separate_undo_steps() {
+        let state = press(
+            cache_box_selected(),
+            &["s", "Q", "u", "e", "u", "e", "\x1b"],
+        );
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("Queue")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn s_then_esc_immediately_leaves_only_the_sibling_as_a_step() {
+        let state = press(cache_box_selected(), &["s", "\x1b"]);
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn capital_i_makes_the_clearing_and_the_new_text_separate_undo_steps() {
+        let state = press(
+            cache_box_selected(),
+            &["I", "R", "e", "d", "i", "s", "\x1b"],
+        );
+        assert_eq!(state.doc.boxes, vec![node("Redis")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn capital_i_then_esc_immediately_leaves_only_the_clearing_as_a_step() {
+        let state = press(cache_box_selected(), &["I", "\x1b"]);
+        assert_eq!(state.doc.boxes, vec![node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn an_i_edit_session_is_undone_by_one_u() {
+        let coloured = coloured_box_a_selected();
+        let edited = press(coloured.clone(), &["i", "x", "y", "\x7f", "z", "\x1b"]);
+        assert_eq!(edited.doc.boxes[0].label, "axz");
+        let undone = handle_key(edited, "u");
+        assert_eq!(undone.doc.boxes, coloured.doc.boxes);
+    }
+
+    #[test]
+    fn i_then_esc_immediately_is_not_an_undo_step() {
+        let coloured = coloured_box_a_selected();
+        let undone = press(coloured.clone(), &["i", "\x1b", "u"]);
+        assert_eq!(undone.doc.boxes[0].colour, None);
+        assert_eq!(undone.doc.boxes[0].label, coloured.doc.boxes[0].label);
+    }
+
+    #[test]
+    fn i_typing_then_backspacing_back_to_the_original_is_not_an_undo_step() {
+        let coloured = coloured_box_a_selected();
+        let undone = press(
+            coloured.clone(),
+            &["i", "x", "y", "\x7f", "\x7f", "\x1b", "u"],
+        );
+        assert_eq!(undone.doc.boxes[0].colour, None);
+        assert_eq!(undone.doc.boxes[0].label, coloured.doc.boxes[0].label);
     }
 
     #[test]
