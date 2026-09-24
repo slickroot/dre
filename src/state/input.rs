@@ -1,4 +1,4 @@
-use crate::action::Action;
+use crate::state::action::Action;
 use crate::state::{KeyBinding, Mode, State};
 
 pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {

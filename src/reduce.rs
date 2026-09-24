@@ -1,7 +1,7 @@
-use crate::action::{Action, ActionMode};
-use crate::command_mode;
-use crate::insert_mode;
-use crate::save_prompt_mode;
+use crate::state::action::{Action, ActionMode};
+use crate::state::command;
+use crate::state::insert;
+use crate::state::save_prompt;
 use crate::state::State;
 
 pub(crate) fn reduce(mut state: State, action: Action) -> State {
@@ -9,8 +9,8 @@ pub(crate) fn reduce(mut state: State, action: Action) -> State {
         state.doc.selected = Some(selected);
     }
     match action.mode() {
-        ActionMode::Insert => insert_mode::reduce(state, action),
-        ActionMode::SavePrompt => save_prompt_mode::reduce(state, action),
-        ActionMode::Command => command_mode::reduce(state, action),
+        ActionMode::Insert => insert::reduce(state, action),
+        ActionMode::SavePrompt => save_prompt::reduce(state, action),
+        ActionMode::Command => command::reduce(state, action),
     }
 }

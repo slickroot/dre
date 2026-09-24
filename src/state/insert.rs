@@ -1,5 +1,5 @@
-use crate::action::Action;
 use crate::diagram::at;
+use crate::state::action::Action;
 use crate::state::{add_child_box, drop_snapshot_if_unchanged, snapshot, Mode, State, PAD};
 
 fn drop_last_chars(s: &str, n: usize) -> String {

@@ -1,9 +1,7 @@
-mod action;
 #[cfg(not(target_arch = "wasm32"))]
 mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
-mod command_mode;
 mod diagram;
 #[cfg(not(target_arch = "wasm32"))]
 mod dre_format;
@@ -13,15 +11,12 @@ mod editor;
 mod file_document;
 #[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
-mod input;
-mod insert_mode;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
 mod palette;
 mod reduce;
 mod render;
-mod save_prompt_mode;
 mod state;
 mod status_line;
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,7 +45,7 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = match input::parse(&self.state, key) {
+        self.state = match state::input::parse(&self.state, key) {
             Some(action) => reduce::reduce(std::mem::take(&mut self.state), action),
             None => std::mem::take(&mut self.state),
         };
@@ -58,7 +53,7 @@ impl Session {
 
     #[doc(hidden)]
     pub fn go_idle(&mut self) {
-        self.state = reduce::reduce(std::mem::take(&mut self.state), action::Action::Idle);
+        self.state = reduce::reduce(std::mem::take(&mut self.state), state::action::Action::Idle);
     }
 
     pub fn is_running(&self) -> bool {

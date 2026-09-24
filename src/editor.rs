@@ -2,10 +2,10 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
-use crate::action::Action;
-use crate::input::parse;
 use crate::reduce::reduce;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
+use crate::state::action::Action;
+use crate::state::input::parse;
 use crate::state::State;
 use crate::terminal::{RawScreen, Terminal};
 use crate::{dre_format, file_document, filesystem, kitty, terminal, IDLE_TIMEOUT_MS};

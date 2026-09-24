@@ -1,3 +1,9 @@
+pub(crate) mod action;
+pub(crate) mod command;
+pub(crate) mod input;
+pub(crate) mod insert;
+pub(crate) mod save_prompt;
+
 use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::palette::palette;
 use crate::status_line::{ModeLabel, StatusInput};
@@ -200,9 +206,9 @@ pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::Action;
     use crate::diagram::{node, node_with_children};
     use crate::reduce::reduce;
+    use crate::state::action::Action;
     use crate::test_support::handle_key;
 
     #[test]

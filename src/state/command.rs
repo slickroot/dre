@@ -1,5 +1,5 @@
-use crate::action::Action;
 use crate::diagram::{append, at, children_at, remove, Path};
+use crate::state::action::Action;
 use crate::state::{
     add_child_box, blank_box, colour_row, drop_snapshot_if_unchanged, next_colour, snapshot, undo,
     Mode, State, DEFAULT_FILENAME, PAD,
