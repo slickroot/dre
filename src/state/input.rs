@@ -1,6 +1,8 @@
 use crate::state::action::Action;
 use crate::state::{KeyBinding, Mode, State};
 
+pub(crate) const INTERRUPT: &str = "\x03";
+
 pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
     match &state.mode {
         Mode::Command => command_parse(key),

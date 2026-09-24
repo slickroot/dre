@@ -3,32 +3,30 @@ mod command;
 mod history;
 mod input;
 mod insert;
+mod mode;
 mod save_prompt;
 
 use crate::diagram::{append, at, children_at, Document, Node, Path};
 use crate::palette::palette;
 use crate::state::action::ActionMode;
+#[cfg(not(test))]
+use crate::state::input::INTERRUPT;
+#[cfg(test)]
+pub(crate) use crate::state::input::INTERRUPT;
+#[cfg(test)]
+pub(crate) use crate::state::mode::Mode;
+#[cfg(not(test))]
+use crate::state::mode::Mode;
 use crate::status_line::{ModeLabel, StatusInput};
 
-pub(crate) const PAD: &str = " ";
-pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
-pub(crate) const INTERRUPT: &str = "\x03";
+const PAD: &str = " ";
+const DEFAULT_FILENAME: &str = "diagram.dre";
 
 #[allow(dead_code)]
-pub(crate) struct KeyBinding<C> {
+struct KeyBinding<C> {
     pub(crate) keys: &'static [&'static str],
     pub(crate) command: C,
     pub(crate) description: &'static str,
-}
-
-#[derive(Clone, PartialEq, Eq, Default, Debug)]
-pub(crate) enum Mode {
-    #[default]
-    Command,
-    Insert,
-    SavePrompt {
-        filename: String,
-    },
 }
 
 #[derive(Clone)]
@@ -140,7 +138,7 @@ pub fn reduce(state: State, key: Option<&str>) -> State {
     }
 }
 
-pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
+fn next_colour(colour: Option<u8>) -> Option<u8> {
     match colour {
         None => Some(0),
         Some(i) if palette(i + 1).is_some() => Some(i + 1),
@@ -148,7 +146,7 @@ pub(crate) fn next_colour(colour: Option<u8>) -> Option<u8> {
     }
 }
 
-pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
+fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     let siblings = children_at(boxes, &path.ancestors);
     let first_colour = siblings[0].colour;
     let uniform = siblings.iter().all(|b| b.colour == first_colour);
@@ -162,14 +160,14 @@ pub(crate) fn colour_row(boxes: &mut Vec<Node>, path: &Path) {
     }
 }
 
-pub(crate) fn blank_box() -> Node {
+fn blank_box() -> Node {
     Node {
         label: PAD.to_string(),
         ..Default::default()
     }
 }
 
-pub(crate) fn add_child_box(mut state: State, selected: Option<Path>) -> State {
+fn add_child_box(mut state: State, selected: Option<Path>) -> State {
     state.doc.selected = match selected {
         Some(mut path) => {
             let index = append(&mut at(&mut state.doc.boxes, &path).children, blank_box());
