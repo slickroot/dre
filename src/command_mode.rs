@@ -138,6 +138,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
             | Command::ToggleSiblingsFill
             | Command::RenameLabel
             | Command::EditLabel
+            | Command::NewSibling
     )
 }
 
@@ -161,10 +162,14 @@ fn new_sibling(mut state: State, path: Path) -> State {
         children_at(&mut state.doc.boxes, &path.ancestors),
         blank_box(),
     );
-    state.doc.selected = Some(Path {
+    let sibling = Path {
         ancestors: path.ancestors,
         index,
-    });
+    };
+    at(&mut state.doc.boxes, &sibling).label.clear();
+    state.doc.selected = Some(sibling.clone());
+    let mut state = snapshot(state);
+    at(&mut state.doc.boxes, &sibling).label = PAD.to_string();
     state.mode = Mode::Insert;
     state
 }
@@ -1763,6 +1768,40 @@ mod tests {
 
     fn press(state: State, keys: &[&str]) -> State {
         keys.iter().fold(state, |state, key| handle_key(state, key))
+    }
+
+    fn cache_box_selected() -> State {
+        new_state(
+            vec![node("Cache")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        )
+    }
+
+    #[test]
+    fn s_makes_the_sibling_and_its_text_separate_undo_steps() {
+        let state = press(
+            cache_box_selected(),
+            &["s", "Q", "u", "e", "u", "e", "\x1b"],
+        );
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("Queue")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn s_then_esc_immediately_leaves_only_the_sibling_as_a_step() {
+        let state = press(cache_box_selected(), &["s", "\x1b"]);
+        assert_eq!(state.doc.boxes, vec![node("Cache"), node("")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
     }
 
     #[test]
