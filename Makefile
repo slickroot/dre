@@ -4,13 +4,13 @@ build:
 	nix develop --command cargo build
 
 test:
-	nix develop --command cargo test
+	nix develop --command cargo test -p dre -p types
 
 fmt:
 	nix develop --command cargo fmt
 
 clippy:
-	nix develop --command cargo clippy
+	nix develop --command cargo clippy -p dre -p types
 
 install:
 	nix develop --command cargo install --path . --debug --force --root $(HOME)/.local
