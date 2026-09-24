@@ -36,6 +36,31 @@ impl<T> Tree<T> {
         }
     }
 
+    pub fn next(&self, path: &[usize]) -> Vec<usize> {
+        let (last, count) = self.position(path);
+        if last + 1 < count {
+            [&path[..path.len() - 1], &[last + 1]].concat()
+        } else {
+            path.to_vec()
+        }
+    }
+
+    pub fn previous(&self, path: &[usize]) -> Vec<usize> {
+        let (last, _) = self.position(path);
+        if last > 0 {
+            [&path[..path.len() - 1], &[last - 1]].concat()
+        } else {
+            path.to_vec()
+        }
+    }
+
+    fn position(&self, path: &[usize]) -> (usize, usize) {
+        let (&last, ancestors) = path.split_last().expect("the root has no siblings");
+        let count = self.get(ancestors).children.len();
+        assert!(last < count, "no box at the path");
+        (last, count)
+    }
+
     fn get(&self, path: &[usize]) -> &Tree<T> {
         path.iter().fold(self, |tree, &index| &tree.children[index])
     }
@@ -131,5 +156,65 @@ mod tests {
     #[should_panic]
     fn child_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().child(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn next_of_a_box_with_a_next_sibling_is_that_sibling() {
+        assert_eq!(sample().next(&[0]), vec![1]);
+        assert_eq!(sample().next(&[0, 0]), vec![0, 1]);
+    }
+
+    #[test]
+    fn next_of_the_last_sibling_is_the_same_path() {
+        assert_eq!(sample().next(&[1]), vec![1]);
+        assert_eq!(sample().next(&[0, 1]), vec![0, 1]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn next_panics_on_the_root_path() {
+        sample().next(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn next_panics_on_an_index_past_the_last_sibling() {
+        sample().next(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn next_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().next(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn previous_of_a_box_with_a_previous_sibling_is_that_sibling() {
+        assert_eq!(sample().previous(&[1]), vec![0]);
+        assert_eq!(sample().previous(&[0, 1]), vec![0, 0]);
+    }
+
+    #[test]
+    fn previous_of_the_first_sibling_is_the_same_path() {
+        assert_eq!(sample().previous(&[0]), vec![0]);
+        assert_eq!(sample().previous(&[0, 0]), vec![0, 0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn previous_panics_on_the_root_path() {
+        sample().previous(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn previous_panics_on_an_index_past_the_last_sibling() {
+        sample().previous(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn previous_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().previous(&[0, 2, 0]);
     }
 }
