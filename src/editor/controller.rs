@@ -35,7 +35,7 @@ impl DreController {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::diagram::{self, Path};
     use crate::state::INTERRUPT;
@@ -43,8 +43,8 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    struct ScriptedKeys {
-        script: std::vec::IntoIter<Option<String>>,
+    pub(in crate::editor) struct ScriptedKeys {
+        pub(in crate::editor) script: std::vec::IntoIter<Option<String>>,
     }
 
     impl KeySource for ScriptedKeys {
@@ -56,14 +56,14 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Screenings {
-        frames: Vec<State>,
-        resizes: usize,
-        fail_resize: bool,
+    pub(in crate::editor) struct Screenings {
+        pub(in crate::editor) frames: Vec<State>,
+        pub(in crate::editor) resizes: usize,
+        pub(in crate::editor) fail_resize: bool,
     }
 
-    struct RecordingScreen {
-        seen: Rc<RefCell<Screenings>>,
+    pub(in crate::editor) struct RecordingScreen {
+        pub(in crate::editor) seen: Rc<RefCell<Screenings>>,
     }
 
     impl Screen for RecordingScreen {
