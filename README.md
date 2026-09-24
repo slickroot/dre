@@ -93,6 +93,7 @@ rounded corners, and arrows, but no cursor or selection.
 | `b` | Add a child box |
 | `s` | Add a sibling box |
 | `d` | Delete the selected box and its descendants |
+| `p` | Paste the cut box and its descendants as the last child of the selected box |
 | `h` | Select the parent box |
 | `l` | Select the first child box |
 | `j` | Select the next sibling |
