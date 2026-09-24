@@ -2225,11 +2225,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_arrow_is_thinner_than_a_box_border_and_thicker_than_one_pixel() {
+    const _: () = {
         assert!(ARROW_STROKE < BORDER);
         assert!(ARROW_STROKE > 1);
-    }
+    };
 
     fn status_line_output(r: &mut TerminalRenderer, state: &State) -> String {
         let mut out = Vec::new();
