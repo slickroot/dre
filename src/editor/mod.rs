@@ -1,16 +1,17 @@
+mod controller;
 mod store;
 mod terminal;
 
-use std::io::{self, Write};
+use std::io;
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
-use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
-use crate::state::{reduce, State};
-use crate::terminal::{RawScreen, Terminal};
-use crate::{kitty, IDLE_TIMEOUT_MS};
+use crate::kitty;
+use crate::render::{GlyphCache, TerminalRenderer, CACHE_LIMIT};
+use crate::terminal::RawScreen;
+use controller::DreController;
 use store::{FileStateStore, StateStore};
-use terminal::DiskFiles;
+use terminal::{DiskFiles, TerminalKeys, TerminalScreen};
 
 pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     let store = FileStateStore::new(Box::new(DiskFiles));
@@ -20,174 +21,20 @@ pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
     kitty::require(&mut stdout, stdin.as_raw_fd())?;
     let terminal = crate::terminal::probe()?;
     let glyph_source = Box::new(GlyphCache::new(terminal.cell_width, terminal.cell_height));
-    let mut renderer = TerminalRenderer::new(terminal, glyph_source, CACHE_LIMIT);
+    let renderer = TerminalRenderer::new(terminal, glyph_source, CACHE_LIMIT);
     let _screen = RawScreen::open(stdin.as_raw_fd())?;
 
     let fd = stdin.as_raw_fd();
     let resize_fd = crate::terminal::install_resize_pipe()?;
-    let state = edit(
-        state,
-        || crate::terminal::poll_read(fd, resize_fd, IDLE_TIMEOUT_MS),
-        crate::terminal::probe,
-        &mut stdout,
-        &mut renderer,
-    )?;
+    let mut controller = DreController::new(
+        Box::new(TerminalKeys { fd, resize_fd }),
+        Box::new(TerminalScreen {
+            renderer,
+            out: stdout,
+        }),
+    );
+    let state = controller.run(state)?;
 
     store.save(&state)?;
     Ok(ExitCode::SUCCESS)
-}
-
-fn edit(
-    state: State,
-    mut next_key: impl FnMut() -> io::Result<Option<String>>,
-    mut probe: impl FnMut() -> io::Result<Terminal>,
-    output: &mut impl Write,
-    renderer: &mut TerminalRenderer,
-) -> io::Result<State> {
-    let mut state = state;
-    while state.running {
-        renderer.render(&state, output)?;
-        output.flush()?;
-
-        match next_key()? {
-            Some(key) if key == crate::terminal::RESIZE => renderer.on_resize(probe()?),
-            key => state = reduce(state, key.as_deref()),
-        }
-    }
-    Ok(state)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::diagram::{self, Path};
-    use crate::render::FakeGlyphSource;
-    use crate::state::INTERRUPT;
-    use crate::terminal::Terminal;
-
-    fn renderer() -> TerminalRenderer {
-        let terminal = Terminal {
-            cols: 20,
-            rows: 10,
-            cell_width: 1,
-            cell_height: 1,
-        };
-        let source = Box::new(FakeGlyphSource::new(
-            terminal.cell_width,
-            terminal.cell_height,
-        ));
-        TerminalRenderer::new(terminal, source, CACHE_LIMIT)
-    }
-
-    fn state_saving_to(path: &str) -> State {
-        State::open(Default::default(), Some(path.to_string()))
-    }
-
-    fn run_script_with_probe(
-        state: State,
-        script: Vec<Option<&str>>,
-        probe: impl FnMut() -> io::Result<Terminal>,
-    ) -> (io::Result<State>, Vec<u8>) {
-        let mut script = script.into_iter();
-        let next_key = || match script.next() {
-            Some(key) => Ok(key.map(str::to_string)),
-            None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "script ended")),
-        };
-        let mut output = Vec::new();
-        let result = edit(state, next_key, probe, &mut output, &mut renderer());
-        (result, output)
-    }
-
-    fn run_script(state: State, script: Vec<Option<&str>>) -> (io::Result<State>, Vec<u8>) {
-        run_script_with_probe(state, script, || {
-            panic!(
-                "unexpected terminal probe: only a RESIZE key makes edit() re-probe the terminal, \
-                 and this test's script has none. Use run_script_with_probe to supply a probe stub \
-                 for tests that send RESIZE."
-            )
-        })
-    }
-
-    fn run(state: State, key: &str) -> (io::Result<State>, Vec<u8>) {
-        run_script(state, vec![Some(key)])
-    }
-
-    #[test]
-    fn an_interrupt_clears_where_to_save() {
-        let (result, _) = run(state_saving_to("a.dre"), INTERRUPT);
-        assert_eq!(result.unwrap().save_to, None);
-    }
-
-    #[test]
-    fn a_resize_key_propagates_a_failed_probe() {
-        let (result, _) = run_script_with_probe(
-            state_saving_to("a.dre"),
-            vec![Some(crate::terminal::RESIZE), Some("q")],
-            || Err(io::Error::other("probe failed")),
-        );
-        let error = result.err().unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(error.to_string(), "probe failed");
-    }
-
-    #[test]
-    fn a_resize_key_re_probes_the_terminal_once() {
-        let mut probe_calls = 0;
-        let (result, _) = run_script_with_probe(
-            state_saving_to("a.dre"),
-            vec![Some(crate::terminal::RESIZE), Some("q")],
-            || {
-                probe_calls += 1;
-                Ok(Terminal {
-                    cols: 30,
-                    rows: 12,
-                    cell_width: 1,
-                    cell_height: 1,
-                })
-            },
-        );
-        assert!(!result.unwrap().running);
-        assert_eq!(probe_calls, 1);
-    }
-
-    #[test]
-    fn a_quit_stops_the_loop_and_keeps_where_to_save() {
-        let (result, _) = run(state_saving_to("a.dre"), "q");
-        let state = result.unwrap();
-        assert!(!state.running);
-        assert_eq!(state.save_to, Some("a.dre".to_string()));
-    }
-
-    #[test]
-    fn a_frame_is_painted_before_the_first_key_is_read() {
-        let (_, output) = run(state_saving_to("a.dre"), INTERRUPT);
-        assert!(!output.is_empty());
-    }
-
-    #[test]
-    fn an_idle_second_hides_the_cursor_and_the_next_key_restores_it() {
-        let selected = Path {
-            ancestors: vec![],
-            index: 0,
-        };
-        let state = State::open(
-            diagram::Document {
-                boxes: vec![diagram::node("a"), diagram::node("b")],
-                selected: None,
-            },
-            Some("a.dre".to_string()),
-        );
-        let (result, output) = run_script(state, vec![None, Some("q")]);
-        let state = result.unwrap();
-        assert_eq!(state.doc.selected, Some(selected));
-        assert!(!state.running);
-        let output = String::from_utf8(output).unwrap();
-        let frames: Vec<&str> = output.split("\x1b[H").skip(1).collect();
-        let sprite_count = |frame: &str| frame.matches("a=T,f=32").count();
-        assert_eq!(
-            sprite_count(frames[0]),
-            sprite_count(frames[1]) + 1,
-            "the cursor sprite is visible before the idle second, and hidden after it"
-        );
-    }
 }
