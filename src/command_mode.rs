@@ -1,4 +1,4 @@
-use crate::diagram::{append, at, children_at, Path};
+use crate::diagram::{append, at, children_at, remove, Path};
 use crate::state::{
     add_child_box, blank_box, colour_row, next_colour, snapshot, undo, KeyBinding, Mode, State,
     DEFAULT_FILENAME, PAD,
@@ -9,6 +9,7 @@ pub(crate) enum Command {
     Undo,
     NewBox,
     NewSibling,
+    Delete,
     SelectParent,
     SelectChild,
     SelectNext,
@@ -32,6 +33,7 @@ pub(crate) fn parse(key: &str) -> Option<Command> {
         "u" => Command::Undo,
         "b" => Command::NewBox,
         "s" => Command::NewSibling,
+        "d" => Command::Delete,
         "h" => Command::SelectParent,
         "l" => Command::SelectChild,
         "j" => Command::SelectNext,
@@ -64,6 +66,11 @@ pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Command>] = &[
         keys: &["s"],
         command: Command::NewSibling,
         description: "Add a sibling box",
+    },
+    KeyBinding {
+        keys: &["d"],
+        command: Command::Delete,
+        description: "Delete the selected box and its descendants",
     },
     KeyBinding {
         keys: &["h"],
@@ -131,6 +138,7 @@ pub(crate) fn is_undoable(command: Command) -> bool {
     matches!(
         command,
         Command::NewBox
+            | Command::Delete
             | Command::CycleColour
             | Command::ToggleFill
             | Command::ToggleRounded
@@ -261,6 +269,11 @@ fn toggle_fill(mut state: State, path: Path) -> State {
     state
 }
 
+fn delete_box(mut state: State, path: Path) -> State {
+    state.doc.selected = remove(&mut state.doc.boxes, &path);
+    state
+}
+
 fn toggle_rounded(mut state: State, path: Path) -> State {
     let node = at(&mut state.doc.boxes, &path);
     node.rounded = !node.rounded;
@@ -321,6 +334,7 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         (Command::CycleSiblingsColour, Some(path)) => cycle_siblings_colour(state, path),
         (Command::ToggleSiblingsFill, Some(path)) => toggle_siblings_fill(state, path),
         (Command::ToggleFill, Some(path)) => toggle_fill(state, path),
+        (Command::Delete, Some(path)) => delete_box(state, path),
         (Command::ToggleRounded, Some(path)) => toggle_rounded(state, path),
         (_, None) => state,
     }
@@ -346,10 +360,11 @@ mod tests {
     use crate::diagram::{node, node_with_children, palette, Node};
     use crate::state::{handle_key, new_state};
 
-    const COMMANDS: [Command; 15] = [
+    const COMMANDS: [Command; 16] = [
         Command::Undo,
         Command::NewBox,
         Command::NewSibling,
+        Command::Delete,
         Command::SelectParent,
         Command::SelectChild,
         Command::SelectNext,
@@ -396,6 +411,7 @@ mod tests {
         assert_eq!(parse("u"), Some(Command::Undo));
         assert_eq!(parse("b"), Some(Command::NewBox));
         assert_eq!(parse("s"), Some(Command::NewSibling));
+        assert_eq!(parse("d"), Some(Command::Delete));
         assert_eq!(parse("h"), Some(Command::SelectParent));
         assert_eq!(parse("l"), Some(Command::SelectChild));
         assert_eq!(parse("j"), Some(Command::SelectNext));
@@ -1964,5 +1980,73 @@ mod tests {
         let after_escape = handle_key(after, "\x1b");
         let undone = handle_key(after_escape, "u");
         assert_eq!(undone.doc.boxes, before.doc.boxes);
+    }
+
+    #[test]
+    fn d_deletes_the_selected_box_and_u_brings_it_back_with_its_children_and_selection() {
+        let boxes = vec![node_with_children(
+            "Shop",
+            vec![
+                node_with_children("Payments", vec![node("Card"), node("Invoice")]),
+                node("Orders"),
+            ],
+        )];
+        let before = new_state(
+            boxes,
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![0],
+                index: 0,
+            }),
+        );
+        let deleted = handle_key(before.clone(), "d");
+        assert_eq!(
+            deleted.doc.boxes,
+            vec![node_with_children("Shop", vec![node("Orders")])]
+        );
+        assert_eq!(
+            deleted.doc.selected,
+            Some(Path {
+                ancestors: vec![0],
+                index: 0,
+            })
+        );
+        assert_eq!(deleted.mode, Mode::Command);
+        let undone = handle_key(deleted, "u");
+        assert_eq!(undone.doc.boxes, before.doc.boxes);
+        assert_eq!(undone.doc.selected, before.doc.selected);
+    }
+
+    #[test]
+    fn d_with_nothing_selected_changes_nothing_and_pushes_no_history() {
+        let start = new_state(vec![node("a")], Mode::Command, None);
+        let mut coloured = start.clone();
+        coloured.doc.selected = Some(Path {
+            ancestors: vec![],
+            index: 0,
+        });
+        let coloured = handle_key(coloured, "c");
+        let mut deselected = coloured.clone();
+        deselected.doc.selected = None;
+        let after_d = handle_key(deselected.clone(), "d");
+        assert_eq!(after_d.doc, deselected.doc);
+        let undone = handle_key(after_d, "u");
+        assert_eq!(undone.doc.boxes, start.doc.boxes);
+    }
+
+    #[test]
+    fn a_count_before_d_still_deletes_only_one_box() {
+        let boxes = vec![node("a"), node("b"), node("c"), node("d")];
+        let state = new_state(
+            boxes,
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 1,
+            }),
+        );
+        let result = handle_key(handle_key(state, "3"), "d");
+        assert_eq!(result.doc.boxes, vec![node("a"), node("c"), node("d")]);
+        assert_eq!(result.pending_count, None);
     }
 }
