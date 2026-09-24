@@ -75,6 +75,50 @@ impl<T> Tree<T> {
         &mut self.get_mut(path).value
     }
 
+    pub fn walk(&self) -> impl Iterator<Item = (Vec<usize>, &T)> {
+        let mut visited = Vec::new();
+        self.collect_descendants(&mut Vec::new(), &mut visited);
+        visited.into_iter()
+    }
+
+    fn collect_descendants<'a>(
+        &'a self,
+        path: &mut Vec<usize>,
+        visited: &mut Vec<(Vec<usize>, &'a T)>,
+    ) {
+        for (index, child) in self.children.iter().enumerate() {
+            path.push(index);
+            visited.push((path.clone(), &child.value));
+            child.collect_descendants(path, visited);
+            path.pop();
+        }
+    }
+
+    pub fn map<U: Default>(&self, f: impl Fn(&T) -> U) -> Tree<U> {
+        Tree::root(
+            self.children
+                .iter()
+                .map(|child| child.map_box(&f))
+                .collect(),
+        )
+    }
+
+    fn map_box<U>(&self, f: &impl Fn(&T) -> U) -> Tree<U> {
+        Tree::new(
+            f(&self.value),
+            self.children.iter().map(|child| child.map_box(f)).collect(),
+        )
+    }
+
+    pub fn contains(&self, path: &[usize]) -> bool {
+        !path.is_empty() && self.try_get(path).is_some()
+    }
+
+    fn try_get(&self, path: &[usize]) -> Option<&Tree<T>> {
+        path.iter()
+            .try_fold(self, |tree, &index| tree.children.get(index))
+    }
+
     fn position(&self, path: &[usize]) -> (usize, usize) {
         let (&last, ancestors) = path.split_last().expect("the root has no siblings");
         let count = self.get(ancestors).children.len();
@@ -425,5 +469,112 @@ mod tests {
     #[should_panic]
     fn value_mut_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().value_mut(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn walk_yields_every_box_in_pre_order() {
+        let tree = sample();
+        let visited: Vec<(Vec<usize>, &str)> =
+            tree.walk().map(|(path, &value)| (path, value)).collect();
+        assert_eq!(
+            visited,
+            vec![
+                (vec![0], "a"),
+                (vec![0, 0], "a0"),
+                (vec![0, 1], "a1"),
+                (vec![1], "b"),
+            ]
+        );
+    }
+
+    #[test]
+    fn walk_never_yields_the_root_path() {
+        assert!(sample().walk().all(|(path, _)| !path.is_empty()));
+    }
+
+    #[test]
+    fn walk_yields_nothing_for_a_root_without_children() {
+        assert_eq!(Tree::<&str>::root(Vec::new()).walk().count(), 0);
+    }
+
+    #[test]
+    fn walk_reaches_a_deep_chain_with_the_full_path_for_each_box() {
+        let tree = Tree::root(vec![Tree::new(
+            "a",
+            vec![Tree::new("a0", vec![Tree::leaf("a00")])],
+        )]);
+        let paths: Vec<Vec<usize>> = tree.walk().map(|(path, _)| path).collect();
+        assert_eq!(paths, vec![vec![0], vec![0, 0], vec![0, 0, 0]]);
+    }
+
+    #[test]
+    fn map_keeps_the_shape() {
+        let tree = sample();
+        let mapped = tree.map(|value| value.len());
+        let paths: Vec<Vec<usize>> = tree.walk().map(|(path, _)| path).collect();
+        let mapped_paths: Vec<Vec<usize>> = mapped.walk().map(|(path, _)| path).collect();
+        assert_eq!(mapped_paths, paths);
+        for path in paths.iter().chain(&[vec![]]) {
+            assert_eq!(
+                mapped.get(path).children.len(),
+                tree.get(path).children.len()
+            );
+        }
+    }
+
+    #[test]
+    fn map_applies_the_function_to_every_value() {
+        let mapped = sample().map(|value| value.len());
+        let visited: Vec<(Vec<usize>, usize)> =
+            mapped.walk().map(|(path, &value)| (path, value)).collect();
+        assert_eq!(
+            visited,
+            vec![(vec![0], 1), (vec![0, 0], 2), (vec![0, 1], 2), (vec![1], 1),]
+        );
+    }
+
+    #[test]
+    fn map_makes_the_root_default_without_showing_it_to_the_function() {
+        let mapped = sample().map(|value| {
+            assert!(!value.is_empty(), "the function saw the root");
+            value.len() + 10
+        });
+        assert_eq!(mapped.get(&[]).value, 0);
+    }
+
+    #[test]
+    fn map_of_an_empty_root_is_an_empty_root() {
+        let mapped = Tree::<&str>::root(Vec::new()).map(|value| value.len());
+        assert_eq!(mapped.walk().count(), 0);
+        assert_eq!(mapped.get(&[]).value, 0);
+    }
+
+    #[test]
+    fn contains_is_true_for_existing_boxes() {
+        let tree = sample();
+        assert!(tree.contains(&[0]));
+        assert!(tree.contains(&[1]));
+        assert!(tree.contains(&[0, 1]));
+    }
+
+    #[test]
+    fn contains_is_false_for_the_root_path() {
+        assert!(!sample().contains(&[]));
+    }
+
+    #[test]
+    fn contains_is_false_for_an_index_past_the_last_sibling() {
+        assert!(!sample().contains(&[2]));
+        assert!(!sample().contains(&[0, 2]));
+    }
+
+    #[test]
+    fn contains_is_false_for_a_path_through_a_box_with_too_few_children() {
+        assert!(!sample().contains(&[0, 2, 0]));
+    }
+
+    #[test]
+    fn contains_is_false_for_a_path_below_a_leaf() {
+        assert!(!sample().contains(&[1, 0]));
     }
 }
