@@ -1,5 +1,5 @@
 use crate::command_mode;
-use crate::diagram::{append, at, children_at, palette, Document, Node, Path};
+use crate::diagram::{append, at, children_at, palette, Document, Node, Path, BACKGROUND};
 use crate::insert_mode;
 use crate::save_prompt_mode;
 
@@ -45,33 +45,65 @@ fn count_boxes(nodes: &[Node]) -> usize {
 }
 
 pub struct StatusLine {
-    pub left: String,
-    pub right: String,
+    pub left: Vec<Segment>,
+    pub right: Vec<Segment>,
+}
+
+pub struct Segment {
+    pub text: String,
+    pub style: Style,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct Style {
+    pub bold: bool,
+    pub background: Option<(u8, u8, u8, u8)>,
+    pub foreground: Option<(u8, u8, u8)>,
+}
+
+const DIM_ALPHA: u8 = 0x40;
+
+fn dim(text: impl Into<String>) -> Segment {
+    Segment {
+        text: text.into(),
+        style: Style {
+            bold: false,
+            background: Some((0, 0, 0, DIM_ALPHA)),
+            foreground: None,
+        },
+    }
 }
 
 pub fn status_line(state: &State) -> StatusLine {
-    match &state.mode {
-        Mode::SavePrompt { filename } => StatusLine {
-            left: format!("Save as: {filename}{CURSOR}"),
-            right: String::new(),
+    let mode_text = match &state.mode {
+        Mode::Command | Mode::SavePrompt { .. } => "COMMANDING",
+        Mode::Insert => "EDITING",
+    };
+    let (r, g, b) = palette(0).unwrap();
+    let mode = Segment {
+        text: format!(" {mode_text} "),
+        style: Style {
+            bold: true,
+            background: Some((r, g, b, 0xFF)),
+            foreground: palette(BACKGROUND),
         },
-        Mode::Command | Mode::Insert => {
-            let mode_text = match &state.mode {
-                Mode::Command => "COMMANDING",
-                Mode::Insert => "EDITING",
-                Mode::SavePrompt { .. } => unreachable!(),
-            };
-            let filename = state
-                .save_to
-                .clone()
-                .unwrap_or_else(|| DEFAULT_FILENAME.to_string());
+    };
+    let filename = match &state.mode {
+        Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
+        _ => {
+            let name = state.save_to.as_deref().unwrap_or(DEFAULT_FILENAME);
             let marker = if state.dirty { "[+]" } else { "" };
-            let box_count = count_boxes(&state.doc.boxes);
-            StatusLine {
-                left: format!("{mode_text} | {filename}{marker}"),
-                right: format!("{box_count} boxes . dre"),
-            }
+            format!("{name}{marker}")
         }
+    };
+    let box_count = count_boxes(&state.doc.boxes);
+    StatusLine {
+        left: vec![mode, dim(" \u{2502} "), dim(filename)],
+        right: vec![
+            dim(format!("{box_count} boxes")),
+            dim(" \u{2022} "),
+            dim("dre"),
+        ],
     }
 }
 
@@ -718,36 +750,96 @@ mod tests {
         assert_eq!(hidden.doc.selected, None);
     }
 
+    fn texts(segments: &[Segment]) -> Vec<&str> {
+        segments.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    fn save_prompt_state() -> State {
+        let mode = Mode::SavePrompt {
+            filename: "diagram.dre".to_string(),
+        };
+        new_state(vec![], mode, None)
+    }
+
+    #[test]
+    fn status_line_pads_the_mode_label_with_a_space_on_each_side() {
+        let command = new_state(vec![], Mode::Command, None);
+        let insert = new_state(vec![], Mode::Insert, None);
+        assert_eq!(status_line(&command).left[0].text, " COMMANDING ");
+        assert_eq!(status_line(&insert).left[0].text, " EDITING ");
+    }
+
+    #[test]
+    fn status_line_keeps_showing_commanding_during_the_save_prompt() {
+        let line = status_line(&save_prompt_state());
+        assert_eq!(line.left[0].text, " COMMANDING ");
+    }
+
+    #[test]
+    fn status_line_styles_the_mode_segment_bold_lime_on_the_app_background() {
+        let style = status_line(&new_state(vec![], Mode::Command, None)).left[0].style;
+        let (r, g, b) = palette(0).unwrap();
+        assert!(style.bold);
+        assert_eq!(style.background, Some((r, g, b, 0xFF)));
+        assert_eq!(style.foreground, palette(BACKGROUND));
+    }
+
+    #[test]
+    fn status_line_styles_every_other_segment_dim() {
+        let line = status_line(&save_prompt_state());
+        let dim: Vec<&Segment> = line.left[1..].iter().chain(line.right.iter()).collect();
+        assert_eq!(dim.len(), 5);
+        for segment in dim {
+            assert!(!segment.style.bold);
+            assert!(segment.style.background.is_some());
+            assert_eq!(
+                segment.style.background.map(|(r, g, b, _)| (r, g, b)),
+                Some((0, 0, 0))
+            );
+            assert_eq!(segment.style.foreground, None);
+        }
+    }
+
+    #[test]
+    fn status_line_separates_the_mode_from_the_filename_with_a_vertical_bar() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert_eq!(status_line(&state).left[1].text, " \u{2502} ");
+    }
+
     #[test]
     fn status_line_shows_default_filename_in_command_mode() {
         let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line(&state).left, "COMMANDING | diagram.dre");
+        assert_eq!(status_line(&state).left[2].text, "diagram.dre");
     }
 
     #[test]
     fn status_line_marks_dirty_state_with_a_plus_marker() {
         let mut state = new_state(vec![], Mode::Command, None);
         state.dirty = true;
-        assert_eq!(status_line(&state).left, "COMMANDING | diagram.dre[+]");
+        assert_eq!(status_line(&state).left[2].text, "diagram.dre[+]");
     }
 
     #[test]
     fn status_line_shows_the_save_to_path_as_is() {
         let mut state = new_state(vec![], Mode::Command, None);
         state.save_to = Some("/foo/bar.dre".to_string());
-        assert_eq!(status_line(&state).left, "COMMANDING | /foo/bar.dre");
+        assert_eq!(status_line(&state).left[2].text, "/foo/bar.dre");
     }
 
     #[test]
-    fn status_line_shows_editing_in_insert_mode() {
+    fn status_line_shows_the_mode_and_filename_in_insert_mode() {
         let state = new_state(vec![], Mode::Insert, None);
-        assert!(status_line(&state).left.starts_with("EDITING | "));
+        let line = status_line(&state);
+        assert_eq!(
+            texts(&line.left),
+            [" EDITING ", " \u{2502} ", "diagram.dre"]
+        );
     }
 
     #[test]
     fn status_line_shows_zero_boxes_when_empty() {
         let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line(&state).right, "0 boxes . dre");
+        assert_eq!(status_line(&state).right[0].text, "0 boxes");
     }
 
     #[test]
@@ -757,26 +849,26 @@ mod tests {
             Mode::Command,
             None,
         );
-        assert_eq!(status_line(&state).right, "3 boxes . dre");
+        assert_eq!(status_line(&state).right[0].text, "3 boxes");
     }
 
     #[test]
     fn status_line_always_pluralizes_box_count() {
         let state = new_state(vec![node("a")], Mode::Command, None);
-        assert_eq!(status_line(&state).right, "1 boxes . dre");
+        assert_eq!(status_line(&state).right[0].text, "1 boxes");
     }
 
     #[test]
-    fn status_line_shows_save_prompt_text_and_empty_right() {
-        let state = new_state(
-            vec![],
-            Mode::SavePrompt {
-                filename: "diagram.dre".to_string(),
-            },
-            None,
-        );
+    fn status_line_ends_with_a_bullet_and_dre() {
+        let state = new_state(vec![], Mode::Command, None);
         let line = status_line(&state);
-        assert_eq!(line.left, format!("Save as: diagram.dre{CURSOR}"));
-        assert_eq!(line.right, String::new());
+        assert_eq!(texts(&line.right), ["0 boxes", " \u{2022} ", "dre"]);
+    }
+
+    #[test]
+    fn status_line_shows_save_prompt_text_and_keeps_the_right_side() {
+        let line = status_line(&save_prompt_state());
+        assert_eq!(line.left[2].text, format!("Save as: diagram.dre{CURSOR}"));
+        assert_eq!(texts(&line.right), ["0 boxes", " \u{2022} ", "dre"]);
     }
 }

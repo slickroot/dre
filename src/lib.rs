@@ -27,7 +27,7 @@ use std::process::ExitCode;
 
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
-pub use state::{status_line, State, StatusLine};
+pub use state::{status_line, Segment, State, StatusLine, Style};
 
 pub const IDLE_TIMEOUT_MS: u16 = 1000;
 

@@ -8,6 +8,10 @@ struct IdleTimer {
     _closure: Closure<dyn FnMut()>,
 }
 
+fn join(segments: Vec<dre::Segment>) -> String {
+    segments.iter().map(|s| s.text.as_str()).collect()
+}
+
 #[wasm_bindgen]
 pub struct WebSession {
     session: Rc<RefCell<dre::Session>>,
@@ -92,11 +96,11 @@ impl WebSession {
     }
 
     pub fn status_line_left(&self) -> String {
-        dre::status_line(self.session.borrow().state()).left
+        join(dre::status_line(self.session.borrow().state()).left)
     }
 
     pub fn status_line_right(&self) -> String {
-        dre::status_line(self.session.borrow().state()).right
+        join(dre::status_line(self.session.borrow().state()).right)
     }
 }
 
@@ -136,7 +140,7 @@ mod tests {
     fn status_line_left_starts_in_command_mode() {
         let session = session();
 
-        assert!(session.status_line_left().starts_with("COMMANDING"));
+        assert!(session.status_line_left().starts_with(" COMMANDING "));
     }
 
     #[test]
@@ -145,14 +149,14 @@ mod tests {
 
         session.press_key("b");
 
-        assert!(session.status_line_left().starts_with("EDITING"));
+        assert!(session.status_line_left().starts_with(" EDITING "));
     }
 
     #[test]
     fn status_line_right_starts_at_zero_boxes() {
         let session = session();
 
-        assert_eq!(session.status_line_right(), "0 boxes . dre");
+        assert_eq!(session.status_line_right(), "0 boxes \u{2022} dre");
     }
 
     #[test]
@@ -161,6 +165,6 @@ mod tests {
 
         session.press_key("b");
 
-        assert_eq!(session.status_line_right(), "1 boxes . dre");
+        assert_eq!(session.status_line_right(), "1 boxes • dre");
     }
 }
