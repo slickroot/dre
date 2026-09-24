@@ -27,6 +27,15 @@ impl<T> Tree<T> {
         Self::new(T::default(), children)
     }
 
+    pub fn child(&self, path: &[usize]) -> Vec<usize> {
+        assert!(!path.is_empty(), "the root has no child");
+        if self.get(path).children.is_empty() {
+            path.to_vec()
+        } else {
+            [path, &[0]].concat()
+        }
+    }
+
     fn get(&self, path: &[usize]) -> &Tree<T> {
         path.iter().fold(self, |tree, &index| &tree.children[index])
     }
@@ -93,5 +102,34 @@ mod tests {
         assert_eq!(tree.get(&[0, 0]).value, "a0");
         assert_eq!(tree.get(&[1]).value, "b");
         assert_eq!(tree.get(&[]).value, "");
+    }
+
+    #[test]
+    fn child_of_a_box_with_children_is_its_first_child() {
+        assert_eq!(sample().child(&[0]), vec![0, 0]);
+    }
+
+    #[test]
+    fn child_of_a_childless_box_is_the_same_path() {
+        assert_eq!(sample().child(&[1]), vec![1]);
+        assert_eq!(sample().child(&[0, 1]), vec![0, 1]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn child_panics_on_the_root_path() {
+        sample().child(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn child_panics_on_an_index_past_the_last_sibling() {
+        sample().child(&[2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn child_panics_on_a_path_through_a_box_with_too_few_children() {
+        sample().child(&[0, 2, 0]);
     }
 }
