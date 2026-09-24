@@ -1,5 +1,6 @@
 use crate::diagram::{append, at, children_at, Document, Node, Path};
-use crate::palette::{palette, BACKGROUND};
+use crate::palette::palette;
+use crate::status_line::{ModeLabel, StatusInput};
 
 pub(crate) const PAD: &str = " ";
 pub(crate) const DEFAULT_FILENAME: &str = "diagram.dre";
@@ -43,66 +44,25 @@ fn count_boxes(nodes: &[Node]) -> usize {
     nodes.iter().map(|n| 1 + count_boxes(&n.children)).sum()
 }
 
-pub struct StatusLine {
-    pub left: Vec<Segment>,
-    pub right: Vec<Segment>,
-}
-
-pub struct Segment {
-    pub text: String,
-    pub style: Style,
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct Style {
-    pub bold: bool,
-    pub background: Option<(u8, u8, u8, u8)>,
-    pub foreground: Option<(u8, u8, u8)>,
-}
-
-const DIM_ALPHA: u8 = 0x40;
-
-fn dim(text: impl Into<String>) -> Segment {
-    Segment {
-        text: text.into(),
-        style: Style {
-            bold: false,
-            background: Some((0, 0, 0, DIM_ALPHA)),
-            foreground: None,
-        },
-    }
-}
-
-pub fn status_line(state: &State) -> StatusLine {
-    let mode_text = match &state.mode {
-        Mode::Command | Mode::SavePrompt { .. } => "COMMANDING",
-        Mode::Insert => "EDITING",
-    };
-    let (r, g, b) = palette(0).unwrap();
-    let mode = Segment {
-        text: format!(" {mode_text} "),
-        style: Style {
-            bold: true,
-            background: Some((r, g, b, 0xFF)),
-            foreground: palette(BACKGROUND),
-        },
-    };
-    let filename = match &state.mode {
-        Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
-        _ => {
-            let name = state.save_to.as_deref().unwrap_or(DEFAULT_FILENAME);
-            let marker = if state.dirty { "[+]" } else { "" };
-            format!("{name}{marker}")
+impl State {
+    pub(crate) fn status_input(&self) -> StatusInput {
+        let mode = match &self.mode {
+            Mode::Command | Mode::SavePrompt { .. } => ModeLabel::Commanding,
+            Mode::Insert => ModeLabel::Editing,
+        };
+        let filename = match &self.mode {
+            Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
+            _ => {
+                let name = self.save_to.as_deref().unwrap_or(DEFAULT_FILENAME);
+                let marker = if self.dirty { "[+]" } else { "" };
+                format!("{name}{marker}")
+            }
+        };
+        StatusInput {
+            mode,
+            filename,
+            box_count: count_boxes(&self.doc.boxes),
         }
-    };
-    let box_count = count_boxes(&state.doc.boxes);
-    StatusLine {
-        left: vec![mode, dim(" \u{2502} "), dim(filename)],
-        right: vec![
-            dim(format!("{box_count} boxes")),
-            dim(" \u{2022} "),
-            dim("dre"),
-        ],
     }
 }
 
@@ -708,10 +668,6 @@ mod tests {
         assert_eq!(hidden.doc.selected, None);
     }
 
-    fn texts(segments: &[Segment]) -> Vec<&str> {
-        segments.iter().map(|s| s.text.as_str()).collect()
-    }
-
     fn save_prompt_state() -> State {
         let mode = Mode::SavePrompt {
             filename: "diagram.dre".to_string(),
@@ -720,113 +676,68 @@ mod tests {
     }
 
     #[test]
-    fn status_line_pads_the_mode_label_with_a_space_on_each_side() {
-        let command = new_state(vec![], Mode::Command, None);
-        let insert = new_state(vec![], Mode::Insert, None);
-        assert_eq!(status_line(&command).left[0].text, " COMMANDING ");
-        assert_eq!(status_line(&insert).left[0].text, " EDITING ");
+    fn status_input_labels_command_mode_as_commanding() {
+        let input = new_state(vec![], Mode::Command, None).status_input();
+        assert!(matches!(input.mode, ModeLabel::Commanding));
     }
 
     #[test]
-    fn status_line_keeps_showing_commanding_during_the_save_prompt() {
-        let line = status_line(&save_prompt_state());
-        assert_eq!(line.left[0].text, " COMMANDING ");
+    fn status_input_labels_insert_mode_as_editing() {
+        let input = new_state(vec![], Mode::Insert, None).status_input();
+        assert!(matches!(input.mode, ModeLabel::Editing));
     }
 
     #[test]
-    fn status_line_styles_the_mode_segment_bold_lime_on_the_app_background() {
-        let style = status_line(&new_state(vec![], Mode::Command, None)).left[0].style;
-        let (r, g, b) = palette(0).unwrap();
-        assert!(style.bold);
-        assert_eq!(style.background, Some((r, g, b, 0xFF)));
-        assert_eq!(style.foreground, palette(BACKGROUND));
+    fn status_input_keeps_commanding_during_the_save_prompt() {
+        let input = save_prompt_state().status_input();
+        assert!(matches!(input.mode, ModeLabel::Commanding));
     }
 
     #[test]
-    fn status_line_styles_every_other_segment_dim() {
-        let line = status_line(&save_prompt_state());
-        let dim: Vec<&Segment> = line.left[1..].iter().chain(line.right.iter()).collect();
-        assert_eq!(dim.len(), 5);
-        for segment in dim {
-            assert!(!segment.style.bold);
-            assert!(segment.style.background.is_some());
-            assert_eq!(
-                segment.style.background.map(|(r, g, b, _)| (r, g, b)),
-                Some((0, 0, 0))
-            );
-            assert_eq!(segment.style.foreground, None);
-        }
+    fn status_input_uses_the_default_filename_without_save_to() {
+        let input = new_state(vec![], Mode::Command, None).status_input();
+        assert_eq!(input.filename, DEFAULT_FILENAME);
     }
 
     #[test]
-    fn status_line_separates_the_mode_from_the_filename_with_a_vertical_bar() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line(&state).left[1].text, " \u{2502} ");
-    }
-
-    #[test]
-    fn status_line_shows_default_filename_in_command_mode() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line(&state).left[2].text, "diagram.dre");
-    }
-
-    #[test]
-    fn status_line_marks_dirty_state_with_a_plus_marker() {
+    fn status_input_marks_dirty_state_with_a_plus_marker() {
         let mut state = new_state(vec![], Mode::Command, None);
         state.dirty = true;
-        assert_eq!(status_line(&state).left[2].text, "diagram.dre[+]");
-    }
-
-    #[test]
-    fn status_line_shows_the_save_to_path_as_is() {
-        let mut state = new_state(vec![], Mode::Command, None);
-        state.save_to = Some("/foo/bar.dre".to_string());
-        assert_eq!(status_line(&state).left[2].text, "/foo/bar.dre");
-    }
-
-    #[test]
-    fn status_line_shows_the_mode_and_filename_in_insert_mode() {
-        let state = new_state(vec![], Mode::Insert, None);
-        let line = status_line(&state);
         assert_eq!(
-            texts(&line.left),
-            [" EDITING ", " \u{2502} ", "diagram.dre"]
+            state.status_input().filename,
+            format!("{DEFAULT_FILENAME}[+]")
         );
     }
 
     #[test]
-    fn status_line_shows_zero_boxes_when_empty() {
-        let state = new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line(&state).right[0].text, "0 boxes");
+    fn status_input_uses_the_save_to_path_as_is() {
+        let mut state = new_state(vec![], Mode::Insert, None);
+        state.save_to = Some("/foo/bar.dre".to_string());
+        assert_eq!(state.status_input().filename, "/foo/bar.dre");
     }
 
     #[test]
-    fn status_line_counts_nested_children_in_box_count() {
+    fn status_input_shows_the_save_prompt_text_with_a_cursor() {
+        let input = save_prompt_state().status_input();
+        assert_eq!(
+            input.filename,
+            format!("Save as: {DEFAULT_FILENAME}{CURSOR}")
+        );
+    }
+
+    #[test]
+    fn status_input_counts_zero_boxes_when_empty() {
+        let input = new_state(vec![], Mode::Command, None).status_input();
+        assert_eq!(input.box_count, 0);
+    }
+
+    #[test]
+    fn status_input_counts_nested_children() {
         let state = new_state(
             vec![node_with_children("a", vec![node("b"), node("c")])],
             Mode::Command,
             None,
         );
-        assert_eq!(status_line(&state).right[0].text, "3 boxes");
-    }
-
-    #[test]
-    fn status_line_always_pluralizes_box_count() {
-        let state = new_state(vec![node("a")], Mode::Command, None);
-        assert_eq!(status_line(&state).right[0].text, "1 boxes");
-    }
-
-    #[test]
-    fn status_line_ends_with_a_bullet_and_dre() {
-        let state = new_state(vec![], Mode::Command, None);
-        let line = status_line(&state);
-        assert_eq!(texts(&line.right), ["0 boxes", " \u{2022} ", "dre"]);
-    }
-
-    #[test]
-    fn status_line_shows_save_prompt_text_and_keeps_the_right_side() {
-        let line = status_line(&save_prompt_state());
-        assert_eq!(line.left[2].text, format!("Save as: diagram.dre{CURSOR}"));
-        assert_eq!(texts(&line.right), ["0 boxes", " \u{2022} ", "dre"]);
+        assert_eq!(state.status_input().box_count, 3);
     }
 }

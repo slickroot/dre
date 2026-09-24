@@ -23,6 +23,7 @@ mod reduce;
 mod render;
 mod save_prompt_mode;
 mod state;
+mod status_line;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
 #[cfg(test)]
@@ -33,7 +34,7 @@ use std::process::ExitCode;
 
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
-pub use state::{status_line, Segment, State, StatusLine, Style};
+pub use state::State;
 
 pub const IDLE_TIMEOUT_MS: u16 = 1000;
 

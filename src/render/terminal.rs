@@ -8,7 +8,8 @@ use crate::diagram::{Node, Path};
 use crate::kitty;
 use crate::layout::{with_cursor, Cursor, Label, Placement, PlacementNode};
 use crate::palette::{palette, BACKGROUND};
-use crate::state::{status_line, Segment, State, StatusLine};
+use crate::state::State;
+use crate::status_line::{status_line, Segment, StatusLine};
 use crate::terminal::Terminal;
 
 const BLANK: char = ' ';
@@ -329,7 +330,7 @@ impl TerminalRenderer {
     }
 
     fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let StatusLine { left, right } = status_line(state);
+        let StatusLine { left, right } = status_line(&state.status_input());
         let Terminal { cols, rows, .. } = self.terminal;
         let content_width: usize = left
             .iter()
@@ -2271,13 +2272,13 @@ mod tests {
             .collect()
     }
 
-    fn background_escape(style: crate::state::Style) -> String {
+    fn background_escape(style: crate::status_line::Style) -> String {
         let (r, g, b) = composite(style.background.unwrap(), palette(BACKGROUND).unwrap());
         format!("\x1b[48;2;{r};{g};{b}m")
     }
 
     fn dim_run_prefix(state: &State) -> String {
-        background_escape(status_line(state).right[0].style)
+        background_escape(status_line(&state.status_input()).right[0].style)
     }
 
     #[test]
@@ -2405,10 +2406,10 @@ mod tests {
         let mut r = renderer_on(terminal(40, 4, 1, 1));
         let state = crate::state::new_state(vec![], Mode::Command, None);
         let runs = status_line_runs(&mut r, &state);
-        let content_width: usize = status_line(&state)
+        let content_width: usize = status_line(&state.status_input())
             .left
             .iter()
-            .chain(&status_line(&state).right)
+            .chain(&status_line(&state.status_input()).right)
             .map(|segment| segment.text.chars().count())
             .sum();
         let filler = format!(
@@ -2438,7 +2439,7 @@ mod tests {
         };
         let state = crate::state::new_state(vec![], mode, None);
         let runs = status_line_runs(&mut r, &state);
-        let mode_style = status_line(&state).left[0].style;
+        let mode_style = status_line(&state.status_input()).left[0].style;
         let mode_prefix = format!("\x1b[1m{}", background_escape(mode_style));
         assert!(runs[0].starts_with(&mode_prefix));
         let dim = dim_run_prefix(&state);
@@ -2475,7 +2476,7 @@ mod tests {
             filename: "diagram.dre".to_string(),
         };
         let state = crate::state::new_state(vec![], mode, None);
-        let expected_left: String = crate::state::status_line(&state)
+        let expected_left: String = status_line(&state.status_input())
             .left
             .iter()
             .map(|s| s.text.as_str())
