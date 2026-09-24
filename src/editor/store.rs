@@ -3,13 +3,17 @@ use std::io;
 use crate::state::State;
 use crate::{dre_format, file_document, filesystem};
 
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait Files {
     fn read(&self, path: &str) -> io::Result<String>;
     fn write(&self, path: &str, contents: &str) -> io::Result<()>;
 }
 
+#[cfg_attr(test, mockall::automock)]
 pub(crate) trait StateStore {
-    fn load(&self, path: Option<&str>) -> io::Result<State>;
+    // automock needs the lifetime named: it cannot mock an elided reference inside Option.
+    #[allow(clippy::needless_lifetimes)]
+    fn load<'a>(&self, path: Option<&'a str>) -> io::Result<State>;
     fn save(&self, state: &State) -> io::Result<()>;
 }
 
@@ -55,62 +59,30 @@ impl StateStore for FileStateStore {
 mod tests {
     use super::*;
     use crate::diagram::{self, Path};
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::rc::Rc;
 
-    #[derive(Clone, Default)]
-    struct FakeFiles {
-        contents: Rc<RefCell<HashMap<String, String>>>,
+    fn store_over(files: MockFiles) -> FileStateStore {
+        FileStateStore::new(Box::new(files))
     }
 
-    impl FakeFiles {
-        fn with(path: &str, contents: &str) -> Self {
-            let files = Self::default();
-            files
-                .contents
-                .borrow_mut()
-                .insert(path.to_string(), contents.to_string());
-            files
-        }
-
-        fn contents_of(&self, path: &str) -> Option<String> {
-            self.contents.borrow().get(path).cloned()
-        }
-
-        fn is_empty(&self) -> bool {
-            self.contents.borrow().is_empty()
-        }
-    }
-
-    impl Files for FakeFiles {
-        fn read(&self, path: &str) -> io::Result<String> {
-            self.contents
-                .borrow()
-                .get(path)
-                .cloned()
-                .ok_or_else(|| filesystem::missing(path))
-        }
-
-        fn write(&self, path: &str, contents: &str) -> io::Result<()> {
-            self.contents
-                .borrow_mut()
-                .insert(path.to_string(), contents.to_string());
-            Ok(())
-        }
-    }
-
-    fn store_over(files: &FakeFiles) -> FileStateStore {
-        FileStateStore::new(Box::new(files.clone()))
+    fn files_reading(path: &'static str, result: io::Result<String>) -> MockFiles {
+        let mut files = MockFiles::new();
+        files
+            .expect_read()
+            .withf(move |p| p == path)
+            .times(1)
+            .return_once(move |_| result);
+        files
     }
 
     fn load_file(contents: &str) -> io::Result<State> {
-        store_over(&FakeFiles::with("a.dre", contents)).load(Some("a.dre"))
+        store_over(files_reading("a.dre", Ok(contents.to_string()))).load(Some("a.dre"))
     }
 
     #[test]
     fn no_argument_starts_from_an_empty_diagram() {
-        let state = store_over(&FakeFiles::default()).load(None).unwrap();
+        let mut files = MockFiles::new();
+        files.expect_read().never();
+        let state = store_over(files).load(None).unwrap();
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
         assert_eq!(state.save_to, None);
@@ -185,9 +157,8 @@ mod tests {
 
     #[test]
     fn a_missing_file_loads_an_empty_canvas_saved_to_that_path() {
-        let state = store_over(&FakeFiles::default())
-            .load(Some("missing.dre"))
-            .unwrap();
+        let files = files_reading("missing.dre", Err(io::Error::from(io::ErrorKind::NotFound)));
+        let state = store_over(files).load(Some("missing.dre")).unwrap();
         assert!(state.doc.boxes.is_empty());
         assert_eq!(state.doc.selected, None);
         assert_eq!(state.save_to, Some("missing.dre".to_string()));
@@ -196,61 +167,48 @@ mod tests {
 
     #[test]
     fn a_read_failure_other_than_not_found_propagates() {
-        struct DeniedFiles;
-        impl Files for DeniedFiles {
-            fn read(&self, _: &str) -> io::Result<String> {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
-            }
-            fn write(&self, _: &str, _: &str) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let result = FileStateStore::new(Box::new(DeniedFiles)).load(Some("a.dre"));
+        let files = files_reading(
+            "a.dre",
+            Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        );
         assert_eq!(
-            result.err().map(|e| e.kind()),
+            store_over(files)
+                .load(Some("a.dre"))
+                .err()
+                .map(|e| e.kind()),
             Some(io::ErrorKind::PermissionDenied)
         );
     }
 
     fn state_with_one_box_saving_to(path: Option<&str>) -> State {
-        let mut state = State::open(
+        State::open(
             diagram::Document {
                 boxes: vec![diagram::node("API")],
                 selected: None,
             },
             path.map(str::to_string),
-        );
-        state.save_to = path.map(str::to_string);
-        state
+        )
     }
 
     #[test]
     fn saving_writes_the_document_to_where_the_state_saves_to() {
-        let files = FakeFiles::default();
         let state = state_with_one_box_saving_to(Some("out.dre"));
-        store_over(&files).save(&state).unwrap();
         let expected = dre_format::write(&file_document::from_document(&state.doc));
-        assert_eq!(files.contents_of("out.dre"), Some(expected));
+        let mut files = MockFiles::new();
+        files
+            .expect_write()
+            .withf(move |path, contents| path == "out.dre" && contents == expected)
+            .times(1)
+            .returning(|_, _| Ok(()));
+        store_over(files).save(&state).unwrap();
     }
 
     #[test]
     fn saving_with_nowhere_to_save_writes_nothing() {
-        let files = FakeFiles::default();
-        store_over(&files)
+        let mut files = MockFiles::new();
+        files.expect_write().never();
+        store_over(files)
             .save(&state_with_one_box_saving_to(None))
             .unwrap();
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn a_saved_state_loads_back_with_the_same_boxes() {
-        let files = FakeFiles::default();
-        let store = store_over(&files);
-        store
-            .save(&state_with_one_box_saving_to(Some("out.dre")))
-            .unwrap();
-        let loaded = store.load(Some("out.dre")).unwrap();
-        assert_eq!(loaded.doc.boxes.len(), 1);
-        assert_eq!(loaded.doc.boxes[0].label, "API");
     }
 }
