@@ -76,7 +76,13 @@ pub(crate) fn reduce(mut state: State, command: Command) -> State {
         Command::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);
             let selected = state.doc.selected.clone();
-            add_child_box(snapshot(state), selected)
+            let mut state = add_child_box(snapshot(drop_snapshot_if_unchanged(state)), selected);
+            if let Some(child) = state.doc.selected.clone() {
+                at(&mut state.doc.boxes, &child).label.clear();
+                state = snapshot(state);
+                at(&mut state.doc.boxes, &child).label = PAD.to_string();
+            }
+            state
         }
         Command::Backspace => {
             node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
@@ -205,6 +211,65 @@ mod tests {
             })
         );
         assert_eq!(result.mode, Mode::Command);
+    }
+
+    fn press(state: State, keys: &[&str]) -> State {
+        keys.iter().fold(state, |state, key| handle_key(state, key))
+    }
+
+    fn command_mode_cache_box() -> State {
+        new_state(
+            vec![node("Cache")],
+            Mode::Command,
+            Some(Path {
+                ancestors: vec![],
+                index: 0,
+            }),
+        )
+    }
+
+    #[test]
+    fn enter_in_an_edit_session_makes_the_child_and_its_text_separate_undo_steps() {
+        let state = press(
+            command_mode_cache_box(),
+            &["i", "!", "\r", "R", "e", "d", "i", "s", "\x1b"],
+        );
+        assert_eq!(
+            state.doc.boxes,
+            vec![node_with_children("Cache!", vec![node("Redis")])]
+        );
+        let state = handle_key(state, "u");
+        assert_eq!(
+            state.doc.boxes,
+            vec![node_with_children("Cache!", vec![node("")])]
+        );
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache!")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn enter_without_changing_the_text_is_not_a_step_for_the_label() {
+        let state = press(command_mode_cache_box(), &["i", "\r", "R", "\x1b"]);
+        let state = handle_key(state, "u");
+        assert_eq!(
+            state.doc.boxes,
+            vec![node_with_children("Cache", vec![node("")])]
+        );
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
+    }
+
+    #[test]
+    fn enter_then_esc_in_the_empty_child_leaves_only_the_child_as_a_step() {
+        let state = press(command_mode_cache_box(), &["i", "x", "\r", "\x1b"]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cachex")]);
+        let state = handle_key(state, "u");
+        assert_eq!(state.doc.boxes, vec![node("Cache")]);
     }
 
     #[test]
