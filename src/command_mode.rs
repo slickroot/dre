@@ -319,13 +319,11 @@ fn paste_box(mut state: State, selected: Option<Path>, count: usize) -> State {
         None => Vec::new(),
     };
     let list = children_at(&mut state.doc.boxes, &target);
-    let mut index = 0;
-    for _ in 0..count {
-        index = append(list, node.clone());
-    }
+    let first = list.len();
+    list.extend(std::iter::repeat_n(node, count));
     state.doc.selected = Some(Path {
         ancestors: target,
-        index,
+        index: first + count - 1,
     });
     state
 }
