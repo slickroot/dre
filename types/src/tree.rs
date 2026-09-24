@@ -3,14 +3,6 @@ pub struct Tree<T> {
     children: Vec<Tree<T>>,
 }
 
-pub fn parent(path: &[usize]) -> &[usize] {
-    match path {
-        [] => panic!("the root has no parent"),
-        [_] => path,
-        [ancestors @ .., _] => ancestors,
-    }
-}
-
 impl<T> Tree<T> {
     pub fn leaf(value: T) -> Self {
         Self::new(value, Vec::new())
@@ -33,6 +25,14 @@ impl<T> Tree<T> {
             path.to_vec()
         } else {
             [path, &[0]].concat()
+        }
+    }
+
+    pub fn parent(&self, path: &[usize]) -> Vec<usize> {
+        self.position(path);
+        match path {
+            [_] => path.to_vec(),
+            _ => path[..path.len() - 1].to_vec(),
         }
     }
 
@@ -84,18 +84,27 @@ mod tests {
 
     #[test]
     fn parent_of_a_nested_path_drops_the_last_step() {
-        assert_eq!(parent(&[1, 2, 3]), &[1, 2]);
+        let tree = sample();
+        let parent = tree.parent(&[0, 1]);
+        assert_eq!(parent, vec![0]);
+        assert_eq!(tree.get(&parent).value, "a");
     }
 
     #[test]
     fn parent_of_a_top_level_path_is_the_same_path() {
-        assert_eq!(parent(&[1]), &[1]);
+        assert_eq!(sample().parent(&[1]), vec![1]);
     }
 
     #[test]
     #[should_panic]
     fn parent_panics_on_the_root_path() {
-        parent(&[]);
+        sample().parent(&[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn parent_panics_on_a_path_that_addresses_no_box() {
+        sample().parent(&[0, 2]);
     }
 
     #[test]
