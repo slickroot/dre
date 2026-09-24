@@ -20,6 +20,8 @@ mod palette;
 mod render;
 mod save_prompt_mode;
 mod state;
+#[allow(dead_code)]
+mod status_line;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
 
