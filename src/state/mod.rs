@@ -4,6 +4,7 @@ mod history;
 mod input;
 mod insert;
 mod mode;
+mod name_prompt;
 mod save_prompt;
 
 use crate::diagram::{Document, Node};
@@ -118,6 +119,7 @@ fn apply(mut state: State, action: action::Action) -> State {
     history::recorded(state, &action, |state| match action.mode() {
         ActionMode::Insert => insert::reduce(state, action),
         ActionMode::SavePrompt => save_prompt::reduce(state, action),
+        ActionMode::NamePrompt => name_prompt::reduce(state, action),
         ActionMode::Command => command::reduce(state, action),
     })
 }
@@ -380,6 +382,21 @@ mod tests {
             vec![node("a")],
             Mode::SavePrompt {
                 filename: "a.dre".to_string(),
+            },
+            Some(selected.clone()),
+        );
+        let hidden = reduce(state, Action::Idle);
+        assert_eq!(hidden.selected, Some(selected));
+        assert_eq!(hidden.last_selected, None);
+    }
+
+    #[test]
+    fn an_idle_hide_in_name_prompt_mode_leaves_the_selection_alone() {
+        let selected = vec![0];
+        let state = new_state(
+            vec![node("a")],
+            Mode::NamePrompt {
+                name: "a".to_string(),
             },
             Some(selected.clone()),
         );

@@ -8,6 +8,7 @@ pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
         Mode::Command => command_parse(key),
         Mode::Insert => insert_parse(key),
         Mode::SavePrompt { .. } => save_prompt_parse(key),
+        Mode::NamePrompt { .. } => name_prompt_parse(key),
     }
 }
 
@@ -33,6 +34,7 @@ fn command_parse(key: &str) -> Option<Action> {
         "f" => Action::ToggleFill,
         "r" => Action::ToggleRounded,
         "q" => Action::Quit,
+        "n" => Action::OpenNamePrompt,
         _ => Action::CancelCount,
     })
 }
@@ -42,10 +44,7 @@ fn insert_parse(key: &str) -> Option<Action> {
         "\x1b" => Some(Action::Commit),
         "\r" => Some(Action::CommitAndAddChild),
         "\x7f" => Some(Action::InsertBackspace),
-        _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Action::InsertAppend(c)),
-            _ => None,
-        },
+        _ => printable(key).map(Action::InsertAppend),
     }
 }
 
@@ -54,11 +53,21 @@ fn save_prompt_parse(key: &str) -> Option<Action> {
         "\r" => Some(Action::Confirm),
         "\x1b" => Some(Action::Cancel),
         "\x7f" => Some(Action::SavePromptBackspace),
-        _ => match key.chars().next() {
-            Some(c) if ('\x20'..='\x7e').contains(&c) => Some(Action::SavePromptAppend(c)),
-            _ => None,
-        },
+        _ => printable(key).map(Action::SavePromptAppend),
     }
+}
+
+fn name_prompt_parse(key: &str) -> Option<Action> {
+    match key {
+        "\r" => Some(Action::NameConfirm),
+        "\x1b" => Some(Action::NameCancel),
+        "\x7f" => Some(Action::NameBackspace),
+        _ => printable(key).map(Action::NameAppend),
+    }
+}
+
+fn printable(key: &str) -> Option<char> {
+    key.chars().next().filter(|c| ('\x20'..='\x7e').contains(c))
 }
 
 #[allow(dead_code)]
@@ -148,6 +157,11 @@ pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Action>] = &[
         command: Action::Quit,
         description: "Save and quit (or choose where to save)",
     },
+    KeyBinding {
+        keys: &["n"],
+        command: Action::OpenNamePrompt,
+        description: "Name the diagram",
+    },
 ];
 
 #[allow(dead_code)]
@@ -220,6 +234,34 @@ mod tests {
             parse(&key_state(prompt), "b"),
             Some(Action::SavePromptAppend('b'))
         );
+        let name_prompt = Mode::NamePrompt {
+            name: String::new(),
+        };
+        assert_eq!(
+            parse(&key_state(name_prompt), "b"),
+            Some(Action::NameAppend('b'))
+        );
+    }
+
+    #[test]
+    fn n_in_command_mode_opens_the_name_prompt() {
+        assert_eq!(
+            parse(&key_state(Mode::Command), "n"),
+            Some(Action::OpenNamePrompt)
+        );
+    }
+
+    #[test]
+    fn name_prompt_keys_parse_to_the_name_actions() {
+        let state = key_state(Mode::NamePrompt {
+            name: String::new(),
+        });
+        assert_eq!(parse(&state, "\r"), Some(Action::NameConfirm));
+        assert_eq!(parse(&state, "\x1b"), Some(Action::NameCancel));
+        assert_eq!(parse(&state, "\x7f"), Some(Action::NameBackspace));
+        assert_eq!(parse(&state, "q"), Some(Action::NameAppend('q')));
+        assert_eq!(parse(&state, "\x01"), None);
+        assert_eq!(parse(&state, "é"), None);
     }
 
     #[test]

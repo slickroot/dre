@@ -6,4 +6,7 @@ pub(crate) enum Mode {
     SavePrompt {
         filename: String,
     },
+    NamePrompt {
+        name: String,
+    },
 }

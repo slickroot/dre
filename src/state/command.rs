@@ -20,6 +20,13 @@ fn hide_idle_cursor(mut state: State) -> State {
     state
 }
 
+fn open_name_prompt(mut state: State) -> State {
+    state.mode = Mode::NamePrompt {
+        name: String::new(),
+    };
+    state
+}
+
 fn interrupt(mut state: State) -> State {
     state.set_save_to(None);
     state.running = false;
@@ -206,6 +213,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
         }
         Action::Idle => return hide_idle_cursor(state),
         Action::Interrupt => return interrupt(state),
+        Action::OpenNamePrompt => return open_name_prompt(state),
         _ => {}
     }
     let count = state.pending_count.take().unwrap_or(1);
