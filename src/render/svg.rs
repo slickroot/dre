@@ -279,7 +279,7 @@ mod tests {
     use super::*;
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{with_cursor, FOOTER_COLOUR};
+    use crate::layout::with_cursor;
     use crate::layout::{Arrow, Cursor, Label, Placement};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
@@ -1020,14 +1020,10 @@ mod tests {
             rows: 33 + FOOTER_ROWS,
         };
         let (body, foot) = body_and_foot(window);
-        let footer = vec![box_placement(
-            foot.col,
+        let footer = vec![label_placement(
+            NAME,
+            foot.col + foot.cols - name_width(),
             foot.row,
-            foot.cols,
-            foot.rows,
-            Some(FOOTER_COLOUR),
-            Some(FOOTER_COLOUR),
-            false,
         )];
 
         let svg = document(window, &[(body, placements), (foot, footer)]);
@@ -1056,7 +1052,7 @@ mod tests {
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
-            nested(foot, &footer_bar(foot)),
+            nested(foot, &footer_label(foot)),
         );
 
         assert_eq!(svg, expected);
@@ -1155,7 +1151,9 @@ mod tests {
 
     fn example_state() -> State {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
-        crate::state::new_state(boxes, Mode::Command, Some(vec![0, 1]))
+        let mut state = crate::state::new_state(boxes, Mode::Command, Some(vec![0, 1]));
+        state.save_to = Some(format!("docs/{NAME}.dre"));
+        state
     }
 
     fn render_to_string(mut renderer: SvgRenderer, state: &State) -> String {
@@ -1199,16 +1197,14 @@ mod tests {
         )
     }
 
-    fn footer_bar(foot: Area) -> String {
-        rect_at(
-            foot.col,
-            foot.row,
-            foot.cols,
-            foot.rows,
-            Some(FOOTER_COLOUR),
-            Some(FOOTER_COLOUR),
-            false,
-        )
+    const NAME: &str = "plans";
+
+    fn name_width() -> i64 {
+        NAME.chars().count() as i64
+    }
+
+    fn footer_label(foot: Area) -> String {
+        label_at(foot.col + foot.cols - name_width(), foot.row, NAME)
     }
 
     #[test]
@@ -1242,7 +1238,7 @@ mod tests {
             body,
         );
         let body_svg = nested(body, &paint(&diagram));
-        let foot_svg = nested(foot, &footer_bar(foot));
+        let foot_svg = nested(foot, &footer_label(foot));
         let body_at = svg.find(&body_svg).expect("the body is a nested svg");
         let foot_at = svg.find(&foot_svg).expect("the footer is a nested svg");
         assert!(body_at < foot_at);
@@ -1287,7 +1283,7 @@ mod tests {
 
         let diagram = with_cursor(diagram(state.doc.tree()), state.selected.clone());
         assert!(svg.contains(&nested(body, &paint(&diagram))));
-        assert!(svg.contains(&nested(foot, &footer_bar(foot))));
+        assert!(svg.contains(&nested(foot, &footer_label(foot))));
     }
 }
 

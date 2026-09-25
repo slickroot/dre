@@ -1119,10 +1119,10 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_drawing_draws_only_the_footer() {
+    fn an_empty_drawing_draws_nothing_without_a_file() {
         let mut r = renderer_on(window(40, 10, 1, 1));
         let frame = r.frame(&empty_state());
-        assert_eq!(frame.images.len(), 1);
+        assert!(frame.images.is_empty());
     }
 
     #[test]
@@ -1748,7 +1748,7 @@ mod tests {
     }
 
     #[test]
-    fn the_diagram_is_centred_in_the_rows_above_the_footer() {
+    fn the_diagram_is_centred_in_the_rows_above_the_last() {
         let (cols, rows) = (20, 12);
         let mut r = renderer_on(window(cols, rows, 1, 1));
         let state = one_leaf();
@@ -1765,33 +1765,15 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_box_fills_the_last_footer_rows() {
-        let window = window(20, 12, 2, 4);
-        let mut r = renderer_on(window);
-        let frame = r.frame(&one_leaf());
-        let footer = frame.images.last().unwrap();
-        assert_eq!((footer.col, footer.row), (0, window.rows - FOOTER_ROWS));
-        assert_eq!(
-            (footer.canvas.width, footer.canvas.height),
-            (
-                window.cols * window.cell_width,
-                FOOTER_ROWS * window.cell_height
-            )
-        );
-    }
-
-    #[test]
-    fn a_diagram_box_overhanging_the_body_does_not_draw_into_the_footer() {
+    fn a_diagram_box_overhanging_the_body_does_not_draw_into_the_last_row() {
         let state = one_leaf();
         let leaf = leaf_box(&state);
         let body_rows = leaf.height - 1;
         let window = window(20, body_rows + FOOTER_ROWS, 1, 1);
         let mut r = renderer_on(window);
         let frame = r.frame(&state);
-        let (footer, diagram) = frame.images.split_last().unwrap();
-        assert_eq!(footer.row, body_rows);
-        assert!(!diagram.is_empty());
-        for image in diagram {
+        assert!(!frame.images.is_empty());
+        for image in &frame.images {
             assert!(image.row + image.canvas.height / window.cell_height <= body_rows);
         }
     }

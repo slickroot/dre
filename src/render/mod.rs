@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crate::composer::{self, Area};
 use crate::layout::{self, with_cursor, Placement, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
-use crate::state::State;
+use crate::state::{diagram_name, State};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod font;
@@ -32,25 +32,18 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
                 body,
             ),
         ),
-        (foot, fill(layout::footer(), foot)),
+        (
+            foot,
+            align_right(
+                layout::footer(state.save_to.as_deref().map(diagram_name)),
+                foot,
+            ),
+        ),
     ]
 }
 
 fn shift(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
     offset(placements, area.col, area.row)
-}
-
-fn fill(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    placements
-        .into_iter()
-        .map(|placement| Placement {
-            x: area.col,
-            y: area.row,
-            width: area.cols,
-            height: area.rows,
-            ..placement
-        })
-        .collect()
 }
 
 fn offset(placements: Vec<Placement<'_>>, dx: i64, dy: i64) -> Vec<Placement<'_>> {
@@ -84,6 +77,17 @@ fn centre(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
     shift(offset(placements, horizontal, vertical), area)
 }
 
+fn align_right(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
+    placements
+        .into_iter()
+        .map(|placement| Placement {
+            x: area.col + area.cols - placement.width,
+            y: area.row,
+            ..placement
+        })
+        .collect()
+}
+
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
 const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 fn arrowhead_depth() -> f64 {
@@ -111,7 +115,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{PlacementNode, FOOTER_COLOUR};
+    use crate::layout::{Label, PlacementNode};
     use crate::state::{new_state, Mode};
 
     const AREA: Area = Area {
@@ -158,16 +162,27 @@ mod tests {
         );
     }
 
+    fn label_at(text: &str, x: i64, y: i64) -> Placement<'_> {
+        Placement {
+            node: PlacementNode::Label(Label { text, path: vec![] }),
+            x,
+            y,
+            width: text.chars().count() as i64,
+            height: 1,
+        }
+    }
+
     #[test]
-    fn fill_makes_every_placement_cover_the_area() {
-        let placements = fill(vec![box_at(0, 0, 1, 1), box_at(5, 4, 3, 2)], AREA);
-        assert_eq!(
-            placements,
-            vec![
-                box_at(AREA.col, AREA.row, AREA.cols, AREA.rows),
-                box_at(AREA.col, AREA.row, AREA.cols, AREA.rows),
-            ]
-        );
+    fn align_right_meets_the_areas_right_edge_on_the_areas_row() {
+        let placed = align_right(vec![label_at("plans", 0, 0)], AREA);
+        assert_eq!(placed[0].x + placed[0].width, AREA.col + AREA.cols);
+        assert_eq!(placed[0].y, AREA.row);
+    }
+
+    #[test]
+    fn align_right_keeps_the_width_and_height_of_a_placement() {
+        let placed = align_right(vec![label_at("plans", 0, 0)], AREA);
+        assert_eq!((placed[0].width, placed[0].height), (5, 1));
     }
 
     #[test]
@@ -280,25 +295,28 @@ mod tests {
             .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
     }
 
+    fn state_saved_to(path: &str) -> State {
+        let mut state = state(None);
+        state.save_to = Some(path.to_string());
+        state
+    }
+
     #[test]
-    fn editor_fills_the_footer_with_one_box_as_wide_as_the_window() {
-        let state = state(None);
+    fn editor_ends_with_the_diagram_name_in_the_bottom_right_corner_when_there_is_a_path() {
+        let state = state_saved_to("docs/plans.dre");
         let screen = editor(&state, WINDOW);
         let foot = foot_of(WINDOW);
         assert_eq!(
             screen[1].1,
-            vec![Placement {
-                node: PlacementNode::Box {
-                    colour: Some(FOOTER_COLOUR),
-                    fill: Some(FOOTER_COLOUR),
-                    rounded: false,
-                },
-                x: foot.col,
-                y: foot.row,
-                width: WINDOW.cols,
-                height: FOOTER_ROWS,
-            }]
+            vec![label_at("plans", foot.col + foot.cols - 5, foot.row)]
         );
+    }
+
+    #[test]
+    fn editor_leaves_the_footer_without_placements_when_there_is_no_path() {
+        let state = state(None);
+        let screen = editor(&state, WINDOW);
+        assert!(screen[1].1.is_empty());
     }
 
     #[test]
