@@ -16,7 +16,6 @@ mod layout;
 mod palette;
 mod render;
 mod state;
-mod status_line;
 #[cfg(test)]
 mod test_support;
 #[cfg(not(target_arch = "wasm32"))]

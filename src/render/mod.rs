@@ -22,7 +22,6 @@ pub trait Renderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()>;
 }
 
-#[allow(dead_code)]
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
     vec![
