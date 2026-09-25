@@ -5,7 +5,7 @@ Doug has `plans.dre` open. He runs `dre --svg plans.dre` and opens `plans.svg`. 
 ## Acceptance Criteria
 
 - Every exported SVG is exactly 1920 × 1080, whatever the size of the diagram.
-- Opened in a browser window of any size, the export scales to fit the window and stays centred in it, keeping its 16:9 ratio.
+- Opened in a browser window of any size, the export stays at its real size (1 unit is 1 px) and centred in the window. The dark background fills the whole window. What does not fit is cut evenly at the window edges.
 - The whole canvas is filled with the dark background (`#0A0B0D`), including the empty space around the diagram.
 - The diagram is centred on the canvas.
 - The text and the boxes are the same size as today's export. Nothing inside the diagram is scaled.
@@ -37,10 +37,10 @@ Decisions from the design session. Everything lives in `src/render/svg.rs`, plus
 
 ### Document
 
-- `document()` takes the pixel canvas and emits `viewBox="0 0 {w} {h}"` on the root, so the coordinate space is always the pixel canvas and the text is always the same size inside it.
-  - `Editor` (web) emits explicit pixel `width="{w}" height="{h}"`, so 1 SVG unit is 1 px.
-  - `Export` (CLI) emits `width="100%" height="100%"` instead. With the default `preserveAspectRatio` (`xMidYMid meet`), a browser scales the whole canvas to fit its window and centres it. The file stays 1920 × 1080 in its own coordinates.
-- The background `<rect>` covers the whole pixel canvas (`#0A0B0D`), including the empty space around the window.
+- `document()` takes the pixel canvas and the mode.
+  - `Editor` (web) emits `<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">` on the root, so 1 SVG unit is 1 px.
+  - `Export` (CLI) emits a root `<svg width="100%" height="100%">` with no `viewBox`, so 1 SVG unit is 1 px at any window size. The background `<rect>` is `width="100%" height="100%"`. The canvas content sits in a nested `<svg x="50%" y="50%" width="{w}" height="{h}" viewBox="{w/2} {h/2} {w} {h}" overflow="visible">`, which puts the canvas centre at the window centre at 1:1. The text is always the same size and the file is still 1920 × 1080 in its own coordinates.
+- The background `<rect>` (`#0A0B0D`) covers the whole pixel canvas in `Editor`, and the whole window in `Export`, including the empty space around the layout window.
 - Nothing inside the diagram is scaled. Boxes, arrows and labels keep today's pixel maths.
 
 ### Collaborators
@@ -51,7 +51,7 @@ Decisions from the design session. Everything lives in `src/render/svg.rs`, plus
 
 ### Tests
 
-- Export of a tiny diagram and of a huge one both have `viewBox="0 0 1920 1080"` and `width="100%" height="100%"` on the root, and the background rect is 1920 × 1080.
+- Export of a tiny diagram and of a huge one both have `width="100%" height="100%"` and no `viewBox` on the root, a background rect of `100%` × `100%`, and a nested `<svg x="50%" y="50%">` with `width="1920" height="1080"` and `viewBox="960 540 1920 1080"`.
 - Label font size and box sizes are identical between the tiny and huge exports.
 - A diagram wider than 240 columns is cut evenly left and right (same overflow on both sides).
 - `with_canvas(cols, rows)` emits `width` and `height` equal to `cols * 8` and `rows * 16`, and the footer is still there.
