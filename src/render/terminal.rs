@@ -331,14 +331,14 @@ impl TerminalRenderer {
     }
 
     fn outline_box(&self, placement: &Placement) -> Canvas {
-        let (edge, fill, rounded, border) = match &placement.node {
+        let (edge, fill, rounded, sides, border) = match &placement.node {
             PlacementNode::Box {
                 colour,
                 fill,
                 rounded,
+                sides,
                 border,
-                ..
-            } => (*colour, *fill, *rounded, *border),
+            } => (*colour, *fill, *rounded, *sides, *border),
             _ => unreachable!("outline_box is only called for Box placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
@@ -350,6 +350,7 @@ impl TerminalRenderer {
             height,
             border,
             radius: if rounded { ROUNDED_RADIUS } else { 0 },
+            sides,
             edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
@@ -429,6 +430,7 @@ mod tests {
             height,
             border: BORDER,
             radius,
+            sides: ALL_SIDES,
             edge: [edge.0, edge.1, edge.2, edge.3],
             fill: [fill.0, fill.1, fill.2, fill.3],
         };
@@ -1635,6 +1637,26 @@ mod tests {
 
     fn pixel_of(sprite: &Canvas, x: i64, y: i64) -> (u8, u8, u8, u8) {
         pixel_at(&sprite.pixels, sprite.width, x, y)
+    }
+
+    #[test]
+    fn a_box_with_only_top_and_left_sides_draws_a_one_pixel_line_on_those_edges() {
+        let r = renderer(1, 1);
+        let size = 10 * BORDER;
+        let node = with_border(
+            &with_sides(&box_node(None, None, false), (true, false, false, true)),
+            1,
+        );
+        let sprite = box_outline(&r, &node, size, size);
+        let ink = edge_rgba(None);
+        let last = size - 1;
+        let middle = size / 2;
+        assert_eq!(pixel_of(&sprite, middle, 0), ink);
+        assert_eq!(pixel_of(&sprite, 0, middle), ink);
+        assert_eq!(pixel_of(&sprite, middle, 1), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, 1, middle), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, middle, last), TRANSPARENT);
+        assert_eq!(pixel_of(&sprite, last, middle), TRANSPARENT);
     }
 
     #[test]

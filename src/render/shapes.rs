@@ -1,22 +1,44 @@
 use super::terminal::{centered_span, python_round};
 use super::{arrowhead_depth, arrowhead_slope};
 use crate::canvas::{Rgba, Shape};
+use crate::layout::{Sides, ALL_SIDES};
 
 pub(super) struct BoxShape {
     pub(super) width: i64,
     pub(super) height: i64,
     pub(super) border: i64,
     pub(super) radius: i64,
+    pub(super) sides: Sides,
     pub(super) edge: Rgba,
     pub(super) fill: Rgba,
 }
 
 impl BoxShape {
+    fn has_all_sides(&self) -> bool {
+        self.sides == ALL_SIDES
+    }
+
+    fn inset(&self, side_on: bool) -> i64 {
+        if side_on {
+            self.border
+        } else {
+            0
+        }
+    }
+
+    fn corner_radius(&self) -> i64 {
+        if self.has_all_sides() {
+            self.radius
+        } else {
+            0
+        }
+    }
+
     fn outer(&self) -> i64 {
-        if self.radius == 0 {
+        if self.corner_radius() == 0 {
             return 0;
         }
-        (self.radius + self.border)
+        (self.corner_radius() + self.border)
             .min(self.width / 2)
             .min(self.height / 2)
     }
@@ -42,12 +64,15 @@ impl Shape for BoxShape {
             self.height as f64,
             self.outer() as f64,
         );
+        let (top, right, bottom, left) = self.sides;
+        let (inset_top, inset_right) = (self.inset(top), self.inset(right));
+        let (inset_bottom, inset_left) = (self.inset(bottom), self.inset(left));
         let inner_coverage = Self::coverage(
-            px - self.border as f64,
-            py - self.border as f64,
-            (self.width - 2 * self.border) as f64,
-            (self.height - 2 * self.border) as f64,
-            self.radius as f64,
+            px - inset_left as f64,
+            py - inset_top as f64,
+            (self.width - inset_left - inset_right) as f64,
+            (self.height - inset_top - inset_bottom) as f64,
+            self.corner_radius() as f64,
         );
         let edge_coverage = outer_coverage - inner_coverage;
         let alpha = edge_coverage * self.edge[3] as f64 + inner_coverage * self.fill[3] as f64;
@@ -138,6 +163,7 @@ mod tests {
             height,
             border: BORDER,
             radius,
+            sides: ALL_SIDES,
             edge: EDGE,
             fill: FILL,
         }
@@ -165,5 +191,57 @@ mod tests {
         for x in 0..shape.width {
             assert_eq!(shape.colour_at(x, 15), Some(EDGE));
         }
+    }
+
+    const TOP_AND_LEFT: Sides = (true, false, false, true);
+
+    fn top_and_left_box() -> BoxShape {
+        BoxShape {
+            sides: TOP_AND_LEFT,
+            ..box_shape(30, 30, 0)
+        }
+    }
+
+    #[test]
+    fn only_the_chosen_sides_get_a_line() {
+        let shape = BoxShape {
+            fill: [0; 4],
+            ..top_and_left_box()
+        };
+        let last = 30 - 1;
+        assert_eq!(shape.colour_at(15, 0), Some(EDGE));
+        assert_eq!(shape.colour_at(0, 15), Some(EDGE));
+        assert_eq!(shape.colour_at(15, last), None);
+        assert_eq!(shape.colour_at(last, 15), None);
+    }
+
+    #[test]
+    fn the_inside_of_a_partial_box_has_no_line() {
+        let shape = top_and_left_box();
+        assert_eq!(shape.colour_at(BORDER, BORDER), Some(FILL));
+        assert_eq!(shape.colour_at(15, 15), Some(FILL));
+    }
+
+    #[test]
+    fn a_partial_box_ignores_rounding() {
+        let rounded = BoxShape {
+            radius: 10,
+            ..top_and_left_box()
+        };
+        let square = top_and_left_box();
+        for y in 0..30 {
+            for x in 0..30 {
+                assert_eq!(rounded.colour_at(x, y), square.colour_at(x, y));
+            }
+        }
+    }
+
+    #[test]
+    fn a_box_with_no_sides_has_no_line() {
+        let shape = BoxShape {
+            sides: (false, false, false, false),
+            ..box_shape(30, 30, 0)
+        };
+        assert_eq!(shape.colour_at(0, 15), Some(FILL));
     }
 }

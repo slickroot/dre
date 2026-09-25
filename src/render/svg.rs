@@ -5,7 +5,7 @@ use super::{
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode, BORDER, FOOTER_ROWS};
+use crate::layout::{diagram, Placement, PlacementNode, ALL_SIDES, BORDER, FOOTER_ROWS};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -108,9 +108,13 @@ fn paint(placements: &[Placement]) -> String {
             colour,
             fill,
             rounded,
+            sides,
             ..
         } = &placement.node
         {
+            if *sides != ALL_SIDES {
+                continue;
+            }
             svg.push_str(&rect(placement, *colour, *fill, *rounded));
         }
     }
@@ -281,8 +285,8 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::with_cursor;
+    use crate::layout::BORDER;
     use crate::layout::{Arrow, Cursor, Label, Placement};
-    use crate::layout::{ALL_SIDES, BORDER};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
 
@@ -380,6 +384,20 @@ mod tests {
 
     fn fill_opacity() -> String {
         format!("{}", FILL_ALPHA as f64 / OPAQUE as f64)
+    }
+
+    #[test]
+    fn a_box_with_partial_sides_adds_no_rect() {
+        let mut partial = plain_box(0, 0, 4, 3);
+        if let PlacementNode::Box { sides, .. } = &mut partial.node {
+            *sides = (true, false, false, true);
+        }
+        let with_partial = draw(&[partial]);
+        let without_boxes = draw(&[]);
+        assert_eq!(
+            with_partial.matches("<rect").count(),
+            without_boxes.matches("<rect").count()
+        );
     }
 
     #[test]
