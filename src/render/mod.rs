@@ -32,10 +32,7 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
                 body,
             ),
         ),
-        (
-            foot,
-            align_right(layout::footer(state.diagram_name()), foot),
-        ),
+        (foot, align_right(layout::footer(state.footer()), foot)),
     ]
 }
 
@@ -294,26 +291,30 @@ mod tests {
 
     fn state_saved_to(path: &str) -> State {
         let mut state = state(None);
-        state.save_to = Some(path.to_string());
+        state.set_save_to(Some(path.to_string()));
         state
     }
 
     #[test]
-    fn editor_ends_with_the_diagram_name_in_the_bottom_right_corner_when_there_is_a_path() {
+    fn editor_ends_with_the_name_and_dre_in_the_bottom_right_corner_when_there_is_a_path() {
         let state = state_saved_to("docs/plans.dre");
-        let screen = editor(&state, WINDOW);
-        let foot = foot_of(WINDOW);
-        assert_eq!(
-            screen[1].1,
-            vec![label_at("plans", foot.col + foot.cols - 5, foot.row)]
-        );
+        assert_footer_is_bottom_right(&state, "plans \u{2022} dre");
     }
 
     #[test]
-    fn editor_leaves_the_footer_without_placements_when_there_is_no_path() {
+    fn editor_ends_with_no_name_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
         let state = state(None);
-        let screen = editor(&state, WINDOW);
-        assert!(screen[1].1.is_empty());
+        assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
+    }
+
+    fn assert_footer_is_bottom_right(state: &State, text: &str) {
+        let screen = editor(state, WINDOW);
+        let foot = foot_of(WINDOW);
+        let width = text.chars().count() as i64;
+        assert_eq!(
+            screen[1].1,
+            vec![label_at(text, foot.col + foot.cols - width, foot.row)]
+        );
     }
 
     #[test]

@@ -20,6 +20,8 @@ use types::Tree;
 
 const PAD: &str = " ";
 const DEFAULT_FILENAME: &str = "diagram.dre";
+const NO_NAME: &str = "[no name]";
+const FOOTER_SUFFIX: &str = " • dre";
 
 #[allow(dead_code)]
 struct KeyBinding<C> {
@@ -37,7 +39,8 @@ pub struct State {
     pub(crate) clipboard: Option<Tree<Node>>,
     pub(crate) mode: Mode,
     pub(crate) running: bool,
-    pub(crate) save_to: Option<String>,
+    save_to: Option<String>,
+    footer: String,
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
     pub(crate) dirty: bool,
@@ -47,9 +50,9 @@ impl State {
     pub(crate) fn open(doc: Document, save_to: Option<String>) -> State {
         let mut state = State {
             doc,
-            save_to,
             ..Default::default()
         };
+        state.set_save_to(save_to);
         if state.doc.tree().contains(&[0]) {
             state.selected = Some(vec![0]);
         }
@@ -57,16 +60,31 @@ impl State {
     }
 
     pub(crate) fn new_file(path: String) -> State {
-        State {
-            save_to: Some(path),
+        let mut state = State {
             new_file: true,
             ..Default::default()
-        }
+        };
+        state.set_save_to(Some(path));
+        state
     }
 
-    pub(crate) fn diagram_name(&self) -> Option<&str> {
-        self.save_to.as_deref().map(file_stem_without_dre)
+    pub(crate) fn save_to(&self) -> Option<&str> {
+        self.save_to.as_deref()
     }
+
+    pub(crate) fn set_save_to(&mut self, save_to: Option<String>) {
+        self.footer = footer_text(save_to.as_deref());
+        self.save_to = save_to;
+    }
+
+    pub(crate) fn footer(&self) -> &str {
+        &self.footer
+    }
+}
+
+fn footer_text(save_to: Option<&str>) -> String {
+    let name = save_to.map_or(NO_NAME, file_stem_without_dre);
+    format!("{name}{FOOTER_SUFFIX}")
 }
 
 fn file_stem_without_dre(path: &str) -> &str {
@@ -85,6 +103,7 @@ impl Default for State {
             mode: Mode::default(),
             running: true,
             save_to: None,
+            footer: footer_text(None),
             new_file: false,
             pending_count: None,
             dirty: false,
@@ -135,6 +154,7 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         mode,
         running: true,
         save_to: None,
+        footer: footer_text(None),
         new_file: false,
         pending_count: None,
         dirty: false,
@@ -149,27 +169,58 @@ mod tests {
     use crate::state::apply as reduce;
     use crate::test_support::handle_key;
 
-    #[test]
-    fn diagram_name_strips_the_folder_and_the_dre_extension() {
-        let state = State::open(Document::default(), Some("docs/plans.dre".to_string()));
-        assert_eq!(state.diagram_name(), Some("plans"));
+    fn footer_of(path: &str) -> String {
+        State::open(Document::default(), Some(path.to_string()))
+            .footer()
+            .to_string()
+    }
+
+    fn footer_for(name: &str) -> String {
+        format!("{name}{FOOTER_SUFFIX}")
     }
 
     #[test]
-    fn diagram_name_strips_the_dre_extension_of_a_bare_file_name() {
-        let state = State::open(Document::default(), Some("plans.dre".to_string()));
-        assert_eq!(state.diagram_name(), Some("plans"));
+    fn footer_strips_the_folder_and_the_dre_extension() {
+        assert_eq!(footer_of("docs/plans.dre"), footer_for("plans"));
     }
 
     #[test]
-    fn diagram_name_of_a_path_without_the_dre_extension_only_strips_the_folder() {
-        let state = State::open(Document::default(), Some("docs/plans".to_string()));
-        assert_eq!(state.diagram_name(), Some("plans"));
+    fn footer_strips_the_dre_extension_of_a_bare_file_name() {
+        assert_eq!(footer_of("plans.dre"), footer_for("plans"));
     }
 
     #[test]
-    fn diagram_name_is_none_without_a_path_to_save_to() {
-        assert_eq!(State::default().diagram_name(), None);
+    fn footer_of_a_path_without_the_dre_extension_only_strips_the_folder() {
+        assert_eq!(footer_of("docs/plans"), footer_for("plans"));
+    }
+
+    #[test]
+    fn footer_of_a_default_state_has_no_name() {
+        assert_eq!(State::default().footer(), footer_for(NO_NAME));
+    }
+
+    #[test]
+    fn footer_of_a_new_file_is_named_after_its_path() {
+        assert_eq!(
+            State::new_file("docs/plans.dre".to_string()).footer(),
+            footer_for("plans")
+        );
+    }
+
+    #[test]
+    fn set_save_to_none_after_a_path_goes_back_to_no_name() {
+        let mut state = State::open(Document::default(), Some("plans.dre".to_string()));
+        state.set_save_to(None);
+        assert_eq!(state.footer(), footer_for(NO_NAME));
+        assert_eq!(state.save_to(), None);
+    }
+
+    #[test]
+    fn set_save_to_a_path_after_none_updates_the_footer() {
+        let mut state = State::default();
+        state.set_save_to(Some("docs/plans.dre".to_string()));
+        assert_eq!(state.footer(), footer_for("plans"));
+        assert_eq!(state.save_to(), Some("docs/plans.dre"));
     }
 
     #[test]
@@ -194,7 +245,7 @@ mod tests {
     #[test]
     fn open_records_where_to_save_back_to() {
         let state = State::open(Document::default(), Some("diagram.dre".to_string()));
-        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
+        assert_eq!(state.save_to(), Some("diagram.dre"));
     }
 
     #[test]
@@ -208,7 +259,7 @@ mod tests {
         let state = State::new_file("diagram.dre".to_string());
         assert_eq!(state.doc, Document::default());
         assert_eq!(state.selected, None);
-        assert_eq!(state.save_to, Some("diagram.dre".to_string()));
+        assert_eq!(state.save_to(), Some("diagram.dre"));
         assert!(state.new_file);
     }
 

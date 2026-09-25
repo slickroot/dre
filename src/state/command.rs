@@ -21,7 +21,7 @@ fn hide_idle_cursor(mut state: State) -> State {
 }
 
 fn interrupt(mut state: State) -> State {
-    state.save_to = None;
+    state.set_save_to(None);
     state.running = false;
     state
 }
@@ -170,9 +170,9 @@ fn toggle_rounded(mut state: State, path: Vec<usize>) -> State {
 
 fn quit(mut state: State) -> State {
     if state.new_file && !state.doc.tree().contains(&[0]) {
-        state.save_to = None;
+        state.set_save_to(None);
         state.running = false;
-    } else if state.save_to.is_some() {
+    } else if state.save_to().is_some() {
         state.running = false;
     } else {
         state.mode = Mode::SavePrompt {
@@ -345,10 +345,10 @@ mod tests {
     #[test]
     fn q_with_a_file_to_save_to_stops_without_prompting() {
         let mut state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        state.save_to = Some("plans.dre".to_string());
+        state.set_save_to(Some("plans.dre".to_string()));
         let result = handle_key(state, "q");
         assert!(!result.running);
-        assert_eq!(result.save_to, Some("plans.dre".to_string()));
+        assert_eq!(result.save_to(), Some("plans.dre"));
         assert_eq!(result.mode, Mode::Command);
         assert_eq!(*result.doc.tree(), Tree::root(vec![node("a")]));
         assert_eq!(result.selected, Some(vec![0]));
@@ -356,7 +356,7 @@ mod tests {
 
     fn new_file_state(boxes: Vec<Tree<Node>>) -> State {
         let mut state = new_state(boxes, Mode::Command, None);
-        state.save_to = Some("ideas.dre".to_string());
+        state.set_save_to(Some("ideas.dre".to_string()));
         state.new_file = true;
         state
     }
@@ -365,7 +365,7 @@ mod tests {
     fn q_on_a_new_file_with_no_boxes_stops_without_a_file_to_save_to() {
         let result = handle_key(new_file_state(vec![]), "q");
         assert!(!result.running);
-        assert_eq!(result.save_to, None);
+        assert_eq!(result.save_to(), None);
         assert_eq!(result.mode, Mode::Command);
     }
 
@@ -376,24 +376,24 @@ mod tests {
         let state = handle_key(state, "u");
         let result = handle_key(state, "q");
         assert!(!result.running);
-        assert_eq!(result.save_to, None);
+        assert_eq!(result.save_to(), None);
     }
 
     #[test]
     fn q_on_a_new_file_with_boxes_stops_without_prompting() {
         let result = handle_key(new_file_state(vec![node("a")]), "q");
         assert!(!result.running);
-        assert_eq!(result.save_to, Some("ideas.dre".to_string()));
+        assert_eq!(result.save_to(), Some("ideas.dre"));
         assert_eq!(result.mode, Mode::Command);
     }
 
     #[test]
     fn q_on_an_existing_file_with_no_boxes_keeps_its_file_to_save_to() {
         let mut state = new_state(vec![], Mode::Command, None);
-        state.save_to = Some("plans.dre".to_string());
+        state.set_save_to(Some("plans.dre".to_string()));
         let result = handle_key(state, "q");
         assert!(!result.running);
-        assert_eq!(result.save_to, Some("plans.dre".to_string()));
+        assert_eq!(result.save_to(), Some("plans.dre"));
         assert_eq!(result.mode, Mode::Command);
     }
 
@@ -1357,9 +1357,9 @@ mod tests {
     #[test]
     fn interrupt_stops_running_and_drops_the_save_path() {
         let mut state = new_state(vec![node("a")], Mode::Command, None);
-        state.save_to = Some("a.dre".to_string());
+        state.set_save_to(Some("a.dre".to_string()));
         let result = reduce(state, Action::Interrupt);
         assert!(!result.running);
-        assert_eq!(result.save_to, None);
+        assert_eq!(result.save_to(), None);
     }
 }

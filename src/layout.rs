@@ -199,19 +199,14 @@ pub(crate) struct Placement<'a> {
 
 pub(crate) const FOOTER_ROWS: i64 = 1;
 
-pub(crate) fn footer(name: Option<&str>) -> Vec<Placement<'_>> {
-    name.map(|name| Placement {
-        node: PlacementNode::Label(Label {
-            text: name,
-            path: vec![],
-        }),
+pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
+    vec![Placement {
+        node: PlacementNode::Label(Label { text, path: vec![] }),
         x: 0,
         y: 0,
-        width: name.chars().count() as i64,
+        width: text.chars().count() as i64,
         height: 1,
-    })
-    .into_iter()
-    .collect()
+    }]
 }
 
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
@@ -272,22 +267,15 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_without_a_name_is_empty() {
-        assert!(footer(None).is_empty());
-    }
-
-    #[test]
-    fn footer_with_a_name_is_one_label_as_wide_as_the_name_and_one_row_high_with_no_path() {
+    fn footer_is_one_label_as_wide_as_the_text_and_one_row_high_with_no_path() {
+        let text = "plans \u{2022} dre";
         assert_eq!(
-            footer(Some("plans")),
+            footer(text),
             vec![Placement {
-                node: PlacementNode::Label(Label {
-                    text: "plans",
-                    path: vec![],
-                }),
+                node: PlacementNode::Label(Label { text, path: vec![] }),
                 x: 0,
                 y: 0,
-                width: 5,
+                width: text.chars().count() as i64,
                 height: 1,
             }]
         );
