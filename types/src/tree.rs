@@ -1,3 +1,4 @@
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tree<T> {
     value: T,
     children: Vec<Tree<T>>,

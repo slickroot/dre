@@ -3,8 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use crate::diagram;
 use crate::dre_format;
-use crate::file_document;
 use crate::filesystem;
 use crate::render::{Renderer, SvgRenderer};
 use crate::state::State;
@@ -40,7 +40,7 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
         Err(e) => return Err(e),
     };
     let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&input))?;
-    let doc = file_document::to_document(doc);
+    let doc = diagram::to_document(doc);
     let state = State::open(doc, None);
     SvgRenderer::default().render(&state, &mut File::create(output_path(&input))?)?;
     Ok(ExitCode::SUCCESS)

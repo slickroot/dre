@@ -33,16 +33,10 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::{Node, Path};
+    use crate::diagram::node;
     use crate::state::{new_state, Mode, DEFAULT_FILENAME};
     use crate::test_support::handle_key;
-
-    fn node(label: &str) -> Node {
-        Node {
-            label: label.to_string(),
-            ..Default::default()
-        }
-    }
+    use types::Tree;
 
     fn prompt(filename: &str) -> Mode {
         Mode::SavePrompt {
@@ -52,14 +46,7 @@ mod tests {
 
     #[test]
     fn q_in_command_mode_opens_the_prompt_with_the_default_filename() {
-        let state = new_state(
-            vec![node("a")],
-            Mode::Command,
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
+        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         let result = handle_key(state, "q");
         assert_eq!(result.mode, prompt(DEFAULT_FILENAME));
         assert!(result.running);
@@ -112,17 +99,10 @@ mod tests {
 
     #[test]
     fn escape_stops_without_saving_and_preserves_boxes() {
-        let state = new_state(
-            vec![node("a")],
-            prompt(DEFAULT_FILENAME),
-            Some(Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
+        let state = new_state(vec![node("a")], prompt(DEFAULT_FILENAME), Some(vec![0]));
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);
-        assert_eq!(result.doc.boxes, vec![node("a")]);
+        assert_eq!(result.doc.root, Tree::root(vec![node("a")]));
     }
 }

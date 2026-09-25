@@ -10,7 +10,7 @@ fmt:
 	nix develop --command cargo fmt
 
 clippy:
-	nix develop --command cargo clippy -p dre -p types
+	nix develop --command cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 install:
 	nix develop --command cargo install --path . --debug --force --root $(HOME)/.local

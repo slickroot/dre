@@ -1,5 +1,7 @@
+use crate::diagram::Node;
 use crate::state::action::Action;
 use crate::state::State;
+use types::Tree;
 
 fn is_undoable(state: &State, action: &Action) -> bool {
     match action {
@@ -50,9 +52,20 @@ pub(super) fn recorded(
     }
 }
 
+fn nearest_existing(tree: &Tree<Node>, mut path: Vec<usize>) -> Option<Vec<usize>> {
+    while !path.is_empty() && !tree.contains(&path) {
+        path.pop();
+    }
+    (!path.is_empty()).then_some(path)
+}
+
 pub(super) fn undo(mut state: State) -> State {
     if let Some(previous) = state.history.pop() {
         state.doc = previous;
+        state.selected = state
+            .selected
+            .take()
+            .and_then(|path| nearest_existing(state.doc.tree(), path));
     }
     state
 }

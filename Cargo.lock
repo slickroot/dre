@@ -85,6 +85,7 @@ dependencies = [
  "nix",
  "quick-xml",
  "serde",
+ "types",
 ]
 
 [[package]]
