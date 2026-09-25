@@ -42,7 +42,7 @@ impl Controller for DreController {
             self.screen.render(&state)?;
             match self.keys.next_key()? {
                 Some(key) if key == tty::RESIZE => self.screen.resize()?,
-                key => state = self.reducer.reduce(state, key.as_deref()),
+                key => state = self.reducer.reduce(state, key.as_deref())?,
             }
         }
         Ok(state)
@@ -93,7 +93,7 @@ mod tests {
             .expect_reduce()
             .withf(move |_, k| *k == Some(key))
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| Ok(stopped(state)));
         reducer
     }
 
@@ -141,7 +141,7 @@ mod tests {
             .expect_reduce()
             .withf(|_, key| key.is_none())
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| Ok(stopped(state)));
 
         controller(keys_reading(vec![None]), any_screen(), reducer)
             .run(State::default())
@@ -169,12 +169,12 @@ mod tests {
             .expect_reduce()
             .withf(|_, key| *key == Some("a"))
             .times(1)
-            .returning(|_, _| marked(2));
+            .returning(|_, _| Ok(marked(2)));
         reducer
             .expect_reduce()
             .withf(|_, key| *key == Some("q"))
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| Ok(stopped(state)));
 
         controller(keys_reading(vec![Some("a"), Some("q")]), screen, reducer)
             .run(marked(1))
@@ -187,7 +187,7 @@ mod tests {
         reducer
             .expect_reduce()
             .times(1)
-            .returning(|_, _| stopped(marked(9)));
+            .returning(|_, _| Ok(stopped(marked(9))));
         let mut screen = MockScreen::new();
         screen.expect_render().times(1).returning(|_| Ok(()));
 
@@ -197,6 +197,24 @@ mod tests {
 
         assert!(!state.running);
         assert_eq!(state.pending_count, Some(9));
+    }
+
+    #[test]
+    fn a_failed_reduce_stops_the_loop_and_run_returns_its_error() {
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .times(1)
+            .returning(|_, _| Err(io::Error::other("reduce failed")));
+        let mut screen = MockScreen::new();
+        screen.expect_render().times(1).returning(|_| Ok(()));
+
+        let error = controller(keys_reading(vec![Some("a")]), screen, reducer)
+            .run(State::default())
+            .err()
+            .unwrap();
+
+        assert_eq!(error.to_string(), "reduce failed");
     }
 
     #[test]
