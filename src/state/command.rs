@@ -99,14 +99,12 @@ fn cycle_colour(mut state: State, path: Vec<usize>) -> State {
     let node = state.doc.root.value_mut(&path);
     node.colour = next_colour(node.colour);
     state.selected = Some(path);
-    state.colour_overlay = true;
     state
 }
 
 fn cycle_siblings_colour(mut state: State, path: Vec<usize>) -> State {
     colour_row(&mut state.doc.root, &path);
     state.selected = Some(path);
-    state.colour_overlay = true;
     state
 }
 
@@ -198,18 +196,6 @@ fn accumulate_digit(mut state: State, digit: u8) -> State {
         .saturating_mul(10)
         .saturating_add(digit as usize);
     state.pending_count = Some(count);
-    if !state.colour_overlay {
-        return state;
-    }
-    state.pending_count = None;
-    state.colour_overlay = false;
-    if (1..=7).contains(&count) {
-        let path = state
-            .selected
-            .clone()
-            .expect("colour overlay implies a selection");
-        state.doc.root.value_mut(&path).colour = Some((count - 1) as u8);
-    }
     state
 }
 
@@ -224,7 +210,6 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
         Action::Interrupt => return interrupt(state),
         _ => {}
     }
-    state.colour_overlay = false;
     let count = state.pending_count.take().unwrap_or(1);
     let depth = state.selected.as_ref().map_or(0, Vec::len);
     if depth < min_depth(command) {
@@ -686,88 +671,14 @@ mod tests {
     }
 
     #[test]
-    fn lowercase_c_opens_the_colour_overlay() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let result = handle_key(state, "c");
-        assert!(result.colour_overlay);
-    }
-
-    #[test]
-    fn capital_c_opens_the_colour_overlay() {
-        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        let state = new_state(boxes, Mode::Command, Some(vec![0, 1]));
-        let result = handle_key(state, "C");
-        assert!(result.colour_overlay);
-    }
-
-    #[test]
-    fn an_unrelated_command_closes_the_colour_overlay() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        assert!(opened.colour_overlay);
-
-        let result = handle_key(opened, "j");
-        assert!(!result.colour_overlay);
-        assert_eq!(result.selected, Some(vec![1]));
-    }
-
-    #[test]
-    fn pressing_c_again_keeps_the_overlay_open() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        assert!(opened.colour_overlay);
-
-        let result = handle_key(opened, "c");
-        assert!(result.colour_overlay);
-    }
-
-    #[test]
-    fn digit_two_while_the_overlay_is_open_applies_mint_and_closes_the_overlay() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        let result = handle_key(opened, "2");
-        assert_eq!(result.doc.tree().value(&[0]).colour, Some(1));
-        assert!(!result.colour_overlay);
-    }
-
-    #[test]
-    fn digit_seven_while_the_overlay_is_open_applies_the_last_palette_colour() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        let result = handle_key(opened, "7");
-        assert_eq!(result.doc.tree().value(&[0]).colour, Some(6));
-        assert!(!result.colour_overlay);
-    }
-
-    #[test]
-    fn digit_eight_while_the_overlay_is_open_leaves_the_colour_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        let expected_colour = opened.doc.tree().value(&[0]).colour;
-        let result = handle_key(opened, "8");
-        assert_eq!(result.doc.tree().value(&[0]).colour, expected_colour);
-        assert!(!result.colour_overlay);
-    }
-
-    #[test]
-    fn digit_zero_while_the_overlay_is_open_leaves_the_colour_unchanged() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        let expected_colour = opened.doc.tree().value(&[0]).colour;
-        let result = handle_key(opened, "0");
-        assert_eq!(result.doc.tree().value(&[0]).colour, expected_colour);
-        assert!(!result.colour_overlay);
-    }
-
-    #[test]
-    fn u_after_applying_a_colour_by_digit_restores_the_previous_colour() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        let opened = handle_key(state, "c");
-        let colour_before_digit = opened.doc.tree().value(&[0]).colour;
-        let applied = handle_key(opened, "2");
-        assert_eq!(applied.doc.tree().value(&[0]).colour, Some(1));
-        let undone = handle_key(applied, "u");
-        assert_eq!(undone.doc.tree().value(&[0]).colour, colour_before_digit);
+    fn a_digit_after_c_is_a_count_not_a_colour() {
+        let boxes: Vec<Tree<Node>> = (0..3).map(|i| node(&i.to_string())).collect();
+        let state = new_state(boxes, Mode::Command, Some(vec![0]));
+        let cycled = handle_key(state, "c");
+        let cycled_colour = cycled.doc.tree().value(&[0]).colour;
+        let result = handle_key(handle_key(cycled, "2"), "j");
+        assert_eq!(result.doc.tree().value(&[0]).colour, cycled_colour);
+        assert_eq!(result.selected, Some(vec![2]));
     }
 
     #[test]
@@ -1422,32 +1333,11 @@ mod tests {
     }
 
     #[test]
-    fn a_digit_under_the_colour_overlay_colours_the_selected_box_and_closes_the_overlay() {
-        let state = reduce(story(), Action::CycleColour);
-        assert!(state.colour_overlay);
-        let result = reduce(state, Action::Digit(3));
-        let selected = result.selected.clone().unwrap();
-        assert_eq!(result.doc.tree().value(&selected).colour, Some(2));
-        assert!(!result.colour_overlay);
-        assert_eq!(result.pending_count, None);
-    }
-
-    #[test]
     fn interrupt_stops_running_and_drops_the_save_path() {
         let mut state = new_state(vec![node("a")], Mode::Command, None);
         state.save_to = Some("a.dre".to_string());
         let result = reduce(state, Action::Interrupt);
         assert!(!result.running);
         assert_eq!(result.save_to, None);
-    }
-
-    #[test]
-    fn a_digit_under_the_colour_overlay_is_undoable() {
-        let coloured = reduce(reduce(story(), Action::CycleColour), Action::Digit(3));
-        let undone = reduce(coloured, Action::Undo);
-        assert_eq!(
-            undone.doc.root,
-            reduce(story(), Action::CycleColour).doc.root
-        );
     }
 }

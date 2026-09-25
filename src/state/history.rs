@@ -3,25 +3,22 @@ use crate::state::action::Action;
 use crate::state::State;
 use types::Tree;
 
-fn is_undoable(state: &State, action: &Action) -> bool {
-    match action {
-        Action::Digit(_) => state.colour_overlay,
-        _ => matches!(
-            action,
-            Action::NewBox
-                | Action::Delete
-                | Action::Paste
-                | Action::CycleColour
-                | Action::ToggleFill
-                | Action::ToggleRounded
-                | Action::CycleSiblingsColour
-                | Action::ToggleSiblingsFill
-                | Action::RenameLabel
-                | Action::EditLabel
-                | Action::NewSibling
-                | Action::CommitAndAddChild
-        ),
-    }
+fn is_undoable(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::NewBox
+            | Action::Delete
+            | Action::Paste
+            | Action::CycleColour
+            | Action::ToggleFill
+            | Action::ToggleRounded
+            | Action::CycleSiblingsColour
+            | Action::ToggleSiblingsFill
+            | Action::RenameLabel
+            | Action::EditLabel
+            | Action::NewSibling
+            | Action::CommitAndAddChild
+    )
 }
 
 fn snapshot(mut state: State) -> State {
@@ -42,7 +39,7 @@ pub(super) fn recorded(
     action: &Action,
     reduce: impl FnOnce(State) -> State,
 ) -> State {
-    let undoable = is_undoable(&state, action);
+    let undoable = is_undoable(action);
     let state = if undoable { snapshot(state) } else { state };
     let state = reduce(state);
     if undoable || *action == Action::Commit {
@@ -88,22 +85,12 @@ mod tests {
 
     #[test]
     fn scroll_idle_and_interrupt_are_not_undoable() {
-        let state = command_state();
-        assert!(!is_undoable(&state, &Action::Idle));
-        assert!(!is_undoable(&state, &Action::Interrupt));
-    }
-
-    #[test]
-    fn a_digit_is_undoable_only_under_the_colour_overlay() {
-        let mut state = command_state();
-        assert!(!is_undoable(&state, &Action::Digit(3)));
-        state.colour_overlay = true;
-        assert!(is_undoable(&state, &Action::Digit(3)));
+        assert!(!is_undoable(&Action::Idle));
+        assert!(!is_undoable(&Action::Interrupt));
     }
 
     #[test]
     fn creating_and_editing_actions_are_undoable() {
-        let state = command_state();
         for action in [
             Action::NewBox,
             Action::NewSibling,
@@ -113,28 +100,26 @@ mod tests {
             Action::RenameLabel,
             Action::CommitAndAddChild,
         ] {
-            assert!(is_undoable(&state, &action));
+            assert!(is_undoable(&action));
         }
     }
 
     #[test]
     fn save_prompt_actions_are_not_undoable() {
-        let state = command_state();
         for action in [
             Action::Confirm,
             Action::Cancel,
             Action::SavePromptBackspace,
             Action::SavePromptAppend('a'),
         ] {
-            assert!(!is_undoable(&state, &action));
+            assert!(!is_undoable(&action));
         }
     }
 
     #[test]
     fn typing_in_insert_mode_is_not_undoable() {
-        let state = command_state();
-        assert!(!is_undoable(&state, &Action::InsertAppend('a')));
-        assert!(!is_undoable(&state, &Action::InsertBackspace));
-        assert!(!is_undoable(&state, &Action::Commit));
+        assert!(!is_undoable(&Action::InsertAppend('a')));
+        assert!(!is_undoable(&Action::InsertBackspace));
+        assert!(!is_undoable(&Action::Commit));
     }
 }

@@ -6,7 +6,7 @@ use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED
 use crate::canvas::Canvas;
 use crate::diagram::Node;
 use crate::kitty;
-use crate::layout::{with_cursor, Cursor, Label, Placement, PlacementNode};
+use crate::layout::{with_cursor, Label, Placement, PlacementNode};
 use crate::palette::{palette, BACKGROUND};
 use crate::state::State;
 use crate::status_line::{status_line, Segment, StatusLine};
@@ -21,17 +21,6 @@ pub(super) const ARROW_STROKE: i64 = 3;
 pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
-
-const PALETTE_ROWS: i64 = 7;
-const OVERLAY_DIGIT_COL: i64 = 0;
-const OVERLAY_SWATCH_COL: i64 = 2;
-const OVERLAY_SWATCH_WIDTH: i64 = 2;
-const OVERLAY_MARK_BORDER: i64 = 2;
-
-fn selected_colour(state: &State) -> Option<u8> {
-    let path = state.selected.as_ref()?;
-    state.doc.tree().value(path).colour
-}
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -264,11 +253,7 @@ pub(crate) struct TerminalRenderer {
 impl Renderer for TerminalRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         self.render_diagram(state, out)?;
-        self.render_status_line(state, out)?;
-        if state.colour_overlay {
-            self.render_colour_overlay(state, out)?;
-        }
-        Ok(())
+        self.render_status_line(state, out)
     }
 }
 
@@ -354,63 +339,6 @@ impl TerminalRenderer {
             write!(out, "{text}")?;
         }
         write!(out, "\x1b[0m")
-    }
-
-    // Uses frame.place only to get cropping for free; its images are sent
-    // directly via kitty::show rather than frame.into_bytes(), which would
-    // reissue kitty::clear() and erase the diagram already drawn this frame.
-    fn render_colour_overlay(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let marked = selected_colour(state);
-        let top = (self.window.rows - PALETTE_ROWS).div_euclid(2);
-        let mut frame = Frame::new(self.window);
-        for index in 0..PALETTE_ROWS {
-            let colour_index = index as u8;
-            let row = top + index;
-            write!(
-                out,
-                "\x1b[{};{}H{}",
-                row + 1,
-                OVERLAY_DIGIT_COL + 1,
-                colour_index + 1
-            )?;
-            let placement = Placement {
-                node: PlacementNode::Cursor(Cursor),
-                x: OVERLAY_SWATCH_COL,
-                y: row,
-                width: OVERLAY_SWATCH_WIDTH,
-                height: 1,
-            };
-            let canvas = self.swatch_canvas(colour_index, marked == Some(colour_index));
-            frame.place(&canvas, &placement);
-        }
-        for image in &frame.images {
-            out.write_all(
-                kitty::show(&image.canvas, image.col, image.row)
-                    .to_string()
-                    .as_bytes(),
-            )?;
-        }
-        Ok(())
-    }
-
-    fn swatch_canvas(&self, colour_index: u8, marked: bool) -> Canvas {
-        let width = self.cells_to_pixels_x(OVERLAY_SWATCH_WIDTH);
-        let height = self.cells_to_pixels_y(1);
-        let (r, g, b) = palette(colour_index).expect("colour_index is within 0..PALETTE_ROWS");
-        let (er, eg, eb) = colour(None);
-        let shape = BoxShape {
-            width,
-            height,
-            border: if marked { OVERLAY_MARK_BORDER } else { 0 },
-            radius: 0,
-            edge: if marked {
-                [er, eg, eb, OPAQUE]
-            } else {
-                [0, 0, 0, 0]
-            },
-            fill: [r, g, b, OPAQUE],
-        };
-        Canvas::fill(width, height, &shape)
     }
 
     fn draw_box(&mut self, frame: &mut Frame, placement: &Placement) {
@@ -2425,145 +2353,5 @@ mod tests {
         let text = status_line_text(&mut r, &state);
         assert!(text.starts_with(&expected_left));
         assert!(strip_escapes(&render_output(&mut r, &state)).contains(&expected_left));
-    }
-
-    fn overlay_state(colour: Option<u8>) -> State {
-        let boxes = vec![Tree::leaf(Node {
-            colour,
-            ..labelled("hi")
-        })];
-        let selected = Some(vec![0]);
-        let mut state = crate::state::new_state(boxes, Mode::Command, selected);
-        state.colour_overlay = true;
-        state
-    }
-
-    fn colour_overlay_output(r: &mut TerminalRenderer, state: &State) -> String {
-        let mut out = Vec::new();
-        r.render_colour_overlay(state, &mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn swatch_canvas_unmarked_is_solid_palette_colour() {
-        let r = renderer_on(window(20, 10, 8, 16));
-        let canvas = r.swatch_canvas(2, false);
-        let expected = {
-            let (pr, pg, pb) = palette(2).unwrap();
-            (pr, pg, pb, OPAQUE)
-        };
-        assert_eq!(pixel_at(&canvas.pixels, canvas.width, 0, 0), expected);
-        assert_eq!(
-            pixel_at(
-                &canvas.pixels,
-                canvas.width,
-                canvas.width - 1,
-                canvas.height - 1
-            ),
-            expected
-        );
-    }
-
-    #[test]
-    fn swatch_canvas_marked_has_a_border_around_the_fill() {
-        let r = renderer_on(window(20, 10, 8, 16));
-        let canvas = r.swatch_canvas(2, true);
-        let expected_edge = {
-            let (er, eg, eb) = colour(None);
-            (er, eg, eb, OPAQUE)
-        };
-        let expected_fill = {
-            let (pr, pg, pb) = palette(2).unwrap();
-            (pr, pg, pb, OPAQUE)
-        };
-        assert_eq!(pixel_at(&canvas.pixels, canvas.width, 0, 0), expected_edge);
-        assert_eq!(
-            pixel_at(
-                &canvas.pixels,
-                canvas.width,
-                canvas.width / 2,
-                canvas.height / 2
-            ),
-            expected_fill
-        );
-    }
-
-    #[test]
-    fn the_colour_overlay_lists_all_seven_palette_rows() {
-        let mut r = renderer_on(window(20, 21, 1, 1));
-        let state = overlay_state(None);
-        let output = colour_overlay_output(&mut r, &state);
-        let top = (21 - PALETTE_ROWS) / 2;
-        for index in 0..PALETTE_ROWS {
-            let row = top + index;
-            let label = format!("\x1b[{};{}H{}", row + 1, OVERLAY_DIGIT_COL + 1, index + 1);
-            assert!(
-                output.contains(&label),
-                "expected label {label:?} in overlay output"
-            );
-        }
-    }
-
-    #[test]
-    fn the_colour_overlay_places_one_swatch_per_row_at_the_left_edge() {
-        let mut r = renderer_on(window(20, 21, 1, 1));
-        let state = overlay_state(Some(2));
-        let output = colour_overlay_output(&mut r, &state);
-        let top = (21 - PALETTE_ROWS) / 2;
-        for index in 0..PALETTE_ROWS {
-            let colour_index = index as u8;
-            let row = top + index;
-            let canvas = r.swatch_canvas(colour_index, colour_index == 2);
-            let expected = kitty::show(&canvas, OVERLAY_SWATCH_COL, row).to_string();
-            assert!(
-                output.contains(&expected),
-                "expected swatch for palette index {colour_index} at row {row}"
-            );
-        }
-    }
-
-    #[test]
-    fn no_row_is_marked_when_the_box_has_no_colour() {
-        let mut r = renderer_on(window(20, 21, 1, 1));
-        let state = overlay_state(None);
-        let output = colour_overlay_output(&mut r, &state);
-        let top = (21 - PALETTE_ROWS) / 2;
-        for index in 0..PALETTE_ROWS {
-            let colour_index = index as u8;
-            let row = top + index;
-            let unmarked = r.swatch_canvas(colour_index, false);
-            let expected = kitty::show(&unmarked, OVERLAY_SWATCH_COL, row).to_string();
-            assert!(
-                output.contains(&expected),
-                "expected the unmarked swatch for palette index {colour_index} at row {row}"
-            );
-        }
-    }
-
-    #[test]
-    fn render_skips_the_colour_overlay_when_it_is_closed() {
-        let mut r = renderer_on(window(20, 21, 1, 1));
-        let mut state = overlay_state(Some(2));
-        state.colour_overlay = false;
-
-        let mut expected = Vec::new();
-        r.render_diagram(&state, &mut expected).unwrap();
-        r.render_status_line(&state, &mut expected).unwrap();
-
-        let mut r2 = renderer_on(window(20, 21, 1, 1));
-        let mut actual = Vec::new();
-        r2.render(&state, &mut actual).unwrap();
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn render_draws_the_colour_overlay_when_it_is_open() {
-        let mut r = renderer_on(window(20, 21, 1, 1));
-        let state = overlay_state(Some(2));
-        let output = render_output(&mut r, &state);
-        let top = (21 - PALETTE_ROWS) / 2;
-        let label = format!("\x1b[{};{}H{}", top + 1, OVERLAY_DIGIT_COL + 1, 1);
-        assert!(output.contains(&label));
     }
 }
