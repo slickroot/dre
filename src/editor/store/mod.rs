@@ -3,7 +3,7 @@ pub(crate) mod files;
 use std::io;
 
 use crate::state::State;
-use crate::{dre_format, file_document, filesystem};
+use crate::{diagram, dre_format, filesystem};
 use files::Files;
 
 #[cfg_attr(test, mockall::automock)]
@@ -36,7 +36,7 @@ impl StateStore for FileStateStore {
             result => result?,
         };
         let doc = dre_format::read(&text)
-            .map(file_document::to_document)
+            .map(diagram::to_document)
             .ok_or_else(|| filesystem::invalid(path))?;
         Ok(State::open(doc, Some(path.to_string())))
     }
@@ -45,7 +45,7 @@ impl StateStore for FileStateStore {
         match &state.save_to {
             Some(path) => self.files.write(
                 path,
-                &dre_format::write(&file_document::from_document(&state.doc)),
+                &dre_format::write(&diagram::from_document(&state.doc)),
             ),
             None => Ok(()),
         }
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn saving_writes_the_document_to_where_the_state_saves_to() {
         let state = state_with_one_box_saving_to(Some("out.dre"));
-        let expected = dre_format::write(&file_document::from_document(&state.doc));
+        let expected = dre_format::write(&diagram::from_document(&state.doc));
         let mut files = MockFiles::new();
         files
             .expect_write()

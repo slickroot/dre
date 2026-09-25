@@ -8,8 +8,6 @@ mod dre_format;
 #[cfg(not(target_arch = "wasm32"))]
 mod editor;
 #[cfg(not(target_arch = "wasm32"))]
-mod file_document;
-#[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
