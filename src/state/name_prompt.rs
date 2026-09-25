@@ -20,6 +20,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
         Action::NameAppend(c) => name.push(c),
         _ => {}
     }
+    state.refresh_footer();
     state
 }
 

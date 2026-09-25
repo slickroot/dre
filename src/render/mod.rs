@@ -1,9 +1,9 @@
 use std::io::{self, Write};
 
 use crate::composer::{self, Area};
-use crate::layout::{self, with_cursor, Placement, FOOTER_ROWS};
+use crate::layout::{self, with_cursor, Cursor, Placement, PlacementNode, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
-use crate::state::State;
+use crate::state::{Mode, State};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod font;
@@ -24,10 +24,17 @@ pub trait Renderer {
 
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
-    vec![
-        (body, self::body(state, body)),
-        (foot, align_right(layout::footer(state.footer()), foot)),
-    ]
+    let mut footer = align_right(layout::footer(state.footer()), foot);
+    if let Mode::NamePrompt { name } = &state.mode {
+        footer.push(Placement {
+            node: PlacementNode::Cursor(Cursor),
+            x: footer[0].x + name.chars().count() as i64,
+            y: foot.row,
+            width: 1,
+            height: 1,
+        });
+    }
+    vec![(body, self::body(state, body)), (foot, footer)]
 }
 
 pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
@@ -111,6 +118,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER};
     use crate::state::{new_state, Mode};
+    use crate::test_support::handle_key;
 
     const AREA: Area = Area {
         col: 3,
@@ -313,6 +321,55 @@ mod tests {
     fn editor_ends_with_no_name_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
         let state = state(None);
         assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
+    }
+
+    fn prompt_cursor_x(name: &str, text: &str) -> i64 {
+        let foot = foot_of(WINDOW);
+        foot.col + foot.cols - text.chars().count() as i64 + name.chars().count() as i64
+    }
+
+    #[test]
+    fn the_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
+        let state = handle_key(state(None), "n");
+        let text = "type a name \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
+    }
+
+    #[test]
+    fn the_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
+        let state = handle_key(handle_key(handle_key(state(None), "n"), "a"), "b");
+        let text = "ab \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
+    }
+
+    #[test]
+    fn cancelling_the_prompt_restores_the_footer() {
+        let state = handle_key(handle_key(state(None), "n"), "\x1b");
+        assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
+    }
+
+    fn assert_footer_is_bottom_right_with_cursor(state: &State, text: &str, x: i64) {
+        let foot = foot_of(WINDOW);
+        let footer = &editor(state, WINDOW)[1].1;
+        assert_eq!(footer.len(), 3);
+        assert_eq!(
+            footer[1],
+            label_at(
+                text,
+                foot.col + foot.cols - text.chars().count() as i64,
+                foot.row
+            )
+        );
+        assert_eq!(
+            footer[2],
+            Placement {
+                node: PlacementNode::Cursor(Cursor),
+                x,
+                y: foot.row,
+                width: 1,
+                height: 1
+            }
+        );
     }
 
     fn assert_footer_is_bottom_right(state: &State, text: &str) {

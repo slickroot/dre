@@ -13,15 +13,13 @@ use crate::state::action::ActionMode;
 use crate::state::input::INTERRUPT;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
-#[cfg(test)]
 pub(crate) use crate::state::mode::Mode;
-#[cfg(not(test))]
-use crate::state::mode::Mode;
 use types::Tree;
 
 const PAD: &str = " ";
 const DEFAULT_FILENAME: &str = "diagram.dre";
 const NO_NAME: &str = "[no name]";
+const PLACEHOLDER: &str = "type a name";
 const FOOTER_SUFFIX: &str = " • dre";
 
 #[allow(dead_code)]
@@ -76,6 +74,14 @@ impl State {
     pub(crate) fn set_save_to(&mut self, save_to: Option<String>) {
         self.footer = footer_text(save_to.as_deref());
         self.save_to = save_to;
+    }
+
+    pub(crate) fn refresh_footer(&mut self) {
+        self.footer = match &self.mode {
+            Mode::NamePrompt { name } if name.is_empty() => format!("{PLACEHOLDER}{FOOTER_SUFFIX}"),
+            Mode::NamePrompt { name } => format!("{name}{FOOTER_SUFFIX}"),
+            _ => footer_text(self.save_to.as_deref()),
+        };
     }
 
     pub(crate) fn footer(&self) -> &str {

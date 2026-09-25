@@ -24,6 +24,7 @@ fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
         name: String::new(),
     };
+    state.refresh_footer();
     state
 }
 
