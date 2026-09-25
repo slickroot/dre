@@ -19,6 +19,7 @@ fn label_font_size() -> f64 {
 pub const FULL_HD_WIDTH: i64 = 1920;
 pub const FULL_HD_HEIGHT: i64 = 1080;
 
+#[derive(Clone, Copy)]
 enum Mode {
     Export,
     Editor,
@@ -59,7 +60,7 @@ impl Renderer for SvgRenderer {
             Mode::Editor => editor(state, window),
             Mode::Export => vec![(window, without_cursor(body(state, window)))],
         };
-        out.write_all(document(self.canvas, &areas).as_bytes())
+        out.write_all(document(self.canvas, self.mode, &areas).as_bytes())
     }
 }
 
@@ -79,10 +80,14 @@ fn pixels(area: Area) -> (i64, i64, i64, i64) {
     )
 }
 
-fn document(canvas: (i64, i64), areas: &[(Area, Vec<Placement>)]) -> String {
+fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) -> String {
     let (width, height) = canvas;
+    let (root_width, root_height) = match mode {
+        Mode::Editor => (width.to_string(), height.to_string()),
+        Mode::Export => ("100%".to_string(), "100%".to_string()),
+    };
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{root_width}\" height=\"{root_height}\" viewBox=\"0 0 {width} {height}\">"
     );
     svg.push_str(&background_rect(0, 0, width, height));
     if areas.iter().any(|(_, placements)| {
@@ -385,6 +390,7 @@ mod tests {
         };
         document(
             (cols * CELL_WIDTH, rows * CELL_HEIGHT),
+            super::Mode::Editor,
             &[(window, placements.to_vec())],
         )
     }
@@ -1069,6 +1075,7 @@ mod tests {
 
         let svg = document(
             (window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
+            super::Mode::Editor,
             &[(body, placements), (foot, footer)],
         );
 
@@ -1238,6 +1245,10 @@ mod tests {
         format!("width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"")
     }
 
+    fn scaling_root_size(width: i64, height: i64) -> String {
+        format!("width=\"100%\" height=\"100%\" viewBox=\"0 0 {width} {height}\"")
+    }
+
     fn nested(area: Area, contents: &str) -> String {
         format!(
             "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{}\">{contents}</svg>",
@@ -1357,7 +1368,7 @@ mod tests {
 
             assert!(svg.starts_with(&format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
-                root_size(FULL_HD_WIDTH, FULL_HD_HEIGHT)
+                scaling_root_size(FULL_HD_WIDTH, FULL_HD_HEIGHT)
             )));
             assert!(svg.contains(&expected_background(0, 0, FULL_HD_WIDTH, FULL_HD_HEIGHT)));
         }
