@@ -1,4 +1,5 @@
-use crate::diagram::Node;
+use crate::diagram::{children, Node};
+use types::Tree;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 #[allow(dead_code)]
@@ -28,33 +29,27 @@ pub(crate) fn centre(width: i64, label: &str) -> i64 {
     1 + leftover - leftover.div_euclid(2)
 }
 
-pub(crate) fn measure_columns(nodes: &[Node]) -> Vec<i64> {
-    fn visit(node: &Node, col: usize, widths: &mut Vec<i64>) {
+pub(crate) fn measure_columns(tree: &Tree<Node>) -> Vec<i64> {
+    fn widen(widths: &mut Vec<i64>, col: usize, width: i64) {
         if widths.len() <= col {
             widths.resize(col + 1, 0);
         }
-        widths[col] = widths[col].max(width(node));
-        if !node.children.is_empty() {
-            let gap_col = col + 1;
-            if widths.len() <= gap_col {
-                widths.resize(gap_col + 1, 0);
-            }
-            widths[gap_col] = widths[gap_col].max(GAP_WIDTH);
-            for child in &node.children {
-                visit(child, gap_col + 1, widths);
-            }
-        }
+        widths[col] = widths[col].max(width);
     }
 
     let mut widths = Vec::new();
-    for node in nodes {
-        visit(node, 0, &mut widths);
+    for (path, node) in tree.walk() {
+        let col = 2 * (path.len() - 1);
+        widen(&mut widths, col, width(node));
+        if children(tree, &path).next().is_some() {
+            widen(&mut widths, col + 1, GAP_WIDTH);
+        }
     }
     widths
 }
 
 // `offsets` has one more entry than there are columns, so `offsets[col + 1] - offsets[col]` gives column `col`'s width.
-pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>> {
+pub(crate) fn place<'a>(tree: &'a Tree<Node>, offsets: &[i64]) -> Vec<Placement<'a>> {
     fn median(rows: &[usize]) -> usize {
         let middle = rows.len() / 2;
         if rows.len() % 2 == 1 {
@@ -122,16 +117,18 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
     }
 
     fn visit<'a>(
-        node: &'a Node,
+        tree: &'a Tree<Node>,
         col: usize,
         path: Vec<usize>,
         offsets: &[i64],
         free: &mut usize,
     ) -> (Vec<Placement<'a>>, usize) {
+        let node = tree.value(&path);
         let x = offsets[col];
         let width = offsets[col + 1] - offsets[col];
+        let child_paths: Vec<Vec<usize>> = children(tree, &path).collect();
 
-        if node.children.is_empty() {
+        if child_paths.is_empty() {
             let row = *free;
             *free += LEAF_STRIDE as usize;
             let placements = emit(node, x, row, width, &path, &[]);
@@ -141,9 +138,8 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
         let child_col = col + 2;
         let mut child_placements = Vec::new();
         let mut child_rows = Vec::new();
-        for (index, child) in node.children.iter().enumerate() {
-            let child_path = [&path[..], &[index]].concat();
-            let (placements, row) = visit(child, child_col, child_path, offsets, free);
+        for child_path in child_paths {
+            let (placements, row) = visit(tree, child_col, child_path, offsets, free);
             child_placements.extend(placements);
             child_rows.push(row);
         }
@@ -155,8 +151,8 @@ pub(crate) fn place<'a>(nodes: &'a [Node], offsets: &[i64]) -> Vec<Placement<'a>
 
     let mut placements = Vec::new();
     let mut free = 0usize;
-    for (index, node) in nodes.iter().enumerate() {
-        let (node_placements, _) = visit(node, 0, vec![index], offsets, &mut free);
+    for path in children(tree, &[]) {
+        let (node_placements, _) = visit(tree, 0, path, offsets, &mut free);
         placements.extend(node_placements);
     }
     placements
@@ -195,12 +191,12 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
-    if nodes.is_empty() {
+pub(crate) fn layout<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
+    if !tree.contains(&[0]) {
         return Vec::new();
     }
 
-    let widths = measure_columns(nodes);
+    let widths = measure_columns(tree);
 
     let mut offsets = Vec::with_capacity(widths.len() + 1);
     let mut offset = 0;
@@ -210,7 +206,7 @@ pub(crate) fn layout<'a>(nodes: &'a [Node]) -> Vec<Placement<'a>> {
     }
     offsets.push(offset);
 
-    let placements = place(nodes, &offsets);
+    let placements = place(tree, &offsets);
 
     let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
@@ -250,9 +246,9 @@ pub(crate) fn with_cursor<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::{node, node_with_children};
+    use crate::diagram::{labelled, node, node_with_children};
 
-    fn offsets_for(nodes: &[Node]) -> Vec<i64> {
+    fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
         let widths = measure_columns(nodes);
         let mut offsets = Vec::with_capacity(widths.len() + 1);
         let mut offset = 0;
@@ -266,38 +262,45 @@ mod tests {
 
     #[test]
     fn measure_columns_of_leaf_only_forest_is_one_column_of_the_max_width() {
-        let nodes = vec![node("aa"), node("b")];
+        let nodes = Tree::root(vec![node("aa"), node("b")]);
         let widths = measure_columns(&nodes);
-        assert_eq!(widths, vec![width(&node("aa"))]);
+        assert_eq!(widths, vec![width(nodes.value(&[0]))]);
     }
 
     #[test]
     fn measure_columns_of_a_parent_and_child_has_parent_gap_child_widths() {
-        let nodes = vec![node_with_children("parent", vec![node("a")])];
+        let nodes = Tree::root(vec![node_with_children("parent", vec![node("a")])]);
         let widths = measure_columns(&nodes);
         assert_eq!(
             widths,
-            vec![width(&node("parent")), GAP_WIDTH, width(&node("a"))]
+            vec![
+                width(nodes.value(&[0])),
+                GAP_WIDTH,
+                width(nodes.value(&[0, 0]))
+            ]
         );
     }
 
     #[test]
     fn measure_columns_aligns_columns_across_multiple_top_level_trees() {
-        let nodes = vec![
+        let nodes = Tree::root(vec![
             node("a"),
             node_with_children("bb", vec![node("ccc")]),
             node("d"),
-        ];
+        ]);
         let widths = measure_columns(&nodes);
-        let expected_col0 = width(&node("a"))
-            .max(width(&node("bb")))
-            .max(width(&node("d")));
-        assert_eq!(widths, vec![expected_col0, GAP_WIDTH, width(&node("ccc"))]);
+        let expected_col0 = width(nodes.value(&[0]))
+            .max(width(nodes.value(&[1])))
+            .max(width(nodes.value(&[2])));
+        assert_eq!(
+            widths,
+            vec![expected_col0, GAP_WIDTH, width(nodes.value(&[1, 0]))]
+        );
     }
 
     #[test]
     fn measure_columns_of_no_nodes_is_empty() {
-        let widths = measure_columns(&[]);
+        let widths = measure_columns(&Tree::root(vec![]));
         assert_eq!(widths, Vec::<i64>::new());
     }
 
@@ -313,18 +316,18 @@ mod tests {
 
     #[test]
     fn width_is_interior_plus_borders() {
-        assert_eq!(width(&node("hi")), 2 + BORDERS);
+        assert_eq!(width(&labelled("hi")), 2 + BORDERS);
     }
 
     #[test]
     fn width_of_empty_label_box_is_one_plus_borders() {
-        assert_eq!(width(&node("")), 1 + BORDERS);
+        assert_eq!(width(&labelled("")), 1 + BORDERS);
     }
 
     #[test]
     fn height_is_always_box_height() {
-        assert_eq!(height(&node("anything")), BOX_HEIGHT);
-        assert_eq!(height(&node("")), BOX_HEIGHT);
+        assert_eq!(height(&labelled("anything")), BOX_HEIGHT);
+        assert_eq!(height(&labelled("")), BOX_HEIGHT);
     }
 
     #[test]
@@ -339,14 +342,13 @@ mod tests {
 
     #[test]
     fn place_places_a_node_using_its_offset_and_row() {
-        let hi = node("hi");
-        let nodes = vec![hi.clone()];
+        let nodes = Tree::root(vec![node("hi")]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
         let box_placement = &placements[0];
         match &box_placement.node {
-            PlacementNode::Node(n) => assert_eq!(*n, &hi),
+            PlacementNode::Node(n) => assert_eq!(*n, nodes.value(&[0])),
             _ => panic!("expected the first placement to wrap the node"),
         }
         assert_eq!(box_placement.x, offsets[0]);
@@ -357,7 +359,10 @@ mod tests {
 
     #[test]
     fn place_recurses_into_children_building_correct_paths() {
-        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
@@ -373,13 +378,13 @@ mod tests {
 
     #[test]
     fn place_of_a_leaf_yields_only_a_box_and_a_label_placement() {
-        let nodes = vec![node("hi")];
+        let nodes = Tree::root(vec![node("hi")]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
         assert_eq!(placements.len(), 2);
         match &placements[0].node {
-            PlacementNode::Node(n) => assert_eq!(*n, &node("hi")),
+            PlacementNode::Node(n) => assert_eq!(*n, &labelled("hi")),
             _ => panic!("expected the first placement to wrap the node"),
         }
         match &placements[1].node {
@@ -393,7 +398,10 @@ mod tests {
 
     #[test]
     fn place_of_a_parent_yields_a_third_arrow_placement_with_stops_and_shaft() {
-        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
@@ -423,10 +431,10 @@ mod tests {
 
     #[test]
     fn place_assigns_a_parents_row_as_the_middle_childs_row_when_odd() {
-        let nodes = vec![node_with_children(
+        let nodes = Tree::root(vec![node_with_children(
             "parent",
             vec![node("a"), node("b"), node("c")],
-        )];
+        )]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
@@ -439,7 +447,10 @@ mod tests {
 
     #[test]
     fn place_assigns_a_parents_row_one_past_the_row_before_the_middle_when_even() {
-        let nodes = vec![node_with_children("parent", vec![node("a"), node("b")])];
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
@@ -452,12 +463,12 @@ mod tests {
 
     #[test]
     fn layout_of_no_boxes_is_empty() {
-        assert_eq!(layout(&[]), vec![]);
+        assert_eq!(layout(&Tree::root(vec![])), vec![]);
     }
 
     #[test]
     fn layout_of_a_single_leaf_box_starts_at_the_origin() {
-        let nodes = vec![node("hi")];
+        let nodes = Tree::root(vec![node("hi")]);
         let placements = layout(&nodes);
         let box_placement = placements[0].clone();
         assert!(matches!(box_placement.node, PlacementNode::Node(_)));
@@ -467,7 +478,7 @@ mod tests {
 
     #[test]
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
-        let nodes = vec![node("hi")];
+        let nodes = Tree::root(vec![node("hi")]);
         let placements = layout(&nodes);
         assert!(placements
             .iter()
@@ -482,10 +493,10 @@ mod tests {
 
     #[test]
     fn a_hint_node_produces_a_hint_label() {
-        let nodes = vec![Node {
+        let nodes = Tree::root(vec![Tree::leaf(Node {
             hint: true,
-            ..node("hi")
-        }];
+            ..labelled("hi")
+        })]);
         let placements = layout(&nodes);
         let label = placements
             .iter()
@@ -499,7 +510,7 @@ mod tests {
 
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
-        let boxes = vec![node_with_children("parent", vec![node("child")])];
+        let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
         let placements = layout(&boxes);
         assert!(placements
             .iter()
@@ -508,7 +519,7 @@ mod tests {
 
     #[test]
     fn layout_draws_boxes_before_labels_and_arrows() {
-        let boxes = vec![node_with_children("parent", vec![node("child")])];
+        let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
         let placements = layout(&boxes);
 
         let first_non_box = placements
@@ -522,7 +533,7 @@ mod tests {
 
     #[test]
     fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
-        let nodes = vec![node("hi")];
+        let nodes = Tree::root(vec![node("hi")]);
         let placements = layout(&nodes);
         let label = placements
             .iter()
@@ -540,7 +551,7 @@ mod tests {
 
     #[test]
     fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
-        let nodes = vec![node("hi")];
+        let nodes = Tree::root(vec![node("hi")]);
         let placements = layout(&nodes);
         let result = with_cursor(placements.clone(), Some(vec![99]));
         assert_eq!(result, placements);
@@ -569,7 +580,7 @@ mod tests {
 
     #[test]
     fn placement_node_holds_the_matching_variants_inner_value() {
-        let a = node("a");
+        let a = labelled("a");
         let box_placement = Placement {
             node: PlacementNode::Node(&a),
             x: 0,

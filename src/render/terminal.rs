@@ -11,6 +11,7 @@ use crate::palette::{palette, BACKGROUND};
 use crate::state::State;
 use crate::status_line::{status_line, Segment, StatusLine};
 use crate::tty::Window;
+use types::Tree;
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -29,16 +30,7 @@ const OVERLAY_MARK_BORDER: i64 = 2;
 
 fn selected_colour(state: &State) -> Option<u8> {
     let path = state.selected.as_ref()?;
-    colour_at(&state.doc.boxes, path)
-}
-
-fn colour_at(boxes: &[Node], path: &[usize]) -> Option<u8> {
-    let (&last, parent) = path.split_last()?;
-    let mut children = boxes;
-    for &index in parent {
-        children = &children[index].children;
-    }
-    children[last].colour
+    state.doc.tree().value(path).colour
 }
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
@@ -300,12 +292,12 @@ impl TerminalRenderer {
     }
 
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let hint_boxes = [hint_node()];
-        let placements = if state.doc.boxes.is_empty() {
+        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
+        let placements = if !state.doc.tree().contains(&[0]) {
             crate::layout::layout(&hint_boxes)
         } else {
             with_cursor(
-                crate::layout::layout(&state.doc.boxes),
+                crate::layout::layout(state.doc.tree()),
                 state.selected.clone(),
             )
         };
@@ -550,7 +542,7 @@ impl TerminalRenderer {
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::*;
-    use crate::diagram::{node, node_with_children, Document};
+    use crate::diagram::{labelled, node, node_with_children, Document};
     use crate::state::Mode;
 
     #[test]
@@ -807,7 +799,6 @@ mod tests {
             colour,
             filled,
             rounded,
-            children: vec![],
             hint: false,
         }
     }
@@ -1196,8 +1187,10 @@ mod tests {
 
     #[test]
     fn a_frame_with_sprites_ends_with_a_clear_then_each_sprite_shown_in_order() {
-        let parent = node_with_children("parent", vec![node("a"), node("b")]);
-        let nodes = vec![parent];
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
         let placements = crate::layout::layout(&nodes);
         let cols = placements
             .iter()
@@ -1221,15 +1214,15 @@ mod tests {
             .map(|command| command.to_string())
             .collect();
         let doc = Document {
-            boxes: nodes.clone(),
+            root: nodes.clone(),
         };
         assert!(rendered_diagram(&mut renderer_on(window), &doc).ends_with(&expected));
     }
 
     #[test]
     fn centres_a_leaf_box_within_the_terminal() {
-        let leaf = node("hi");
-        let nodes = vec![leaf.clone()];
+        let leaf = labelled("hi");
+        let nodes = Tree::root(vec![Tree::leaf(leaf.clone())]);
         let placements = crate::layout::layout(&nodes);
         let cols = 20;
         let rows_count = 10;
@@ -1258,8 +1251,8 @@ mod tests {
 
     #[test]
     fn an_overflowing_diagram_is_cropped_equally_on_both_sides() {
-        let leaf = node("hi");
-        let nodes = vec![leaf.clone()];
+        let leaf = labelled("hi");
+        let nodes = Tree::root(vec![Tree::leaf(leaf.clone())]);
         let placements = crate::layout::layout(&nodes);
         let width = crate::layout::width(&leaf);
         let cut_each_side = 1;
@@ -1278,14 +1271,16 @@ mod tests {
 
     #[test]
     fn centres_a_parent_and_children_as_a_group() {
-        let parent = node_with_children("parent", vec![node("a"), node("b")]);
-        let nodes = vec![parent.clone()];
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
         let placements = crate::layout::layout(&nodes);
         let cols = 40;
         let rows_count = 12;
-        let span = crate::layout::width(&parent)
+        let span = crate::layout::width(nodes.value(&[0]))
             + crate::layout::GAP_WIDTH
-            + crate::layout::width(&node("a"));
+            + crate::layout::width(nodes.value(&[0, 0]));
         let height =
             crate::layout::LEAF_STRIDE * crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT;
         let left = (cols - span).div_euclid(2);
@@ -1296,11 +1291,13 @@ mod tests {
         frame.centre_on(&placements);
         draw_all(&mut r, &mut frame, &placements);
 
-        let child_base_x = crate::layout::width(&parent) + crate::layout::GAP_WIDTH;
-        let parent_label_x = left + crate::layout::centre(crate::layout::width(&parent), "parent");
+        let child_base_x = crate::layout::width(nodes.value(&[0])) + crate::layout::GAP_WIDTH;
+        let parent_label_x =
+            left + crate::layout::centre(crate::layout::width(nodes.value(&[0])), "parent");
         let parent_label_row = top + crate::layout::HALF_PITCH + crate::layout::BOX_HEIGHT / 2;
-        let child_a_label_x =
-            left + child_base_x + crate::layout::centre(crate::layout::width(&node("a")), "a");
+        let child_a_label_x = left
+            + child_base_x
+            + crate::layout::centre(crate::layout::width(nodes.value(&[0, 0])), "a");
         let child_a_label_row = top + crate::layout::BOX_HEIGHT / 2;
 
         let is_glyph = |image: &&Placed| image.canvas.width == 1 && image.canvas.height == 1;
@@ -1331,15 +1328,16 @@ mod tests {
 
     #[test]
     fn on_resize_re_centres_the_next_render_on_the_new_size() {
-        let leaf = node("hi");
-        let boxes = vec![leaf.clone()];
-        let doc = Document { boxes };
+        let leaf = labelled("hi");
+        let doc = Document {
+            root: Tree::root(vec![Tree::leaf(leaf.clone())]),
+        };
         let mut r = renderer_on(window(20, 10, 1, 1));
         rendered(&mut r, &doc);
         let (cols, rows_count) = (40, 20);
         r.on_resize(window(cols, rows_count, 1, 1));
 
-        let placements = crate::layout::layout(&doc.boxes);
+        let placements = crate::layout::layout(doc.tree());
         let mut frame = Frame::new(r.window);
         frame.centre_on(&placements);
         draw_all(&mut r, &mut frame, &placements);
@@ -1396,7 +1394,7 @@ mod tests {
     }
 
     fn empty_doc() -> Document {
-        Document { boxes: vec![] }
+        Document::default()
     }
 
     #[test]
@@ -1447,7 +1445,7 @@ mod tests {
 
     #[test]
     fn the_cursor_is_drawn_for_the_selected_box() {
-        let boxes = vec![node("hi")];
+        let boxes = Tree::root(vec![node("hi")]);
         let mut r = renderer_on(Window {
             cols: 20,
             rows: 10,
@@ -1479,7 +1477,7 @@ mod tests {
             cell_width: 1,
             cell_height: 1,
         });
-        let boxes = vec![node("hi")];
+        let boxes = Tree::root(vec![node("hi")]);
         let placements = with_cursor(crate::layout::layout(&boxes), None);
         assert!(!placements
             .iter()
@@ -1494,7 +1492,7 @@ mod tests {
         let output = rendered_diagram(&mut r, &empty_doc());
 
         let mut expected_r = renderer_on(window);
-        let hint_boxes = [hint_node()];
+        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
         let placements = crate::layout::layout(&hint_boxes);
         let mut frame = Frame::new(window);
         frame.centre_on(&placements);
@@ -1509,12 +1507,12 @@ mod tests {
         let window = window(40, 10, 1, 1);
         let mut r = renderer_on(window);
         let doc = Document {
-            boxes: vec![node("hi")],
+            root: Tree::root(vec![node("hi")]),
         };
         let output = rendered_diagram(&mut r, &doc);
 
         let mut expected_r = renderer_on(window);
-        let placements = with_cursor(crate::layout::layout(&doc.boxes), None);
+        let placements = with_cursor(crate::layout::layout(doc.tree()), None);
         let mut frame = Frame::new(window);
         frame.centre_on(&placements);
         draw_all(&mut expected_r, &mut frame, &placements);
@@ -1536,7 +1534,7 @@ mod tests {
         let output = String::from_utf8(out).unwrap();
 
         let mut expected_r = renderer_on(window(20, 10, 1, 1));
-        let hint_boxes = [hint_node()];
+        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
         let placements = crate::layout::layout(&hint_boxes);
         assert!(!placements
             .iter()
@@ -2430,10 +2428,10 @@ mod tests {
     }
 
     fn overlay_state(colour: Option<u8>) -> State {
-        let boxes = vec![Node {
+        let boxes = vec![Tree::leaf(Node {
             colour,
-            ..node("hi")
-        }];
+            ..labelled("hi")
+        })];
         let selected = Some(vec![0]);
         let mut state = crate::state::new_state(boxes, Mode::Command, selected);
         state.colour_overlay = true;

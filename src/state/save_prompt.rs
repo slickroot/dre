@@ -33,16 +33,10 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::Node;
+    use crate::diagram::node;
     use crate::state::{new_state, Mode, DEFAULT_FILENAME};
     use crate::test_support::handle_key;
-
-    fn node(label: &str) -> Node {
-        Node {
-            label: label.to_string(),
-            ..Default::default()
-        }
-    }
+    use types::Tree;
 
     fn prompt(filename: &str) -> Mode {
         Mode::SavePrompt {
@@ -109,6 +103,6 @@ mod tests {
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);
-        assert_eq!(result.doc.boxes, vec![node("a")]);
+        assert_eq!(result.doc.root, Tree::root(vec![node("a")]));
     }
 }

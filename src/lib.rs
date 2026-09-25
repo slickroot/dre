@@ -63,7 +63,7 @@ impl Session {
     }
 
     pub fn extent(&self) -> (i64, i64) {
-        let placements = layout::layout(&self.state.doc.boxes);
+        let placements = layout::layout(self.state.doc.tree());
         let width = placements
             .iter()
             .map(|placement| placement.x + placement.width)
