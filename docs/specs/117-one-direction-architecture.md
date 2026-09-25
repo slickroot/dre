@@ -198,6 +198,7 @@ deliberate: extractions first, then the `Action` seam, then the data types.
    removed, `file_document.rs` into `diagram.rs`.
 7. Spec 124: edits move onto `Document` methods and the reducers call them.
 8. Spec 125: `layout(&Document)` with its own `PlacementNode`.
+9. Spec 130: `State`'s fields become private, with getters and test builders.
 
 Steps 1 to 3 are mechanical and can share one short design session, or go
 straight to implementation. Steps 4 to 8 each get a short design session right
