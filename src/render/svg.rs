@@ -82,14 +82,23 @@ fn pixels(area: Area) -> (i64, i64, i64, i64) {
 
 fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) -> String {
     let (width, height) = canvas;
-    let (root_width, root_height) = match mode {
-        Mode::Editor => (width.to_string(), height.to_string()),
-        Mode::Export => ("100%".to_string(), "100%".to_string()),
-    };
-    let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{root_width}\" height=\"{root_height}\" viewBox=\"0 0 {width} {height}\">"
-    );
-    svg.push_str(&background_rect(0, 0, width, height));
+    let content = canvas_content(areas);
+    match mode {
+        Mode::Editor => format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{}{content}</svg>",
+            background_rect(0, 0, &width.to_string(), &height.to_string())
+        ),
+        Mode::Export => format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">{}<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">{content}</svg></svg>",
+            background_rect(0, 0, "100%", "100%"),
+            width / 2,
+            height / 2
+        ),
+    }
+}
+
+fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
+    let mut svg = String::new();
     if areas.iter().any(|(_, placements)| {
         placements
             .iter()
@@ -105,7 +114,6 @@ fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) ->
         svg.push_str(&paint(placements));
         svg.push_str("</svg>");
     }
-    svg.push_str("</svg>");
     svg
 }
 
@@ -144,7 +152,7 @@ fn paint(placements: &[Placement]) -> String {
     svg
 }
 
-fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String {
     let (r, g, b) = crate::palette::palette(crate::palette::BACKGROUND).unwrap();
     format!(
         "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"rgb({r},{g},{b})\"/>"
@@ -1245,8 +1253,15 @@ mod tests {
         format!("width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"")
     }
 
-    fn scaling_root_size(width: i64, height: i64) -> String {
-        format!("width=\"100%\" height=\"100%\" viewBox=\"0 0 {width} {height}\"")
+    const SCALING_ROOT: &str =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">";
+
+    fn viewport_open(width: i64, height: i64) -> String {
+        format!(
+            "<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">",
+            width / 2,
+            height / 2
+        )
     }
 
     fn nested(area: Area, contents: &str) -> String {
@@ -1366,11 +1381,15 @@ mod tests {
         for state in [a_tiny_state(), a_huge_state()] {
             let svg = render_to_string(SvgRenderer::default(), &state);
 
+            let screen_background = expected_background(0, 0, 0, 0)
+                .replace("width=\"0\"", "width=\"100%\"")
+                .replace("height=\"0\"", "height=\"100%\"");
             assert!(svg.starts_with(&format!(
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
-                scaling_root_size(FULL_HD_WIDTH, FULL_HD_HEIGHT)
+                "{SCALING_ROOT}{screen_background}{}",
+                viewport_open(FULL_HD_WIDTH, FULL_HD_HEIGHT)
             )));
-            assert!(svg.contains(&expected_background(0, 0, FULL_HD_WIDTH, FULL_HD_HEIGHT)));
+            assert!(svg.ends_with("</svg></svg>"));
+            assert!(!svg.contains(&expected_background(0, 0, FULL_HD_WIDTH, FULL_HD_HEIGHT)));
         }
     }
 
