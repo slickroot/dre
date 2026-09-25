@@ -16,7 +16,6 @@ pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
 #[cfg(not(test))]
 use crate::state::mode::Mode;
-use crate::status_line::{ModeLabel, StatusInput};
 use types::Tree;
 
 const PAD: &str = " ";
@@ -44,8 +43,6 @@ pub struct State {
     pub(crate) dirty: bool,
 }
 
-const CURSOR: char = '\u{2588}';
-
 impl State {
     pub(crate) fn open(doc: Document, save_to: Option<String>) -> State {
         let mut state = State {
@@ -64,26 +61,6 @@ impl State {
             save_to: Some(path),
             new_file: true,
             ..Default::default()
-        }
-    }
-
-    pub(crate) fn status_input(&self) -> StatusInput {
-        let mode = match &self.mode {
-            Mode::Command | Mode::SavePrompt { .. } => ModeLabel::Commanding,
-            Mode::Insert => ModeLabel::Editing,
-        };
-        let filename = match &self.mode {
-            Mode::SavePrompt { filename } => format!("Save as: {filename}{CURSOR}"),
-            _ => {
-                let name = self.save_to.as_deref().unwrap_or(DEFAULT_FILENAME);
-                let marker = if self.dirty { "[+]" } else { "" };
-                format!("{name}{marker}")
-            }
-        };
-        StatusInput {
-            mode,
-            filename,
-            box_count: self.doc.tree().walk().count(),
         }
     }
 }
@@ -439,78 +416,5 @@ mod tests {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let edited = reduce(reduce(before, Action::NewBox), Action::Undo);
         assert_eq!(edited.history.len(), 0);
-    }
-
-    fn save_prompt_state() -> State {
-        let mode = Mode::SavePrompt {
-            filename: "diagram.dre".to_string(),
-        };
-        new_state(vec![], mode, None)
-    }
-
-    #[test]
-    fn status_input_labels_command_mode_as_commanding() {
-        let input = new_state(vec![], Mode::Command, None).status_input();
-        assert!(matches!(input.mode, ModeLabel::Commanding));
-    }
-
-    #[test]
-    fn status_input_labels_insert_mode_as_editing() {
-        let input = new_state(vec![], Mode::Insert, None).status_input();
-        assert!(matches!(input.mode, ModeLabel::Editing));
-    }
-
-    #[test]
-    fn status_input_keeps_commanding_during_the_save_prompt() {
-        let input = save_prompt_state().status_input();
-        assert!(matches!(input.mode, ModeLabel::Commanding));
-    }
-
-    #[test]
-    fn status_input_uses_the_default_filename_without_save_to() {
-        let input = new_state(vec![], Mode::Command, None).status_input();
-        assert_eq!(input.filename, DEFAULT_FILENAME);
-    }
-
-    #[test]
-    fn status_input_marks_dirty_state_with_a_plus_marker() {
-        let mut state = new_state(vec![], Mode::Command, None);
-        state.dirty = true;
-        assert_eq!(
-            state.status_input().filename,
-            format!("{DEFAULT_FILENAME}[+]")
-        );
-    }
-
-    #[test]
-    fn status_input_uses_the_save_to_path_as_is() {
-        let mut state = new_state(vec![], Mode::Insert, None);
-        state.save_to = Some("/foo/bar.dre".to_string());
-        assert_eq!(state.status_input().filename, "/foo/bar.dre");
-    }
-
-    #[test]
-    fn status_input_shows_the_save_prompt_text_with_a_cursor() {
-        let input = save_prompt_state().status_input();
-        assert_eq!(
-            input.filename,
-            format!("Save as: {DEFAULT_FILENAME}{CURSOR}")
-        );
-    }
-
-    #[test]
-    fn status_input_counts_zero_boxes_when_empty() {
-        let input = new_state(vec![], Mode::Command, None).status_input();
-        assert_eq!(input.box_count, 0);
-    }
-
-    #[test]
-    fn status_input_counts_nested_children() {
-        let state = new_state(
-            vec![node_with_children("a", vec![node("b"), node("c")])],
-            Mode::Command,
-            None,
-        );
-        assert_eq!(state.status_input().box_count, 3);
     }
 }

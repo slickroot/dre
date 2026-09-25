@@ -2,13 +2,13 @@ use std::io::{self, Write};
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
-use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, editor, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
+use crate::composer::Area;
 use crate::kitty;
-use crate::layout::{with_cursor, Label, Placement, PlacementNode};
-use crate::palette::{palette, BACKGROUND};
+use crate::layout::{Label, Placement, PlacementNode};
+use crate::palette::palette;
 use crate::state::State;
-use crate::status_line::{status_line, Segment, StatusLine};
 use crate::tty::Window;
 
 const BLANK: char = ' ';
@@ -37,17 +37,13 @@ fn fill_colour(fill: Option<u8>) -> (u8, u8, u8, u8) {
     }
 }
 
-fn composite(overlay: (u8, u8, u8, u8), backdrop: (u8, u8, u8)) -> (u8, u8, u8) {
-    let (r, g, b, alpha) = overlay;
-    let blend = |over: u8, under: u8| {
-        let weight = alpha as f64 / OPAQUE as f64;
-        (over as f64 * weight + under as f64 * (1.0 - weight)).round() as u8
-    };
-    (
-        blend(r, backdrop.0),
-        blend(g, backdrop.1),
-        blend(b, backdrop.2),
-    )
+fn whole(window: Window) -> Area {
+    Area {
+        col: 0,
+        row: 0,
+        cols: window.cols,
+        rows: window.rows,
+    }
 }
 
 pub(super) fn python_round(value: f64) -> f64 {
@@ -122,7 +118,6 @@ struct Placed {
 
 struct Frame {
     window: Window,
-    origin: (i64, i64),
     characters: Vec<Vec<char>>,
     images: Vec<Placed>,
 }
@@ -131,47 +126,24 @@ impl Frame {
     fn new(window: Window) -> Self {
         Frame {
             window,
-            origin: (0, 0),
             characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
             images: Vec::new(),
         }
     }
 
-    fn centre_on(&mut self, placements: &[Placement]) {
-        if placements.is_empty() {
-            self.origin = (0, 0);
-            return;
-        }
-        let min_x = placements
-            .iter()
-            .map(|placement| placement.x)
-            .min()
-            .unwrap();
-        let span = placements
-            .iter()
-            .map(|placement| placement.x + placement.width)
-            .max()
-            .unwrap()
-            - min_x;
-        let height = placements
-            .iter()
-            .map(|placement| placement.y + placement.height)
-            .max()
-            .unwrap();
-        let horizontal = (self.window.cols - span).div_euclid(2);
-        self.origin = (horizontal, (self.window.rows - height).div_euclid(2));
-    }
-
     // Clipping happens by cropping: kitty::show cannot position at a negative
     // column, and sends a=T without C=1, so an overhang would shift into view
     // or scroll the screen instead of being cut off.
-    fn crop(&self, placement: &Placement) -> Option<Crop> {
-        let left = placement.x + self.origin.0;
-        let top = placement.y + self.origin.1;
-        let col = left.max(0);
-        let row = top.max(0);
-        let right = (left + placement.width).min(self.window.cols);
-        let bottom = (top + placement.height).min(self.window.rows);
+    fn crop(&self, placement: &Placement, area: Area) -> Option<Crop> {
+        let (left, top) = (placement.x, placement.y);
+        let col = left.max(area.col).max(0);
+        let row = top.max(area.row).max(0);
+        let right = (left + placement.width)
+            .min(area.col + area.cols)
+            .min(self.window.cols);
+        let bottom = (top + placement.height)
+            .min(area.row + area.rows)
+            .min(self.window.rows);
         if col >= right || row >= bottom {
             return None;
         }
@@ -185,15 +157,12 @@ impl Frame {
         })
     }
 
-    fn shows(&self, placement: &Placement) -> bool {
-        let left = placement.x + self.origin.0;
-        let top = placement.y + self.origin.1;
-        left.max(0) < (left + placement.width).min(self.window.cols)
-            && top.max(0) < (top + placement.height).min(self.window.rows)
+    fn shows(&self, placement: &Placement, area: Area) -> bool {
+        self.crop(placement, area).is_some()
     }
 
-    fn place(&mut self, canvas: &Canvas, placement: &Placement) {
-        let Some(crop) = self.crop(placement) else {
+    fn place(&mut self, canvas: &Canvas, placement: &Placement, area: Area) {
+        let Some(crop) = self.crop(placement, area) else {
             return;
         };
         self.images.push(Placed {
@@ -242,8 +211,8 @@ pub(crate) struct TerminalRenderer {
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        self.render_diagram(state, out)?;
-        self.render_status_line(state, out)
+        let frame = self.frame(state);
+        out.write_all(&frame.into_bytes())
     }
 }
 
@@ -266,68 +235,27 @@ impl TerminalRenderer {
         self.window.rows = window.rows;
     }
 
-    fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(
-            crate::layout::layout(state.doc.tree()),
-            state.selected.clone(),
-        );
+    fn frame(&mut self, state: &State) -> Frame {
         let mut frame = Frame::new(self.window);
-        frame.centre_on(&placements);
-        for placement in &placements {
+        for (area, placements) in editor(state, whole(self.window)) {
+            self.paint(&mut frame, &placements, area);
+        }
+        frame
+    }
+
+    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
+        for placement in placements {
             match &placement.node {
-                PlacementNode::Box { .. } => self.draw_box(&mut frame, placement),
-                PlacementNode::Arrow(_) => self.draw_arrow(&mut frame, placement),
-                PlacementNode::Label(label) => self.draw_label(&mut frame, placement, label),
-                PlacementNode::Cursor(_) => self.draw_cursor(&mut frame, placement),
+                PlacementNode::Box { .. } => self.draw_box(frame, placement, area),
+                PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
+                PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
+                PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
             }
         }
-        out.write_all(&frame.into_bytes())
     }
 
-    fn render_status_line(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let StatusLine { left, right } = status_line(&state.status_input());
-        let Window { cols, rows, .. } = self.window;
-        let content_width: usize = left
-            .iter()
-            .chain(&right)
-            .map(|segment| segment.text.chars().count())
-            .sum();
-        let filler = Segment {
-            text: BLANK
-                .to_string()
-                .repeat((cols as usize).saturating_sub(content_width)),
-            style: right
-                .last()
-                .map(|segment| segment.style)
-                .unwrap_or_default(),
-        };
-        let backdrop = palette(BACKGROUND).unwrap();
-        write!(out, "\x1b[{rows};1H")?;
-        let mut remaining = cols as usize;
-        for segment in left.iter().chain(std::iter::once(&filler)).chain(&right) {
-            let text: String = segment.text.chars().take(remaining).collect();
-            remaining -= text.chars().count();
-            if text.is_empty() {
-                continue;
-            }
-            write!(out, "\x1b[0m")?;
-            if segment.style.bold {
-                write!(out, "\x1b[1m")?;
-            }
-            if let Some(overlay) = segment.style.background {
-                let (r, g, b) = composite(overlay, backdrop);
-                write!(out, "\x1b[48;2;{r};{g};{b}m")?;
-            }
-            if let Some((r, g, b)) = segment.style.foreground {
-                write!(out, "\x1b[38;2;{r};{g};{b}m")?;
-            }
-            write!(out, "{text}")?;
-        }
-        write!(out, "\x1b[0m")
-    }
-
-    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement) {
-        if !frame.shows(placement) {
+    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
+        if !frame.shows(placement, area) {
             return;
         }
         let key = sprite_key(placement);
@@ -335,11 +263,11 @@ impl TerminalRenderer {
             let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement);
+        frame.place(&self.cache[&key], placement, area);
     }
 
-    fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement) {
-        if !frame.shows(placement) {
+    fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
+        if !frame.shows(placement, area) {
             return;
         }
         let key = sprite_key(placement);
@@ -347,10 +275,10 @@ impl TerminalRenderer {
             let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement);
+        frame.place(&self.cache[&key], placement, area);
     }
 
-    fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label) {
+    fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
         for (offset, character) in label.text.chars().enumerate() {
             let char_placement = Placement {
                 node: PlacementNode::Label(label.clone()),
@@ -359,15 +287,15 @@ impl TerminalRenderer {
                 width: 1,
                 height: 1,
             };
-            if !frame.shows(&char_placement) {
+            if !frame.shows(&char_placement, area) {
                 continue;
             }
             let glyph = self.glyph_source.glyph(character);
-            frame.place(glyph, &char_placement);
+            frame.place(glyph, &char_placement, area);
         }
     }
 
-    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement) {
+    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
         let (r, g, b) = colour(None);
@@ -378,7 +306,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        frame.place(&canvas, placement);
+        frame.place(&canvas, placement, area);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -459,6 +387,7 @@ impl TerminalRenderer {
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::*;
+    use crate::layout::FOOTER_ROWS;
     use crate::state::Mode;
 
     #[test]
@@ -812,20 +741,10 @@ mod tests {
         TerminalRenderer::new(window, source, CACHE_LIMIT)
     }
 
-    fn draw_all(r: &mut TerminalRenderer, frame: &mut Frame, placements: &[Placement]) {
-        for placement in placements {
-            match &placement.node {
-                PlacementNode::Box { .. } => r.draw_box(frame, placement),
-                PlacementNode::Arrow(_) => r.draw_arrow(frame, placement),
-                PlacementNode::Label(label) => r.draw_label(frame, placement, label),
-                PlacementNode::Cursor(_) => r.draw_cursor(frame, placement),
-            }
-        }
-    }
-
     fn drawn_frame(r: &mut TerminalRenderer, placements: &[Placement]) -> Frame {
         let mut frame = Frame::new(r.window);
-        draw_all(r, &mut frame, placements);
+        let area = whole(r.window);
+        r.paint(&mut frame, placements, area);
         frame
     }
 
@@ -888,88 +807,16 @@ mod tests {
     }
 
     #[test]
-    fn centre_on_puts_the_diagram_in_the_middle_of_the_terminal() {
-        let node = box_node(None, None, false);
-        let (cols, rows) = (20, 10);
-        let (width, height) = (6, 4);
-        let mut frame = Frame::new(window(cols, rows, 1, 1));
-        frame.centre_on(&[box_placement(&node, 0, 0, width, height)]);
-        assert_eq!(
-            frame.origin,
-            ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
-        );
-    }
-
-    #[test]
-    fn centre_on_measures_the_whole_bounding_box() {
-        let node = box_node(None, None, false);
-        let (cols, rows) = (20, 10);
-        let placements = vec![
-            box_placement(&node, 0, 0, 3, 2),
-            box_placement(&node, 5, 4, 3, 2),
-        ];
-        let mut frame = Frame::new(window(cols, rows, 1, 1));
-        frame.centre_on(&placements);
-        assert_eq!(
-            frame.origin,
-            ((cols - 8).div_euclid(2), (rows - 6).div_euclid(2))
-        );
-    }
-
-    #[test]
-    fn centre_on_nothing_leaves_the_origin_at_the_corner() {
-        let mut frame = Frame::new(window(20, 10, 1, 1));
-        frame.centre_on(&[]);
-        assert_eq!(frame.origin, (0, 0));
-    }
-
-    #[test]
-    fn centre_on_centres_an_overflowing_diagram_with_a_negative_origin() {
-        let node = box_node(None, None, false);
-        let (cols, rows) = (10, 10);
-        let (span, height) = (30, 4);
-        let mut frame = Frame::new(window(cols, rows, 1, 1));
-        frame.centre_on(&[box_placement(&node, 0, 0, span, height)]);
-        assert_eq!(
-            frame.origin,
-            ((cols - span).div_euclid(2), (rows - height).div_euclid(2))
-        );
-        assert!(frame.origin.0 < 0);
-    }
-
-    #[test]
-    fn centre_on_cuts_the_extra_column_of_an_odd_overflow_on_the_left() {
-        let node = box_node(None, None, false);
-        let (cols, rows) = (10, 10);
-        let span = cols + 3;
-        let mut frame = Frame::new(window(cols, rows, 1, 1));
-        frame.centre_on(&[box_placement(&node, 0, 0, span, 4)]);
-        let cut_on_left = -frame.origin.0;
-        let cut_on_right = span - cols - cut_on_left;
-        assert_eq!(cut_on_left, cut_on_right + 1);
-    }
-
-    #[test]
-    fn centre_on_centres_a_diagram_that_fits() {
-        let node = box_node(None, None, false);
-        let (cols, rows) = (20, 10);
-        let (width, height) = (6, 4);
-        let mut frame = Frame::new(window(cols, rows, 1, 1));
-        frame.centre_on(&[box_placement(&node, 0, 0, width, height)]);
-        assert_eq!(
-            frame.origin,
-            ((cols - width).div_euclid(2), (rows - height).div_euclid(2))
-        );
-    }
-
-    #[test]
     fn a_box_on_screen_is_cropped_to_the_whole_shape() {
         let node = box_node(None, None, false);
         let window = window(20, 10, 4, 8);
         let (width, height) = (5, 4);
         let frame = Frame::new(window);
         assert_eq!(
-            frame.crop(&box_placement(&node, 2, 3, width, height)),
+            frame.crop(
+                &box_placement(&node, 2, 3, width, height),
+                whole(frame.window)
+            ),
             Some(Crop {
                 col: 2,
                 row: 3,
@@ -982,14 +829,33 @@ mod tests {
     }
 
     #[test]
-    fn a_crop_sits_at_the_placement_shifted_by_the_origin() {
+    fn a_crop_is_clipped_to_its_area_not_the_window() {
         let node = box_node(None, None, false);
-        let mut frame = Frame::new(window(20, 10, 4, 8));
-        frame.centre_on(&[box_placement(&node, 0, 0, 6, 4)]);
-        let crop = frame.crop(&box_placement(&node, 1, 1, 3, 2)).unwrap();
+        let window = window(20, 10, 4, 8);
+        let area = Area {
+            col: 2,
+            row: 3,
+            cols: 5,
+            rows: 4,
+        };
+        let frame = Frame::new(window);
+        let crop = frame
+            .crop(&box_placement(&node, 0, 0, window.cols, window.rows), area)
+            .unwrap();
+        assert_eq!((crop.col, crop.row), (area.col, area.row));
         assert_eq!(
-            (crop.col, crop.row),
-            (1 + frame.origin.0, 1 + frame.origin.1)
+            (crop.first_x, crop.last_x),
+            (
+                area.col * window.cell_width,
+                (area.col + area.cols) * window.cell_width
+            )
+        );
+        assert_eq!(
+            (crop.first_y, crop.last_y),
+            (
+                area.row * window.cell_height,
+                (area.row + area.rows) * window.cell_height
+            )
         );
     }
 
@@ -1000,7 +866,10 @@ mod tests {
         let (hidden, width) = (2, 5);
         let frame = Frame::new(window);
         let crop = frame
-            .crop(&box_placement(&node, -hidden, 0, width, 3))
+            .crop(
+                &box_placement(&node, -hidden, 0, width, 3),
+                whole(frame.window),
+            )
             .unwrap();
         assert_eq!(crop.col, 0);
         assert_eq!(crop.first_x, hidden * window.cell_width);
@@ -1014,7 +883,10 @@ mod tests {
         let (hidden, height) = (2, 5);
         let frame = Frame::new(window);
         let crop = frame
-            .crop(&box_placement(&node, 0, -hidden, 3, height))
+            .crop(
+                &box_placement(&node, 0, -hidden, 3, height),
+                whole(frame.window),
+            )
             .unwrap();
         assert_eq!(crop.row, 0);
         assert_eq!(crop.first_y, hidden * window.cell_height);
@@ -1027,7 +899,9 @@ mod tests {
         let window = window(20, 10, 4, 8);
         let x = 18;
         let frame = Frame::new(window);
-        let crop = frame.crop(&box_placement(&node, x, 0, 5, 3)).unwrap();
+        let crop = frame
+            .crop(&box_placement(&node, x, 0, 5, 3), whole(frame.window))
+            .unwrap();
         assert_eq!(crop.col, x);
         assert_eq!(crop.first_x, 0);
         assert_eq!(crop.last_x, (window.cols - x) * window.cell_width);
@@ -1039,7 +913,9 @@ mod tests {
         let window = window(20, 10, 4, 8);
         let y = 8;
         let frame = Frame::new(window);
-        let crop = frame.crop(&box_placement(&node, 0, y, 3, 5)).unwrap();
+        let crop = frame
+            .crop(&box_placement(&node, 0, y, 3, 5), whole(frame.window))
+            .unwrap();
         assert_eq!(crop.row, y);
         assert_eq!(crop.first_y, 0);
         assert_eq!(crop.last_y, (window.rows - y) * window.cell_height);
@@ -1049,14 +925,20 @@ mod tests {
     fn a_box_beyond_the_right_edge_has_no_crop() {
         let node = box_node(None, None, false);
         let frame = Frame::new(window(20, 10, 4, 8));
-        assert_eq!(frame.crop(&box_placement(&node, 20, 0, 4, 3)), None);
+        assert_eq!(
+            frame.crop(&box_placement(&node, 20, 0, 4, 3), whole(frame.window)),
+            None
+        );
     }
 
     #[test]
     fn a_box_beyond_the_top_edge_has_no_crop() {
         let node = box_node(None, None, false);
         let frame = Frame::new(window(20, 10, 4, 8));
-        assert_eq!(frame.crop(&box_placement(&node, 0, -3, 4, 3)), None);
+        assert_eq!(
+            frame.crop(&box_placement(&node, 0, -3, 4, 3), whole(frame.window)),
+            None
+        );
     }
 
     #[test]
@@ -1107,74 +989,38 @@ mod tests {
         ]
     }
 
-    fn label_columns_on_row(frame: &Frame, row: i64) -> Vec<i64> {
-        frame
-            .images
-            .iter()
-            .filter(|image| image.row == row)
-            .map(|image| image.col)
-            .collect()
-    }
-
-    #[test]
-    fn centres_a_leaf_box_within_the_terminal() {
-        let (width, height) = (4, 3);
-        let placements = a_labelled_box(width, height);
-        let label = &placements[1];
-        let (cols, rows_count) = (20, 10);
-        let left = (cols - width).div_euclid(2);
-        let top = (rows_count - height).div_euclid(2);
-        let mut r = renderer_on(window(cols, rows_count, 1, 1));
-        let mut frame = Frame::new(r.window);
-        frame.centre_on(&placements);
-        draw_all(&mut r, &mut frame, &placements);
-        let label_x = left + label.x;
-        assert_eq!(
-            label_columns_on_row(&frame, top + label.y),
-            vec![label_x, label_x + 1]
-        );
-        let lines = rows(&frame);
-        assert_eq!(lines[top as usize], " ".repeat(cols as usize));
-        assert_eq!(lines[(top + height) as usize], " ".repeat(cols as usize));
-    }
-
     #[test]
     fn an_overflowing_diagram_is_cropped_equally_on_both_sides() {
-        let width = 4;
-        let placements = [box_placement(&box_node(None, None, false), 0, 0, width, 3)];
+        let state = one_leaf();
+        let width = leaf_box(&state).width;
         let cut_each_side = 1;
-        let cols = width - 2 * cut_each_side;
-        let mut r = renderer_on(window(cols, 10, 1, 1));
-        let mut frame = Frame::new(r.window);
-        frame.centre_on(&placements);
-        draw_all(&mut r, &mut frame, &placements);
-        let box_placement = &placements[0];
-        let crop = frame.crop(box_placement).unwrap();
+        let window = window(width - 2 * cut_each_side, 10, 1, 1);
+        let frame = Frame::new(window);
+        let screen = editor(&state, whole(window));
+        let (body, diagram) = &screen[0];
+        let placed = &diagram[0];
+        let crop = frame.crop(placed, *body).unwrap();
         let cut_on_left = crop.first_x;
-        let cut_on_right = box_placement.width * frame.window.cell_width - crop.last_x;
+        let cut_on_right = placed.width * window.cell_width - crop.last_x;
         assert_eq!(cut_on_left, cut_each_side);
         assert_eq!(cut_on_right, cut_each_side);
     }
 
     #[test]
     fn on_resize_re_centres_the_next_render_on_the_new_size() {
-        let (width, height) = (4, 3);
-        let placements = a_labelled_box(width, height);
-        let label = &placements[1];
+        let state = one_leaf();
+        let leaf = leaf_box(&state);
         let mut r = renderer_on(window(20, 10, 1, 1));
-        drawn_frame(&mut r, &placements);
-        let (cols, rows_count) = (40, 20);
-        r.on_resize(window(cols, rows_count, 1, 1));
-
-        let mut frame = Frame::new(r.window);
-        frame.centre_on(&placements);
-        draw_all(&mut r, &mut frame, &placements);
-
-        let label_x = (cols - width).div_euclid(2) + label.x;
-        let label_row = (rows_count - height).div_euclid(2) + label.y;
+        r.frame(&state);
+        let (cols, rows) = (40, 20);
+        r.on_resize(window(cols, rows, 1, 1));
+        let frame = r.frame(&state);
         assert_eq!(
-            label_columns_on_row(&frame, label_row),
-            vec![label_x, label_x + 1]
+            (frame.images[0].col, frame.images[0].row),
+            (
+                (cols - leaf.width).div_euclid(2),
+                (rows - FOOTER_ROWS - leaf.height).div_euclid(2)
+            )
         );
     }
 
@@ -1273,14 +1119,10 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_drawing_draws_no_placements() {
-        let window = window(40, 10, 1, 1);
-        let mut r = renderer_on(window);
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let mut out = Vec::new();
-        r.render_diagram(&state, &mut out).unwrap();
-        let empty_frame = String::from_utf8(Frame::new(window).into_bytes()).unwrap();
-        assert_eq!(String::from_utf8(out).unwrap(), empty_frame);
+    fn an_empty_drawing_draws_only_the_footer() {
+        let mut r = renderer_on(window(40, 10, 1, 1));
+        let frame = r.frame(&empty_state());
+        assert_eq!(frame.images.len(), 1);
     }
 
     #[test]
@@ -1651,22 +1493,22 @@ mod tests {
     fn a_box_beyond_the_right_edge_is_not_shown() {
         let node = box_node(None, None, false);
         let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(!frame.shows(&box_placement(&node, 20, 0, 4, 3)));
+        assert!(!frame.shows(&box_placement(&node, 20, 0, 4, 3), whole(frame.window)));
     }
 
     #[test]
     fn a_box_beyond_the_top_edge_is_not_shown() {
         let node = box_node(None, None, false);
         let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(!frame.shows(&box_placement(&node, 0, -3, 4, 3)));
+        assert!(!frame.shows(&box_placement(&node, 0, -3, 4, 3), whole(frame.window)));
     }
 
     #[test]
     fn a_box_straddling_an_edge_is_shown() {
         let node = box_node(None, None, false);
         let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(frame.shows(&box_placement(&node, 18, 0, 4, 3)));
-        assert!(frame.shows(&box_placement(&node, -2, 8, 4, 3)));
+        assert!(frame.shows(&box_placement(&node, 18, 0, 4, 3), whole(frame.window)));
+        assert!(frame.shows(&box_placement(&node, -2, 8, 4, 3), whole(frame.window)));
     }
 
     #[test]
@@ -1894,257 +1736,63 @@ mod tests {
         assert!(ARROW_STROKE > 1);
     };
 
-    fn status_line_output(r: &mut TerminalRenderer, state: &State) -> String {
-        let mut out = Vec::new();
-        r.render_status_line(state, &mut out).unwrap();
-        String::from_utf8(out).unwrap()
+    fn one_leaf() -> State {
+        crate::state::new_state(vec![crate::diagram::node("A")], Mode::Command, None)
     }
 
-    fn strip_escapes(output: &str) -> String {
-        let mut visible = String::new();
-        let mut chars = output.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for skipped in chars.by_ref() {
-                    if skipped.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            } else {
-                visible.push(c);
-            }
-        }
-        visible
-    }
-
-    fn status_line_text(r: &mut TerminalRenderer, state: &State) -> String {
-        strip_escapes(&status_line_output(r, state))
-    }
-
-    fn status_line_runs(r: &mut TerminalRenderer, state: &State) -> Vec<String> {
-        let output = status_line_output(r, state);
-        let body = output
-            .strip_prefix(&format!("\x1b[{};1H", r.window.rows))
-            .unwrap();
-        body.strip_suffix("\x1b[0m")
+    fn leaf_box(state: &State) -> Placement<'_> {
+        crate::layout::diagram(state.doc.tree())
+            .into_iter()
+            .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .unwrap()
-            .split("\x1b[0m")
-            .skip(1)
-            .map(str::to_string)
-            .collect()
-    }
-
-    fn background_escape(style: crate::status_line::Style) -> String {
-        let (r, g, b) = composite(style.background.unwrap(), palette(BACKGROUND).unwrap());
-        format!("\x1b[48;2;{r};{g};{b}m")
-    }
-
-    fn dim_run_prefix(state: &State) -> String {
-        background_escape(status_line(&state.status_input()).right[0].style)
     }
 
     #[test]
-    fn composite_blends_the_overlay_over_the_backdrop_by_its_alpha() {
-        assert_eq!(composite((200, 100, 0, 255), (10, 20, 30)), (200, 100, 0));
-        assert_eq!(composite((200, 100, 0, 0), (10, 20, 30)), (10, 20, 30));
-        assert_eq!(composite((0, 0, 0, 128), (100, 50, 10)), (50, 25, 5));
-    }
-
-    #[test]
-    fn the_status_line_puts_the_mode_and_filename_on_the_left_and_the_box_count_on_the_right() {
-        let mut r = renderer_on(window(40, 2, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let text = status_line_text(&mut r, &state);
-        assert!(text.starts_with(" COMMANDING  \u{2502} diagram.dre"));
-        assert!(text.ends_with("0 boxes \u{2022} dre"));
-        let left = " COMMANDING  \u{2502} diagram.dre";
-        let right = "0 boxes \u{2022} dre";
-        let middle: String = text
-            .chars()
-            .skip(left.chars().count())
-            .take(text.chars().count() - left.chars().count() - right.chars().count())
-            .collect();
-        assert!(!middle.is_empty());
-        assert!(middle.chars().all(|c| c == BLANK));
-    }
-
-    #[test]
-    fn the_status_line_shows_a_dirty_marker_after_the_filename() {
-        let mut r = renderer_on(window(40, 2, 1, 1));
-        let mut state = crate::state::new_state(vec![], Mode::Command, None);
-        state.dirty = true;
-        let text = status_line_text(&mut r, &state);
-        assert!(text.starts_with(" COMMANDING  \u{2502} diagram.dre[+]"));
-    }
-
-    #[test]
-    fn the_status_line_fills_the_terminal_width() {
-        let mut r = renderer_on(window(40, 2, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line_text(&mut r, &state).chars().count(), 40);
-    }
-
-    #[test]
-    fn the_status_line_is_cut_to_the_terminal_width() {
-        let mut r = renderer_on(window(3, 2, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line_text(&mut r, &state), " CO");
-    }
-
-    #[test]
-    fn the_status_line_is_cut_inside_a_multibyte_segment() {
-        let mut r = renderer_on(window(13, 2, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert_eq!(status_line_text(&mut r, &state), " COMMANDING  ");
-        let mut r = renderer_on(window(14, 2, 1, 1));
-        assert_eq!(status_line_text(&mut r, &state), " COMMANDING  \u{2502}");
-    }
-
-    #[test]
-    fn the_status_line_is_written_to_the_last_row() {
-        let mut r = renderer_on(window(5, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert!(status_line_output(&mut r, &state).starts_with("\x1b[4;1H"));
-    }
-
-    #[test]
-    fn on_resize_moves_the_status_line_to_the_new_last_row() {
-        let mut r = renderer_on(window(5, 4, 1, 1));
-        r.on_resize(window(5, 9, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert!(status_line_output(&mut r, &state).starts_with("\x1b[9;1H"));
-    }
-
-    #[test]
-    fn the_status_line_moves_the_cursor_once() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let output = status_line_output(&mut r, &state);
-        assert_eq!(output.matches("H").count(), 1);
-        assert!(output.starts_with("\x1b[4;1H"));
-    }
-
-    #[test]
-    fn the_status_line_never_uses_reverse_video() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert!(!status_line_output(&mut r, &state).contains("\x1b[7m"));
-    }
-
-    #[test]
-    fn the_status_line_ends_by_resetting_the_style() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert!(status_line_output(&mut r, &state).ends_with("\x1b[0m"));
-    }
-
-    #[test]
-    fn the_mode_cell_is_bold_on_lime_with_the_background_colour_as_text() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let (lr, lg, lb) = palette(0).unwrap();
-        let (br, bg, bb) = palette(BACKGROUND).unwrap();
-        let expected =
-            format!("\x1b[1m\x1b[48;2;{lr};{lg};{lb}m\x1b[38;2;{br};{bg};{bb}m COMMANDING ");
-        assert_eq!(status_line_runs(&mut r, &state)[0], expected);
-    }
-
-    #[test]
-    fn everything_after_the_mode_cell_has_a_dim_background_and_no_foreground() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let runs = status_line_runs(&mut r, &state);
-        let dim = dim_run_prefix(&state);
-        assert!(runs.len() > 1);
-        for run in &runs[1..] {
-            assert!(run.starts_with(&dim), "{run:?}");
-            assert!(!run.contains("\x1b[38;"));
-            assert!(!run.contains("\x1b[1m"));
-        }
-    }
-
-    #[test]
-    fn the_filler_between_left_and_right_is_dim() {
-        let mut r = renderer_on(window(40, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let runs = status_line_runs(&mut r, &state);
-        let content_width: usize = status_line(&state.status_input())
-            .left
-            .iter()
-            .chain(&status_line(&state.status_input()).right)
-            .map(|segment| segment.text.chars().count())
-            .sum();
-        let filler = format!(
-            "{}{}",
-            dim_run_prefix(&state),
-            " ".repeat(40 - content_width)
+    fn the_diagram_is_centred_in_the_rows_above_the_footer() {
+        let (cols, rows) = (20, 12);
+        let mut r = renderer_on(window(cols, rows, 1, 1));
+        let state = one_leaf();
+        let leaf = leaf_box(&state);
+        let frame = r.frame(&state);
+        let drawn = &frame.images[0];
+        assert_eq!(
+            (drawn.col, drawn.row),
+            (
+                (cols - leaf.width).div_euclid(2),
+                (rows - FOOTER_ROWS - leaf.height).div_euclid(2)
+            )
         );
-        assert!(runs.contains(&filler), "{runs:?}");
     }
 
     #[test]
-    fn the_status_line_can_be_cut_inside_the_mode_cell_keeping_its_style() {
-        let mut r = renderer_on(window(3, 2, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        let runs = status_line_runs(&mut r, &state);
-        assert_eq!(runs.len(), 1);
-        let (lr, lg, lb) = palette(0).unwrap();
-        assert!(runs[0].starts_with(&format!("\x1b[1m\x1b[48;2;{lr};{lg};{lb}m")));
-        assert!(runs[0].ends_with(" CO"));
+    fn the_footer_box_fills_the_last_footer_rows() {
+        let window = window(20, 12, 2, 4);
+        let mut r = renderer_on(window);
+        let frame = r.frame(&one_leaf());
+        let footer = frame.images.last().unwrap();
+        assert_eq!((footer.col, footer.row), (0, window.rows - FOOTER_ROWS));
+        assert_eq!(
+            (footer.canvas.width, footer.canvas.height),
+            (
+                window.cols * window.cell_width,
+                FOOTER_ROWS * window.cell_height
+            )
+        );
     }
 
     #[test]
-    fn the_save_prompt_keeps_the_mode_cell_styling_and_dims_the_rest() {
-        let mut r = renderer_on(window(60, 4, 1, 1));
-        let mode = Mode::SavePrompt {
-            filename: "diagram.dre".to_string(),
-        };
-        let state = crate::state::new_state(vec![], mode, None);
-        let runs = status_line_runs(&mut r, &state);
-        let mode_style = status_line(&state.status_input()).left[0].style;
-        let mode_prefix = format!("\x1b[1m{}", background_escape(mode_style));
-        assert!(runs[0].starts_with(&mode_prefix));
-        let dim = dim_run_prefix(&state);
-        for run in &runs[1..] {
-            assert!(run.starts_with(&dim));
+    fn a_diagram_box_overhanging_the_body_does_not_draw_into_the_footer() {
+        let state = one_leaf();
+        let leaf = leaf_box(&state);
+        let body_rows = leaf.height - 1;
+        let window = window(20, body_rows + FOOTER_ROWS, 1, 1);
+        let mut r = renderer_on(window);
+        let frame = r.frame(&state);
+        let (footer, diagram) = frame.images.split_last().unwrap();
+        assert_eq!(footer.row, body_rows);
+        assert!(!diagram.is_empty());
+        for image in diagram {
+            assert!(image.row + image.canvas.height / window.cell_height <= body_rows);
         }
-        assert_eq!(strip_escapes(&runs.concat()).chars().count(), 60);
-    }
-
-    fn render_output(r: &mut TerminalRenderer, state: &State) -> String {
-        let mut out = Vec::new();
-        r.render(state, &mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn render_shows_editing_in_insert_mode() {
-        let mut r = renderer_on(window(20, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Insert, None);
-        assert!(render_output(&mut r, &state).contains("EDITING"));
-    }
-
-    #[test]
-    fn render_shows_commanding_in_command_mode() {
-        let mut r = renderer_on(window(20, 4, 1, 1));
-        let state = crate::state::new_state(vec![], Mode::Command, None);
-        assert!(render_output(&mut r, &state).contains("COMMANDING"));
-    }
-
-    #[test]
-    fn render_shows_the_filename_being_typed_in_save_prompt_mode() {
-        let mut r = renderer_on(window(60, 4, 1, 1));
-        let mode = Mode::SavePrompt {
-            filename: "diagram.dre".to_string(),
-        };
-        let state = crate::state::new_state(vec![], mode, None);
-        let expected_left: String = status_line(&state.status_input())
-            .left
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect();
-        let text = status_line_text(&mut r, &state);
-        assert!(text.starts_with(&expected_left));
-        assert!(strip_escapes(&render_output(&mut r, &state)).contains(&expected_left));
     }
 }
