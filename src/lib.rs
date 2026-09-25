@@ -1,6 +1,4 @@
 #[cfg(not(target_arch = "wasm32"))]
-mod bootstrap;
-#[cfg(not(target_arch = "wasm32"))]
 mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
@@ -92,7 +90,7 @@ impl Default for Session {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
-        cli::Command::Edit(file) => bootstrap::run(file),
+        cli::Command::Edit(file) => editor::bootstrap::run(file),
         cli::Command::Export { input } => cli::export(input),
     };
     match result {

@@ -1,5 +1,6 @@
-pub(crate) mod controller;
-pub(crate) mod store;
+pub(crate) mod bootstrap;
+mod controller;
+mod store;
 
 use std::io;
 
