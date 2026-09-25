@@ -4,7 +4,7 @@ use super::{
     arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, BORDER, CELL_HEIGHT,
     CELL_WIDTH,
 };
-use crate::layout::{layout, with_cursor, PlacementNode};
+use crate::layout::{diagram, with_cursor, PlacementNode};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -102,7 +102,7 @@ impl SvgRenderer {
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(layout(state.doc.tree()), state.selected.clone());
+        let placements = with_cursor(diagram(state.doc.tree()), state.selected.clone());
         out.write_all(self.draw(&placements).as_bytes())
     }
 }

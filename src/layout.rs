@@ -197,7 +197,27 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) fn layout<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
+#[allow(dead_code)]
+pub(crate) const FOOTER_ROWS: i64 = 3;
+#[allow(dead_code)]
+pub(crate) const FOOTER_COLOUR: u8 = 0;
+
+#[allow(dead_code)]
+pub(crate) fn footer(width: i64, height: i64) -> Vec<Placement<'static>> {
+    vec![Placement {
+        node: PlacementNode::Box {
+            colour: Some(FOOTER_COLOUR),
+            fill: Some(FOOTER_COLOUR),
+            rounded: false,
+        },
+        x: 0,
+        y: 0,
+        width,
+        height,
+    }]
+}
+
+pub(crate) fn diagram<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
     if !tree.contains(&[0]) {
         return Vec::new();
     }
@@ -253,6 +273,24 @@ pub(crate) fn with_cursor<'a>(
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children};
+
+    #[test]
+    fn footer_is_one_filled_square_box_in_the_footer_colour_filling_its_area() {
+        assert_eq!(
+            footer(40, FOOTER_ROWS),
+            vec![Placement {
+                node: PlacementNode::Box {
+                    colour: Some(FOOTER_COLOUR),
+                    fill: Some(FOOTER_COLOUR),
+                    rounded: false,
+                },
+                x: 0,
+                y: 0,
+                width: 40,
+                height: FOOTER_ROWS,
+            }]
+        );
+    }
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
         let widths = measure_columns(nodes);
@@ -496,7 +534,7 @@ mod tests {
                 .with_fill(filled)
                 .with_rounded(rounded),
         )]);
-        match layout(&nodes)[0].node {
+        match diagram(&nodes)[0].node {
             PlacementNode::Box {
                 colour,
                 fill,
@@ -548,13 +586,13 @@ mod tests {
 
     #[test]
     fn layout_of_no_boxes_is_empty() {
-        assert_eq!(layout(&Tree::root(vec![])), vec![]);
+        assert_eq!(diagram(&Tree::root(vec![])), vec![]);
     }
 
     #[test]
     fn layout_of_a_single_leaf_box_starts_at_the_origin() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = layout(&nodes);
+        let placements = diagram(&nodes);
         let box_placement = placements[0].clone();
         assert!(matches!(box_placement.node, PlacementNode::Box { .. }));
         assert_eq!(box_placement.x, 0);
@@ -564,7 +602,7 @@ mod tests {
     #[test]
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = layout(&nodes);
+        let placements = diagram(&nodes);
         assert!(placements
             .iter()
             .all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
@@ -579,7 +617,7 @@ mod tests {
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
-        let placements = layout(&boxes);
+        let placements = diagram(&boxes);
         assert!(placements
             .iter()
             .any(|p| matches!(p.node, PlacementNode::Arrow(_))));
@@ -588,7 +626,7 @@ mod tests {
     #[test]
     fn layout_draws_boxes_before_labels_and_arrows() {
         let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
-        let placements = layout(&boxes);
+        let placements = diagram(&boxes);
 
         let first_non_box = placements
             .iter()
@@ -602,7 +640,7 @@ mod tests {
     #[test]
     fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = layout(&nodes);
+        let placements = diagram(&nodes);
         let label = placements
             .iter()
             .find(|p| matches!(p.node, PlacementNode::Label(_)))
@@ -620,14 +658,14 @@ mod tests {
     #[test]
     fn with_cursor_adds_nothing_without_a_selection() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = layout(&nodes);
+        let placements = diagram(&nodes);
         assert_eq!(with_cursor(placements.clone(), None), placements);
     }
 
     #[test]
     fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = layout(&nodes);
+        let placements = diagram(&nodes);
         let result = with_cursor(placements.clone(), Some(vec![99]));
         assert_eq!(result, placements);
     }

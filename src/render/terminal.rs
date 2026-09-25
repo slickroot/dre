@@ -268,7 +268,7 @@ impl TerminalRenderer {
 
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let placements = with_cursor(
-            crate::layout::layout(state.doc.tree()),
+            crate::layout::diagram(state.doc.tree()),
             state.selected.clone(),
         );
         let mut frame = Frame::new(self.window);
