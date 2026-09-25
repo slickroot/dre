@@ -42,9 +42,56 @@ impl Default for Document {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) enum Scope {
+    Box,
+    Siblings,
+}
+
 impl Document {
     pub(crate) fn tree(&self) -> &Tree<Node> {
         &self.root
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_label(&mut self, path: &[usize], label: String) {
+        self.root.value_mut(path).label = label;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_colour(&mut self, path: &[usize], colour: Option<u8>, scope: Scope) {
+        self.set(path, scope, |node| node.colour = colour);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_fill(&mut self, path: &[usize], filled: bool, scope: Scope) {
+        self.set(path, scope, |node| node.filled = filled);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_rounded(&mut self, path: &[usize], rounded: bool, scope: Scope) {
+        self.set(path, scope, |node| node.rounded = rounded);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
+        self.root.push(parent, subtree.clone())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove(&mut self, path: &[usize]) -> Tree<Node> {
+        self.root.remove(path)
+    }
+
+    #[allow(dead_code)]
+    fn set(&mut self, path: &[usize], scope: Scope, write: impl Fn(&mut Node)) {
+        let targets: Vec<Vec<usize>> = match scope {
+            Scope::Box => vec![path.to_vec()],
+            Scope::Siblings => children(&self.root, parent_of(path)).collect(),
+        };
+        for target in targets {
+            write(self.root.value_mut(&target));
+        }
     }
 }
 
@@ -128,6 +175,30 @@ pub(crate) fn node(label: &str) -> Tree<Node> {
 #[cfg(test)]
 pub(crate) fn node_with_children(label: &str, children: Vec<Tree<Node>>) -> Tree<Node> {
     Tree::new(labelled(label), children)
+}
+
+#[cfg(test)]
+impl Node {
+    pub(crate) fn with_colour(self, colour: Option<u8>) -> Node {
+        Node { colour, ..self }
+    }
+
+    pub(crate) fn with_fill(self, filled: bool) -> Node {
+        Node { filled, ..self }
+    }
+
+    pub(crate) fn with_rounded(self, rounded: bool) -> Node {
+        Node { rounded, ..self }
+    }
+}
+
+#[cfg(test)]
+impl Document {
+    pub(crate) fn with_boxes(boxes: Vec<Tree<Node>>) -> Document {
+        Document {
+            root: Tree::root(boxes),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -382,5 +453,164 @@ mod tests {
         };
         let doc = to_document(fd);
         assert!(doc.tree().value(&[0]).filled);
+    }
+
+    fn row() -> Document {
+        Document::with_boxes(vec![
+            node_with_children("a", vec![node("c"), node("d")]),
+            node("b"),
+        ])
+    }
+
+    fn row_with_child_of_a(subtree: Tree<Node>) -> Document {
+        Document::with_boxes(vec![
+            node_with_children("a", vec![node("c"), node("d"), subtree]),
+            node("b"),
+        ])
+    }
+
+    #[test]
+    fn set_label_writes_the_label_of_the_box() {
+        let mut doc = row();
+        doc.set_label(&[0, 1], "e".to_string());
+        assert_eq!(doc.tree().value(&[0, 1]).label(), "e");
+    }
+
+    #[test]
+    fn set_label_leaves_other_boxes_alone() {
+        let mut doc = row();
+        doc.set_label(&[0, 1], "e".to_string());
+        assert_eq!(doc.tree().value(&[0, 0]).label(), "c");
+    }
+
+    #[test]
+    fn set_colour_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_colour(&[0], Some(3), Scope::Box);
+        assert_eq!(doc.tree().value(&[0]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[1]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_on_siblings_writes_every_child_of_the_parent() {
+        let mut doc = row();
+        doc.set_colour(&[0, 0], Some(3), Scope::Siblings);
+        assert_eq!(doc.tree().value(&[0, 0]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[0, 1]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[0]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_writes_no_colour() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_colour(Some(2)))]);
+        doc.set_colour(&[0], None, Scope::Box);
+        assert_eq!(doc.tree().value(&[0]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_leaves_the_fill_alone() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(
+            labelled("a").with_colour(Some(2)).with_fill(true),
+        )]);
+        doc.set_colour(&[0], None, Scope::Box);
+        assert!(doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_fill(&[1], true, Scope::Box);
+        assert!(doc.tree().value(&[1]).filled());
+        assert!(!doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_writes_the_value_even_without_a_colour() {
+        let mut doc = row();
+        doc.set_fill(&[0], true, Scope::Box);
+        assert!(doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_on_siblings_writes_every_top_level_box() {
+        let mut doc = row();
+        doc.set_fill(&[1], true, Scope::Siblings);
+        assert!(doc.tree().value(&[0]).filled());
+        assert!(doc.tree().value(&[1]).filled());
+        assert!(!doc.tree().value(&[0, 0]).filled());
+    }
+
+    #[test]
+    fn set_fill_writes_false() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_fill(true))]);
+        doc.set_fill(&[0], false, Scope::Box);
+        assert!(!doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_rounded_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_rounded(&[0, 1], true, Scope::Box);
+        assert!(doc.tree().value(&[0, 1]).rounded());
+        assert!(!doc.tree().value(&[0, 0]).rounded());
+    }
+
+    #[test]
+    fn set_rounded_on_siblings_writes_every_child_of_the_parent() {
+        let mut doc = row();
+        doc.set_rounded(&[0, 1], true, Scope::Siblings);
+        assert!(doc.tree().value(&[0, 0]).rounded());
+        assert!(doc.tree().value(&[0, 1]).rounded());
+    }
+
+    #[test]
+    fn set_rounded_writes_false() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_rounded(true))]);
+        doc.set_rounded(&[0], false, Scope::Box);
+        assert!(!doc.tree().value(&[0]).rounded());
+    }
+
+    #[test]
+    fn insert_adds_the_subtree_as_the_last_child_and_returns_its_path() {
+        let mut doc = row();
+        let subtree = node_with_children("e", vec![node("f")]);
+        let path = doc.insert(&[0], &subtree);
+        assert_eq!(path, vec![0, 2]);
+        assert_eq!(doc.tree(), row_with_child_of_a(subtree).tree());
+    }
+
+    #[test]
+    fn insert_at_the_root_adds_a_top_level_box() {
+        let mut doc = row();
+        let path = doc.insert(&[], &node("e"));
+        assert_eq!(path, vec![2]);
+        assert_eq!(doc.tree().value(&path).label(), "e");
+    }
+
+    #[test]
+    fn insert_into_an_empty_document_adds_the_first_box() {
+        let mut doc = Document::default();
+        let path = doc.insert(&[], &node("a"));
+        assert_eq!(doc, Document::with_boxes(vec![node("a")]));
+        assert_eq!(path, vec![0]);
+    }
+
+    #[test]
+    fn remove_returns_the_detached_subtree() {
+        let mut doc = row();
+        assert_eq!(
+            doc.remove(&[0]),
+            node_with_children("a", vec![node("c"), node("d")])
+        );
+    }
+
+    #[test]
+    fn remove_takes_the_box_out_of_the_document() {
+        let mut doc = row();
+        doc.remove(&[0, 0]);
+        assert_eq!(
+            doc,
+            Document::with_boxes(vec![node_with_children("a", vec![node("d")]), node("b")])
+        );
     }
 }
