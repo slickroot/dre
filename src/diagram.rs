@@ -15,6 +15,18 @@ impl Node {
     pub(crate) fn label(&self) -> &str {
         &self.label
     }
+
+    pub(crate) fn colour(&self) -> Option<u8> {
+        self.colour
+    }
+
+    pub(crate) fn filled(&self) -> bool {
+        self.filled
+    }
+
+    pub(crate) fn rounded(&self) -> bool {
+        self.rounded
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -69,7 +69,11 @@ pub(crate) fn place<'a>(tree: &'a Tree<Node>, offsets: &[i64]) -> Vec<Placement<
     ) -> Vec<Placement<'a>> {
         let y = row as i64 * HALF_PITCH;
         let mut placements = vec![Placement {
-            node: PlacementNode::Node(node),
+            node: PlacementNode::Box {
+                colour: node.colour(),
+                fill: node.filled().then_some(node.colour()).flatten(),
+                rounded: node.rounded(),
+            },
             x,
             y,
             width,
@@ -174,7 +178,11 @@ pub(crate) struct Cursor;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode<'a> {
-    Node(&'a Node),
+    Box {
+        colour: Option<u8>,
+        fill: Option<u8>,
+        rounded: bool,
+    },
     Label(Label<'a>),
     Arrow(Arrow),
     Cursor(Cursor),
@@ -208,12 +216,12 @@ pub(crate) fn layout<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
 
     let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
-        .filter(|placement| matches!(placement.node, PlacementNode::Node(_)))
+        .filter(|placement| matches!(placement.node, PlacementNode::Box { .. }))
         .cloned()
         .collect();
     let mut rest: Vec<Placement<'a>> = placements
         .into_iter()
-        .filter(|placement| !matches!(placement.node, PlacementNode::Node(_)))
+        .filter(|placement| !matches!(placement.node, PlacementNode::Box { .. }))
         .collect();
     boxes_first.append(&mut rest);
     boxes_first
@@ -346,8 +354,8 @@ mod tests {
 
         let box_placement = &placements[0];
         match &box_placement.node {
-            PlacementNode::Node(n) => assert_eq!(*n, nodes.value(&[0])),
-            _ => panic!("expected the first placement to wrap the node"),
+            PlacementNode::Box { .. } => {}
+            _ => panic!("expected the first placement to be the box"),
         }
         assert_eq!(box_placement.x, offsets[0]);
         assert_eq!(box_placement.y, 0);
@@ -382,8 +390,8 @@ mod tests {
 
         assert_eq!(placements.len(), 2);
         match &placements[0].node {
-            PlacementNode::Node(n) => assert_eq!(*n, &labelled("hi")),
-            _ => panic!("expected the first placement to wrap the node"),
+            PlacementNode::Box { .. } => {}
+            _ => panic!("expected the first placement to be the box"),
         }
         match &placements[1].node {
             PlacementNode::Label(label) => {
@@ -427,6 +435,34 @@ mod tests {
         assert_eq!(arrow.shaft, expected_shaft);
     }
 
+    fn box_labelled<'a>(placements: &'a [Placement<'a>], text: &str) -> &'a Placement<'a> {
+        let label = placements
+            .iter()
+            .position(|placement| matches!(&placement.node, PlacementNode::Label(label) if label.text == text))
+            .expect("the box has a label placement");
+        let box_placement = &placements[label - 1];
+        assert!(matches!(box_placement.node, PlacementNode::Box { .. }));
+        box_placement
+    }
+
+    #[test]
+    fn place_centres_a_label_on_its_boxs_midline() {
+        let nodes = Tree::root(vec![node("hi"), node("a wider label")]);
+        let offsets = offsets_for(&nodes);
+        let placements = place(&nodes, &offsets);
+
+        let box_placement = box_labelled(&placements, "hi");
+        let label = placements
+            .iter()
+            .find(|placement| matches!(&placement.node, PlacementNode::Label(label) if label.text == "hi"))
+            .expect("the box has a label placement");
+        assert!(box_placement.width > width(&labelled("hi")));
+        assert_eq!(label.x, box_placement.x + centre(box_placement.width, "hi"));
+        assert_eq!(label.y, box_placement.y + BOX_HEIGHT / 2);
+        assert_eq!(label.width, interior("hi"));
+        assert_eq!(label.height, 1);
+    }
+
     #[test]
     fn place_assigns_a_parents_row_as_the_middle_childs_row_when_odd() {
         let nodes = Tree::root(vec![node_with_children(
@@ -436,10 +472,7 @@ mod tests {
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
-        let parent_box = placements
-            .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label() == "parent"))
-            .expect("the parent has a box placement");
+        let parent_box = box_labelled(&placements, "parent");
         assert_eq!(parent_box.y, LEAF_STRIDE * HALF_PITCH);
     }
 
@@ -452,11 +485,65 @@ mod tests {
         let offsets = offsets_for(&nodes);
         let placements = place(&nodes, &offsets);
 
-        let parent_box = placements
-            .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label() == "parent"))
-            .expect("the parent has a box placement");
+        let parent_box = box_labelled(&placements, "parent");
         assert_eq!(parent_box.y, HALF_PITCH);
+    }
+
+    fn laid_out_box(colour: Option<u8>, filled: bool, rounded: bool) -> PlacementNode<'static> {
+        let nodes = Tree::root(vec![Tree::leaf(Node {
+            colour,
+            filled,
+            rounded,
+            ..labelled("hi")
+        })]);
+        match layout(&nodes)[0].node {
+            PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+            },
+            _ => panic!("the first placement is the box"),
+        }
+    }
+
+    #[test]
+    fn layout_carries_a_boxs_colour_and_rounding() {
+        assert_eq!(
+            laid_out_box(Some(3), false, true),
+            PlacementNode::Box {
+                colour: Some(3),
+                fill: None,
+                rounded: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_filled_coloured_box_is_filled_with_its_colour() {
+        assert!(matches!(
+            laid_out_box(Some(2), true, false),
+            PlacementNode::Box { fill: Some(2), .. }
+        ));
+    }
+
+    #[test]
+    fn an_unfilled_box_has_no_fill() {
+        assert!(matches!(
+            laid_out_box(Some(2), false, false),
+            PlacementNode::Box { fill: None, .. }
+        ));
+    }
+
+    #[test]
+    fn a_filled_box_without_a_colour_has_no_fill() {
+        assert!(matches!(
+            laid_out_box(None, true, false),
+            PlacementNode::Box { fill: None, .. }
+        ));
     }
 
     #[test]
@@ -469,7 +556,7 @@ mod tests {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = layout(&nodes);
         let box_placement = placements[0].clone();
-        assert!(matches!(box_placement.node, PlacementNode::Node(_)));
+        assert!(matches!(box_placement.node, PlacementNode::Box { .. }));
         assert_eq!(box_placement.x, 0);
         assert_eq!(box_placement.y, 0);
     }
@@ -483,7 +570,7 @@ mod tests {
             .all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
         assert!(placements
             .iter()
-            .any(|p| matches!(p.node, PlacementNode::Node(_))));
+            .any(|p| matches!(p.node, PlacementNode::Box { .. })));
         assert!(placements
             .iter()
             .any(|p| matches!(p.node, PlacementNode::Label(_))));
@@ -505,11 +592,11 @@ mod tests {
 
         let first_non_box = placements
             .iter()
-            .position(|p| !matches!(p.node, PlacementNode::Node(_)))
+            .position(|p| !matches!(p.node, PlacementNode::Box { .. }))
             .expect("there is at least one non-box placement");
         assert!(placements[..first_non_box]
             .iter()
-            .all(|p| matches!(p.node, PlacementNode::Node(_))));
+            .all(|p| matches!(p.node, PlacementNode::Box { .. })));
     }
 
     #[test]
@@ -528,6 +615,13 @@ mod tests {
         assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
         assert_eq!(cursor.x, label.x + label.width - 1);
         assert_eq!(cursor.y, label.y);
+    }
+
+    #[test]
+    fn with_cursor_adds_nothing_without_a_selection() {
+        let nodes = Tree::root(vec![node("hi")]);
+        let placements = layout(&nodes);
+        assert_eq!(with_cursor(placements.clone(), None), placements);
     }
 
     #[test]
@@ -560,17 +654,24 @@ mod tests {
 
     #[test]
     fn placement_node_holds_the_matching_variants_inner_value() {
-        let a = labelled("a");
         let box_placement = Placement {
-            node: PlacementNode::Node(&a),
+            node: PlacementNode::Box {
+                colour: Some(1),
+                fill: Some(1),
+                rounded: true,
+            },
             x: 0,
             y: 0,
             width: 3,
             height: 3,
         };
         match box_placement.node {
-            PlacementNode::Node(n) => assert_eq!(n, &a),
-            _ => panic!("expected a Node variant"),
+            PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+            } => assert_eq!((colour, fill, rounded), (Some(1), Some(1), true)),
+            _ => panic!("expected a Box variant"),
         }
 
         let label_placement = Placement {
