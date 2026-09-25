@@ -9,7 +9,6 @@ pub(crate) struct Node {
     pub(crate) colour: Option<u8>,
     pub(crate) filled: bool,
     pub(crate) rounded: bool,
-    pub(crate) hint: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,7 +78,6 @@ fn node_from_file_box(file_box: FileBox) -> Tree<Node> {
             colour: file_box.colour,
             filled: file_box.fill.is_some(),
             rounded: file_box.rounded,
-            hint: false,
         },
         file_box
             .children

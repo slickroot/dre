@@ -4,14 +4,12 @@ use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::Node;
 use crate::kitty;
 use crate::layout::{with_cursor, Label, Placement, PlacementNode};
 use crate::palette::{palette, BACKGROUND};
 use crate::state::State;
 use crate::status_line::{status_line, Segment, StatusLine};
 use crate::tty::Window;
-use types::Tree;
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -84,7 +82,6 @@ enum SpriteKey {
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
-        hint: bool,
     },
     Arrow {
         width: i64,
@@ -102,7 +99,6 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             colour: node.colour,
             fill: if node.filled { node.colour } else { None },
             rounded: node.rounded,
-            hint: node.hint,
         },
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
@@ -233,16 +229,6 @@ impl crate::canvas::Shape for SolidShape {
     }
 }
 
-const HINT_TEXT: &str = "press b to add a box";
-
-fn hint_node() -> Node {
-    Node {
-        label: HINT_TEXT.to_string(),
-        hint: true,
-        ..Default::default()
-    }
-}
-
 pub(crate) struct TerminalRenderer {
     window: Window,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -277,15 +263,10 @@ impl TerminalRenderer {
     }
 
     fn render_diagram(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
-        let placements = if !state.doc.tree().contains(&[0]) {
-            crate::layout::layout(&hint_boxes)
-        } else {
-            with_cursor(
-                crate::layout::layout(state.doc.tree()),
-                state.selected.clone(),
-            )
-        };
+        let placements = with_cursor(
+            crate::layout::layout(state.doc.tree()),
+            state.selected.clone(),
+        );
         let mut frame = Frame::new(self.window);
         frame.centre_on(&placements);
         for placement in &placements {
@@ -377,7 +358,7 @@ impl TerminalRenderer {
             if !frame.shows(&char_placement) {
                 continue;
             }
-            let glyph = self.glyph_source.glyph(character, label.hint);
+            let glyph = self.glyph_source.glyph(character);
             frame.place(glyph, &char_placement);
         }
     }
@@ -425,7 +406,7 @@ impl TerminalRenderer {
             height,
             border: BORDER,
             radius: if node.rounded { ROUNDED_RADIUS } else { 0 },
-            edge: [r, g, b, if node.hint { OPAQUE / 4 } else { OPAQUE }],
+            edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
         Canvas::fill(width, height, &shape)
@@ -472,6 +453,7 @@ mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children, Document};
     use crate::state::Mode;
+    use types::Tree;
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
@@ -727,7 +709,6 @@ mod tests {
             colour,
             filled,
             rounded,
-            hint: false,
         }
     }
 
@@ -795,21 +776,6 @@ mod tests {
     fn sprite_key_differs_by_rounded() {
         let node_a = box_node(Some(1), true, true);
         let node_b = box_node(Some(1), true, false);
-        let a = box_placement(&node_a, 0, 0, 10, 10);
-        let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
-    }
-
-    #[test]
-    fn sprite_key_differs_by_hint() {
-        let node_a = crate::diagram::Node {
-            hint: false,
-            ..box_node(Some(1), true, true)
-        };
-        let node_b = crate::diagram::Node {
-            hint: true,
-            ..box_node(Some(1), true, true)
-        };
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(sprite_key(&a), sprite_key(&b));
@@ -899,7 +865,6 @@ mod tests {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
                 path: vec![0],
-                hint: false,
             }),
             x,
             y,
@@ -1414,65 +1379,14 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_canvas_renders_the_hint_box() {
+    fn an_empty_drawing_draws_no_placements() {
         let window = window(40, 10, 1, 1);
         let mut r = renderer_on(window);
-        let output = rendered_diagram(&mut r, &empty_doc());
-
-        let mut expected_r = renderer_on(window);
-        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
-        let placements = crate::layout::layout(&hint_boxes);
-        let mut frame = Frame::new(window);
-        frame.centre_on(&placements);
-        draw_all(&mut expected_r, &mut frame, &placements);
-        let expected = String::from_utf8(frame.into_bytes()).unwrap();
-
-        assert_eq!(output, expected);
-    }
-
-    #[test]
-    fn a_canvas_with_a_box_does_not_show_the_hint() {
-        let window = window(40, 10, 1, 1);
-        let mut r = renderer_on(window);
-        let doc = Document {
-            root: Tree::root(vec![node("hi")]),
-        };
-        let output = rendered_diagram(&mut r, &doc);
-
-        let mut expected_r = renderer_on(window);
-        let placements = with_cursor(crate::layout::layout(doc.tree()), None);
-        let mut frame = Frame::new(window);
-        frame.centre_on(&placements);
-        draw_all(&mut expected_r, &mut frame, &placements);
-        let expected = String::from_utf8(frame.into_bytes()).unwrap();
-        assert_eq!(output, expected);
-
-        let mut hint_r = renderer_on(window);
-        let hint_output = rendered_diagram(&mut hint_r, &empty_doc());
-        assert_ne!(output, hint_output);
-    }
-
-    #[test]
-    fn no_cursor_is_drawn_over_the_hint_even_with_a_selection() {
-        let mut r = renderer_on(window(20, 10, 1, 1));
-        let mut state = State::default();
-        state.selected = Some(vec![0]);
+        let state = crate::state::new_state(vec![], Mode::Command, None);
         let mut out = Vec::new();
         r.render_diagram(&state, &mut out).unwrap();
-        let output = String::from_utf8(out).unwrap();
-
-        let mut expected_r = renderer_on(window(20, 10, 1, 1));
-        let hint_boxes = Tree::root(vec![Tree::leaf(hint_node())]);
-        let placements = crate::layout::layout(&hint_boxes);
-        assert!(!placements
-            .iter()
-            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
-        let mut frame = Frame::new(window(20, 10, 1, 1));
-        frame.centre_on(&placements);
-        draw_all(&mut expected_r, &mut frame, &placements);
-        let expected = String::from_utf8(frame.into_bytes()).unwrap();
-
-        assert_eq!(output, expected);
+        let empty_frame = String::from_utf8(Frame::new(window).into_bytes()).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), empty_frame);
     }
 
     #[test]
@@ -1919,21 +1833,6 @@ mod tests {
             pixel_of(&sprite, BORDER + 1, BORDER + 1),
             fill_colour(Some(2), true)
         );
-    }
-
-    #[test]
-    fn a_hint_boxs_edge_is_fainter_than_a_normal_boxs_edge() {
-        let r = renderer(1, 1);
-        let size = 2 * BORDER + 3;
-        let normal = box_outline(&r, &box_node(None, false, false), size, size);
-        let hint_node = crate::diagram::Node {
-            hint: true,
-            ..box_node(None, false, false)
-        };
-        let hint = box_outline(&r, &hint_node, size, size);
-        let (_, _, _, normal_alpha) = pixel_of(&normal, 0, size / 2);
-        let (_, _, _, hint_alpha) = pixel_of(&hint, 0, size / 2);
-        assert!(hint_alpha < normal_alpha);
     }
 
     #[test]

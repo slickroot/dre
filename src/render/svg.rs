@@ -277,7 +277,6 @@ mod tests {
             colour,
             filled,
             rounded,
-            hint: false,
         }
     }
 
@@ -526,7 +525,6 @@ mod tests {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
                 path: vec![0],
-                hint: false,
             }),
             x,
             y,
