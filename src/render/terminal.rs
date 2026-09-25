@@ -2,11 +2,11 @@ use std::io::{self, Write};
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
-use super::{colour, editor, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, editor, Renderer, ARROW_OPACITY, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
-use crate::layout::{Label, Placement, PlacementNode};
+use crate::layout::{Label, Placement, PlacementNode, Sides};
 use crate::palette::palette;
 use crate::state::State;
 use crate::tty::Window;
@@ -78,6 +78,8 @@ enum SpriteKey {
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
+        sides: Sides,
+        border: i64,
     },
     Arrow {
         width: i64,
@@ -93,12 +95,16 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             colour,
             fill,
             rounded,
+            sides,
+            border,
         } => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
             colour: *colour,
             fill: *fill,
             rounded: *rounded,
+            sides: *sides,
+            border: *border,
         },
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
@@ -325,12 +331,14 @@ impl TerminalRenderer {
     }
 
     fn outline_box(&self, placement: &Placement) -> Canvas {
-        let (edge, fill, rounded) = match &placement.node {
+        let (edge, fill, rounded, border) = match &placement.node {
             PlacementNode::Box {
                 colour,
                 fill,
                 rounded,
-            } => (*colour, *fill, *rounded),
+                border,
+                ..
+            } => (*colour, *fill, *rounded, *border),
             _ => unreachable!("outline_box is only called for Box placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
@@ -340,7 +348,7 @@ impl TerminalRenderer {
         let shape = BoxShape {
             width,
             height,
-            border: BORDER,
+            border,
             radius: if rounded { ROUNDED_RADIUS } else { 0 },
             edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
@@ -387,7 +395,7 @@ impl TerminalRenderer {
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::*;
-    use crate::layout::FOOTER_ROWS;
+    use crate::layout::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::state::Mode;
 
     #[test]
@@ -637,6 +645,46 @@ mod tests {
             colour,
             fill,
             rounded,
+            sides: ALL_SIDES,
+            border: BORDER,
+        }
+    }
+
+    fn with_sides(node: &PlacementNode<'static>, new_sides: Sides) -> PlacementNode<'static> {
+        match node.clone() {
+            PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+                border,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+                sides: new_sides,
+                border,
+            },
+            _ => panic!("expected a Box"),
+        }
+    }
+
+    fn with_border(node: &PlacementNode<'static>, new_border: i64) -> PlacementNode<'static> {
+        match node.clone() {
+            PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+                sides,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                rounded,
+                sides,
+                border: new_border,
+            },
+            _ => panic!("expected a Box"),
         }
     }
 
@@ -707,6 +755,39 @@ mod tests {
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_sides() {
+        let node_a = box_node(None, None, false);
+        let node_b = with_sides(&node_a, (true, false, false, true));
+        let a = box_placement(&node_a, 0, 0, 10, 10);
+        let b = box_placement(&node_b, 0, 0, 10, 10);
+        assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_border() {
+        let node_a = box_node(None, None, false);
+        let node_b = with_border(&node_a, BORDER + 1);
+        let a = box_placement(&node_a, 0, 0, 10, 10);
+        let b = box_placement(&node_b, 0, 0, 10, 10);
+        assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn boxes_differing_only_in_sides_or_border_are_cached_distinctly() {
+        let mut r = renderer_on(window(40, 20, 2, 4));
+        let plain = box_node(None, None, false);
+        let variants = [
+            plain.clone(),
+            with_sides(&plain, (true, false, false, true)),
+            with_border(&plain, BORDER + 1),
+        ];
+        for variant in &variants {
+            sprites(&mut r, &[box_placement(variant, 0, 0, 4, 3)]);
+        }
+        assert_eq!(r.cache.len(), variants.len());
     }
 
     #[test]

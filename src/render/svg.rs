@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, colour, editor, Renderer, ARROW_OPACITY, BORDER, CELL_HEIGHT,
+    arrowhead_depth, arrowhead_slope, colour, editor, Renderer, ARROW_OPACITY, CELL_HEIGHT,
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode, FOOTER_ROWS};
+use crate::layout::{diagram, Placement, PlacementNode, BORDER, FOOTER_ROWS};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -108,6 +108,7 @@ fn paint(placements: &[Placement]) -> String {
             colour,
             fill,
             rounded,
+            ..
         } = &placement.node
         {
             svg.push_str(&rect(placement, *colour, *fill, *rounded));
@@ -220,7 +221,8 @@ fn rect(
     fill: Option<u8>,
     rounded: bool,
 ) -> String {
-    use super::{BORDER, OPAQUE, ROUNDED_RADIUS};
+    use super::{OPAQUE, ROUNDED_RADIUS};
+    use crate::layout::BORDER;
     use std::fmt::Write as _;
 
     let (r, g, b) = colour(edge);
@@ -270,7 +272,6 @@ mod tests {
     use super::super::arrowhead_slope;
     use super::super::centre;
     use super::super::colour;
-    use super::super::BORDER;
     use super::super::CELL_HEIGHT;
     use super::super::CELL_WIDTH;
     use super::super::FILL_ALPHA;
@@ -281,6 +282,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::with_cursor;
     use crate::layout::{Arrow, Cursor, Label, Placement};
+    use crate::layout::{ALL_SIDES, BORDER};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
 
@@ -298,6 +300,8 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x,
             y,

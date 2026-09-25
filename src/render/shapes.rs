@@ -126,7 +126,8 @@ impl Shape for ArrowShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::{BORDER, OPAQUE};
+    use crate::layout::BORDER;
+    use crate::render::OPAQUE;
 
     const EDGE: Rgba = [10, 20, 30, OPAQUE];
     const FILL: Rgba = [1, 2, 3, OPAQUE];

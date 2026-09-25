@@ -95,7 +95,6 @@ const CELL_WIDTH: i64 = 8;
 const CELL_HEIGHT: i64 = 16;
 
 const ROUNDED_RADIUS: i64 = 20;
-const BORDER: i64 = 4;
 
 const OPAQUE: u8 = 255;
 const FILL_ALPHA: u16 = 77;
@@ -109,7 +108,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Label, PlacementNode};
+    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER};
     use crate::state::{new_state, Mode};
 
     const AREA: Area = Area {
@@ -131,6 +130,8 @@ mod tests {
             colour: None,
             fill: None,
             rounded: false,
+            sides: ALL_SIDES,
+            border: BORDER,
         }
     }
 

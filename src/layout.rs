@@ -6,6 +6,10 @@ pub(crate) const BOX_HEIGHT: i64 = 3;
 pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const BORDERS: i64 = 2;
+pub(crate) const BORDER: i64 = 4;
+
+pub type Sides = (bool, bool, bool, bool);
+pub const ALL_SIDES: Sides = (true, true, true, true);
 #[allow(dead_code)]
 pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
@@ -73,6 +77,8 @@ pub(crate) fn place<'a>(tree: &'a Tree<Node>, offsets: &[i64]) -> Vec<Placement<
                 colour: node.colour(),
                 fill: node.filled().then_some(node.colour()).flatten(),
                 rounded: node.rounded(),
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x,
             y,
@@ -182,6 +188,8 @@ pub(crate) enum PlacementNode<'a> {
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
+        sides: Sides,
+        border: i64,
     },
     Label(Label<'a>),
     Arrow(Arrow),
@@ -528,10 +536,14 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                sides,
+                border,
             } => PlacementNode::Box {
                 colour,
                 fill,
                 rounded,
+                sides,
+                border,
             },
             _ => panic!("the first placement is the box"),
         }
@@ -545,8 +557,25 @@ mod tests {
                 colour: Some(3),
                 fill: None,
                 rounded: true,
+                sides: ALL_SIDES,
+                border: BORDER,
             }
         );
+    }
+
+    #[test]
+    fn diagram_boxes_have_all_sides_and_the_border_width() {
+        let nodes = Tree::root(vec![Tree::leaf(labelled("hi"))]);
+        let placements = diagram(&nodes);
+        let boxes: Vec<_> = placements
+            .iter()
+            .filter_map(|placement| match placement.node {
+                PlacementNode::Box { sides, border, .. } => Some((sides, border)),
+                _ => None,
+            })
+            .collect();
+        assert!(!boxes.is_empty());
+        assert!(boxes.iter().all(|&found| found == (ALL_SIDES, BORDER)));
     }
 
     #[test]
@@ -686,6 +715,8 @@ mod tests {
                 colour: Some(1),
                 fill: Some(1),
                 rounded: true,
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x: 0,
             y: 0,
@@ -697,6 +728,7 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                ..
             } => assert_eq!((colour, fill, rounded), (Some(1), Some(1), true)),
             _ => panic!("expected a Box variant"),
         }
