@@ -1,19 +1,11 @@
+pub(crate) mod bootstrap;
 mod controller;
 mod store;
 
 use std::io;
-use std::os::fd::AsRawFd;
-use std::process::ExitCode;
 
-use crate::kitty;
-use crate::render::{GlyphCache, TerminalRenderer, CACHE_LIMIT};
-use crate::terminal::{self, RawScreen};
-use controller::key_source::TerminalKeySource;
-use controller::reducer::StateReducer;
-use controller::screen::TerminalScreen;
-use controller::{Controller, DreController};
-use store::files::DiskFiles;
-use store::{FileStateStore, StateStore};
+use controller::Controller;
+use store::StateStore;
 
 pub(crate) struct Editor {
     store: Box<dyn StateStore>,
@@ -30,30 +22,6 @@ impl Editor {
         let state = self.controller.run(state)?;
         self.store.save(&state)
     }
-}
-
-pub(crate) fn open(file: Option<String>) -> io::Result<ExitCode> {
-    let mut stdout = io::stdout();
-    let fd = io::stdin().as_raw_fd();
-    kitty::require(&mut stdout, fd)?;
-    let terminal = terminal::probe()?;
-    let glyph_source = Box::new(GlyphCache::new(terminal.cell_width, terminal.cell_height));
-    let renderer = TerminalRenderer::new(terminal, glyph_source, CACHE_LIMIT);
-    let _raw = RawScreen::open(fd)?;
-    let resize_fd = terminal::install_resize_pipe()?;
-
-    let store = FileStateStore::new(Box::new(DiskFiles));
-    let controller = DreController::new(
-        Box::new(TerminalKeySource { fd, resize_fd }),
-        Box::new(TerminalScreen {
-            renderer,
-            out: stdout,
-        }),
-        Box::new(StateReducer),
-    );
-    let mut editor = Editor::new(Box::new(store), Box::new(controller));
-    editor.run(file.as_deref())?;
-    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]

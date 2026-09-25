@@ -17,13 +17,13 @@ const RESET_BACKGROUND_COLOUR: &str = "\x1b]111\x1b\\";
 
 pub(crate) const RESIZE: &str = "\x1bRESIZE";
 
-pub(crate) struct RawScreen {
+pub(crate) struct RawMode {
     fd: RawFd,
     saved: Termios,
 }
 
-impl RawScreen {
-    pub(crate) fn open(fd: RawFd) -> io::Result<Self> {
+impl RawMode {
+    pub(crate) fn enter(fd: RawFd) -> io::Result<Self> {
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
         let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
         let mut stdout = io::stdout();
@@ -35,11 +35,11 @@ impl RawScreen {
         let mut raw = saved.clone();
         cfmakeraw(&mut raw);
         tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
-        Ok(RawScreen { fd, saved })
+        Ok(RawMode { fd, saved })
     }
 }
 
-impl Drop for RawScreen {
+impl Drop for RawMode {
     fn drop(&mut self) {
         let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
         let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
@@ -52,7 +52,7 @@ impl Drop for RawScreen {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Terminal {
+pub(crate) struct Window {
     pub(crate) cols: i64,
     pub(crate) rows: i64,
     pub(crate) cell_width: i64,
@@ -68,17 +68,17 @@ fn retry_on_eintr<T>(mut syscall: impl FnMut() -> nix::Result<T>) -> io::Result<
     }
 }
 
-pub(crate) fn probe() -> io::Result<Terminal> {
+pub(crate) fn probe() -> io::Result<Window> {
     let stdout_fd = io::stdout().as_raw_fd();
     let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
     retry_on_eintr(|| unsafe { terminal_window_size(stdout_fd, &mut winsize) })?;
     Ok(measure(winsize))
 }
 
-fn measure(winsize: libc::winsize) -> Terminal {
+fn measure(winsize: libc::winsize) -> Window {
     let cols = winsize.ws_col as f64;
     let rows = winsize.ws_row as f64;
-    Terminal {
+    Window {
         cols: winsize.ws_col as i64,
         rows: winsize.ws_row as i64,
         cell_width: (winsize.ws_xpixel as f64 / cols).round() as i64,
@@ -164,20 +164,20 @@ mod tests {
 
     #[test]
     fn the_window_size_gives_the_columns_and_rows() {
-        let terminal = measure(winsize(80, 24, 800, 480));
-        assert_eq!((terminal.cols, terminal.rows), (80, 24));
+        let window = measure(winsize(80, 24, 800, 480));
+        assert_eq!((window.cols, window.rows), (80, 24));
     }
 
     #[test]
     fn a_cell_is_the_pixel_size_divided_by_the_grid() {
-        let terminal = measure(winsize(80, 24, 800, 480));
-        assert_eq!((terminal.cell_width, terminal.cell_height), (10, 20));
+        let window = measure(winsize(80, 24, 800, 480));
+        assert_eq!((window.cell_width, window.cell_height), (10, 20));
     }
 
     #[test]
     fn a_cell_that_does_not_divide_evenly_is_rounded() {
-        let terminal = measure(winsize(3, 3, 8, 7));
-        assert_eq!((terminal.cell_width, terminal.cell_height), (3, 2));
+        let window = measure(winsize(3, 3, 8, 7));
+        assert_eq!((window.cell_width, window.cell_height), (3, 2));
     }
 
     #[test]

@@ -18,10 +18,10 @@ mod palette;
 mod render;
 mod state;
 mod status_line;
-#[cfg(not(target_arch = "wasm32"))]
-mod terminal;
 #[cfg(test)]
 mod test_support;
+#[cfg(not(target_arch = "wasm32"))]
+mod tty;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;
@@ -90,7 +90,7 @@ impl Default for Session {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
-        cli::Command::Edit(file) => editor::open(file),
+        cli::Command::Edit(file) => editor::bootstrap::run(file),
         cli::Command::Export { input } => cli::export(input),
     };
     match result {

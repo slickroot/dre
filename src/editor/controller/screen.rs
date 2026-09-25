@@ -2,7 +2,7 @@ use std::io::{self, Stdout, Write};
 
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::State;
-use crate::terminal;
+use crate::tty;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Screen {
@@ -22,7 +22,7 @@ impl Screen for TerminalScreen {
     }
 
     fn resize(&mut self) -> io::Result<()> {
-        self.renderer.on_resize(terminal::probe()?);
+        self.renderer.on_resize(tty::probe()?);
         Ok(())
     }
 }
