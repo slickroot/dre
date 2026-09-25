@@ -197,21 +197,21 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) const FOOTER_ROWS: i64 = 3;
-pub(crate) const FOOTER_COLOUR: u8 = 0;
+pub(crate) const FOOTER_ROWS: i64 = 1;
 
-pub(crate) fn footer() -> Vec<Placement<'static>> {
-    vec![Placement {
-        node: PlacementNode::Box {
-            colour: Some(FOOTER_COLOUR),
-            fill: Some(FOOTER_COLOUR),
-            rounded: false,
-        },
+pub(crate) fn footer(name: Option<&str>) -> Vec<Placement<'_>> {
+    name.map(|name| Placement {
+        node: PlacementNode::Label(Label {
+            text: name,
+            path: vec![],
+        }),
         x: 0,
         y: 0,
-        width: 1,
+        width: name.chars().count() as i64,
         height: 1,
-    }]
+    })
+    .into_iter()
+    .collect()
 }
 
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
@@ -272,18 +272,22 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_is_one_filled_square_unit_box_in_the_footer_colour_at_the_origin() {
+    fn footer_without_a_name_is_empty() {
+        assert!(footer(None).is_empty());
+    }
+
+    #[test]
+    fn footer_with_a_name_is_one_label_as_wide_as_the_name_and_one_row_high_with_no_path() {
         assert_eq!(
-            footer(),
+            footer(Some("plans")),
             vec![Placement {
-                node: PlacementNode::Box {
-                    colour: Some(FOOTER_COLOUR),
-                    fill: Some(FOOTER_COLOUR),
-                    rounded: false,
-                },
+                node: PlacementNode::Label(Label {
+                    text: "plans",
+                    path: vec![],
+                }),
                 x: 0,
                 y: 0,
-                width: 1,
+                width: 5,
                 height: 1,
             }]
         );

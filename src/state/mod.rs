@@ -63,6 +63,15 @@ impl State {
             ..Default::default()
         }
     }
+
+    pub(crate) fn diagram_name(&self) -> Option<&str> {
+        self.save_to.as_deref().map(file_stem_without_dre)
+    }
+}
+
+fn file_stem_without_dre(path: &str) -> &str {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    file_name.strip_suffix(".dre").unwrap_or(file_name)
 }
 
 impl Default for State {
@@ -139,6 +148,29 @@ mod tests {
     use crate::state::action::Action;
     use crate::state::apply as reduce;
     use crate::test_support::handle_key;
+
+    #[test]
+    fn diagram_name_strips_the_folder_and_the_dre_extension() {
+        let state = State::open(Document::default(), Some("docs/plans.dre".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
+    }
+
+    #[test]
+    fn diagram_name_strips_the_dre_extension_of_a_bare_file_name() {
+        let state = State::open(Document::default(), Some("plans.dre".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
+    }
+
+    #[test]
+    fn diagram_name_of_a_path_without_the_dre_extension_only_strips_the_folder() {
+        let state = State::open(Document::default(), Some("docs/plans".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
+    }
+
+    #[test]
+    fn diagram_name_is_none_without_a_path_to_save_to() {
+        assert_eq!(State::default().diagram_name(), None);
+    }
 
     #[test]
     fn a_default_state_is_not_dirty() {
