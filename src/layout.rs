@@ -197,12 +197,9 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-#[allow(dead_code)]
 pub(crate) const FOOTER_ROWS: i64 = 3;
-#[allow(dead_code)]
 pub(crate) const FOOTER_COLOUR: u8 = 0;
 
-#[allow(dead_code)]
 pub(crate) fn footer(width: i64, height: i64) -> Vec<Placement<'static>> {
     vec![Placement {
         node: PlacementNode::Box {

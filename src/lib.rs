@@ -2,7 +2,6 @@
 mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
-#[allow(dead_code)]
 mod composer;
 mod diagram;
 #[cfg(not(target_arch = "wasm32"))]
