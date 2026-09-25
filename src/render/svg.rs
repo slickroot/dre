@@ -5,7 +5,7 @@ use super::{
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode, ALL_SIDES, BORDER};
+use crate::layout::{Placement, PlacementNode, ALL_SIDES, BORDER};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -16,39 +16,51 @@ fn label_font_size() -> f64 {
     (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
 }
 
-#[derive(Default)]
+pub const FULL_HD_WIDTH: i64 = 1920;
+pub const FULL_HD_HEIGHT: i64 = 1080;
+
+#[derive(Clone, Copy)]
+enum Mode {
+    Export,
+    Editor,
+}
+
 pub struct SvgRenderer {
-    canvas: Option<(i64, i64)>,
+    canvas: (i64, i64),
+    mode: Mode,
+}
+
+impl Default for SvgRenderer {
+    fn default() -> Self {
+        SvgRenderer {
+            canvas: (FULL_HD_WIDTH, FULL_HD_HEIGHT),
+            mode: Mode::Export,
+        }
+    }
 }
 
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
         SvgRenderer {
-            canvas: Some((columns, rows)),
-        }
-    }
-
-    fn window(&self, state: &State) -> Area {
-        let (cols, rows) = self
-            .canvas
-            .unwrap_or_else(|| extent(&diagram(state.doc.tree())));
-        Area {
-            col: 0,
-            row: 0,
-            cols,
-            rows,
+            canvas: (columns * CELL_WIDTH, rows * CELL_HEIGHT),
+            mode: Mode::Editor,
         }
     }
 }
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let window = self.window(state);
-        let areas = match self.canvas {
-            Some(_) => editor(state, window),
-            None => vec![(window, without_cursor(body(state, window)))],
+        let window = Area {
+            col: 0,
+            row: 0,
+            cols: self.canvas.0 / CELL_WIDTH,
+            rows: self.canvas.1 / CELL_HEIGHT,
         };
-        out.write_all(document(window, &areas).as_bytes())
+        let areas = match self.mode {
+            Mode::Editor => editor(state, window),
+            Mode::Export => vec![(window, without_cursor(body(state, window)))],
+        };
+        out.write_all(document(self.canvas, self.mode, &areas).as_bytes())
     }
 }
 
@@ -57,20 +69,6 @@ fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
         .into_iter()
         .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
         .collect()
-}
-
-fn extent(placements: &[Placement]) -> (i64, i64) {
-    let width = placements
-        .iter()
-        .map(|placement| placement.x + placement.width)
-        .max()
-        .unwrap_or(0);
-    let height = placements
-        .iter()
-        .map(|placement| placement.y + placement.height)
-        .max()
-        .unwrap_or(0);
-    (width, height)
 }
 
 fn pixels(area: Area) -> (i64, i64, i64, i64) {
@@ -82,11 +80,25 @@ fn pixels(area: Area) -> (i64, i64, i64, i64) {
     )
 }
 
-fn document(window: Area, areas: &[(Area, Vec<Placement>)]) -> String {
-    let (x, y, width, height) = pixels(window);
-    let mut svg =
-        format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{x} {y} {width} {height}\">");
-    svg.push_str(&background_rect(x, y, width, height));
+fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) -> String {
+    let (width, height) = canvas;
+    let content = canvas_content(areas);
+    match mode {
+        Mode::Editor => format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{}{content}</svg>",
+            background_rect(0, 0, &width.to_string(), &height.to_string())
+        ),
+        Mode::Export => format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">{}<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">{content}</svg></svg>",
+            background_rect(0, 0, "100%", "100%"),
+            width / 2,
+            height / 2
+        ),
+    }
+}
+
+fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
+    let mut svg = String::new();
     if areas.iter().any(|(_, placements)| {
         placements
             .iter()
@@ -102,7 +114,6 @@ fn document(window: Area, areas: &[(Area, Vec<Placement>)]) -> String {
         svg.push_str(&paint(placements));
         svg.push_str("</svg>");
     }
-    svg.push_str("</svg>");
     svg
 }
 
@@ -141,7 +152,7 @@ fn paint(placements: &[Placement]) -> String {
     svg
 }
 
-fn background_rect(min_x: i64, min_y: i64, span_x: i64, span_y: i64) -> String {
+fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String {
     let (r, g, b) = crate::palette::palette(crate::palette::BACKGROUND).unwrap();
     format!(
         "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"rgb({r},{g},{b})\"/>"
@@ -294,6 +305,7 @@ mod tests {
     use super::*;
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
+    use crate::layout::diagram;
     use crate::layout::with_cursor;
     use crate::layout::FOOTER_ROWS;
     use crate::layout::{Arrow, Cursor, Label, Placement};
@@ -369,6 +381,13 @@ mod tests {
             .expect("the placements include an arrow")
     }
 
+    fn extent(placements: &[Placement]) -> (i64, i64) {
+        (
+            placements.iter().map(|p| p.x + p.width).max().unwrap_or(0),
+            placements.iter().map(|p| p.y + p.height).max().unwrap_or(0),
+        )
+    }
+
     fn draw(placements: &[Placement]) -> String {
         let (cols, rows) = extent(placements);
         let window = Area {
@@ -377,7 +396,11 @@ mod tests {
             cols,
             rows,
         };
-        document(window, &[(window, placements.to_vec())])
+        document(
+            (cols * CELL_WIDTH, rows * CELL_HEIGHT),
+            super::Mode::Editor,
+            &[(window, placements.to_vec())],
+        )
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -1058,7 +1081,11 @@ mod tests {
             foot.row,
         )];
 
-        let svg = document(window, &[(body, placements), (foot, footer)]);
+        let svg = document(
+            (window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
+            super::Mode::Editor,
+            &[(body, placements), (foot, footer)],
+        );
 
         let diagram = [
             arrow_at(7, 19, 8, 6, &[0, 6, 12]),
@@ -1079,8 +1106,8 @@ mod tests {
         ]
         .concat();
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
-            pixel_box(window),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>{}{}{}{}</svg>",
+            root_size(window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
@@ -1222,6 +1249,21 @@ mod tests {
         )
     }
 
+    fn root_size(width: i64, height: i64) -> String {
+        format!("width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"")
+    }
+
+    const SCALING_ROOT: &str =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">";
+
+    fn viewport_open(width: i64, height: i64) -> String {
+        format!(
+            "<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">",
+            width / 2,
+            height / 2
+        )
+    }
+
     fn nested(area: Area, contents: &str) -> String {
         format!(
             "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{}\">{contents}</svg>",
@@ -1266,8 +1308,8 @@ mod tests {
         );
 
         assert!(svg.starts_with(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">",
-            pixel_box(CANVAS)
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
+            root_size(CANVAS.cols * CELL_WIDTH, CANVAS.rows * CELL_HEIGHT)
         )));
         assert!(svg.contains(&expected_background(
             0,
@@ -1296,48 +1338,95 @@ mod tests {
         assert!(svg.ends_with(&format!("{foot_svg}</svg>")));
     }
 
-    fn drawing_extent(state: &State) -> (i64, i64) {
-        let placements = diagram(state.doc.tree());
-        (
-            placements.iter().map(|p| p.x + p.width).max().unwrap(),
-            placements.iter().map(|p| p.y + p.height).max().unwrap(),
+    fn a_state_of_one_box_labelled(text: &str) -> State {
+        crate::state::new_state(vec![node(text)], Mode::Command, None)
+    }
+
+    const CHILD_LABEL: &str = "child";
+    const HUGE_CHILDREN: usize = 300;
+
+    fn a_tiny_state() -> State {
+        a_state_of_one_box_labelled(CHILD_LABEL)
+    }
+
+    fn a_huge_state() -> State {
+        let children = (0..HUGE_CHILDREN).map(|_| node(CHILD_LABEL)).collect();
+        crate::state::new_state(
+            vec![node_with_children("root", children)],
+            Mode::Command,
+            None,
         )
     }
 
-    #[test]
-    fn without_a_canvas_the_window_is_exactly_the_drawing() {
-        let state = example_state();
-        let (width, height) = drawing_extent(&state);
+    fn full_hd_cells() -> (i64, i64) {
+        (FULL_HD_WIDTH / CELL_WIDTH, FULL_HD_HEIGHT / CELL_HEIGHT)
+    }
 
-        let svg = render_to_string(SvgRenderer::default(), &state);
-
-        assert!(svg.starts_with(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">",
-            width * CELL_WIDTH,
-            height * CELL_HEIGHT
-        )));
+    fn stroked_box_sizes(svg: &str) -> Vec<String> {
+        svg.split('<')
+            .filter(|element| element.starts_with("rect ") && element.contains("stroke="))
+            .map(|element| {
+                let start = element.find("width=").unwrap();
+                element[start..]
+                    .split(" stroke")
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
     }
 
     #[test]
-    fn without_a_canvas_the_only_area_holds_the_whole_diagram_uncropped() {
-        let state = example_state();
-        let (width, height) = drawing_extent(&state);
-        let window = Area {
-            col: 0,
-            row: 0,
-            cols: width,
-            rows: height,
-        };
+    fn an_export_is_always_full_hd_whatever_the_diagram_size() {
+        for state in [a_tiny_state(), a_huge_state()] {
+            let svg = render_to_string(SvgRenderer::default(), &state);
 
-        let svg = render_to_string(SvgRenderer::default(), &state);
-
-        let diagram = diagram(state.doc.tree());
-        assert!(svg.contains(&nested(window, &paint(&diagram))));
-        assert_eq!(svg.matches("<svg ").count(), 2);
+            let screen_background = expected_background(0, 0, 0, 0)
+                .replace("width=\"0\"", "width=\"100%\"")
+                .replace("height=\"0\"", "height=\"100%\"");
+            assert!(svg.starts_with(&format!(
+                "{SCALING_ROOT}{screen_background}{}",
+                viewport_open(FULL_HD_WIDTH, FULL_HD_HEIGHT)
+            )));
+            assert!(svg.ends_with("</svg></svg>"));
+            assert!(!svg.contains(&expected_background(0, 0, FULL_HD_WIDTH, FULL_HD_HEIGHT)));
+        }
     }
 
     #[test]
-    fn without_a_canvas_no_footer_text_is_drawn_for_a_named_or_an_unnamed_state() {
+    fn an_export_draws_the_same_text_size_and_the_same_box_sizes_for_a_tiny_and_a_huge_diagram() {
+        let tiny = render_to_string(SvgRenderer::default(), &a_tiny_state());
+        let huge = render_to_string(SvgRenderer::default(), &a_huge_state());
+
+        for svg in [&tiny, &huge] {
+            assert!(svg.contains(&format!("font-size=\"{}\"", label_font_size())));
+        }
+        let tiny_boxes = stroked_box_sizes(&tiny);
+        let huge_boxes = stroked_box_sizes(&huge);
+        assert!(tiny_boxes.iter().all(|size| huge_boxes.contains(size)));
+    }
+
+    #[test]
+    fn an_export_wider_than_the_window_is_cut_evenly_left_and_right() {
+        let (window_cols, _) = full_hd_cells();
+        let overflow_cols = 20;
+        let label = "w".repeat((window_cols + overflow_cols) as usize);
+        let state = a_state_of_one_box_labelled(&label);
+
+        let svg = render_to_string(SvgRenderer::default(), &state);
+
+        let outer = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("stroke="))
+            .unwrap();
+        let left = -attribute(outer, "x");
+        let right = attribute(outer, "x") + attribute(outer, "width") - window_cols * CELL_WIDTH;
+        assert!(left > 0);
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn an_export_draws_no_footer_for_a_named_or_an_unnamed_state() {
         let mut unnamed = example_state();
         unnamed.set_save_to(None);
         for state in [example_state(), unnamed] {
@@ -1358,6 +1447,51 @@ mod tests {
 
         assert!(svg.contains(&footer_label(body_and_foot(CANVAS).1)));
         assert!(svg.contains(&format!("viewBox=\"{}\"", pixel_box(CANVAS))));
+    }
+
+    fn attribute(svg: &str, name: &str) -> i64 {
+        let marker = format!(" {name}=\"");
+        let start = svg.find(&marker).unwrap() + marker.len();
+        let length = svg[start..].find('"').unwrap();
+        svg[start..start + length].parse().unwrap()
+    }
+
+    #[test]
+    fn a_canvas_emits_its_pixel_size_and_still_draws_the_footer() {
+        let (cols, rows) = (90, 30);
+
+        let svg = render_to_string(SvgRenderer::with_canvas(cols, rows), &example_state());
+
+        assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
+        assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
+        assert!(svg.contains(&format!(">{FOOTER_TEXT}</text>")));
+    }
+
+    #[test]
+    fn a_bigger_canvas_extends_the_background_without_scaling_the_diagram() {
+        let state = example_state();
+        let small = render_to_string(SvgRenderer::with_canvas(100, 40), &state);
+        let big = render_to_string(SvgRenderer::with_canvas(400, 200), &state);
+
+        assert_eq!(attribute(&big, "width"), 400 * CELL_WIDTH);
+        assert_eq!(attribute(&big, "height"), 200 * CELL_HEIGHT);
+        for svg in [&small, &big] {
+            assert!(svg.contains(&format!("font-size=\"{}\"", label_font_size())));
+        }
+        let box_sizes = |svg: &str| -> Vec<String> {
+            svg.split('<')
+                .filter(|element| element.starts_with("rect ") && element.contains("stroke="))
+                .map(|element| {
+                    let start = element.find("width=").unwrap();
+                    element[start..]
+                        .split(" stroke")
+                        .next()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect()
+        };
+        assert_eq!(box_sizes(&small), box_sizes(&big));
     }
 }
 
