@@ -46,10 +46,17 @@ impl Renderer for SvgRenderer {
         let window = self.window(state);
         let areas = match self.canvas {
             Some(_) => editor(state, window),
-            None => vec![(window, body(state, window))],
+            None => vec![(window, without_cursor(body(state, window)))],
         };
         out.write_all(document(window, &areas).as_bytes())
     }
+}
+
+fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
+    placements
+        .into_iter()
+        .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
+        .collect()
 }
 
 fn extent(placements: &[Placement]) -> (i64, i64) {
@@ -1066,7 +1073,9 @@ mod tests {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         let state = crate::state::new_state(boxes, Mode::Command, selected);
         let mut out = Vec::new();
-        SvgRenderer::default().render(&state, &mut out).unwrap();
+        SvgRenderer::with_canvas(100, 40)
+            .render(&state, &mut out)
+            .unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -1112,6 +1121,22 @@ mod tests {
     #[test]
     fn a_selected_box_shows_one_cursor() {
         assert_eq!(cursor_rects(&rendered(Some(vec![0, 1]))).len(), 1);
+    }
+
+    #[test]
+    fn the_export_without_a_canvas_omits_the_cursor() {
+        let selected = example_state().selected;
+        assert!(selected.is_some());
+        let svg = render_to_string(SvgRenderer::default(), &example_state());
+
+        assert!(cursor_rects(&svg).is_empty());
+    }
+
+    #[test]
+    fn the_canvas_render_keeps_the_cursor() {
+        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_state());
+
+        assert_eq!(cursor_rects(&svg).len(), 1);
     }
 
     #[test]
@@ -1285,7 +1310,7 @@ mod tests {
 
         let svg = render_to_string(SvgRenderer::default(), &state);
 
-        let diagram = with_cursor(diagram(state.doc.tree()), state.selected.clone());
+        let diagram = diagram(state.doc.tree());
         assert!(svg.contains(&nested(window, &paint(&diagram))));
         assert_eq!(svg.matches("<svg ").count(), 2);
     }
