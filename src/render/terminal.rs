@@ -4,7 +4,7 @@ use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape};
 use super::{colour, Renderer, ARROW_OPACITY, BORDER, FILL_ALPHA, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
-use crate::diagram::{Node, Path};
+use crate::diagram::Node;
 use crate::kitty;
 use crate::layout::{with_cursor, Cursor, Label, Placement, PlacementNode};
 use crate::palette::{palette, BACKGROUND};
@@ -32,12 +32,13 @@ fn selected_colour(state: &State) -> Option<u8> {
     colour_at(&state.doc.boxes, path)
 }
 
-fn colour_at(boxes: &[Node], path: &Path) -> Option<u8> {
+fn colour_at(boxes: &[Node], path: &[usize]) -> Option<u8> {
+    let (&last, parent) = path.split_last()?;
     let mut children = boxes;
-    for &index in &path.ancestors {
+    for &index in parent {
         children = &children[index].children;
     }
-    children[path.index].colour
+    children[last].colour
 }
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
@@ -978,10 +979,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::diagram::Path {
-                    ancestors: vec![],
-                    index: 0,
-                },
+                path: vec![0],
                 hint: false,
             }),
             x,
@@ -1456,13 +1454,7 @@ mod tests {
             cell_width: 1,
             cell_height: 1,
         });
-        let placements = with_cursor(
-            crate::layout::layout(&boxes),
-            Some(crate::diagram::Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        );
+        let placements = with_cursor(crate::layout::layout(&boxes), Some(vec![0]));
         assert!(placements
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
@@ -1538,10 +1530,7 @@ mod tests {
     fn no_cursor_is_drawn_over_the_hint_even_with_a_selection() {
         let mut r = renderer_on(window(20, 10, 1, 1));
         let mut state = State::default();
-        state.selected = Some(crate::diagram::Path {
-            ancestors: vec![],
-            index: 0,
-        });
+        state.selected = Some(vec![0]);
         let mut out = Vec::new();
         r.render_diagram(&state, &mut out).unwrap();
         let output = String::from_utf8(out).unwrap();
@@ -2445,10 +2434,7 @@ mod tests {
             colour,
             ..node("hi")
         }];
-        let selected = Some(Path {
-            ancestors: vec![],
-            index: 0,
-        });
+        let selected = Some(vec![0]);
         let mut state = crate::state::new_state(boxes, Mode::Command, selected);
         state.colour_overlay = true;
         state

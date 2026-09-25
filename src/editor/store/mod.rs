@@ -56,7 +56,7 @@ impl StateStore for FileStateStore {
 mod tests {
     use super::files::MockFiles;
     use super::*;
-    use crate::diagram::{self, Path};
+    use crate::diagram;
 
     fn store_over(files: MockFiles) -> FileStateStore {
         FileStateStore::new(Box::new(files))
@@ -100,13 +100,7 @@ mod tests {
         let state = load_file(&text).unwrap();
         assert_eq!(state.doc.boxes.len(), 1);
         assert_eq!(state.doc.boxes[0].label, "API");
-        assert_eq!(
-            state.selected,
-            Some(Path {
-                ancestors: vec![],
-                index: 0
-            })
-        );
+        assert_eq!(state.selected, Some(vec![0]));
     }
 
     #[test]

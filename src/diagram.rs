@@ -11,36 +11,37 @@ pub(crate) struct Node {
     pub(crate) hint: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Path {
-    pub(crate) ancestors: Vec<usize>,
-    pub(crate) index: usize,
-}
-
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Document {
     pub(crate) boxes: Vec<Node>,
 }
 
-pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
+pub(crate) fn parent_of(path: &[usize]) -> &[usize] {
+    &path[..path.len() - 1]
+}
+
+pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, parent: &[usize]) -> &'a mut Vec<Node> {
     let mut children = boxes;
-    for &index in ancestors {
+    for &index in parent {
         children = &mut children[index].children;
     }
     children
 }
 
-pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
-    &mut children_at(boxes, &path.ancestors)[path.index]
+pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &[usize]) -> &'a mut Node {
+    let (&last, parent) = path.split_last().expect("the root is not a box");
+    &mut children_at(boxes, parent)[last]
 }
 
-pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {
-    siblings.push(node);
-    siblings.len() - 1
+pub(crate) fn append(boxes: &mut Vec<Node>, parent: &[usize], node: Node) -> Vec<usize> {
+    let children = children_at(boxes, parent);
+    children.push(node);
+    [parent, &[children.len() - 1]].concat()
 }
 
-pub(crate) fn remove(boxes: &mut Vec<Node>, path: &Path) -> Node {
-    children_at(boxes, &path.ancestors).remove(path.index)
+pub(crate) fn remove(boxes: &mut Vec<Node>, path: &[usize]) -> Node {
+    let (&last, parent) = path.split_last().expect("the root cannot be removed");
+    children_at(boxes, parent).remove(last)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -177,31 +178,13 @@ mod tests {
     #[test]
     fn at_a_single_index_returns_the_top_level_box() {
         let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(
-            *at(
-                &mut boxes,
-                &Path {
-                    ancestors: vec![],
-                    index: 1
-                }
-            ),
-            node("b")
-        );
+        assert_eq!(*at(&mut boxes, &[1]), node("b"));
     }
 
     #[test]
     fn at_a_longer_path_walks_into_children() {
         let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(
-            *at(
-                &mut boxes,
-                &Path {
-                    ancestors: vec![0],
-                    index: 1
-                }
-            ),
-            node("d")
-        );
+        assert_eq!(*at(&mut boxes, &[0, 1]), node("d"));
     }
 
     #[test]
@@ -210,50 +193,34 @@ mod tests {
             "a",
             vec![node_with_children("b", vec![node("c")])],
         )];
-        assert_eq!(
-            *at(
-                &mut boxes,
-                &Path {
-                    ancestors: vec![0, 0],
-                    index: 0
-                }
-            ),
-            node("c")
-        );
+        assert_eq!(*at(&mut boxes, &[0, 0, 0]), node("c"));
     }
 
     #[test]
     fn append_on_an_empty_list_pushes_the_node_and_returns_its_index() {
         let mut boxes = Vec::new();
-        let index = append(&mut boxes, node("a"));
+        let path = append(&mut boxes, &[], node("a"));
         assert_eq!(boxes, vec![node("a")]);
-        assert_eq!(index, 0);
+        assert_eq!(path, vec![0]);
     }
 
     #[test]
     fn append_pushes_after_existing_nodes_and_returns_its_index() {
         let mut boxes = vec![node("a")];
-        let index = append(&mut boxes, node("b"));
+        let path = append(&mut boxes, &[], node("b"));
         assert_eq!(boxes, vec![node("a"), node("b")]);
-        assert_eq!(index, 1);
+        assert_eq!(path, vec![1]);
     }
 
     #[test]
     fn append_on_a_nodes_children_appends_a_child() {
         let mut boxes = vec![node_with_children("a", vec![node("c")])];
-        let index = append(&mut boxes[0].children, node("d"));
+        let path = append(&mut boxes, &[0], node("d"));
         assert_eq!(
             boxes,
             vec![node_with_children("a", vec![node("c"), node("d")])]
         );
-        assert_eq!(index, 1);
-    }
-
-    fn path(ancestors: &[usize], index: usize) -> Path {
-        Path {
-            ancestors: ancestors.to_vec(),
-            index,
-        }
+        assert_eq!(path, vec![0, 1]);
     }
 
     #[test]
@@ -262,7 +229,7 @@ mod tests {
             node_with_children("a", vec![node_with_children("b", vec![node("c")])]),
             node("d"),
         ];
-        let removed = remove(&mut boxes, &path(&[], 0));
+        let removed = remove(&mut boxes, &[0]);
         assert_eq!(
             removed,
             node_with_children("a", vec![node_with_children("b", vec![node("c")])])
@@ -276,7 +243,7 @@ mod tests {
             node_with_children("a", vec![node("b"), node("c")]),
             node_with_children("d", vec![node("e")]),
         ];
-        let removed = remove(&mut boxes, &path(&[0], 0));
+        let removed = remove(&mut boxes, &[0, 0]);
         assert_eq!(removed, node("b"));
         assert_eq!(
             boxes,

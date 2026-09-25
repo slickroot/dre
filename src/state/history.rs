@@ -1,4 +1,4 @@
-use crate::diagram::{Node, Path};
+use crate::diagram::Node;
 use crate::state::action::Action;
 use crate::state::State;
 
@@ -51,22 +51,25 @@ pub(super) fn recorded(
     }
 }
 
-fn contains(boxes: &[Node], path: &Path) -> bool {
+fn contains(boxes: &[Node], path: &[usize]) -> bool {
+    let Some((&last, parent)) = path.split_last() else {
+        return false;
+    };
     let mut siblings = boxes;
-    for &index in &path.ancestors {
+    for &index in parent {
         match siblings.get(index) {
             Some(node) => siblings = &node.children,
             None => return false,
         }
     }
-    path.index < siblings.len()
+    last < siblings.len()
 }
 
-fn nearest_existing(boxes: &[Node], mut path: Path) -> Option<Path> {
-    while !contains(boxes, &path) {
-        path.index = path.ancestors.pop()?;
+fn nearest_existing(boxes: &[Node], mut path: Vec<usize>) -> Option<Vec<usize>> {
+    while !path.is_empty() && !contains(boxes, &path) {
+        path.pop();
     }
-    Some(path)
+    (!path.is_empty()).then_some(path)
 }
 
 pub(super) fn undo(mut state: State) -> State {

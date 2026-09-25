@@ -266,7 +266,7 @@ mod tests {
     use super::super::OPAQUE;
     use super::super::ROUNDED_RADIUS;
     use super::*;
-    use crate::diagram::{node, node_with_children, Document, Node, Path};
+    use crate::diagram::{node, node_with_children, Document, Node};
     use crate::layout::BOX_HEIGHT;
     use crate::palette::{palette, BACKGROUND};
 
@@ -522,10 +522,7 @@ mod tests {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text,
-                path: crate::diagram::Path {
-                    ancestors: vec![],
-                    index: 0,
-                },
+                path: vec![0],
                 hint: false,
             }),
             x,
@@ -1029,7 +1026,7 @@ mod tests {
         assert_eq!(svg, expected);
     }
 
-    fn rendered(doc: &Document, selected: Option<Path>) -> String {
+    fn rendered(doc: &Document, selected: Option<Vec<usize>>) -> String {
         let mut out = Vec::new();
         let mut state = State::default();
         state.doc = doc.clone();
@@ -1050,7 +1047,7 @@ mod tests {
         );
     }
 
-    fn cursor_rect_at_label_end_of(doc: &Document, selected: &Path) -> String {
+    fn cursor_rect_at_label_end_of(doc: &Document, selected: &[usize]) -> String {
         let boxes = layout(&doc.boxes);
         let label = boxes
             .iter()
@@ -1076,10 +1073,7 @@ mod tests {
 
     #[test]
     fn a_selected_box_shows_the_cursor_at_the_end_of_its_label() {
-        let path = Path {
-            ancestors: vec![0],
-            index: 1,
-        };
+        let path = vec![0, 1];
         let doc = two_children_document();
 
         assert!(
@@ -1100,14 +1094,8 @@ mod tests {
 
     #[test]
     fn moving_the_selection_moves_the_cursor() {
-        let first = Path {
-            ancestors: vec![0],
-            index: 0,
-        };
-        let second = Path {
-            ancestors: vec![0],
-            index: 1,
-        };
+        let first = vec![0, 0];
+        let second = vec![0, 1];
         let doc = two_children_document();
         let first_cursor = cursor_rect_at_label_end_of(&doc, &first);
         let second_cursor = cursor_rect_at_label_end_of(&doc, &second);
