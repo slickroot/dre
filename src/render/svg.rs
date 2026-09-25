@@ -1021,8 +1021,8 @@ mod tests {
         };
         let (body, foot) = body_and_foot(window);
         let footer = vec![label_placement(
-            NAME,
-            foot.col + foot.cols - name_width(),
+            FOOTER_TEXT,
+            foot.col + foot.cols - footer_width(),
             foot.row,
         )];
 
@@ -1152,7 +1152,7 @@ mod tests {
     fn example_state() -> State {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         let mut state = crate::state::new_state(boxes, Mode::Command, Some(vec![0, 1]));
-        state.save_to = Some(format!("docs/{NAME}.dre"));
+        state.set_save_to(Some(format!("docs/{NAME}.dre")));
         state
     }
 
@@ -1198,13 +1198,14 @@ mod tests {
     }
 
     const NAME: &str = "plans";
+    const FOOTER_TEXT: &str = "plans \u{2022} dre";
 
-    fn name_width() -> i64 {
-        NAME.chars().count() as i64
+    fn footer_width() -> i64 {
+        FOOTER_TEXT.chars().count() as i64
     }
 
     fn footer_label(foot: Area) -> String {
-        label_at(foot.col + foot.cols - name_width(), foot.row, NAME)
+        label_at(foot.col + foot.cols - footer_width(), foot.row, FOOTER_TEXT)
     }
 
     #[test]

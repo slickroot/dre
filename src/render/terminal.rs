@@ -1119,10 +1119,14 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_drawing_draws_nothing_without_a_file() {
-        let mut r = renderer_on(window(40, 10, 1, 1));
+    fn an_empty_drawing_draws_only_in_the_footer_row() {
+        let window = window(40, 10, 1, 1);
+        let mut r = renderer_on(window);
         let frame = r.frame(&empty_state());
-        assert!(frame.images.is_empty());
+        assert!(frame
+            .images
+            .iter()
+            .all(|image| image.row >= window.rows - FOOTER_ROWS));
     }
 
     #[test]
@@ -1772,8 +1776,13 @@ mod tests {
         let window = window(20, body_rows + FOOTER_ROWS, 1, 1);
         let mut r = renderer_on(window);
         let frame = r.frame(&state);
-        assert!(!frame.images.is_empty());
-        for image in &frame.images {
+        let body_images: Vec<&Placed> = frame
+            .images
+            .iter()
+            .filter(|image| image.row < body_rows)
+            .collect();
+        assert!(!body_images.is_empty());
+        for image in body_images {
             assert!(image.row + image.canvas.height / window.cell_height <= body_rows);
         }
     }

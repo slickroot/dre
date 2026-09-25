@@ -42,7 +42,7 @@ impl StateStore for FileStateStore {
     }
 
     fn save(&self, state: &State) -> io::Result<()> {
-        match &state.save_to {
+        match state.save_to() {
             Some(path) => self.files.write(
                 path,
                 &dre_format::write(&diagram::from_document(&state.doc)),
@@ -83,7 +83,7 @@ mod tests {
         let state = store_over(files).load(None).unwrap();
         assert_eq!(state.doc, diagram::Document::default());
         assert_eq!(state.selected, None);
-        assert_eq!(state.save_to, None);
+        assert_eq!(state.save_to(), None);
     }
 
     #[test]
@@ -105,10 +105,7 @@ mod tests {
 
     #[test]
     fn a_valid_file_loads_saving_back_to_the_given_path() {
-        assert_eq!(
-            load_file("<dre/>").unwrap().save_to,
-            Some("a.dre".to_string())
-        );
+        assert_eq!(load_file("<dre/>").unwrap().save_to(), Some("a.dre"));
     }
 
     #[test]
@@ -153,7 +150,7 @@ mod tests {
         let state = store_over(files).load(Some("missing.dre")).unwrap();
         assert_eq!(state.doc, diagram::Document::default());
         assert_eq!(state.selected, None);
-        assert_eq!(state.save_to, Some("missing.dre".to_string()));
+        assert_eq!(state.save_to(), Some("missing.dre"));
         assert!(state.new_file);
     }
 

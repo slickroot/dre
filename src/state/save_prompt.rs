@@ -17,7 +17,8 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
     };
     match command {
         Action::Confirm => {
-            state.save_to = Some(with_extension(filename));
+            let path = with_extension(filename);
+            state.set_save_to(Some(path));
             state.running = false;
         }
         Action::Cancel => state.running = false,
@@ -50,7 +51,7 @@ mod tests {
         let result = handle_key(state, "q");
         assert_eq!(result.mode, prompt(DEFAULT_FILENAME));
         assert!(result.running);
-        assert_eq!(result.save_to, None);
+        assert_eq!(result.save_to(), None);
     }
 
     #[test]
@@ -85,7 +86,7 @@ mod tests {
     fn enter_saves_to_the_filename_with_the_extension_added_and_stops() {
         let state = new_state(vec![], prompt("notes"), None);
         let result = handle_key(state, "\r");
-        assert_eq!(result.save_to, Some(format!("notes{EXTENSION}")));
+        assert_eq!(result.save_to(), Some(format!("notes{EXTENSION}").as_str()));
         assert!(!result.running);
     }
 
@@ -93,7 +94,7 @@ mod tests {
     fn enter_keeps_a_filename_that_already_has_the_extension() {
         let state = new_state(vec![], prompt(DEFAULT_FILENAME), None);
         let result = handle_key(state, "\r");
-        assert_eq!(result.save_to, Some(DEFAULT_FILENAME.to_string()));
+        assert_eq!(result.save_to(), Some(DEFAULT_FILENAME));
         assert!(!result.running);
     }
 
@@ -102,7 +103,7 @@ mod tests {
         let state = new_state(vec![node("a")], prompt(DEFAULT_FILENAME), Some(vec![0]));
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
-        assert_eq!(result.save_to, None);
+        assert_eq!(result.save_to(), None);
         assert_eq!(*result.doc.tree(), Tree::root(vec![node("a")]));
     }
 }
