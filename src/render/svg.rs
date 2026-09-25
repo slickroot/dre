@@ -1054,7 +1054,7 @@ mod tests {
         let boxes = layout(doc.tree());
         let label = boxes
             .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Label(label) if &label.path == selected))
+            .find(|placement| matches!(&placement.node, PlacementNode::Label(label) if label.path == selected))
             .unwrap();
         cursor_rect_at_cell(label.x + label.width - 1, label.y)
     }
