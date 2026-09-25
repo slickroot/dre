@@ -3,7 +3,7 @@ use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
 use super::controller::key_source::TtyKeySource;
-use super::controller::reducer::StateReducer;
+use super::controller::reducer::{AutosavingReducer, StateReducer};
 use super::controller::screen::TerminalScreen;
 use super::controller::DreController;
 use super::store::files::DiskFiles;
@@ -30,7 +30,10 @@ pub(crate) fn run(file: Option<String>) -> io::Result<ExitCode> {
             renderer,
             out: stdout,
         }),
-        Box::new(StateReducer),
+        Box::new(AutosavingReducer::new(
+            Box::new(StateReducer),
+            Box::new(FileStateStore::new(Box::new(DiskFiles))),
+        )),
     );
     Editor::new(Box::new(store), Box::new(controller)).run(file.as_deref())?;
     Ok(ExitCode::SUCCESS)
