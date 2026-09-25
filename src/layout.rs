@@ -200,7 +200,7 @@ pub(crate) struct Placement<'a> {
 pub(crate) const FOOTER_ROWS: i64 = 3;
 pub(crate) const FOOTER_COLOUR: u8 = 0;
 
-pub(crate) fn footer(width: i64, height: i64) -> Vec<Placement<'static>> {
+pub(crate) fn footer() -> Vec<Placement<'static>> {
     vec![Placement {
         node: PlacementNode::Box {
             colour: Some(FOOTER_COLOUR),
@@ -209,8 +209,8 @@ pub(crate) fn footer(width: i64, height: i64) -> Vec<Placement<'static>> {
         },
         x: 0,
         y: 0,
-        width,
-        height,
+        width: 1,
+        height: 1,
     }]
 }
 
@@ -272,9 +272,9 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_is_one_filled_square_box_in_the_footer_colour_filling_its_area() {
+    fn footer_is_one_filled_square_unit_box_in_the_footer_colour_at_the_origin() {
         assert_eq!(
-            footer(40, FOOTER_ROWS),
+            footer(),
             vec![Placement {
                 node: PlacementNode::Box {
                     colour: Some(FOOTER_COLOUR),
@@ -283,8 +283,8 @@ mod tests {
                 },
                 x: 0,
                 y: 0,
-                width: 40,
-                height: FOOTER_ROWS,
+                width: 1,
+                height: 1,
             }]
         );
     }

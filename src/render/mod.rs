@@ -32,12 +32,25 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
                 body,
             ),
         ),
-        (foot, shift(layout::footer(foot.cols, foot.rows), foot)),
+        (foot, fill(layout::footer(), foot)),
     ]
 }
 
 fn shift(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
     offset(placements, area.col, area.row)
+}
+
+fn fill(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
+    placements
+        .into_iter()
+        .map(|placement| Placement {
+            x: area.col,
+            y: area.row,
+            width: area.cols,
+            height: area.rows,
+            ..placement
+        })
+        .collect()
 }
 
 fn offset(placements: Vec<Placement<'_>>, dx: i64, dy: i64) -> Vec<Placement<'_>> {
@@ -141,6 +154,18 @@ mod tests {
             vec![
                 box_at(AREA.col, AREA.row, 3, 2),
                 box_at(AREA.col + 5, AREA.row + 4, 3, 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn fill_makes_every_placement_cover_the_area() {
+        let placements = fill(vec![box_at(0, 0, 1, 1), box_at(5, 4, 3, 2)], AREA);
+        assert_eq!(
+            placements,
+            vec![
+                box_at(AREA.col, AREA.row, AREA.cols, AREA.rows),
+                box_at(AREA.col, AREA.row, AREA.cols, AREA.rows),
             ]
         );
     }
