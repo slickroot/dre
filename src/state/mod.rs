@@ -63,9 +63,13 @@ impl State {
             ..Default::default()
         }
     }
+
+    pub(crate) fn diagram_name(&self) -> Option<&str> {
+        self.save_to.as_deref().map(file_stem_without_dre)
+    }
 }
 
-pub(crate) fn diagram_name(path: &str) -> &str {
+fn file_stem_without_dre(path: &str) -> &str {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     file_name.strip_suffix(".dre").unwrap_or(file_name)
 }
@@ -147,17 +151,25 @@ mod tests {
 
     #[test]
     fn diagram_name_strips_the_folder_and_the_dre_extension() {
-        assert_eq!(diagram_name("docs/plans.dre"), "plans");
+        let state = State::open(Document::default(), Some("docs/plans.dre".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
     }
 
     #[test]
     fn diagram_name_strips_the_dre_extension_of_a_bare_file_name() {
-        assert_eq!(diagram_name("plans.dre"), "plans");
+        let state = State::open(Document::default(), Some("plans.dre".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
     }
 
     #[test]
     fn diagram_name_of_a_path_without_the_dre_extension_only_strips_the_folder() {
-        assert_eq!(diagram_name("docs/plans"), "plans");
+        let state = State::open(Document::default(), Some("docs/plans".to_string()));
+        assert_eq!(state.diagram_name(), Some("plans"));
+    }
+
+    #[test]
+    fn diagram_name_is_none_without_a_path_to_save_to() {
+        assert_eq!(State::default().diagram_name(), None);
     }
 
     #[test]

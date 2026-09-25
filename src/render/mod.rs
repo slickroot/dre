@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crate::composer::{self, Area};
 use crate::layout::{self, with_cursor, Placement, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
-use crate::state::{diagram_name, State};
+use crate::state::State;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod font;
@@ -34,10 +34,7 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
         ),
         (
             foot,
-            align_right(
-                layout::footer(state.save_to.as_deref().map(diagram_name)),
-                foot,
-            ),
+            align_right(layout::footer(state.diagram_name()), foot),
         ),
     ]
 }
