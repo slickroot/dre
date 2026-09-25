@@ -7,7 +7,7 @@ mod mode;
 mod save_prompt;
 
 use crate::diagram::{children, parent_of, Document, Node};
-use crate::palette::palette;
+use crate::palette::next_on_palette;
 use crate::state::action::ActionMode;
 #[cfg(not(test))]
 use crate::state::input::INTERRUPT;
@@ -130,14 +130,6 @@ pub fn reduce(state: State, key: Option<&str>) -> State {
     }
 }
 
-fn next_colour(colour: Option<u8>) -> Option<u8> {
-    match colour {
-        None => Some(0),
-        Some(i) if palette(i + 1).is_some() => Some(i + 1),
-        Some(_) => None,
-    }
-}
-
 fn colour_row(tree: &mut Tree<Node>, path: &[usize]) {
     let siblings: Vec<Vec<usize>> = children(tree, parent_of(path)).collect();
     let first_colour = tree.value(&siblings[0]).colour;
@@ -145,7 +137,7 @@ fn colour_row(tree: &mut Tree<Node>, path: &[usize]) {
         .iter()
         .all(|sibling| tree.value(sibling).colour == first_colour);
     let new_colour = if uniform {
-        next_colour(first_colour)
+        next_on_palette(first_colour)
     } else {
         Some(0)
     };
@@ -273,23 +265,12 @@ mod tests {
     }
 
     #[test]
-    fn next_colour_cycles_through_the_palette_and_back_to_plain() {
-        let mut colour = None;
-        for _ in (0..).take_while(|&i| palette(i).is_some()) {
-            colour = next_colour(colour);
-        }
-        assert_ne!(colour, None);
-        colour = next_colour(colour);
-        assert_eq!(colour, None);
-    }
-
-    #[test]
     fn colour_row_advances_uniformly_coloured_siblings() {
         let mut boxes = Tree::root(vec![node("a"), node("b")]);
         let mut a = labelled("a");
-        a.colour = next_colour(None);
+        a.colour = next_on_palette(None);
         let mut b = labelled("b");
-        b.colour = next_colour(None);
+        b.colour = next_on_palette(None);
         colour_row(&mut boxes, &[0]);
         assert_eq!(boxes, Tree::root(vec![Tree::leaf(a), Tree::leaf(b)]));
     }

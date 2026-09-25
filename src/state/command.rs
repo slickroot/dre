@@ -1,9 +1,8 @@
 use crate::diagram::{children, parent_of};
+use crate::palette::next_on_palette;
 use crate::state::action::Action;
 use crate::state::history::undo;
-use crate::state::{
-    add_child_box, blank_box, colour_row, next_colour, Mode, State, DEFAULT_FILENAME, PAD,
-};
+use crate::state::{add_child_box, blank_box, colour_row, Mode, State, DEFAULT_FILENAME, PAD};
 use types::Tree;
 
 pub(crate) fn min_depth(command: Action) -> usize {
@@ -97,7 +96,7 @@ fn rename_label(mut state: State, path: Vec<usize>) -> State {
 
 fn cycle_colour(mut state: State, path: Vec<usize>) -> State {
     let node = state.doc.root.value_mut(&path);
-    node.colour = next_colour(node.colour);
+    node.colour = next_on_palette(node.colour);
     state.selected = Some(path);
     state
 }
@@ -686,7 +685,7 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         let result = handle_key(state, "c");
         let mut expected = labelled("a");
-        expected.colour = next_colour(None);
+        expected.colour = next_on_palette(None);
         assert_eq!(result.doc.root, Tree::root(vec![Tree::leaf(expected)]));
         assert_eq!(result.doc.tree().value(&[0]).label, "a");
 
@@ -698,7 +697,7 @@ mod tests {
         };
         let result = handle_key(state, "f");
         let mut expected = labelled("a");
-        expected.colour = next_colour(None);
+        expected.colour = next_on_palette(None);
         expected.filled = true;
         assert_eq!(result.doc.root, Tree::root(vec![Tree::leaf(expected)]));
 
@@ -719,7 +718,7 @@ mod tests {
 
     #[test]
     fn f_toggles_fill_on_and_off() {
-        let colour = next_colour(None);
+        let colour = next_on_palette(None);
         let mut colourised = labelled("a");
         colourised.colour = colour;
         let state = new_state(
@@ -809,9 +808,9 @@ mod tests {
         let state = new_state(boxes, Mode::Command, Some(vec![0, 1]));
         let result = handle_key(state, "C");
         let mut c = labelled("c");
-        c.colour = next_colour(None);
+        c.colour = next_on_palette(None);
         let mut d = labelled("d");
-        d.colour = next_colour(None);
+        d.colour = next_on_palette(None);
         assert_eq!(
             result.doc.root,
             Tree::root(vec![node_with_children(
@@ -823,8 +822,8 @@ mod tests {
 
     #[test]
     fn capital_f_toggles_every_sibling_fill_and_leaves_colour_untouched() {
-        let colour_one = next_colour(None);
-        let colour_two = next_colour(colour_one);
+        let colour_one = next_on_palette(None);
+        let colour_two = next_on_palette(colour_one);
         let mut c = labelled("c");
         c.colour = colour_one;
         let mut d = labelled("d");
@@ -851,7 +850,7 @@ mod tests {
 
     #[test]
     fn capital_f_fills_every_sibling_including_colourless_ones() {
-        let colour = next_colour(None);
+        let colour = next_on_palette(None);
         let mut c = labelled("c");
         c.colour = colour;
         let d = node("d");
