@@ -5,7 +5,7 @@ use super::{
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode, ALL_SIDES, BORDER};
+use crate::layout::{Placement, PlacementNode, ALL_SIDES, BORDER};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -16,40 +16,50 @@ fn label_font_size() -> f64 {
     (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
 }
 
-#[derive(Default)]
+pub const FULL_HD_WIDTH: i64 = 1920;
+pub const FULL_HD_HEIGHT: i64 = 1080;
+
+enum Mode {
+    Export,
+    Editor,
+}
+
 pub struct SvgRenderer {
-    canvas: Option<(i64, i64)>,
+    canvas: (i64, i64),
+    mode: Mode,
+}
+
+impl Default for SvgRenderer {
+    fn default() -> Self {
+        SvgRenderer {
+            canvas: (FULL_HD_WIDTH, FULL_HD_HEIGHT),
+            mode: Mode::Export,
+        }
+    }
 }
 
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
         SvgRenderer {
-            canvas: Some((columns * CELL_WIDTH, rows * CELL_HEIGHT)),
+            canvas: (columns * CELL_WIDTH, rows * CELL_HEIGHT),
+            mode: Mode::Editor,
         }
-    }
-
-    fn pixel_canvas(&self, state: &State) -> (i64, i64) {
-        self.canvas.unwrap_or_else(|| {
-            let (cols, rows) = extent(&diagram(state.doc.tree()));
-            (cols * CELL_WIDTH, rows * CELL_HEIGHT)
-        })
     }
 }
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let canvas = self.pixel_canvas(state);
         let window = Area {
             col: 0,
             row: 0,
-            cols: canvas.0 / CELL_WIDTH,
-            rows: canvas.1 / CELL_HEIGHT,
+            cols: self.canvas.0 / CELL_WIDTH,
+            rows: self.canvas.1 / CELL_HEIGHT,
         };
-        let areas = match self.canvas {
-            Some(_) => editor(state, window),
-            None => vec![(window, without_cursor(body(state, window)))],
+        let areas = match self.mode {
+            Mode::Editor => editor(state, window),
+            Mode::Export => vec![(window, without_cursor(body(state, window)))],
         };
-        out.write_all(document(canvas, &areas).as_bytes())
+        out.write_all(document(self.canvas, &areas).as_bytes())
     }
 }
 
@@ -58,20 +68,6 @@ fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
         .into_iter()
         .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
         .collect()
-}
-
-fn extent(placements: &[Placement]) -> (i64, i64) {
-    let width = placements
-        .iter()
-        .map(|placement| placement.x + placement.width)
-        .max()
-        .unwrap_or(0);
-    let height = placements
-        .iter()
-        .map(|placement| placement.y + placement.height)
-        .max()
-        .unwrap_or(0);
-    (width, height)
 }
 
 fn pixels(area: Area) -> (i64, i64, i64, i64) {
@@ -296,6 +292,7 @@ mod tests {
     use super::*;
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
+    use crate::layout::diagram;
     use crate::layout::with_cursor;
     use crate::layout::FOOTER_ROWS;
     use crate::layout::{Arrow, Cursor, Label, Placement};
@@ -369,6 +366,13 @@ mod tests {
                 _ => None,
             })
             .expect("the placements include an arrow")
+    }
+
+    fn extent(placements: &[Placement]) -> (i64, i64) {
+        (
+            placements.iter().map(|p| p.x + p.width).max().unwrap_or(0),
+            placements.iter().map(|p| p.y + p.height).max().unwrap_or(0),
+        )
     }
 
     fn draw(placements: &[Placement]) -> String {
@@ -1308,47 +1312,91 @@ mod tests {
         assert!(svg.ends_with(&format!("{foot_svg}</svg>")));
     }
 
-    fn drawing_extent(state: &State) -> (i64, i64) {
-        let placements = diagram(state.doc.tree());
-        (
-            placements.iter().map(|p| p.x + p.width).max().unwrap(),
-            placements.iter().map(|p| p.y + p.height).max().unwrap(),
+    fn a_state_of_one_box_labelled(text: &str) -> State {
+        crate::state::new_state(vec![node(text)], Mode::Command, None)
+    }
+
+    const CHILD_LABEL: &str = "child";
+    const HUGE_CHILDREN: usize = 300;
+
+    fn a_tiny_state() -> State {
+        a_state_of_one_box_labelled(CHILD_LABEL)
+    }
+
+    fn a_huge_state() -> State {
+        let children = (0..HUGE_CHILDREN).map(|_| node(CHILD_LABEL)).collect();
+        crate::state::new_state(
+            vec![node_with_children("root", children)],
+            Mode::Command,
+            None,
         )
     }
 
-    #[test]
-    fn without_a_canvas_the_window_is_exactly_the_drawing() {
-        let state = example_state();
-        let (width, height) = drawing_extent(&state);
+    fn full_hd_cells() -> (i64, i64) {
+        (FULL_HD_WIDTH / CELL_WIDTH, FULL_HD_HEIGHT / CELL_HEIGHT)
+    }
 
-        let svg = render_to_string(SvgRenderer::default(), &state);
-
-        assert!(svg.starts_with(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
-            root_size(width * CELL_WIDTH, height * CELL_HEIGHT)
-        )));
+    fn stroked_box_sizes(svg: &str) -> Vec<String> {
+        svg.split('<')
+            .filter(|element| element.starts_with("rect ") && element.contains("stroke="))
+            .map(|element| {
+                let start = element.find("width=").unwrap();
+                element[start..]
+                    .split(" stroke")
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
     }
 
     #[test]
-    fn without_a_canvas_the_only_area_holds_the_whole_diagram_uncropped() {
-        let state = example_state();
-        let (width, height) = drawing_extent(&state);
-        let window = Area {
-            col: 0,
-            row: 0,
-            cols: width,
-            rows: height,
-        };
+    fn an_export_is_always_full_hd_whatever_the_diagram_size() {
+        for state in [a_tiny_state(), a_huge_state()] {
+            let svg = render_to_string(SvgRenderer::default(), &state);
 
-        let svg = render_to_string(SvgRenderer::default(), &state);
-
-        let diagram = diagram(state.doc.tree());
-        assert!(svg.contains(&nested(window, &paint(&diagram))));
-        assert_eq!(svg.matches("<svg ").count(), 2);
+            assert!(svg.starts_with(&format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
+                root_size(FULL_HD_WIDTH, FULL_HD_HEIGHT)
+            )));
+            assert!(svg.contains(&expected_background(0, 0, FULL_HD_WIDTH, FULL_HD_HEIGHT)));
+        }
     }
 
     #[test]
-    fn without_a_canvas_no_footer_text_is_drawn_for_a_named_or_an_unnamed_state() {
+    fn an_export_draws_the_same_text_size_and_the_same_box_sizes_for_a_tiny_and_a_huge_diagram() {
+        let tiny = render_to_string(SvgRenderer::default(), &a_tiny_state());
+        let huge = render_to_string(SvgRenderer::default(), &a_huge_state());
+
+        for svg in [&tiny, &huge] {
+            assert!(svg.contains(&format!("font-size=\"{}\"", label_font_size())));
+        }
+        let tiny_boxes = stroked_box_sizes(&tiny);
+        let huge_boxes = stroked_box_sizes(&huge);
+        assert!(tiny_boxes.iter().all(|size| huge_boxes.contains(size)));
+    }
+
+    #[test]
+    fn an_export_wider_than_the_window_is_cut_evenly_left_and_right() {
+        let (window_cols, _) = full_hd_cells();
+        let overflow_cols = 20;
+        let label = "w".repeat((window_cols + overflow_cols) as usize);
+        let state = a_state_of_one_box_labelled(&label);
+
+        let svg = render_to_string(SvgRenderer::default(), &state);
+
+        let outer = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("stroke="))
+            .unwrap();
+        let left = -attribute(outer, "x");
+        let right = attribute(outer, "x") + attribute(outer, "width") - window_cols * CELL_WIDTH;
+        assert!(left > 0);
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn an_export_draws_no_footer_for_a_named_or_an_unnamed_state() {
         let mut unnamed = example_state();
         unnamed.set_save_to(None);
         for state in [example_state(), unnamed] {
