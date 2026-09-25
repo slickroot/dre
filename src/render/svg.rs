@@ -24,31 +24,32 @@ pub struct SvgRenderer {
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
         SvgRenderer {
-            canvas: Some((columns, rows)),
+            canvas: Some((columns * CELL_WIDTH, rows * CELL_HEIGHT)),
         }
     }
 
-    fn window(&self, state: &State) -> Area {
-        let (cols, rows) = self
-            .canvas
-            .unwrap_or_else(|| extent(&diagram(state.doc.tree())));
-        Area {
-            col: 0,
-            row: 0,
-            cols,
-            rows,
-        }
+    fn pixel_canvas(&self, state: &State) -> (i64, i64) {
+        self.canvas.unwrap_or_else(|| {
+            let (cols, rows) = extent(&diagram(state.doc.tree()));
+            (cols * CELL_WIDTH, rows * CELL_HEIGHT)
+        })
     }
 }
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let window = self.window(state);
+        let canvas = self.pixel_canvas(state);
+        let window = Area {
+            col: 0,
+            row: 0,
+            cols: canvas.0 / CELL_WIDTH,
+            rows: canvas.1 / CELL_HEIGHT,
+        };
         let areas = match self.canvas {
             Some(_) => editor(state, window),
             None => vec![(window, without_cursor(body(state, window)))],
         };
-        out.write_all(document(window, &areas).as_bytes())
+        out.write_all(document(canvas, &areas).as_bytes())
     }
 }
 
@@ -82,11 +83,12 @@ fn pixels(area: Area) -> (i64, i64, i64, i64) {
     )
 }
 
-fn document(window: Area, areas: &[(Area, Vec<Placement>)]) -> String {
-    let (x, y, width, height) = pixels(window);
-    let mut svg =
-        format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{x} {y} {width} {height}\">");
-    svg.push_str(&background_rect(x, y, width, height));
+fn document(canvas: (i64, i64), areas: &[(Area, Vec<Placement>)]) -> String {
+    let (width, height) = canvas;
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">"
+    );
+    svg.push_str(&background_rect(0, 0, width, height));
     if areas.iter().any(|(_, placements)| {
         placements
             .iter()
@@ -377,7 +379,10 @@ mod tests {
             cols,
             rows,
         };
-        document(window, &[(window, placements.to_vec())])
+        document(
+            (cols * CELL_WIDTH, rows * CELL_HEIGHT),
+            &[(window, placements.to_vec())],
+        )
     }
 
     fn rgb(colour: (u8, u8, u8)) -> String {
@@ -1058,7 +1063,10 @@ mod tests {
             foot.row,
         )];
 
-        let svg = document(window, &[(body, placements), (foot, footer)]);
+        let svg = document(
+            (window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
+            &[(body, placements), (foot, footer)],
+        );
 
         let diagram = [
             arrow_at(7, 19, 8, 6, &[0, 6, 12]),
@@ -1079,8 +1087,8 @@ mod tests {
         ]
         .concat();
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">{}{}{}{}</svg>",
-            pixel_box(window),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>{}{}{}{}</svg>",
+            root_size(window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
@@ -1222,6 +1230,10 @@ mod tests {
         )
     }
 
+    fn root_size(width: i64, height: i64) -> String {
+        format!("width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"")
+    }
+
     fn nested(area: Area, contents: &str) -> String {
         format!(
             "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{}\">{contents}</svg>",
@@ -1266,8 +1278,8 @@ mod tests {
         );
 
         assert!(svg.starts_with(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{}\">",
-            pixel_box(CANVAS)
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
+            root_size(CANVAS.cols * CELL_WIDTH, CANVAS.rows * CELL_HEIGHT)
         )));
         assert!(svg.contains(&expected_background(
             0,
@@ -1312,9 +1324,8 @@ mod tests {
         let svg = render_to_string(SvgRenderer::default(), &state);
 
         assert!(svg.starts_with(&format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">",
-            width * CELL_WIDTH,
-            height * CELL_HEIGHT
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>",
+            root_size(width * CELL_WIDTH, height * CELL_HEIGHT)
         )));
     }
 
@@ -1358,6 +1369,51 @@ mod tests {
 
         assert!(svg.contains(&footer_label(body_and_foot(CANVAS).1)));
         assert!(svg.contains(&format!("viewBox=\"{}\"", pixel_box(CANVAS))));
+    }
+
+    fn attribute(svg: &str, name: &str) -> i64 {
+        let marker = format!(" {name}=\"");
+        let start = svg.find(&marker).unwrap() + marker.len();
+        let length = svg[start..].find('"').unwrap();
+        svg[start..start + length].parse().unwrap()
+    }
+
+    #[test]
+    fn a_canvas_emits_its_pixel_size_and_still_draws_the_footer() {
+        let (cols, rows) = (90, 30);
+
+        let svg = render_to_string(SvgRenderer::with_canvas(cols, rows), &example_state());
+
+        assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
+        assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
+        assert!(svg.contains(&format!(">{FOOTER_TEXT}</text>")));
+    }
+
+    #[test]
+    fn a_bigger_canvas_extends_the_background_without_scaling_the_diagram() {
+        let state = example_state();
+        let small = render_to_string(SvgRenderer::with_canvas(100, 40), &state);
+        let big = render_to_string(SvgRenderer::with_canvas(400, 200), &state);
+
+        assert_eq!(attribute(&big, "width"), 400 * CELL_WIDTH);
+        assert_eq!(attribute(&big, "height"), 200 * CELL_HEIGHT);
+        for svg in [&small, &big] {
+            assert!(svg.contains(&format!("font-size=\"{}\"", label_font_size())));
+        }
+        let box_sizes = |svg: &str| -> Vec<String> {
+            svg.split('<')
+                .filter(|element| element.starts_with("rect ") && element.contains("stroke="))
+                .map(|element| {
+                    let start = element.find("width=").unwrap();
+                    element[start..]
+                        .split(" stroke")
+                        .next()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect()
+        };
+        assert_eq!(box_sizes(&small), box_sizes(&big));
     }
 }
 
