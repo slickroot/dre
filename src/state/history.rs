@@ -117,6 +117,19 @@ mod tests {
     }
 
     #[test]
+    fn name_actions_are_not_undoable() {
+        for action in [
+            Action::OpenNamePrompt,
+            Action::NameAppend('a'),
+            Action::NameBackspace,
+            Action::NameConfirm,
+            Action::NameCancel,
+        ] {
+            assert!(!is_undoable(&action));
+        }
+    }
+
+    #[test]
     fn typing_in_insert_mode_is_not_undoable() {
         assert!(!is_undoable(&Action::InsertAppend('a')));
         assert!(!is_undoable(&Action::InsertBackspace));

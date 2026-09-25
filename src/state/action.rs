@@ -29,6 +29,11 @@ pub(crate) enum Action {
     Cancel,
     SavePromptBackspace,
     SavePromptAppend(char),
+    OpenNamePrompt,
+    NameAppend(char),
+    NameBackspace,
+    NameConfirm,
+    NameCancel,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -36,6 +41,7 @@ pub(crate) enum ActionMode {
     Command,
     Insert,
     SavePrompt,
+    NamePrompt,
 }
 
 impl Action {
@@ -49,6 +55,10 @@ impl Action {
             | Action::Cancel
             | Action::SavePromptBackspace
             | Action::SavePromptAppend(_) => ActionMode::SavePrompt,
+            Action::NameAppend(_)
+            | Action::NameBackspace
+            | Action::NameConfirm
+            | Action::NameCancel => ActionMode::NamePrompt,
             Action::Undo
             | Action::NewBox
             | Action::NewSibling
@@ -68,6 +78,7 @@ impl Action {
             | Action::Quit
             | Action::Idle
             | Action::Interrupt
+            | Action::OpenNamePrompt
             | Action::Digit(_)
             | Action::CancelCount => ActionMode::Command,
         }
@@ -82,6 +93,8 @@ mod tests {
     fn actions_map_to_their_mode() {
         assert_eq!(Action::InsertAppend('a').mode(), ActionMode::Insert);
         assert_eq!(Action::Confirm.mode(), ActionMode::SavePrompt);
+        assert_eq!(Action::NameConfirm.mode(), ActionMode::NamePrompt);
+        assert_eq!(Action::OpenNamePrompt.mode(), ActionMode::Command);
         assert_eq!(Action::Idle.mode(), ActionMode::Command);
         assert_eq!(Action::Interrupt.mode(), ActionMode::Command);
     }
