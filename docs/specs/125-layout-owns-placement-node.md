@@ -12,6 +12,7 @@ user story: it has no user-facing behaviour.
 - `layout(&Document) -> Vec<Placement>`. `Node` appears only inside `layout`, through its getters.
 - `PlacementNode` is a new type that knows nothing about `Node`. Its box variant carries `colour`, `filled`, `rounded` and `hint`.
 - `Placement` has no lifetime parameter.
+- `Node` has no `hint` field (left in place by spec 123).
 - `layout::placeholder(text)` produces the faded placeholder box for an empty drawing, and the renderer no longer builds a `Node`.
 - The output stays a flat list, boxes first. No visible change.
 

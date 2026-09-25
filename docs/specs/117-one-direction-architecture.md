@@ -151,8 +151,8 @@ as spec 114 decided.
 - The "did anything change?" check compares only the `Document`, so moving the
   cursor never costs an undo step.
 - After undo, if the selection no longer addresses a box, it falls back to the
-  nearest ancestor that still exists (walking up with `parent`), then to the
-  first top-level box, then to `None` if the drawing is empty. The check uses
+  nearest ancestor that still exists (dropping the last index), then to
+  `None` if no ancestor exists. The check uses
   `Tree::contains`. It runs once, in `undo`, so everything else can assume the
   selection is valid.
 

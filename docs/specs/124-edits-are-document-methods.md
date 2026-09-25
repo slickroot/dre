@@ -13,6 +13,7 @@ The Command-mode edits (`cycle_colour`, `toggle_fill`, `delete_box`, `paste_box`
 - The reducers compute the new selection from `Tree` navigation and call those methods.
 - The clipboard is `Option<Tree<Node>>`. `Document::remove` returns the detached subtree and `Document::paste` puts a clone back.
 - No module outside `diagram.rs` touches `.children` or the boxes.
+- `Node`'s fields and `Document.root` are private. `Node` has read methods only: `label()`, `colour()`, `filled()`, `rounded()` (left `pub(crate)` by spec 123).
 
 ## Technical Design
 
