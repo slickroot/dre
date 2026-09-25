@@ -8,7 +8,7 @@ fn drop_last_chars(s: &str, n: usize) -> String {
 }
 
 pub(crate) fn reduce(mut state: State, command: Action) -> State {
-    let Some(path) = &state.doc.selected else {
+    let Some(path) = &state.selected else {
         return state;
     };
     let node = at(&mut state.doc.boxes, path);
@@ -21,7 +21,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
         }
         Action::CommitAndAddChild => {
             node.label = drop_last_chars(&label, 1);
-            let selected = state.doc.selected.clone();
+            let selected = state.selected.clone();
             add_child_box(state, selected)
         }
         Action::InsertBackspace => {
@@ -59,7 +59,7 @@ mod tests {
             vec![node_with_children("hi", vec![node(PAD)])]
         );
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![0],
                 index: 0
@@ -84,7 +84,7 @@ mod tests {
             vec![node_with_children("", vec![node(PAD)])]
         );
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![0],
                 index: 0
@@ -108,7 +108,7 @@ mod tests {
         let result = handle_key(state, "u");
         assert_eq!(result.doc.boxes, vec![node(&format!("hi{PAD}"))]);
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 0
@@ -190,7 +190,7 @@ mod tests {
             )]
         );
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![0, 0],
                 index: 0
@@ -338,7 +338,7 @@ mod tests {
             assert_eq!(result.doc.boxes, vec![node(&format!("a{key}{PAD}"))]);
             assert_eq!(result.mode, Mode::Insert);
             assert_eq!(
-                result.doc.selected,
+                result.selected,
                 Some(Path {
                     ancestors: vec![],
                     index: 0

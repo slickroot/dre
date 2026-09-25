@@ -97,7 +97,7 @@ impl SvgRenderer {
 
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let placements = with_cursor(layout(&state.doc.boxes), state.doc.selected.clone());
+        let placements = with_cursor(layout(&state.doc.boxes), state.selected.clone());
         out.write_all(self.draw(&placements).as_bytes())
     }
 }
@@ -1029,10 +1029,11 @@ mod tests {
         assert_eq!(svg, expected);
     }
 
-    fn rendered(doc: &Document) -> String {
+    fn rendered(doc: &Document, selected: Option<Path>) -> String {
         let mut out = Vec::new();
         let mut state = State::default();
         state.doc = doc.clone();
+        state.selected = selected;
         SvgRenderer::default().render(&state, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
@@ -1041,11 +1042,10 @@ mod tests {
     fn rendering_a_document_writes_the_drawing_of_its_layout() {
         let doc = Document {
             boxes: vec![node_with_children("root", vec![node("A"), node("B")])],
-            selected: None,
         };
 
         assert_eq!(
-            rendered(&doc),
+            rendered(&doc, None),
             SvgRenderer::default().draw(&layout(&doc.boxes))
         );
     }
@@ -1068,10 +1068,9 @@ mod tests {
         )
     }
 
-    fn two_children_document(selected: Option<Path>) -> Document {
+    fn two_children_document() -> Document {
         Document {
             boxes: vec![node_with_children("root", vec![node("A"), node("B")])],
-            selected,
         }
     }
 
@@ -1081,20 +1080,22 @@ mod tests {
             ancestors: vec![0],
             index: 1,
         };
-        let doc = two_children_document(Some(path.clone()));
+        let doc = two_children_document();
 
-        assert!(rendered(&doc).contains(&cursor_rect_at_label_end_of(&doc, &path)));
+        assert!(
+            rendered(&doc, Some(path.clone())).contains(&cursor_rect_at_label_end_of(&doc, &path))
+        );
     }
 
     #[test]
     fn no_selection_shows_no_cursor() {
-        let doc = two_children_document(None);
+        let doc = two_children_document();
 
         let cursor_fill = format!(
             "width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"{}\"/>",
             rgb(colour(None))
         );
-        assert!(!rendered(&doc).contains(&cursor_fill));
+        assert!(!rendered(&doc, None).contains(&cursor_fill));
     }
 
     #[test]
@@ -1107,11 +1108,11 @@ mod tests {
             ancestors: vec![0],
             index: 1,
         };
-        let doc = two_children_document(Some(second.clone()));
+        let doc = two_children_document();
         let first_cursor = cursor_rect_at_label_end_of(&doc, &first);
         let second_cursor = cursor_rect_at_label_end_of(&doc, &second);
 
-        let svg = rendered(&doc);
+        let svg = rendered(&doc, Some(second.clone()));
 
         assert!(svg.contains(&second_cursor));
         assert!(!svg.contains(&first_cursor));

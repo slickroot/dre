@@ -28,7 +28,7 @@ const OVERLAY_SWATCH_WIDTH: i64 = 2;
 const OVERLAY_MARK_BORDER: i64 = 2;
 
 fn selected_colour(state: &State) -> Option<u8> {
-    let path = state.doc.selected.as_ref()?;
+    let path = state.selected.as_ref()?;
     colour_at(&state.doc.boxes, path)
 }
 
@@ -305,7 +305,7 @@ impl TerminalRenderer {
         } else {
             with_cursor(
                 crate::layout::layout(&state.doc.boxes),
-                state.doc.selected.clone(),
+                state.selected.clone(),
             )
         };
         let mut frame = Frame::new(self.window);
@@ -1224,7 +1224,6 @@ mod tests {
             .collect();
         let doc = Document {
             boxes: nodes.clone(),
-            selected: None,
         };
         assert!(rendered_diagram(&mut renderer_on(window), &doc).ends_with(&expected));
     }
@@ -1336,10 +1335,7 @@ mod tests {
     fn on_resize_re_centres_the_next_render_on_the_new_size() {
         let leaf = node("hi");
         let boxes = vec![leaf.clone()];
-        let doc = Document {
-            boxes,
-            selected: None,
-        };
+        let doc = Document { boxes };
         let mut r = renderer_on(window(20, 10, 1, 1));
         rendered(&mut r, &doc);
         let (cols, rows_count) = (40, 20);
@@ -1402,10 +1398,7 @@ mod tests {
     }
 
     fn empty_doc() -> Document {
-        Document {
-            boxes: vec![],
-            selected: None,
-        }
+        Document { boxes: vec![] }
     }
 
     #[test]
@@ -1525,7 +1518,6 @@ mod tests {
         let mut r = renderer_on(window);
         let doc = Document {
             boxes: vec![node("hi")],
-            selected: None,
         };
         let output = rendered_diagram(&mut r, &doc);
 
@@ -1545,14 +1537,14 @@ mod tests {
     #[test]
     fn no_cursor_is_drawn_over_the_hint_even_with_a_selection() {
         let mut r = renderer_on(window(20, 10, 1, 1));
-        let doc = Document {
-            boxes: vec![],
-            selected: Some(crate::diagram::Path {
-                ancestors: vec![],
-                index: 0,
-            }),
-        };
-        let output = rendered_diagram(&mut r, &doc);
+        let mut state = State::default();
+        state.selected = Some(crate::diagram::Path {
+            ancestors: vec![],
+            index: 0,
+        });
+        let mut out = Vec::new();
+        r.render_diagram(&state, &mut out).unwrap();
+        let output = String::from_utf8(out).unwrap();
 
         let mut expected_r = renderer_on(window(20, 10, 1, 1));
         let hint_boxes = [hint_node()];

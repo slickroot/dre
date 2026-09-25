@@ -82,7 +82,7 @@ mod tests {
         files.expect_read().never();
         let state = store_over(files).load(None).unwrap();
         assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.selected, None);
         assert_eq!(state.save_to, None);
     }
 
@@ -101,7 +101,7 @@ mod tests {
         assert_eq!(state.doc.boxes.len(), 1);
         assert_eq!(state.doc.boxes[0].label, "API");
         assert_eq!(
-            state.doc.selected,
+            state.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 0
@@ -121,7 +121,7 @@ mod tests {
     fn a_file_with_no_boxes_loads_an_empty_canvas_with_nothing_selected() {
         let state = load_file("<dre/>").unwrap();
         assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.selected, None);
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         let files = files_reading("missing.dre", Err(io::Error::from(io::ErrorKind::NotFound)));
         let state = store_over(files).load(Some("missing.dre")).unwrap();
         assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.selected, None);
         assert_eq!(state.save_to, Some("missing.dre".to_string()));
         assert!(state.new_file);
     }
@@ -182,7 +182,6 @@ mod tests {
         State::open(
             diagram::Document {
                 boxes: vec![diagram::node("API")],
-                selected: None,
             },
             path.map(str::to_string),
         )

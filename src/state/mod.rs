@@ -32,6 +32,7 @@ struct KeyBinding<C> {
 #[derive(Clone)]
 pub struct State {
     pub(crate) doc: Document,
+    pub(crate) selected: Option<Path>,
     pub(crate) last_selected: Option<Path>,
     history: Vec<Document>,
     pub(crate) clipboard: Option<Node>,
@@ -58,7 +59,7 @@ impl State {
             ..Default::default()
         };
         if !state.doc.boxes.is_empty() {
-            state.doc.selected = Some(Path {
+            state.selected = Some(Path {
                 ancestors: vec![],
                 index: 0,
             });
@@ -99,6 +100,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             doc: Document::default(),
+            selected: None,
             last_selected: None,
             history: Vec::new(),
             clipboard: None,
@@ -115,7 +117,7 @@ impl Default for State {
 
 fn apply(mut state: State, action: action::Action) -> State {
     if let Some(selected) = state.last_selected.take() {
-        state.doc.selected = Some(selected);
+        state.selected = Some(selected);
     }
     history::recorded(state, &action, |state| match action.mode() {
         ActionMode::Insert => insert::reduce(state, action),
@@ -166,7 +168,7 @@ fn blank_box() -> Node {
 }
 
 fn add_child_box(mut state: State, selected: Option<Path>) -> State {
-    state.doc.selected = match selected {
+    state.selected = match selected {
         Some(mut path) => {
             let index = append(&mut at(&mut state.doc.boxes, &path).children, blank_box());
             path.ancestors.push(path.index);
@@ -190,7 +192,8 @@ fn add_child_box(mut state: State, selected: Option<Path>) -> State {
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Node>, mode: Mode, selected: Option<Path>) -> State {
     State {
-        doc: Document { boxes, selected },
+        doc: Document { boxes },
+        selected,
         last_selected: None,
         history: Vec::new(),
         clipboard: None,
@@ -222,13 +225,12 @@ mod tests {
         let state = State::open(
             Document {
                 boxes: vec![node("a"), node("b")],
-                selected: None,
             },
             None,
         );
         assert_eq!(state.doc.boxes, vec![node("a"), node("b")]);
         assert_eq!(
-            state.doc.selected,
+            state.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 0
@@ -240,7 +242,7 @@ mod tests {
     fn open_of_an_empty_document_selects_nothing() {
         let state = State::open(Document::default(), None);
         assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.selected, None);
     }
 
     #[test]
@@ -259,7 +261,7 @@ mod tests {
     fn new_file_is_empty_with_the_path_to_save_to() {
         let state = State::new_file("diagram.dre".to_string());
         assert!(state.doc.boxes.is_empty());
-        assert_eq!(state.doc.selected, None);
+        assert_eq!(state.selected, None);
         assert_eq!(state.save_to, Some("diagram.dre".to_string()));
         assert!(state.new_file);
     }
@@ -281,7 +283,7 @@ mod tests {
         let result = add_child_box(state, None);
         assert_eq!(result.doc.boxes, vec![node(PAD)]);
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 0
@@ -312,7 +314,7 @@ mod tests {
             vec![node_with_children("a", vec![node(PAD)])]
         );
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![0],
                 index: 0
@@ -387,7 +389,7 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, None);
         let result = handle_key(state.clone(), "x");
         assert_eq!(result.doc.boxes, state.doc.boxes);
-        assert_eq!(result.doc.selected, state.doc.selected);
+        assert_eq!(result.selected, state.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
     }
@@ -407,7 +409,7 @@ mod tests {
             let result = handle_key(state.clone(), key);
             assert_eq!(result.doc.boxes, boxes);
             assert_eq!(
-                result.doc.selected,
+                result.selected,
                 Some(Path {
                     ancestors: vec![],
                     index: 1
@@ -451,7 +453,7 @@ mod tests {
         let state = handle_key(state, "3");
         let result = handle_key(state, "2");
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 0
@@ -459,7 +461,7 @@ mod tests {
         );
         let result = handle_key(result, "j");
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 32
@@ -485,7 +487,7 @@ mod tests {
         let state = handle_key(state, "x");
         let result = handle_key(state, "j");
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 1
@@ -501,7 +503,7 @@ mod tests {
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
         let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.selected, None);
         assert_eq!(hidden.last_selected, Some(selected));
     }
 
@@ -513,7 +515,7 @@ mod tests {
         };
         let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
         let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
 
@@ -531,7 +533,7 @@ mod tests {
             Some(selected.clone()),
         );
         let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.doc.selected, Some(selected));
+        assert_eq!(hidden.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
     }
 
@@ -539,7 +541,7 @@ mod tests {
     fn an_idle_hide_with_nothing_selected_is_a_noop() {
         let state = new_state(vec![node("a")], Mode::Command, None);
         let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.selected, None);
         assert_eq!(hidden.last_selected, None);
     }
 
@@ -551,10 +553,10 @@ mod tests {
         };
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
         let hidden = reduce(reduce(state, Action::Idle), Action::Idle);
-        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.selected, None);
         assert_eq!(hidden.last_selected, Some(selected.clone()));
         let restored = handle_key(hidden, "z");
-        assert_eq!(restored.doc.selected, Some(selected));
+        assert_eq!(restored.selected, Some(selected));
     }
 
     #[test]
@@ -570,7 +572,7 @@ mod tests {
         let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "j");
         assert_eq!(
-            result.doc.selected,
+            result.selected,
             Some(Path {
                 ancestors: vec![],
                 index: 1
@@ -587,7 +589,7 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
         let hidden = reduce(state, Action::Idle);
         let result = handle_key(hidden, "z");
-        assert_eq!(result.doc.selected, Some(selected));
+        assert_eq!(result.selected, Some(selected));
     }
 
     #[test]
@@ -604,7 +606,7 @@ mod tests {
         state = reduce(state, Action::ToggleRounded);
         let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.history.len(), 2);
-        assert_eq!(hidden.doc.selected, None);
+        assert_eq!(hidden.selected, None);
     }
 
     fn selecting_first(boxes: Vec<Node>, mode: Mode) -> State {

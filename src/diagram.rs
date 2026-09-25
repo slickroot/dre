@@ -20,7 +20,6 @@ pub(crate) struct Path {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Document {
     pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Option<Path>,
 }
 
 pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
@@ -86,7 +85,6 @@ fn node_from_file_box(file_box: FileBox) -> Node {
 pub(crate) fn to_document(doc: FileDoc) -> Document {
     Document {
         boxes: doc.boxes.into_iter().map(node_from_file_box).collect(),
-        selected: None,
     }
 }
 
@@ -340,33 +338,9 @@ mod tests {
     }
 
     #[test]
-    fn opening_an_empty_file_doc_gives_no_boxes_and_nothing_selected() {
+    fn opening_an_empty_file_doc_gives_no_boxes() {
         let doc = to_document(FileDoc { boxes: vec![] });
         assert!(doc.boxes.is_empty());
-        assert_eq!(doc.selected, None);
-    }
-
-    #[test]
-    fn opening_a_file_doc_with_boxes_selects_nothing() {
-        let doc = FileDoc {
-            boxes: vec![
-                FileBox {
-                    label: "API".to_string(),
-                    colour: None,
-                    fill: None,
-                    rounded: false,
-                    children: vec![],
-                },
-                FileBox {
-                    label: "Billing".to_string(),
-                    colour: None,
-                    fill: None,
-                    rounded: false,
-                    children: vec![],
-                },
-            ],
-        };
-        assert_eq!(to_document(doc).selected, None);
     }
 
     #[test]

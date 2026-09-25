@@ -1,3 +1,4 @@
+use crate::diagram::{Node, Path};
 use crate::state::action::Action;
 use crate::state::State;
 
@@ -50,9 +51,31 @@ pub(super) fn recorded(
     }
 }
 
+fn contains(boxes: &[Node], path: &Path) -> bool {
+    let mut siblings = boxes;
+    for &index in &path.ancestors {
+        match siblings.get(index) {
+            Some(node) => siblings = &node.children,
+            None => return false,
+        }
+    }
+    path.index < siblings.len()
+}
+
+fn nearest_existing(boxes: &[Node], mut path: Path) -> Option<Path> {
+    while !contains(boxes, &path) {
+        path.index = path.ancestors.pop()?;
+    }
+    Some(path)
+}
+
 pub(super) fn undo(mut state: State) -> State {
     if let Some(previous) = state.history.pop() {
         state.doc = previous;
+        state.selected = state
+            .selected
+            .take()
+            .and_then(|path| nearest_existing(&state.doc.boxes, path));
     }
     state
 }
