@@ -7,28 +7,30 @@ fn drop_last_chars(s: &str, n: usize) -> String {
 }
 
 pub(crate) fn reduce(mut state: State, command: Action) -> State {
-    let Some(path) = &state.selected else {
+    let Some(path) = state.selected.clone() else {
         return state;
     };
-    let node = state.doc.root.value_mut(path);
-    let label = node.label.clone();
+    let label = state.doc.tree().value(&path).label();
     match command {
         Action::Commit => {
-            node.label = drop_last_chars(&label, 1);
+            let label = drop_last_chars(label, 1);
+            state.doc.set_label(&path, label);
             state.mode = Mode::Command;
             state
         }
         Action::CommitAndAddChild => {
-            node.label = drop_last_chars(&label, 1);
-            let selected = state.selected.clone();
-            add_child_box(state, selected)
+            let label = drop_last_chars(label, 1);
+            state.doc.set_label(&path, label);
+            add_child_box(state, Some(path))
         }
         Action::InsertBackspace => {
-            node.label = format!("{}{PAD}", drop_last_chars(&label, 2));
+            let label = format!("{}{PAD}", drop_last_chars(label, 2));
+            state.doc.set_label(&path, label);
             state
         }
         Action::InsertAppend(c) => {
-            node.label = format!("{}{c}{PAD}", drop_last_chars(&label, 1));
+            let label = format!("{}{c}{PAD}", drop_last_chars(label, 1));
+            state.doc.set_label(&path, label);
             state
         }
         _ => state,

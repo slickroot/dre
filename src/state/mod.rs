@@ -6,8 +6,7 @@ mod insert;
 mod mode;
 mod save_prompt;
 
-use crate::diagram::{children, parent_of, Document, Node};
-use crate::palette::next_on_palette;
+use crate::diagram::{Document, Node};
 use crate::state::action::ActionMode;
 #[cfg(not(test))]
 use crate::state::input::INTERRUPT;
@@ -130,32 +129,11 @@ pub fn reduce(state: State, key: Option<&str>) -> State {
     }
 }
 
-fn colour_row(tree: &mut Tree<Node>, path: &[usize]) {
-    let siblings: Vec<Vec<usize>> = children(tree, parent_of(path)).collect();
-    let first_colour = tree.value(&siblings[0]).colour;
-    let uniform = siblings
-        .iter()
-        .all(|sibling| tree.value(sibling).colour == first_colour);
-    let new_colour = if uniform {
-        next_on_palette(first_colour)
-    } else {
-        Some(0)
-    };
-    for sibling in &siblings {
-        tree.value_mut(sibling).colour = new_colour;
-    }
-}
-
-fn blank_box() -> Node {
-    Node {
-        label: PAD.to_string(),
-        ..Default::default()
-    }
-}
-
 fn add_child_box(mut state: State, selected: Option<Vec<usize>>) -> State {
     let parent = selected.unwrap_or_default();
-    state.selected = Some(state.doc.root.push(&parent, Tree::leaf(blank_box())));
+    let new = state.doc.insert(&parent, &Tree::leaf(Node::default()));
+    state.doc.set_label(&new, PAD.to_string());
+    state.selected = Some(new);
     state.mode = Mode::Insert;
     state
 }
@@ -182,7 +160,7 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagram::{labelled, node, node_with_children};
+    use crate::diagram::{node, node_with_children};
     use crate::state::action::Action;
     use crate::state::apply as reduce;
     use crate::test_support::handle_key;
@@ -233,17 +211,6 @@ mod tests {
     }
 
     #[test]
-    fn blank_box_is_a_default_box_labelled_with_the_pad() {
-        assert_eq!(
-            blank_box(),
-            Node {
-                label: PAD.to_string(),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
     fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
         let state = new_state(vec![], Mode::Command, None);
         let result = add_child_box(state, None);
@@ -262,35 +229,6 @@ mod tests {
         );
         assert_eq!(result.selected, Some(vec![0, 0]));
         assert_eq!(result.mode, Mode::Insert);
-    }
-
-    #[test]
-    fn colour_row_advances_uniformly_coloured_siblings() {
-        let mut boxes = Tree::root(vec![node("a"), node("b")]);
-        let mut a = labelled("a");
-        a.colour = next_on_palette(None);
-        let mut b = labelled("b");
-        b.colour = next_on_palette(None);
-        colour_row(&mut boxes, &[0]);
-        assert_eq!(boxes, Tree::root(vec![Tree::leaf(a), Tree::leaf(b)]));
-    }
-
-    #[test]
-    fn colour_row_sets_mixed_siblings_to_the_first_palette_colour() {
-        let mut a = labelled("a");
-        a.colour = Some(0);
-        let mut b = labelled("b");
-        b.colour = Some(1);
-        let mut boxes = Tree::root(vec![Tree::leaf(a), Tree::leaf(b)]);
-        let mut expected_a = labelled("a");
-        expected_a.colour = Some(0);
-        let mut expected_b = labelled("b");
-        expected_b.colour = Some(0);
-        colour_row(&mut boxes, &[0]);
-        assert_eq!(
-            boxes,
-            Tree::root(vec![Tree::leaf(expected_a), Tree::leaf(expected_b)])
-        );
     }
 
     #[test]

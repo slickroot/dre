@@ -1,9 +1,8 @@
-use crate::diagram::{children, parent_of};
+use crate::diagram::{children, parent_of, Scope};
 use crate::palette::next_on_palette;
 use crate::state::action::Action;
 use crate::state::history::undo;
-use crate::state::{add_child_box, blank_box, colour_row, Mode, State, DEFAULT_FILENAME, PAD};
-use types::Tree;
+use crate::state::{add_child_box, Mode, State, DEFAULT_FILENAME, PAD};
 
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
@@ -28,21 +27,14 @@ fn interrupt(mut state: State) -> State {
 }
 
 fn enter_insert(mut state: State, path: Vec<usize>, base_label: &str) -> State {
-    state.doc.root.value_mut(&path).label = format!("{base_label}{PAD}");
+    state.doc.set_label(&path, format!("{base_label}{PAD}"));
     state.selected = Some(path);
     state.mode = Mode::Insert;
     state
 }
 
-fn new_sibling(mut state: State, path: Vec<usize>) -> State {
-    let sibling = state
-        .doc
-        .root
-        .push(parent_of(&path), Tree::leaf(blank_box()));
-    state.doc.root.value_mut(&sibling).label = PAD.to_string();
-    state.selected = Some(sibling);
-    state.mode = Mode::Insert;
-    state
+fn new_sibling(state: State, path: Vec<usize>) -> State {
+    add_child_box(state, Some(parent_of(&path).to_vec()))
 }
 
 fn select_parent(mut state: State, mut path: Vec<usize>) -> State {
@@ -83,61 +75,68 @@ fn repeat(
 }
 
 fn edit_label(state: State, path: Vec<usize>) -> State {
-    let label = state.doc.tree().value(&path).label.clone();
+    let label = state.doc.tree().value(&path).label().to_string();
     enter_insert(state, path, &label)
 }
 
 fn rename_label(mut state: State, path: Vec<usize>) -> State {
-    state.doc.root.value_mut(&path).label = PAD.to_string();
+    state.doc.set_label(&path, PAD.to_string());
     state.selected = Some(path);
     state.mode = Mode::Insert;
     state
 }
 
 fn cycle_colour(mut state: State, path: Vec<usize>) -> State {
-    let node = state.doc.root.value_mut(&path);
-    node.colour = next_on_palette(node.colour);
+    let colour = next_on_palette(state.doc.tree().value(&path).colour());
+    state.doc.set_colour(&path, colour, Scope::Box);
     state.selected = Some(path);
     state
 }
 
+fn next_row_colour(state: &State, path: &[usize]) -> Option<u8> {
+    let tree = state.doc.tree();
+    let mut colours = children(tree, parent_of(path)).map(|sibling| tree.value(&sibling).colour());
+    let first = colours.next().flatten();
+    if colours.all(|colour| colour == first) {
+        next_on_palette(first)
+    } else {
+        Some(0)
+    }
+}
+
 fn cycle_siblings_colour(mut state: State, path: Vec<usize>) -> State {
-    colour_row(&mut state.doc.root, &path);
+    let colour = next_row_colour(&state, &path);
+    state.doc.set_colour(&path, colour, Scope::Siblings);
     state.selected = Some(path);
     state
 }
 
 fn toggle_siblings_fill(mut state: State, path: Vec<usize>) -> State {
-    let tree = &mut state.doc.root;
+    let tree = state.doc.tree();
     let siblings: Vec<Vec<usize>> = children(tree, parent_of(&path)).collect();
     if siblings
         .iter()
-        .all(|sibling| tree.value(sibling).colour.is_none())
+        .any(|sibling| tree.value(sibling).colour().is_some())
     {
-        state.selected = Some(path);
-        return state;
-    }
-    let all_filled = siblings.iter().all(|sibling| tree.value(sibling).filled);
-    for sibling in &siblings {
-        tree.value_mut(sibling).filled = !all_filled;
+        let all_filled = siblings.iter().all(|sibling| tree.value(sibling).filled());
+        state.doc.set_fill(&path, !all_filled, Scope::Siblings);
     }
     state.selected = Some(path);
     state
 }
 
 fn toggle_fill(mut state: State, path: Vec<usize>) -> State {
-    let node = state.doc.root.value_mut(&path);
-    if node.colour.is_none() {
-        state.selected = Some(path);
-        return state;
+    let node = state.doc.tree().value(&path);
+    if node.colour().is_some() {
+        let filled = !node.filled();
+        state.doc.set_fill(&path, filled, Scope::Box);
     }
-    node.filled = !node.filled;
     state.selected = Some(path);
     state
 }
 
 fn delete_box(mut state: State, path: Vec<usize>) -> State {
-    state.clipboard = Some(state.doc.root.remove(&path));
+    state.clipboard = Some(state.doc.remove(&path));
     let (&last, parent) = path.split_last().expect("a selection is never the root");
     let remaining = children(state.doc.tree(), parent).count();
     state.selected = if remaining > 0 {
@@ -153,18 +152,18 @@ fn paste_box(mut state: State, selected: Option<Vec<usize>>, count: usize) -> St
         state.selected = selected;
         return state;
     };
-    let parent = selected.unwrap_or_default();
-    let first = children(state.doc.tree(), &parent).count();
+    let parent = selected.clone().unwrap_or_default();
+    let mut last = selected;
     for _ in 0..count {
-        state.doc.root.push(&parent, branch.clone());
+        last = Some(state.doc.insert(&parent, &branch));
     }
-    state.selected = Some([&parent[..], &[first + count - 1]].concat());
+    state.selected = last;
     state
 }
 
 fn toggle_rounded(mut state: State, path: Vec<usize>) -> State {
-    let node = state.doc.root.value_mut(&path);
-    node.rounded = !node.rounded;
+    let rounded = !state.doc.tree().value(&path).rounded();
+    state.doc.set_rounded(&path, rounded, Scope::Box);
     state.selected = Some(path);
     state
 }
@@ -244,6 +243,7 @@ mod tests {
     use crate::state::apply as reduce;
     use crate::state::new_state;
     use crate::test_support::handle_key;
+    use types::Tree;
 
     const COMMANDS: [Action; 17] = [
         Action::Undo,
@@ -818,6 +818,38 @@ mod tests {
                 vec![Tree::leaf(c), Tree::leaf(d)]
             )])
         );
+    }
+
+    fn row_with_colours(first: Option<u8>, second: Option<u8>) -> State {
+        let boxes = vec![node_with_children(
+            "a",
+            vec![
+                Tree::leaf(labelled("c").with_colour(first)),
+                Tree::leaf(labelled("d").with_colour(second)),
+            ],
+        )];
+        new_state(boxes, Mode::Command, Some(vec![0, 1]))
+    }
+
+    fn row_colours(state: &State) -> Vec<Option<u8>> {
+        children(state.doc.tree(), &[0])
+            .map(|path| state.doc.tree().value(&path).colour())
+            .collect()
+    }
+
+    #[test]
+    fn capital_c_advances_siblings_that_share_a_colour() {
+        let colour = next_on_palette(None);
+        let result = handle_key(row_with_colours(colour, colour), "C");
+        let next = next_on_palette(colour);
+        assert_eq!(row_colours(&result), vec![next, next]);
+    }
+
+    #[test]
+    fn capital_c_sets_mixed_siblings_to_the_first_palette_colour() {
+        let first = next_on_palette(None);
+        let result = handle_key(row_with_colours(first, next_on_palette(first)), "C");
+        assert_eq!(row_colours(&result), vec![first, first]);
     }
 
     #[test]

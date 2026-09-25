@@ -42,7 +42,6 @@ impl Default for Document {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) enum Scope {
     Box,
     Siblings,
@@ -53,37 +52,30 @@ impl Document {
         &self.root
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_label(&mut self, path: &[usize], label: String) {
         self.root.value_mut(path).label = label;
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_colour(&mut self, path: &[usize], colour: Option<u8>, scope: Scope) {
         self.set(path, scope, |node| node.colour = colour);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_fill(&mut self, path: &[usize], filled: bool, scope: Scope) {
         self.set(path, scope, |node| node.filled = filled);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn set_rounded(&mut self, path: &[usize], rounded: bool, scope: Scope) {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
         self.root.push(parent, subtree.clone())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn remove(&mut self, path: &[usize]) -> Tree<Node> {
         self.root.remove(path)
     }
 
-    #[allow(dead_code)]
     fn set(&mut self, path: &[usize], scope: Scope, write: impl Fn(&mut Node)) {
         let targets: Vec<Vec<usize>> = match scope {
             Scope::Box => vec![path.to_vec()],
