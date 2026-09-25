@@ -65,6 +65,11 @@ impl State {
     }
 }
 
+pub(crate) fn diagram_name(path: &str) -> &str {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    file_name.strip_suffix(".dre").unwrap_or(file_name)
+}
+
 impl Default for State {
     fn default() -> Self {
         State {
@@ -139,6 +144,21 @@ mod tests {
     use crate::state::action::Action;
     use crate::state::apply as reduce;
     use crate::test_support::handle_key;
+
+    #[test]
+    fn diagram_name_strips_the_folder_and_the_dre_extension() {
+        assert_eq!(diagram_name("docs/plans.dre"), "plans");
+    }
+
+    #[test]
+    fn diagram_name_strips_the_dre_extension_of_a_bare_file_name() {
+        assert_eq!(diagram_name("plans.dre"), "plans");
+    }
+
+    #[test]
+    fn diagram_name_of_a_path_without_the_dre_extension_only_strips_the_folder() {
+        assert_eq!(diagram_name("docs/plans"), "plans");
+    }
 
     #[test]
     fn a_default_state_is_not_dirty() {
