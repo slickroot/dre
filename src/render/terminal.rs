@@ -1213,6 +1213,35 @@ mod tests {
     }
 
     #[test]
+    fn the_footer_box_is_a_one_pixel_line_along_its_top_and_left_in_the_foreground() {
+        let cell = 4;
+        let mut r = renderer_on(window(40, 10, cell, cell));
+        let frame = r.frame(&empty_state());
+        let image = frame
+            .images
+            .first()
+            .expect("the footer box is drawn as an image");
+        let (width, height) = (image.canvas.width as usize, image.canvas.height as usize);
+        let (cr, cg, cb) = colour(None);
+        let at = |x: usize, y: usize| {
+            let i = (y * width + x) * 4;
+            &image.canvas.pixels[i..i + 4]
+        };
+        for x in 0..width {
+            assert_eq!(at(x, 0), [cr, cg, cb, OPAQUE]);
+        }
+        for x in 1..width {
+            assert_eq!(at(x, 1)[3], 0, "top line is 1px thick at column {x}");
+        }
+        for y in 0..height {
+            assert_eq!(at(0, y), [cr, cg, cb, OPAQUE]);
+        }
+        for y in 1..height {
+            assert_eq!(at(1, y)[3], 0, "left line is 1px thick at row {y}");
+        }
+    }
+
+    #[test]
     fn empty_canvas_fills_terminal() {
         let grid = grid(&mut renderer_on(window(11, 5, 1, 1)), &[]);
         assert_eq!(grid, vec![BLANK.to_string().repeat(11); 5]);

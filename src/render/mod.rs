@@ -312,10 +312,15 @@ mod tests {
         let screen = editor(state, WINDOW);
         let foot = foot_of(WINDOW);
         let width = text.chars().count() as i64;
+        let x = foot.col + foot.cols - width;
+        let footer = &screen[1].1;
+        assert_eq!(footer.len(), 2);
+        assert_eq!(footer[0].node, layout::footer(text)[0].node);
         assert_eq!(
-            screen[1].1,
-            vec![label_at(text, foot.col + foot.cols - width, foot.row)]
+            (footer[0].x, footer[0].y, footer[0].width, footer[0].height),
+            (x, foot.row, width, 1)
         );
+        assert_eq!(footer[1], label_at(text, x, foot.row));
     }
 
     #[test]
