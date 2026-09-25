@@ -1318,7 +1318,7 @@ mod tests {
     #[test]
     fn without_a_canvas_no_footer_text_is_drawn_for_a_named_or_an_unnamed_state() {
         let mut unnamed = example_state();
-        unnamed.save_to = None;
+        unnamed.set_save_to(None);
         for state in [example_state(), unnamed] {
             let svg = render_to_string(SvgRenderer::default(), &state);
 
