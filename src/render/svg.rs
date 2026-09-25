@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, colour, editor, Renderer, ARROW_OPACITY, BORDER, CELL_HEIGHT,
-    CELL_WIDTH,
+    arrowhead_depth, arrowhead_slope, body, colour, editor, Renderer, ARROW_OPACITY, BORDER,
+    CELL_HEIGHT, CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode, FOOTER_ROWS};
+use crate::layout::{diagram, Placement, PlacementNode};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -29,10 +29,9 @@ impl SvgRenderer {
     }
 
     fn window(&self, state: &State) -> Area {
-        let (cols, rows) = self.canvas.unwrap_or_else(|| {
-            let (width, height) = extent(&diagram(state.doc.tree()));
-            (width, height + FOOTER_ROWS)
-        });
+        let (cols, rows) = self
+            .canvas
+            .unwrap_or_else(|| extent(&diagram(state.doc.tree())));
         Area {
             col: 0,
             row: 0,
@@ -45,8 +44,19 @@ impl SvgRenderer {
 impl Renderer for SvgRenderer {
     fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
         let window = self.window(state);
-        out.write_all(document(window, &editor(state, window)).as_bytes())
+        let areas = match self.canvas {
+            Some(_) => editor(state, window),
+            None => vec![(window, without_cursor(body(state, window)))],
+        };
+        out.write_all(document(window, &areas).as_bytes())
     }
+}
+
+fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
+    placements
+        .into_iter()
+        .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
+        .collect()
 }
 
 fn extent(placements: &[Placement]) -> (i64, i64) {
@@ -280,6 +290,7 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::with_cursor;
+    use crate::layout::FOOTER_ROWS;
     use crate::layout::{Arrow, Cursor, Label, Placement};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
@@ -1062,7 +1073,9 @@ mod tests {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         let state = crate::state::new_state(boxes, Mode::Command, selected);
         let mut out = Vec::new();
-        SvgRenderer::default().render(&state, &mut out).unwrap();
+        SvgRenderer::with_canvas(100, 40)
+            .render(&state, &mut out)
+            .unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -1108,6 +1121,22 @@ mod tests {
     #[test]
     fn a_selected_box_shows_one_cursor() {
         assert_eq!(cursor_rects(&rendered(Some(vec![0, 1]))).len(), 1);
+    }
+
+    #[test]
+    fn the_export_without_a_canvas_omits_the_cursor() {
+        let selected = example_state().selected;
+        assert!(selected.is_some());
+        let svg = render_to_string(SvgRenderer::default(), &example_state());
+
+        assert!(cursor_rects(&svg).is_empty());
+    }
+
+    #[test]
+    fn the_canvas_render_keeps_the_cursor() {
+        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_state());
+
+        assert_eq!(cursor_rects(&svg).len(), 1);
     }
 
     #[test]
@@ -1255,7 +1284,7 @@ mod tests {
     }
 
     #[test]
-    fn without_a_canvas_the_window_is_the_drawing_plus_the_footer() {
+    fn without_a_canvas_the_window_is_exactly_the_drawing() {
         let state = example_state();
         let (width, height) = drawing_extent(&state);
 
@@ -1264,27 +1293,50 @@ mod tests {
         assert!(svg.starts_with(&format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">",
             width * CELL_WIDTH,
-            (height + FOOTER_ROWS) * CELL_HEIGHT
+            height * CELL_HEIGHT
         )));
     }
 
     #[test]
-    fn without_a_canvas_the_body_holds_the_whole_diagram_uncropped() {
+    fn without_a_canvas_the_only_area_holds_the_whole_diagram_uncropped() {
         let state = example_state();
         let (width, height) = drawing_extent(&state);
         let window = Area {
             col: 0,
             row: 0,
             cols: width,
-            rows: height + FOOTER_ROWS,
+            rows: height,
         };
-        let (body, foot) = body_and_foot(window);
 
         let svg = render_to_string(SvgRenderer::default(), &state);
 
-        let diagram = with_cursor(diagram(state.doc.tree()), state.selected.clone());
-        assert!(svg.contains(&nested(body, &paint(&diagram))));
-        assert!(svg.contains(&nested(foot, &footer_label(foot))));
+        let diagram = diagram(state.doc.tree());
+        assert!(svg.contains(&nested(window, &paint(&diagram))));
+        assert_eq!(svg.matches("<svg ").count(), 2);
+    }
+
+    #[test]
+    fn without_a_canvas_no_footer_text_is_drawn_for_a_named_or_an_unnamed_state() {
+        let mut unnamed = example_state();
+        unnamed.set_save_to(None);
+        for state in [example_state(), unnamed] {
+            let svg = render_to_string(SvgRenderer::default(), &state);
+
+            assert!(!svg.contains(NAME));
+            assert!(!svg.contains("[no name]"));
+            assert!(!svg.contains("• dre"));
+        }
+    }
+
+    #[test]
+    fn a_canvas_still_draws_the_footer_in_a_window_of_the_canvas_size() {
+        let svg = render_to_string(
+            SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows),
+            &example_state(),
+        );
+
+        assert!(svg.contains(&footer_label(body_and_foot(CANVAS).1)));
+        assert!(svg.contains(&format!("viewBox=\"{}\"", pixel_box(CANVAS))));
     }
 }
 

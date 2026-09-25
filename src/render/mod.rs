@@ -25,15 +25,16 @@ pub trait Renderer {
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
     vec![
-        (
-            body,
-            centre(
-                with_cursor(layout::diagram(state.doc.tree()), state.selected.clone()),
-                body,
-            ),
-        ),
+        (body, self::body(state, body)),
         (foot, align_right(layout::footer(state.footer()), foot)),
     ]
+}
+
+pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
+    centre(
+        with_cursor(layout::diagram(state.doc.tree()), state.selected.clone()),
+        area,
+    )
 }
 
 fn shift(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
@@ -269,6 +270,12 @@ mod tests {
         let screen = editor(&state, WINDOW);
         let body = body_of(WINDOW);
         assert_eq!(screen[0].1, centre(layout::diagram(state.doc.tree()), body));
+    }
+
+    #[test]
+    fn body_is_the_body_half_of_the_editor() {
+        let state = state(Some(vec![0]));
+        assert_eq!(body(&state, body_of(WINDOW)), editor(&state, WINDOW)[0].1);
     }
 
     #[test]
