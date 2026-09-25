@@ -104,6 +104,7 @@ mod tests {
         assert_eq!(result.unwrap(), ExitCode::SUCCESS);
         assert!(svg.starts_with("<svg"));
         assert!(svg.contains("<rect"));
+        assert!(!svg.contains("• dre"));
     }
 
     #[test]
