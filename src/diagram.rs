@@ -5,10 +5,10 @@ use types::Tree;
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct Node {
-    pub(crate) label: String,
-    pub(crate) colour: Option<u8>,
-    pub(crate) filled: bool,
-    pub(crate) rounded: bool,
+    label: String,
+    colour: Option<u8>,
+    filled: bool,
+    rounded: bool,
 }
 
 impl Node {
@@ -31,7 +31,7 @@ impl Node {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
-    pub(crate) root: Tree<Node>,
+    root: Tree<Node>,
 }
 
 impl Default for Document {

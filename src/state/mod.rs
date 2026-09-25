@@ -141,9 +141,7 @@ fn add_child_box(mut state: State, selected: Option<Vec<usize>>) -> State {
 #[cfg(test)]
 pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec<usize>>) -> State {
     State {
-        doc: Document {
-            root: Tree::root(boxes),
-        },
+        doc: Document::with_boxes(boxes),
         selected,
         last_selected: None,
         history: Vec::new(),
@@ -172,13 +170,8 @@ mod tests {
 
     #[test]
     fn open_selects_the_first_box() {
-        let state = State::open(
-            Document {
-                root: Tree::root(vec![node("a"), node("b")]),
-            },
-            None,
-        );
-        assert_eq!(state.doc.root, Tree::root(vec![node("a"), node("b")]));
+        let state = State::open(Document::with_boxes(vec![node("a"), node("b")]), None);
+        assert_eq!(*state.doc.tree(), Tree::root(vec![node("a"), node("b")]));
         assert_eq!(state.selected, Some(vec![0]));
     }
 
@@ -214,7 +207,7 @@ mod tests {
     fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
         let state = new_state(vec![], Mode::Command, None);
         let result = add_child_box(state, None);
-        assert_eq!(result.doc.root, Tree::root(vec![node(PAD)]));
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node(PAD)]));
         assert_eq!(result.selected, Some(vec![0]));
         assert_eq!(result.mode, Mode::Insert);
     }
@@ -224,7 +217,7 @@ mod tests {
         let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         let result = add_child_box(state, Some(vec![0]));
         assert_eq!(
-            result.doc.root,
+            *result.doc.tree(),
             Tree::root(vec![node_with_children("a", vec![node(PAD)])])
         );
         assert_eq!(result.selected, Some(vec![0, 0]));
@@ -247,7 +240,7 @@ mod tests {
     fn unknown_key_returns_the_state_unchanged() {
         let state = new_state(vec![node("a")], Mode::Command, None);
         let result = handle_key(state.clone(), "x");
-        assert_eq!(result.doc.root, state.doc.root);
+        assert_eq!(*result.doc.tree(), *state.doc.tree());
         assert_eq!(result.selected, state.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
@@ -259,7 +252,7 @@ mod tests {
         let state = new_state(boxes.clone(), Mode::Command, Some(vec![1]));
         for key in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
             let result = handle_key(state.clone(), key);
-            assert_eq!(result.doc.root, Tree::root(boxes.clone()));
+            assert_eq!(*result.doc.tree(), Tree::root(boxes.clone()));
             assert_eq!(result.selected, Some(vec![1]));
         }
     }
@@ -403,8 +396,8 @@ mod tests {
         let committed = reduce(typed, Action::CommitAndAddChild);
         let once = reduce(committed, Action::Undo);
         let twice = reduce(once.clone(), Action::Undo);
-        assert_ne!(once.doc.root, before.doc.root);
-        assert_eq!(twice.doc.root, before.doc.root);
+        assert_ne!(*once.doc.tree(), *before.doc.tree());
+        assert_eq!(*twice.doc.tree(), *before.doc.tree());
     }
 
     #[test]
@@ -420,7 +413,7 @@ mod tests {
         let created = reduce(before.clone(), Action::NewSibling);
         assert_eq!(created.history.len(), 1);
         let once = reduce(created, Action::Undo);
-        assert_eq!(once.doc.root, before.doc.root);
+        assert_eq!(*once.doc.tree(), *before.doc.tree());
     }
 
     #[test]
@@ -429,7 +422,7 @@ mod tests {
         let renaming = reduce(before.clone(), Action::RenameLabel);
         assert_eq!(renaming.history.len(), 1);
         let once = reduce(renaming, Action::Undo);
-        assert_eq!(once.doc.root, before.doc.root);
+        assert_eq!(*once.doc.tree(), *before.doc.tree());
     }
 
     #[test]
@@ -438,7 +431,7 @@ mod tests {
         let editing = reduce(before.clone(), Action::EditLabel);
         let committed = reduce(editing, Action::Commit);
         assert_eq!(committed.history.len(), before.history.len());
-        assert_eq!(committed.doc.root, before.doc.root);
+        assert_eq!(*committed.doc.tree(), *before.doc.tree());
     }
 
     #[test]

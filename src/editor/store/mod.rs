@@ -57,7 +57,6 @@ mod tests {
     use super::files::MockFiles;
     use super::*;
     use crate::diagram;
-    use types::Tree;
 
     fn store_over(files: MockFiles) -> FileStateStore {
         FileStateStore::new(Box::new(files))
@@ -100,7 +99,7 @@ mod tests {
         });
         let state = load_file(&text).unwrap();
         assert_eq!(state.doc.tree().walk().count(), 1);
-        assert_eq!(state.doc.tree().value(&[0]).label, "API");
+        assert_eq!(state.doc.tree().value(&[0]).label(), "API");
         assert_eq!(state.selected, Some(vec![0]));
     }
 
@@ -175,9 +174,7 @@ mod tests {
 
     fn state_with_one_box_saving_to(path: Option<&str>) -> State {
         State::open(
-            diagram::Document {
-                root: Tree::root(vec![diagram::node("API")]),
-            },
+            diagram::Document::with_boxes(vec![diagram::node("API")]),
             path.map(str::to_string),
         )
     }
