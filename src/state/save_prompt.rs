@@ -103,6 +103,6 @@ mod tests {
         let result = handle_key(state, "\x1b");
         assert!(!result.running);
         assert_eq!(result.save_to, None);
-        assert_eq!(result.doc.root, Tree::root(vec![node("a")]));
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a")]));
     }
 }

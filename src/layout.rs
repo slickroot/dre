@@ -490,12 +490,12 @@ mod tests {
     }
 
     fn laid_out_box(colour: Option<u8>, filled: bool, rounded: bool) -> PlacementNode<'static> {
-        let nodes = Tree::root(vec![Tree::leaf(Node {
-            colour,
-            filled,
-            rounded,
-            ..labelled("hi")
-        })]);
+        let nodes = Tree::root(vec![Tree::leaf(
+            labelled("hi")
+                .with_colour(colour)
+                .with_fill(filled)
+                .with_rounded(rounded),
+        )]);
         match layout(&nodes)[0].node {
             PlacementNode::Box {
                 colour,
