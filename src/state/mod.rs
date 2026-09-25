@@ -71,6 +71,10 @@ impl State {
         self.save_to.as_deref()
     }
 
+    pub(crate) fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
     pub(crate) fn set_save_to(&mut self, save_to: Option<String>) {
         self.footer = footer_text(save_to.as_deref());
         self.save_to = save_to;
