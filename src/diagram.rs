@@ -11,6 +11,12 @@ pub(crate) struct Node {
     pub(crate) rounded: bool,
 }
 
+impl Node {
+    pub(crate) fn label(&self) -> &str {
+        &self.label
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
     pub(crate) root: Tree<Node>,

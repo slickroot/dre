@@ -16,7 +16,7 @@ pub(crate) fn interior(label: &str) -> i64 {
 }
 
 pub(crate) fn width(node: &Node) -> i64 {
-    interior(&node.label) + BORDERS
+    interior(node.label()) + BORDERS
 }
 
 #[allow(dead_code)]
@@ -76,16 +76,16 @@ pub(crate) fn place<'a>(tree: &'a Tree<Node>, offsets: &[i64]) -> Vec<Placement<
             height: BOX_HEIGHT,
         }];
 
-        let start = x + centre(width, &node.label);
+        let start = x + centre(width, node.label());
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
             node: PlacementNode::Label(Label {
-                text: &node.label,
+                text: node.label(),
                 path: path.to_vec(),
             }),
             x: start,
             y: middle,
-            width: interior(&node.label),
+            width: interior(node.label()),
             height: 1,
         });
 
@@ -438,7 +438,7 @@ mod tests {
 
         let parent_box = placements
             .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label == "parent"))
+            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label() == "parent"))
             .expect("the parent has a box placement");
         assert_eq!(parent_box.y, LEAF_STRIDE * HALF_PITCH);
     }
@@ -454,7 +454,7 @@ mod tests {
 
         let parent_box = placements
             .iter()
-            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label == "parent"))
+            .find(|placement| matches!(&placement.node, PlacementNode::Node(n) if n.label() == "parent"))
             .expect("the parent has a box placement");
         assert_eq!(parent_box.y, HALF_PITCH);
     }
