@@ -43,7 +43,6 @@ pub struct State {
     pub(crate) new_file: bool,
     pub(crate) pending_count: Option<usize>,
     pub(crate) dirty: bool,
-    pub(crate) colour_overlay: bool,
 }
 
 const CURSOR: char = '\u{2588}';
@@ -104,7 +103,6 @@ impl Default for State {
             new_file: false,
             pending_count: None,
             dirty: false,
-            colour_overlay: false,
         }
     }
 }
@@ -186,7 +184,6 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         new_file: false,
         pending_count: None,
         dirty: false,
-        colour_overlay: false,
     }
 }
 
