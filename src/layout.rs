@@ -6,6 +6,10 @@ pub(crate) const BOX_HEIGHT: i64 = 3;
 pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const BORDERS: i64 = 2;
+pub(crate) const BORDER: i64 = 4;
+
+pub type Sides = (bool, bool, bool, bool);
+pub const ALL_SIDES: Sides = (true, true, true, true);
 #[allow(dead_code)]
 pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
@@ -73,6 +77,8 @@ pub(crate) fn place<'a>(tree: &'a Tree<Node>, offsets: &[i64]) -> Vec<Placement<
                 colour: node.colour(),
                 fill: node.filled().then_some(node.colour()).flatten(),
                 rounded: node.rounded(),
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x,
             y,
@@ -182,6 +188,8 @@ pub(crate) enum PlacementNode<'a> {
         colour: Option<u8>,
         fill: Option<u8>,
         rounded: bool,
+        sides: Sides,
+        border: i64,
     },
     Label(Label<'a>),
     Arrow(Arrow),
@@ -200,13 +208,25 @@ pub(crate) struct Placement<'a> {
 pub(crate) const FOOTER_ROWS: i64 = 1;
 
 pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
-    vec![Placement {
-        node: PlacementNode::Label(Label { text, path: vec![] }),
-        x: 0,
-        y: 0,
-        width: text.chars().count() as i64,
-        height: 1,
-    }]
+    let width = text.chars().count() as i64;
+    let corner_box = PlacementNode::Box {
+        colour: None,
+        fill: None,
+        rounded: false,
+        sides: (true, false, false, true),
+        border: 1,
+    };
+    let label = PlacementNode::Label(Label { text, path: vec![] });
+    [corner_box, label]
+        .into_iter()
+        .map(|node| Placement {
+            node,
+            x: 0,
+            y: 0,
+            width,
+            height: 1,
+        })
+        .collect()
 }
 
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>) -> Vec<Placement<'a>> {
@@ -267,18 +287,31 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_is_one_label_as_wide_as_the_text_and_one_row_high_with_no_path() {
+    fn footer_is_a_corner_box_then_a_label_both_as_wide_as_the_text_and_one_row_high() {
         let text = "plans \u{2022} dre";
+        let width = text.chars().count() as i64;
+        let placements = footer(text);
+        assert_eq!(placements.len(), 2);
         assert_eq!(
-            footer(text),
-            vec![Placement {
-                node: PlacementNode::Label(Label { text, path: vec![] }),
-                x: 0,
-                y: 0,
-                width: text.chars().count() as i64,
-                height: 1,
-            }]
+            placements[0].node,
+            PlacementNode::Box {
+                colour: None,
+                fill: None,
+                rounded: false,
+                sides: (true, false, false, true),
+                border: 1,
+            }
         );
+        assert_eq!(
+            placements[1].node,
+            PlacementNode::Label(Label { text, path: vec![] })
+        );
+        for placement in &placements {
+            assert_eq!(
+                (placement.x, placement.y, placement.width, placement.height),
+                (0, 0, width, 1)
+            );
+        }
     }
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
@@ -528,10 +561,14 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                sides,
+                border,
             } => PlacementNode::Box {
                 colour,
                 fill,
                 rounded,
+                sides,
+                border,
             },
             _ => panic!("the first placement is the box"),
         }
@@ -545,8 +582,25 @@ mod tests {
                 colour: Some(3),
                 fill: None,
                 rounded: true,
+                sides: ALL_SIDES,
+                border: BORDER,
             }
         );
+    }
+
+    #[test]
+    fn diagram_boxes_have_all_sides_and_the_border_width() {
+        let nodes = Tree::root(vec![Tree::leaf(labelled("hi"))]);
+        let placements = diagram(&nodes);
+        let boxes: Vec<_> = placements
+            .iter()
+            .filter_map(|placement| match placement.node {
+                PlacementNode::Box { sides, border, .. } => Some((sides, border)),
+                _ => None,
+            })
+            .collect();
+        assert!(!boxes.is_empty());
+        assert!(boxes.iter().all(|&found| found == (ALL_SIDES, BORDER)));
     }
 
     #[test]
@@ -686,6 +740,8 @@ mod tests {
                 colour: Some(1),
                 fill: Some(1),
                 rounded: true,
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x: 0,
             y: 0,
@@ -697,6 +753,7 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                ..
             } => assert_eq!((colour, fill, rounded), (Some(1), Some(1), true)),
             _ => panic!("expected a Box variant"),
         }

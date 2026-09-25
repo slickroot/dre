@@ -96,7 +96,6 @@ const CELL_WIDTH: i64 = 8;
 const CELL_HEIGHT: i64 = 16;
 
 const ROUNDED_RADIUS: i64 = 20;
-const BORDER: i64 = 4;
 
 const OPAQUE: u8 = 255;
 const FILL_ALPHA: u16 = 77;
@@ -110,7 +109,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Label, PlacementNode};
+    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER};
     use crate::state::{new_state, Mode};
 
     const AREA: Area = Area {
@@ -132,6 +131,8 @@ mod tests {
             colour: None,
             fill: None,
             rounded: false,
+            sides: ALL_SIDES,
+            border: BORDER,
         }
     }
 
@@ -318,10 +319,15 @@ mod tests {
         let screen = editor(state, WINDOW);
         let foot = foot_of(WINDOW);
         let width = text.chars().count() as i64;
+        let x = foot.col + foot.cols - width;
+        let footer = &screen[1].1;
+        assert_eq!(footer.len(), 2);
+        assert_eq!(footer[0].node, layout::footer(text)[0].node);
         assert_eq!(
-            screen[1].1,
-            vec![label_at(text, foot.col + foot.cols - width, foot.row)]
+            (footer[0].x, footer[0].y, footer[0].width, footer[0].height),
+            (x, foot.row, width, 1)
         );
+        assert_eq!(footer[1], label_at(text, x, foot.row));
     }
 
     #[test]

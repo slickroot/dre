@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, body, colour, editor, Renderer, ARROW_OPACITY, BORDER,
-    CELL_HEIGHT, CELL_WIDTH,
+    arrowhead_depth, arrowhead_slope, body, colour, editor, Renderer, ARROW_OPACITY, CELL_HEIGHT,
+    CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{diagram, Placement, PlacementNode};
+use crate::layout::{diagram, Placement, PlacementNode, ALL_SIDES, BORDER};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -118,8 +118,13 @@ fn paint(placements: &[Placement]) -> String {
             colour,
             fill,
             rounded,
+            sides,
+            ..
         } = &placement.node
         {
+            if *sides != ALL_SIDES {
+                continue;
+            }
             svg.push_str(&rect(placement, *colour, *fill, *rounded));
         }
     }
@@ -230,7 +235,8 @@ fn rect(
     fill: Option<u8>,
     rounded: bool,
 ) -> String {
-    use super::{BORDER, OPAQUE, ROUNDED_RADIUS};
+    use super::{OPAQUE, ROUNDED_RADIUS};
+    use crate::layout::BORDER;
     use std::fmt::Write as _;
 
     let (r, g, b) = colour(edge);
@@ -280,7 +286,6 @@ mod tests {
     use super::super::arrowhead_slope;
     use super::super::centre;
     use super::super::colour;
-    use super::super::BORDER;
     use super::super::CELL_HEIGHT;
     use super::super::CELL_WIDTH;
     use super::super::FILL_ALPHA;
@@ -309,6 +314,8 @@ mod tests {
                 colour,
                 fill,
                 rounded,
+                sides: ALL_SIDES,
+                border: BORDER,
             },
             x,
             y,
@@ -387,6 +394,20 @@ mod tests {
 
     fn fill_opacity() -> String {
         format!("{}", FILL_ALPHA as f64 / OPAQUE as f64)
+    }
+
+    #[test]
+    fn a_box_with_partial_sides_adds_no_rect() {
+        let mut partial = plain_box(0, 0, 4, 3);
+        if let PlacementNode::Box { sides, .. } = &mut partial.node {
+            *sides = (true, false, false, true);
+        }
+        let with_partial = draw(&[partial]);
+        let without_boxes = draw(&[]);
+        assert_eq!(
+            with_partial.matches("<rect").count(),
+            without_boxes.matches("<rect").count()
+        );
     }
 
     #[test]
