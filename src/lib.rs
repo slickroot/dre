@@ -61,21 +61,6 @@ impl Session {
     pub fn state(&self) -> &State {
         &self.state
     }
-
-    pub fn extent(&self) -> (i64, i64) {
-        let placements = layout::diagram(self.state.doc.tree());
-        let width = placements
-            .iter()
-            .map(|placement| placement.x + placement.width)
-            .max()
-            .unwrap_or(0);
-        let height = placements
-            .iter()
-            .map(|placement| placement.y + placement.height)
-            .max()
-            .unwrap_or(0);
-        (width, height)
-    }
 }
 
 impl Default for Session {
