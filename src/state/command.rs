@@ -7,7 +7,7 @@ use crate::state::{add_child_box, Mode, State, DEFAULT_FILENAME};
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
         Action::Undo | Action::NewBox | Action::Paste | Action::Quit => 0,
-        Action::SelectParent | Action::CycleSiblingsColour | Action::ToggleSiblingsFill => 2,
+        Action::SelectParent => 2,
         _ => 1,
     }
 }
@@ -791,19 +791,27 @@ mod tests {
     }
 
     #[test]
-    fn capital_c_on_a_top_level_box_does_nothing() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![0]));
-        let result = handle_key(state.clone(), "C");
-        assert_eq!(*result.doc.tree(), *state.doc.tree());
-        assert_eq!(result.selected, state.selected);
+    fn capital_c_works_on_a_row_of_top_level_boxes() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes, Mode::Command, Some(vec![0]));
+        let result = handle_key(state, "C");
+        let expected = next_on_palette(None);
+        assert_eq!(result.doc.tree().value(&[0]).colour(), expected);
+        assert_eq!(result.doc.tree().value(&[1]).colour(), expected);
+        assert_eq!(result.selected, Some(vec![0]));
     }
 
     #[test]
-    fn capital_f_on_a_top_level_box_does_nothing() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![0]));
-        let result = handle_key(state.clone(), "F");
-        assert_eq!(*result.doc.tree(), *state.doc.tree());
-        assert_eq!(result.selected, state.selected);
+    fn capital_f_works_on_a_row_of_top_level_boxes() {
+        let boxes = vec![
+            Tree::leaf(labelled("a").with_colour(next_on_palette(None))),
+            node("b"),
+        ];
+        let state = new_state(boxes, Mode::Command, Some(vec![0]));
+        let result = handle_key(state, "F");
+        assert!(result.doc.tree().value(&[0]).filled());
+        assert!(result.doc.tree().value(&[1]).filled());
+        assert_eq!(result.selected, Some(vec![0]));
     }
 
     #[test]
