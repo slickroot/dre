@@ -1,3 +1,4 @@
+pub(crate) mod effects;
 pub(crate) mod key_source;
 pub(crate) mod reducer;
 pub(crate) mod screen;
