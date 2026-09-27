@@ -1173,7 +1173,7 @@ mod tests {
 
     #[test]
     fn the_export_without_a_canvas_omits_the_cursor() {
-        let selected = example_state().selected;
+        let selected = example_state().selected().map(<[usize]>::to_vec);
         assert!(selected.is_some());
         let svg = render_to_string(SvgRenderer::default(), &example_state());
 
@@ -1327,7 +1327,10 @@ mod tests {
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
         let diagram = centre(
-            with_cursor(diagram(state.doc.tree()), state.selected.clone()),
+            with_cursor(
+                diagram(state.doc().tree()),
+                state.selected().map(<[usize]>::to_vec),
+            ),
             body,
         );
         let body_svg = nested(body, &paint(&diagram));

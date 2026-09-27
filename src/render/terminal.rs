@@ -1877,7 +1877,7 @@ mod tests {
     }
 
     fn leaf_box(state: &State) -> Placement<'_> {
-        crate::layout::diagram(state.doc.tree())
+        crate::layout::diagram(state.doc().tree())
             .into_iter()
             .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .unwrap()

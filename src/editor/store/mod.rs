@@ -45,7 +45,7 @@ impl StateStore for FileStateStore {
         match state.save_to() {
             Some(path) => self.files.write(
                 path,
-                &dre_format::write(&diagram::from_document(&state.doc)),
+                &dre_format::write(&diagram::from_document(state.doc())),
             ),
             None => Ok(()),
         }
@@ -81,8 +81,8 @@ mod tests {
         let mut files = MockFiles::new();
         files.expect_read().never();
         let state = store_over(files).load(None).unwrap();
-        assert_eq!(state.doc, diagram::Document::default());
-        assert_eq!(state.selected, None);
+        assert_eq!(state.doc(), &diagram::Document::default());
+        assert_eq!(state.selected(), None);
         assert_eq!(state.save_to(), None);
     }
 
@@ -98,9 +98,9 @@ mod tests {
             }],
         });
         let state = load_file(&text).unwrap();
-        assert_eq!(state.doc.tree().walk().count(), 1);
-        assert_eq!(state.doc.tree().value(&[0]).label(), "API");
-        assert_eq!(state.selected, Some(vec![0]));
+        assert_eq!(state.doc().tree().walk().count(), 1);
+        assert_eq!(state.doc().tree().value(&[0]).label(), "API");
+        assert_eq!(state.selected(), Some(&[0][..]));
     }
 
     #[test]
@@ -111,8 +111,8 @@ mod tests {
     #[test]
     fn a_file_with_no_boxes_loads_an_empty_canvas_with_nothing_selected() {
         let state = load_file("<dre/>").unwrap();
-        assert_eq!(state.doc, diagram::Document::default());
-        assert_eq!(state.selected, None);
+        assert_eq!(state.doc(), &diagram::Document::default());
+        assert_eq!(state.selected(), None);
     }
 
     #[test]
@@ -141,17 +141,17 @@ mod tests {
 
     #[test]
     fn a_valid_file_is_not_a_new_file() {
-        assert!(!load_file("<dre/>").unwrap().new_file);
+        assert!(!load_file("<dre/>").unwrap().is_new_file());
     }
 
     #[test]
     fn a_missing_file_loads_an_empty_canvas_saved_to_that_path() {
         let files = files_reading("missing.dre", Err(io::Error::from(io::ErrorKind::NotFound)));
         let state = store_over(files).load(Some("missing.dre")).unwrap();
-        assert_eq!(state.doc, diagram::Document::default());
-        assert_eq!(state.selected, None);
+        assert_eq!(state.doc(), &diagram::Document::default());
+        assert_eq!(state.selected(), None);
         assert_eq!(state.save_to(), Some("missing.dre"));
-        assert!(state.new_file);
+        assert!(state.is_new_file());
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn saving_writes_the_document_to_where_the_state_saves_to() {
         let state = state_with_one_box_saving_to(Some("out.dre"));
-        let expected = dre_format::write(&diagram::from_document(&state.doc));
+        let expected = dre_format::write(&diagram::from_document(state.doc()));
         let mut files = MockFiles::new();
         files
             .expect_write()
