@@ -105,6 +105,7 @@ rounded corners, and arrows, but no cursor or selection.
 | `f` | Toggle the box's fill |
 | `F` | Toggle the fill of every sibling |
 | `r` | Toggle rounded corners |
+| `R` | Toggle rounded corners of every sibling |
 | `q` | Save and quit (or choose where to save) |
 | `n` | Name the diagram |
 

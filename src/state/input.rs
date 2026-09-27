@@ -34,6 +34,7 @@ fn command_parse(key: &str) -> Option<Action> {
         "F" => Action::ToggleSiblingsFill,
         "f" => Action::ToggleFill,
         "r" => Action::ToggleRounded,
+        "R" => Action::ToggleSiblingsRounded,
         "q" => Action::Quit,
         "n" => Action::OpenNamePrompt,
         _ => Action::CancelCount,
@@ -154,6 +155,11 @@ pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Action>] = &[
         keys: &["r"],
         command: Action::ToggleRounded,
         description: "Toggle rounded corners",
+    },
+    KeyBinding {
+        keys: &["R"],
+        command: Action::ToggleSiblingsRounded,
+        description: "Toggle rounded corners of every sibling",
     },
     KeyBinding {
         keys: &["q"],
@@ -321,6 +327,7 @@ mod tests {
         assert_eq!(command_parse("F"), Some(Action::ToggleSiblingsFill));
         assert_eq!(command_parse("f"), Some(Action::ToggleFill));
         assert_eq!(command_parse("r"), Some(Action::ToggleRounded));
+        assert_eq!(command_parse("R"), Some(Action::ToggleSiblingsRounded));
         assert_eq!(command_parse("q"), Some(Action::Quit));
     }
 

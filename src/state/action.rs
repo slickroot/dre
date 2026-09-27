@@ -16,6 +16,7 @@ pub(crate) enum Action {
     CycleColour,
     CycleSiblingsColour,
     ToggleSiblingsFill,
+    ToggleSiblingsRounded,
     ToggleFill,
     ToggleRounded,
     Quit,
@@ -71,6 +72,7 @@ impl Action {
             | Action::CycleColour
             | Action::CycleSiblingsColour
             | Action::ToggleSiblingsFill
+            | Action::ToggleSiblingsRounded
             | Action::ToggleFill
             | Action::ToggleRounded
             | Action::Quit
