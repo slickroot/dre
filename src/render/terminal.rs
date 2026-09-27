@@ -120,6 +120,7 @@ struct Placed {
     canvas: Canvas,
     col: i64,
     row: i64,
+    z: i32,
 }
 
 struct Frame {
@@ -167,7 +168,7 @@ impl Frame {
         self.crop(placement, area).is_some()
     }
 
-    fn place(&mut self, canvas: &Canvas, placement: &Placement, area: Area) {
+    fn place(&mut self, canvas: &Canvas, placement: &Placement, area: Area, z: i32) {
         let Some(crop) = self.crop(placement, area) else {
             return;
         };
@@ -175,6 +176,7 @@ impl Frame {
             canvas: canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y),
             col: crop.col,
             row: crop.row,
+            z,
         });
     }
 
@@ -189,7 +191,7 @@ impl Frame {
         bytes.extend_from_slice(kitty::clear().to_string().as_bytes());
         for image in &self.images {
             bytes.extend_from_slice(
-                kitty::show(&image.canvas, image.col, image.row)
+                kitty::show(&image.canvas, image.col, image.row, image.z)
                     .to_string()
                     .as_bytes(),
             );
@@ -269,7 +271,7 @@ impl TerminalRenderer {
             let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area);
+        frame.place(&self.cache[&key], placement, area, -2);
     }
 
     fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -281,7 +283,7 @@ impl TerminalRenderer {
             let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area);
+        frame.place(&self.cache[&key], placement, area, -1);
     }
 
     fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
@@ -297,7 +299,7 @@ impl TerminalRenderer {
                 continue;
             }
             let glyph = self.glyph_source.glyph(character);
-            frame.place(glyph, &char_placement, area);
+            frame.place(glyph, &char_placement, area, -1);
         }
     }
 
@@ -312,7 +314,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        frame.place(&canvas, placement, area);
+        frame.place(&canvas, placement, area, -1);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -1057,7 +1059,7 @@ mod tests {
                 frame
                     .images
                     .iter()
-                    .map(|image| kitty::show(&image.canvas, image.col, image.row)),
+                    .map(|image| kitty::show(&image.canvas, image.col, image.row, image.z)),
             )
             .map(|command| command.to_string())
             .collect();
