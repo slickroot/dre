@@ -97,6 +97,7 @@ pub(super) struct ArrowShape {
     pub(super) shaft_row: i64,
     pub(super) trunk: (i64, i64),
     pub(super) stroke: i64,
+    pub(super) arrowhead_edge_length: f64,
     pub(super) ink: Rgba,
 }
 
@@ -121,8 +122,8 @@ impl ArrowShape {
     }
 
     fn in_arrowhead(&self, x: i64, y: i64, stop_row: i64) -> bool {
-        let depth = arrowhead_depth();
-        let slope = arrowhead_slope();
+        let depth = arrowhead_depth(self.arrowhead_edge_length);
+        let slope = arrowhead_slope(self.arrowhead_edge_length);
         let right_edge = self.width - 1;
         (0..=(depth as i64))
             .take_while(|&distance| (distance as f64) < depth)

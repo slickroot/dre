@@ -97,11 +97,10 @@ fn align_right(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>>
 }
 
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
-const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
-fn arrowhead_depth() -> f64 {
-    ARROWHEAD_EDGE_LENGTH * ARROWHEAD_ANGLE_DEG.to_radians().cos()
+fn arrowhead_depth(edge_length: f64) -> f64 {
+    edge_length * ARROWHEAD_ANGLE_DEG.to_radians().cos()
 }
-fn arrowhead_slope() -> f64 {
+fn arrowhead_slope(_edge_length: f64) -> f64 {
     ARROWHEAD_ANGLE_DEG.to_radians().tan()
 }
 
