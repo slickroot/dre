@@ -12,8 +12,8 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
-const GLOW_STROKE_WIDTH: i64 = 8;
-const GLOW_BLUR_STD_DEVIATION: f64 = 8.0;
+const GLOW_STROKE_WIDTH: i64 = 16;
+const GLOW_BLUR_STD_DEVIATION: f64 = 16.0;
 const GLOW_FILTER_ID: &str = "glow";
 
 fn label_font_size() -> f64 {

@@ -24,7 +24,7 @@ const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
-const GLOW_THICKNESS_PX: i64 = 8;
+const GLOW_THICKNESS_PX: i64 = 16;
 const GLOW_PEAK_OPACITY: f64 = 0.5;
 
 fn glow_padding_cells(cell_size: i64) -> i64 {
@@ -956,12 +956,12 @@ mod tests {
     fn the_glow_is_centred_on_the_box_and_extends_beyond_it() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(1));
-        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let images = sprites(&mut r, &[box_placement(&node, 8, 8, 4, 4)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         let padding_cells_x = glow_padding_cells(r.window.cell_width);
         let padding_cells_y = glow_padding_cells(r.window.cell_height);
-        assert_eq!(glow.col, 4 - padding_cells_x);
-        assert_eq!(glow.row, 4 - padding_cells_y);
+        assert_eq!(glow.col, 8 - padding_cells_x);
+        assert_eq!(glow.row, 8 - padding_cells_y);
         assert_eq!(
             glow.canvas.width,
             (4 + 2 * padding_cells_x) * r.window.cell_width
