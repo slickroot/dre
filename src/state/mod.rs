@@ -31,18 +31,18 @@ struct KeyBinding<C> {
 
 #[derive(Clone)]
 pub struct State {
-    pub(crate) doc: Document,
-    pub(crate) selected: Option<Vec<usize>>,
-    pub(crate) last_selected: Option<Vec<usize>>,
+    doc: Document,
+    selected: Option<Vec<usize>>,
+    last_selected: Option<Vec<usize>>,
     history: Vec<Document>,
-    pub(crate) clipboard: Option<Tree<Node>>,
-    pub(crate) mode: Mode,
-    pub(crate) running: bool,
+    clipboard: Option<Tree<Node>>,
+    mode: Mode,
+    running: bool,
     save_to: Option<String>,
     footer: String,
-    pub(crate) new_file: bool,
-    pub(crate) pending_count: Option<usize>,
-    pub(crate) dirty: bool,
+    new_file: bool,
+    pending_count: Option<usize>,
+    dirty: bool,
 }
 
 impl State {
@@ -65,6 +65,32 @@ impl State {
         };
         state.set_save_to(Some(path));
         state
+    }
+
+    pub(crate) fn doc(&self) -> &Document {
+        &self.doc
+    }
+
+    pub(crate) fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub(crate) fn selected(&self) -> Option<&[usize]> {
+        self.selected.as_deref()
+    }
+
+    pub(crate) fn is_running(&self) -> bool {
+        self.running
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_count(&self) -> Option<usize> {
+        self.pending_count
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_new_file(&self) -> bool {
+        self.new_file
     }
 
     pub(crate) fn save_to(&self) -> Option<&str> {
@@ -166,6 +192,19 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         new_file: false,
         pending_count: None,
         dirty: false,
+    }
+}
+
+#[cfg(test)]
+impl State {
+    pub(crate) fn with_pending_count(mut self, count: usize) -> State {
+        self.pending_count = Some(count);
+        self
+    }
+
+    pub(crate) fn with_running(mut self, running: bool) -> State {
+        self.running = running;
+        self
     }
 }
 

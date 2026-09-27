@@ -38,7 +38,7 @@ impl DreController {
 impl Controller for DreController {
     fn run(&mut self, state: State) -> io::Result<State> {
         let mut state = state;
-        while state.running {
+        while state.is_running() {
             self.screen.render(&state)?;
             match self.keys.next_key()? {
                 Some(key) if key == tty::RESIZE => self.screen.resize()?,
@@ -82,9 +82,8 @@ mod tests {
         screen
     }
 
-    fn stopped(mut state: State) -> State {
-        state.running = false;
-        state
+    fn stopped(state: State) -> State {
+        state.with_running(false)
     }
 
     fn reducer_stopping_on(key: &'static str) -> MockReducer {
@@ -98,9 +97,7 @@ mod tests {
     }
 
     fn marked(count: usize) -> State {
-        let mut state = State::default();
-        state.pending_count = Some(count);
-        state
+        State::default().with_pending_count(count)
     }
 
     #[test]
@@ -154,13 +151,13 @@ mod tests {
         let mut screen = MockScreen::new();
         screen
             .expect_render()
-            .withf(|state| state.pending_count == Some(1))
+            .withf(|state| state.pending_count() == Some(1))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
         screen
             .expect_render()
-            .withf(|state| state.pending_count == Some(2))
+            .withf(|state| state.pending_count() == Some(2))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -195,8 +192,8 @@ mod tests {
             .run(State::default())
             .unwrap();
 
-        assert!(!state.running);
-        assert_eq!(state.pending_count, Some(9));
+        assert!(!state.is_running());
+        assert_eq!(state.pending_count(), Some(9));
     }
 
     #[test]
@@ -279,6 +276,6 @@ mod tests {
             .run(stopped(marked(7)))
             .unwrap();
 
-        assert_eq!(state.pending_count, Some(7));
+        assert_eq!(state.pending_count(), Some(7));
     }
 }

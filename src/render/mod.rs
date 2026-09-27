@@ -25,7 +25,7 @@ pub trait Renderer {
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
     let mut footer = align_right(layout::footer(state.footer()), foot);
-    if let Mode::NamePrompt { name } = &state.mode {
+    if let Mode::NamePrompt { name } = state.mode() {
         footer.push(Placement {
             node: PlacementNode::Cursor(Cursor),
             x: footer[0].x + name.chars().count() as i64,
@@ -39,7 +39,10 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
 
 pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
     centre(
-        with_cursor(layout::diagram(state.doc.tree()), state.selected.clone()),
+        with_cursor(
+            layout::diagram(state.doc().tree()),
+            state.selected().map(<[usize]>::to_vec),
+        ),
         area,
     )
 }
@@ -278,7 +281,10 @@ mod tests {
         let state = state(None);
         let screen = editor(&state, WINDOW);
         let body = body_of(WINDOW);
-        assert_eq!(screen[0].1, centre(layout::diagram(state.doc.tree()), body));
+        assert_eq!(
+            screen[0].1,
+            centre(layout::diagram(state.doc().tree()), body)
+        );
     }
 
     #[test]
@@ -295,7 +301,7 @@ mod tests {
         assert_eq!(
             screen[0].1,
             centre(
-                with_cursor(layout::diagram(state.doc.tree()), selected),
+                with_cursor(layout::diagram(state.doc().tree()), selected),
                 body_of(WINDOW)
             )
         );

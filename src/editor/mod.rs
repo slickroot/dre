@@ -33,9 +33,7 @@ mod tests {
     use mockall::Sequence;
 
     fn marked(count: usize) -> State {
-        let mut state = State::default();
-        state.pending_count = Some(count);
-        state
+        State::default().with_pending_count(count)
     }
 
     #[test]
@@ -51,13 +49,13 @@ mod tests {
         let mut controller = MockController::new();
         controller
             .expect_run()
-            .withf(|state| state.pending_count == Some(1))
+            .withf(|state| state.pending_count() == Some(1))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(marked(2)));
         store
             .expect_save()
-            .withf(|state| state.pending_count == Some(2))
+            .withf(|state| state.pending_count() == Some(2))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
