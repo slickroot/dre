@@ -144,6 +144,7 @@ mod tests {
         PlacementNode::Box {
             colour: None,
             fill: None,
+            opacity: None,
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,

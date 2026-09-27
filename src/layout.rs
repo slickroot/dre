@@ -1,4 +1,5 @@
 use crate::diagram::{children, Node};
+use crate::palette::FOREGROUND;
 use types::Tree;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
@@ -9,8 +10,12 @@ pub(crate) const SIDE_PADDING: i64 = 2;
 pub(crate) const BORDER: i64 = 4;
 const BORDER_COLUMNS: i64 = 2;
 
+pub(crate) const BOX_FILL_OPACITY: f64 = 0.3;
+pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
+
 pub type Sides = (bool, bool, bool, bool);
 pub const ALL_SIDES: Sides = (true, true, true, true);
+pub const NO_SIDES: Sides = (false, false, false, false);
 #[allow(dead_code)]
 pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
@@ -82,10 +87,12 @@ pub(crate) fn place<'a>(
         edit_room: i64,
     ) -> Vec<Placement<'a>> {
         let y = row as i64 * HALF_PITCH;
+        let fill = node.filled().then_some(node.colour()).flatten();
         let mut placements = vec![Placement {
             node: PlacementNode::Box {
                 colour: node.colour(),
-                fill: node.filled().then_some(node.colour()).flatten(),
+                fill,
+                opacity: fill.is_some().then_some(BOX_FILL_OPACITY),
                 rounded: node.rounded(),
                 sides: ALL_SIDES,
                 border: BORDER,
@@ -206,6 +213,7 @@ pub(crate) enum PlacementNode<'a> {
     Box {
         colour: Option<u8>,
         fill: Option<u8>,
+        opacity: Option<f64>,
         rounded: bool,
         sides: Sides,
         border: i64,
@@ -231,9 +239,10 @@ pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
     let box_width = interior(text) + SIDE_PADDING * 2;
     let corner_box = PlacementNode::Box {
         colour: None,
-        fill: None,
+        fill: Some(FOREGROUND),
+        opacity: Some(FOOTER_FILL_OPACITY),
         rounded: false,
-        sides: ALL_SIDES,
+        sides: NO_SIDES,
         border: 1,
     };
     let label = PlacementNode::Label(Label { text, path: vec![] });
@@ -314,7 +323,7 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_is_a_fully_bordered_box_with_the_label_padded_inside_it() {
+    fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
         let text = "plans \u{2022} dre";
         let text_width = text.chars().count() as i64;
         let placements = footer(text);
@@ -323,9 +332,10 @@ mod tests {
             placements[0].node,
             PlacementNode::Box {
                 colour: None,
-                fill: None,
+                fill: Some(FOREGROUND),
+                opacity: Some(FOOTER_FILL_OPACITY),
                 rounded: false,
-                sides: ALL_SIDES,
+                sides: NO_SIDES,
                 border: 1,
             }
         );
@@ -610,17 +620,26 @@ mod tests {
             PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 sides,
                 border,
             } => PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 sides,
                 border,
             },
             _ => panic!("the first placement is the box"),
+        }
+    }
+
+    fn opacity_of(node: &PlacementNode) -> Option<f64> {
+        match node {
+            PlacementNode::Box { opacity, .. } => *opacity,
+            _ => panic!("expected a Box"),
         }
     }
 
@@ -631,11 +650,25 @@ mod tests {
             PlacementNode::Box {
                 colour: Some(3),
                 fill: None,
+                opacity: None,
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,
             }
         );
+    }
+
+    #[test]
+    fn a_filled_coloured_box_has_the_box_fill_opacity() {
+        assert_eq!(
+            opacity_of(&laid_out_box(Some(2), true, false)),
+            Some(BOX_FILL_OPACITY)
+        );
+    }
+
+    #[test]
+    fn an_unfilled_box_has_no_opacity() {
+        assert_eq!(opacity_of(&laid_out_box(Some(2), false, false)), None);
     }
 
     #[test]
@@ -854,6 +887,7 @@ mod tests {
             node: PlacementNode::Box {
                 colour: Some(1),
                 fill: Some(1),
+                opacity: Some(BOX_FILL_OPACITY),
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,

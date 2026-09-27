@@ -94,6 +94,7 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
         PlacementNode::Box {
             colour,
             fill,
+            opacity: _,
             rounded,
             sides,
             border,
@@ -337,6 +338,7 @@ impl TerminalRenderer {
             PlacementNode::Box {
                 colour,
                 fill,
+                opacity: _,
                 rounded,
                 sides,
                 border,
@@ -648,6 +650,7 @@ mod tests {
         PlacementNode::Box {
             colour,
             fill,
+            opacity: None,
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
@@ -659,12 +662,14 @@ mod tests {
             PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 border,
                 ..
             } => PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 sides: new_sides,
                 border,
@@ -678,12 +683,14 @@ mod tests {
             PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 sides,
                 ..
             } => PlacementNode::Box {
                 colour,
                 fill,
+                opacity,
                 rounded,
                 sides,
                 border: new_border,
@@ -1215,7 +1222,7 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_box_is_a_one_pixel_line_along_all_four_sides_in_the_foreground() {
+    fn the_footer_box_is_filled_with_the_foreground_colour_and_has_no_border() {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = r.frame(&empty_state());
@@ -1223,39 +1230,9 @@ mod tests {
             .images
             .first()
             .expect("the footer box is drawn as an image");
-        let (width, height) = (image.canvas.width as usize, image.canvas.height as usize);
-        let (cr, cg, cb) = colour(None);
-        let at = |x: usize, y: usize| {
-            let i = (y * width + x) * 4;
-            &image.canvas.pixels[i..i + 4]
-        };
-        for x in 0..width {
-            assert_eq!(at(x, 0), [cr, cg, cb, OPAQUE]);
-        }
-        for x in 1..width - 1 {
-            assert_eq!(at(x, 1)[3], 0, "top line is 1px thick at column {x}");
-        }
-        for y in 0..height {
-            assert_eq!(at(0, y), [cr, cg, cb, OPAQUE]);
-        }
-        for y in 1..height - 1 {
-            assert_eq!(at(1, y)[3], 0, "left line is 1px thick at row {y}");
-        }
-        for x in 0..width {
-            assert_eq!(at(x, height - 1), [cr, cg, cb, OPAQUE]);
-        }
-        for x in 1..width - 1 {
-            assert_eq!(
-                at(x, height - 2)[3],
-                0,
-                "bottom line is 1px thick at column {x}"
-            );
-        }
-        for y in 0..height {
-            assert_eq!(at(width - 1, y), [cr, cg, cb, OPAQUE]);
-        }
-        for y in 1..height - 1 {
-            assert_eq!(at(width - 2, y)[3], 0, "right line is 1px thick at row {y}");
+        let (er, eg, eb, ea) = fill_colour(Some(crate::palette::FOREGROUND));
+        for pixel in image.canvas.pixels.chunks(4) {
+            assert_eq!(pixel, [er, eg, eb, ea]);
         }
     }
 

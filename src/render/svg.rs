@@ -325,6 +325,7 @@ mod tests {
             node: PlacementNode::Box {
                 colour,
                 fill,
+                opacity: None,
                 rounded,
                 sides: ALL_SIDES,
                 border: BORDER,
@@ -1310,11 +1311,6 @@ mod tests {
         }
     }
 
-    fn padded_footer_box(foot: Area) -> String {
-        let area = footer_box_area(foot);
-        rect_at(area.col, area.row, area.cols, area.rows, None, None, false)
-    }
-
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
         label_at(
@@ -1324,8 +1320,10 @@ mod tests {
         )
     }
 
+    // The footer box's sides are all disabled, so `paint` (which only draws a
+    // box rect when every side is on) does not render it: only the label appears.
     fn padded_footer(foot: Area) -> String {
-        format!("{}{}", padded_footer_box(foot), padded_footer_label(foot))
+        padded_footer_label(foot)
     }
 
     #[test]
