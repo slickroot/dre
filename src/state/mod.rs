@@ -169,7 +169,7 @@ pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
         None => state,
     };
     let effects = if state.save_to.is_some()
-        && !matches!(state.mode, Mode::Insert)
+        && !matches!(state.mode, Mode::Insert { .. })
         && state.history.len() != state.saved_len
     {
         state.saved_len = state.history.len();
@@ -623,7 +623,7 @@ mod tests {
             assert_eq!(effects, vec![]);
             let (state, effects) = crate::state::reduce(state, Some("\r"));
             assert_eq!(effects, vec![]);
-            assert_eq!(*state.mode(), Mode::Insert);
+            assert!(matches!(state.mode(), Mode::Insert { .. }));
             let (state, effects) = crate::state::reduce(state, Some("c"));
             assert_eq!(effects, vec![]);
             let (_, effects) = crate::state::reduce(state, Some("\x1b"));
