@@ -2,7 +2,7 @@ use crate::diagram::{children, parent_of, Scope};
 use crate::palette::next_on_palette;
 use crate::state::action::Action;
 use crate::state::history::undo;
-use crate::state::{add_child_box, Mode, State, DEFAULT_FILENAME};
+use crate::state::{add_child_box, Mode, State};
 
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
@@ -23,8 +23,8 @@ fn hide_idle_cursor(mut state: State) -> State {
 fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
         name: String::new(),
+        quits: false,
     };
-    state.refresh_footer();
     state
 }
 
@@ -191,8 +191,9 @@ fn quit(mut state: State) -> State {
     } else if state.save_to().is_some() {
         state.running = false;
     } else {
-        state.mode = Mode::SavePrompt {
-            filename: DEFAULT_FILENAME.to_string(),
+        state.mode = Mode::NamePrompt {
+            name: String::new(),
+            quits: true,
         };
     }
     state
@@ -347,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn q_opens_the_save_prompt_and_preserves_boxes_and_selection() {
+    fn q_opens_the_name_prompt_and_preserves_boxes_and_selection() {
         let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         let result = handle_key(state, "q");
         assert!(result.running);
@@ -355,8 +356,9 @@ mod tests {
         assert_eq!(result.selected, Some(vec![0]));
         assert_eq!(
             result.mode,
-            Mode::SavePrompt {
-                filename: DEFAULT_FILENAME.to_string()
+            Mode::NamePrompt {
+                name: String::new(),
+                quits: true
             }
         );
     }

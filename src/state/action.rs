@@ -27,10 +27,6 @@ pub(crate) enum Action {
     Commit,
     CommitAndAddChild,
     InsertKey(TextKey),
-    Confirm,
-    Cancel,
-    SavePromptBackspace,
-    SavePromptAppend(char),
     OpenNamePrompt,
     NameAppend(char),
     NameBackspace,
@@ -42,7 +38,6 @@ pub(crate) enum Action {
 pub(crate) enum ActionMode {
     Command,
     Insert,
-    SavePrompt,
     NamePrompt,
 }
 
@@ -50,10 +45,6 @@ impl Action {
     pub(crate) fn mode(&self) -> ActionMode {
         match self {
             Action::Commit | Action::CommitAndAddChild | Action::InsertKey(_) => ActionMode::Insert,
-            Action::Confirm
-            | Action::Cancel
-            | Action::SavePromptBackspace
-            | Action::SavePromptAppend(_) => ActionMode::SavePrompt,
             Action::NameAppend(_)
             | Action::NameBackspace
             | Action::NameConfirm
@@ -95,7 +86,6 @@ mod tests {
             Action::InsertKey(TextKey::Char('a')).mode(),
             ActionMode::Insert
         );
-        assert_eq!(Action::Confirm.mode(), ActionMode::SavePrompt);
         assert_eq!(Action::NameConfirm.mode(), ActionMode::NamePrompt);
         assert_eq!(Action::OpenNamePrompt.mode(), ActionMode::Command);
         assert_eq!(Action::Idle.mode(), ActionMode::Command);

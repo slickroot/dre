@@ -94,18 +94,6 @@ mod tests {
     }
 
     #[test]
-    fn save_prompt_actions_are_not_undoable() {
-        for action in [
-            Action::Confirm,
-            Action::Cancel,
-            Action::SavePromptBackspace,
-            Action::SavePromptAppend('a'),
-        ] {
-            assert!(!is_undoable(&action));
-        }
-    }
-
-    #[test]
     fn name_actions_are_not_undoable() {
         for action in [
             Action::OpenNamePrompt,

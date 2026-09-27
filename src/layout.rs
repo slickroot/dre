@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::diagram::{children, Node};
 use crate::palette::FOREGROUND;
 use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
@@ -105,7 +107,7 @@ pub(crate) fn place<'a>(
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
             node: PlacementNode::Label(Label {
-                text: node.label(),
+                text: Cow::Borrowed(node.label()),
                 path: path.to_vec(),
             }),
             x: start,
@@ -193,7 +195,7 @@ pub(crate) fn place<'a>(
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Label<'a> {
-    pub(crate) text: &'a str,
+    pub(crate) text: Cow<'a, str>,
     pub(crate) path: Vec<usize>,
 }
 
@@ -232,7 +234,7 @@ pub(crate) struct Placement<'a> {
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
-pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
+pub(crate) fn footer(text: &str) -> Vec<Placement<'static>> {
     let text_width = text.chars().count() as i64;
     let box_width = interior(text) + SIDE_PADDING * 2;
     let corner_box = PlacementNode::Box {
@@ -243,7 +245,10 @@ pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
         sides: NO_SIDES,
         border: 1,
     };
-    let label = PlacementNode::Label(Label { text, path: vec![] });
+    let label = PlacementNode::Label(Label {
+        text: Cow::Owned(text.to_string()),
+        path: vec![],
+    });
     vec![
         Placement {
             node: corner_box,
@@ -339,7 +344,10 @@ mod tests {
         );
         assert_eq!(
             placements[1].node,
-            PlacementNode::Label(Label { text, path: vec![] })
+            PlacementNode::Label(Label {
+                text: text.into(),
+                path: vec![]
+            })
         );
         let box_width = interior(text) + SIDE_PADDING * 2;
         assert_eq!(
@@ -862,7 +870,7 @@ mod tests {
     #[test]
     fn label_constructor_defaults_path_to_empty() {
         let label = Label {
-            text: "hi",
+            text: "hi".into(),
             path: vec![0],
         };
         assert_eq!(label.text, "hi");
@@ -907,7 +915,7 @@ mod tests {
 
         let label_placement = Placement {
             node: PlacementNode::Label(Label {
-                text: "a",
+                text: "a".into(),
                 path: vec![0],
             }),
             x: 0,
@@ -920,7 +928,7 @@ mod tests {
                 assert_eq!(
                     label,
                     Label {
-                        text: "a",
+                        text: "a".into(),
                         path: vec![0],
                     }
                 )

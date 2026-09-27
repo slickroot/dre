@@ -24,8 +24,8 @@ pub trait Renderer {
 
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
-    let mut footer = align_right(layout::footer(state.footer()), foot);
-    if let Mode::NamePrompt { name } = state.mode() {
+    let mut footer = align_right(layout::footer(&state.footer()), foot);
+    if let Mode::NamePrompt { name, .. } = state.mode() {
         footer.push(Placement {
             node: PlacementNode::Cursor(Cursor),
             x: footer[1].x + name.chars().count() as i64,
@@ -177,7 +177,10 @@ mod tests {
 
     fn label_at(text: &str, x: i64, y: i64) -> Placement<'_> {
         Placement {
-            node: PlacementNode::Label(Label { text, path: vec![] }),
+            node: PlacementNode::Label(Label {
+                text: text.into(),
+                path: vec![],
+            }),
             x,
             y,
             width: text.chars().count() as i64,
@@ -387,6 +390,20 @@ mod tests {
     fn cancelling_the_prompt_restores_the_footer() {
         let state = handle_key(handle_key(state(None), "n"), "\x1b");
         assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
+    }
+
+    #[test]
+    fn the_quit_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
+        let state = handle_key(state(None), "q");
+        let text = "type a name \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
+    }
+
+    #[test]
+    fn the_quit_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
+        let state = handle_key(handle_key(handle_key(state(None), "q"), "a"), "b");
+        let text = "ab \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
     }
 
     fn assert_footer_is_bottom_right_with_cursor(state: &State, text: &str, x: i64) {

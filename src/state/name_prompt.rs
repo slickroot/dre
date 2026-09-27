@@ -4,23 +4,33 @@ use crate::state::{Mode, State};
 const EXTENSION: &str = ".dre";
 
 pub(crate) fn reduce(mut state: State, command: Action) -> State {
-    let Mode::NamePrompt { name } = &mut state.mode else {
+    let Mode::NamePrompt { name, quits } = &mut state.mode else {
         return state;
     };
+    let quits = *quits;
     match command {
         Action::NameConfirm if !name.is_empty() => {
             let path = format!("{name}{EXTENSION}");
             state.set_save_to(Some(path));
-            state.mode = Mode::Command;
+            if quits {
+                state.running = false;
+            } else {
+                state.mode = Mode::Command;
+            }
         }
-        Action::NameCancel => state.mode = Mode::Command,
+        Action::NameCancel => {
+            if quits {
+                state.running = false;
+            } else {
+                state.mode = Mode::Command;
+            }
+        }
         Action::NameBackspace => {
             name.pop();
         }
         Action::NameAppend(c) => name.push(c),
         _ => {}
     }
-    state.refresh_footer();
     state
 }
 
@@ -35,6 +45,14 @@ mod tests {
     fn prompt(name: &str) -> Mode {
         Mode::NamePrompt {
             name: name.to_string(),
+            quits: false,
+        }
+    }
+
+    fn quitting_prompt(name: &str) -> Mode {
+        Mode::NamePrompt {
+            name: name.to_string(),
+            quits: true,
         }
     }
 
@@ -114,5 +132,28 @@ mod tests {
             result = handle_key(result, key);
         }
         assert_eq!(result.save_to(), Some(format!("new{EXTENSION}").as_str()));
+    }
+
+    #[test]
+    fn enter_with_a_name_in_a_quitting_prompt_saves_and_stops_running() {
+        let state = new_state(vec![], quitting_prompt("plans"), None);
+        let result = handle_key(state, "\r");
+        assert_eq!(result.save_to(), Some(format!("plans{EXTENSION}").as_str()));
+        assert!(!result.running);
+    }
+
+    #[test]
+    fn escape_in_a_quitting_prompt_stops_running() {
+        let state = new_state(vec![node("a")], quitting_prompt("x"), Some(vec![0]));
+        let result = handle_key(state, "\x1b");
+        assert!(!result.running);
+    }
+
+    #[test]
+    fn enter_with_an_empty_name_in_a_quitting_prompt_leaves_the_prompt_open() {
+        let state = new_state(vec![], quitting_prompt(""), None);
+        let result = handle_key(state, "\r");
+        assert_eq!(result.mode, quitting_prompt(""));
+        assert!(result.running);
     }
 }
