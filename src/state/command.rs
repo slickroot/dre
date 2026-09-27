@@ -977,6 +977,16 @@ mod tests {
     }
 
     #[test]
+    fn u_after_capital_r_restores_the_whole_row_in_one_undo() {
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let before = new_state(boxes, Mode::Command, Some(vec![0, 0]));
+        let after = handle_key(before.clone(), "R");
+        let undone = handle_key(after, "u");
+        assert_eq!(*undone.doc.tree(), *before.doc.tree());
+        assert_eq!(undone.selected, before.selected);
+    }
+
+    #[test]
     fn u_after_b_restores_boxes_and_command_mode() {
         let before = new_state(vec![], Mode::Command, None);
         let after = handle_key(before.clone(), "b");
