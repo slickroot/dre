@@ -223,11 +223,11 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) const FOOTER_MARGIN: i64 = 1;
-pub(crate) const FOOTER_ROWS: i64 = 1 + 2 * FOOTER_MARGIN;
+pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
 pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
     let text_width = text.chars().count() as i64;
+    let box_width = interior(text) + BORDERS;
     let corner_box = PlacementNode::Box {
         colour: None,
         fill: None,
@@ -241,13 +241,13 @@ pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
             node: corner_box,
             x: 0,
             y: 0,
-            width: text_width + 2 * FOOTER_MARGIN,
-            height: 1 + 2 * FOOTER_MARGIN,
+            width: box_width,
+            height: BOX_HEIGHT,
         },
         Placement {
             node: label,
-            x: FOOTER_MARGIN,
-            y: FOOTER_MARGIN,
+            x: centre(box_width, text),
+            y: BOX_HEIGHT / 2,
             width: text_width,
             height: 1,
         },
@@ -332,6 +332,7 @@ mod tests {
             placements[1].node,
             PlacementNode::Label(Label { text, path: vec![] })
         );
+        let box_width = interior(text) + BORDERS;
         assert_eq!(
             (
                 placements[0].x,
@@ -339,7 +340,7 @@ mod tests {
                 placements[0].width,
                 placements[0].height,
             ),
-            (0, 0, text_width + 2 * FOOTER_MARGIN, 1 + 2 * FOOTER_MARGIN)
+            (0, 0, box_width, BOX_HEIGHT)
         );
         assert_eq!(
             (
@@ -348,7 +349,7 @@ mod tests {
                 placements[1].width,
                 placements[1].height,
             ),
-            (FOOTER_MARGIN, FOOTER_MARGIN, text_width, 1)
+            (centre(box_width, text), BOX_HEIGHT / 2, text_width, 1)
         );
     }
 

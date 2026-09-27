@@ -307,8 +307,8 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
     use crate::layout::with_cursor;
+    use crate::layout::{centre as centre_label, BORDERS, BOX_HEIGHT, FOOTER_ROWS};
     use crate::layout::{Arrow, Cursor, Label, Placement};
-    use crate::layout::{FOOTER_MARGIN, FOOTER_ROWS};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
 
@@ -1301,7 +1301,7 @@ mod tests {
     }
 
     fn footer_box_area(foot: Area) -> Area {
-        let width = footer_width() + 2 * FOOTER_MARGIN;
+        let width = footer_width() + BORDERS;
         Area {
             col: foot.col + foot.cols - width,
             row: foot.row + foot.rows - FOOTER_ROWS,
@@ -1318,8 +1318,8 @@ mod tests {
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
         label_at(
-            area.col + FOOTER_MARGIN,
-            area.row + FOOTER_MARGIN,
+            area.col + centre_label(area.cols, FOOTER_TEXT),
+            area.row + BOX_HEIGHT / 2,
             FOOTER_TEXT,
         )
     }
