@@ -302,7 +302,7 @@ fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
-        escape(label.text),
+        escape(&label.text),
     )
 }
 
@@ -709,7 +709,7 @@ mod tests {
     fn label_placement(text: &str, x: i64, y: i64) -> Placement<'_> {
         Placement {
             node: PlacementNode::Label(Label {
-                text,
+                text: text.into(),
                 path: vec![0],
             }),
             x,

@@ -889,7 +889,7 @@ mod tests {
     ) -> crate::layout::Placement<'_> {
         crate::layout::Placement {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
-                text,
+                text: text.into(),
                 path: vec![0],
             }),
             x,

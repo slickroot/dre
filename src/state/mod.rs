@@ -39,7 +39,6 @@ pub struct State {
     mode: Mode,
     running: bool,
     save_to: Option<String>,
-    footer: String,
     new_file: bool,
     pending_count: Option<usize>,
     saved_len: usize,
@@ -98,22 +97,17 @@ impl State {
     }
 
     pub(crate) fn set_save_to(&mut self, save_to: Option<String>) {
-        self.footer = footer_text(save_to.as_deref());
         self.save_to = save_to;
     }
 
-    pub(crate) fn refresh_footer(&mut self) {
-        self.footer = match &self.mode {
+    pub(crate) fn footer(&self) -> String {
+        match &self.mode {
             Mode::NamePrompt { name, .. } if name.is_empty() => {
                 format!("{PLACEHOLDER}{FOOTER_SUFFIX}")
             }
             Mode::NamePrompt { name, .. } => format!("{name}{FOOTER_SUFFIX}"),
             _ => footer_text(self.save_to.as_deref()),
-        };
-    }
-
-    pub(crate) fn footer(&self) -> &str {
-        &self.footer
+        }
     }
 }
 
@@ -138,7 +132,6 @@ impl Default for State {
             mode: Mode::default(),
             running: true,
             save_to: None,
-            footer: footer_text(None),
             new_file: false,
             pending_count: None,
             saved_len: 0,
@@ -198,7 +191,6 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         mode,
         running: true,
         save_to: None,
-        footer: footer_text(None),
         new_file: false,
         pending_count: None,
         saved_len: 0,
@@ -228,9 +220,7 @@ mod tests {
     use crate::test_support::handle_key;
 
     fn footer_of(path: &str) -> String {
-        State::open(Document::default(), Some(path.to_string()))
-            .footer()
-            .to_string()
+        State::open(Document::default(), Some(path.to_string())).footer()
     }
 
     fn footer_for(name: &str) -> String {
