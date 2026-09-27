@@ -68,17 +68,14 @@ impl Document {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_colour(&self, path: &[usize], scope: Scope) -> Vec<Option<u8>> {
         self.get(path, scope, |node| node.colour())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_fill(&self, path: &[usize], scope: Scope) -> Vec<bool> {
         self.get(path, scope, |node| node.filled())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_rounded(&self, path: &[usize], scope: Scope) -> Vec<bool> {
         self.get(path, scope, |node| node.rounded())
     }
