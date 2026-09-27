@@ -11,6 +11,6 @@ pub(crate) struct StateReducer;
 
 impl Reducer for StateReducer {
     fn reduce(&self, state: State, key: Option<&str>) -> State {
-        state::reduce(state, key)
+        state::reduce(state, key).0
     }
 }

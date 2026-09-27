@@ -42,12 +42,12 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = state::reduce(std::mem::take(&mut self.state), Some(key));
+        self.state = state::reduce(std::mem::take(&mut self.state), Some(key)).0;
     }
 
     #[doc(hidden)]
     pub fn go_idle(&mut self) {
-        self.state = state::reduce(std::mem::take(&mut self.state), None);
+        self.state = state::reduce(std::mem::take(&mut self.state), None).0;
     }
 
     pub fn is_running(&self) -> bool {
