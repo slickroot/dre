@@ -68,16 +68,15 @@ impl Document {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
-    pub(crate) fn get_colour(&self, path: &[usize], scope: Scope) -> Vec<Option<u8>> {
-        self.get(path, scope, |node| node.colour())
-    }
-
-    pub(crate) fn get_fill(&self, path: &[usize], scope: Scope) -> Vec<bool> {
-        self.get(path, scope, |node| node.filled())
-    }
-
-    pub(crate) fn get_rounded(&self, path: &[usize], scope: Scope) -> Vec<bool> {
-        self.get(path, scope, |node| node.rounded())
+    pub(crate) fn siblings(&self, path: &[usize], scope: Scope) -> Vec<&Node> {
+        let targets: Vec<Vec<usize>> = match scope {
+            Scope::Box => vec![path.to_vec()],
+            Scope::Siblings => children(&self.root, parent_of(path)).collect(),
+        };
+        targets
+            .into_iter()
+            .map(|target| self.root.value(&target))
+            .collect()
     }
 
     pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
@@ -96,17 +95,6 @@ impl Document {
         for target in targets {
             write(self.root.value_mut(&target));
         }
-    }
-
-    fn get<T>(&self, path: &[usize], scope: Scope, read: impl Fn(&Node) -> T) -> Vec<T> {
-        let targets: Vec<Vec<usize>> = match scope {
-            Scope::Box => vec![path.to_vec()],
-            Scope::Siblings => children(&self.root, parent_of(path)).collect(),
-        };
-        targets
-            .into_iter()
-            .map(|target| read(self.root.value(&target)))
-            .collect()
     }
 }
 
@@ -586,30 +574,24 @@ mod tests {
     }
 
     #[test]
-    fn get_colour_returns_the_box_value_or_every_siblings_value() {
+    fn siblings_returns_the_box_node_or_every_sibling_node_in_order() {
         let mut doc = row();
         doc.set_colour(&[0, 0], Some(3), Scope::Box);
-        assert_eq!(doc.get_colour(&[0, 0], Scope::Box), vec![Some(3)]);
+
+        let boxed = doc.siblings(&[0, 0], Scope::Box);
         assert_eq!(
-            doc.get_colour(&[0, 0], Scope::Siblings),
-            vec![Some(3), None]
+            boxed.iter().map(|node| node.label()).collect::<Vec<_>>(),
+            vec!["c"]
         );
-    }
+        assert_eq!(boxed[0].colour(), Some(3));
 
-    #[test]
-    fn get_fill_returns_the_box_value_or_every_siblings_value() {
-        let mut doc = row();
-        doc.set_fill(&[0, 1], true, Scope::Box);
-        assert_eq!(doc.get_fill(&[0, 1], Scope::Box), vec![true]);
-        assert_eq!(doc.get_fill(&[0, 1], Scope::Siblings), vec![false, true]);
-    }
-
-    #[test]
-    fn get_rounded_returns_the_box_value_or_every_siblings_value() {
-        let mut doc = row();
-        doc.set_rounded(&[0, 0], true, Scope::Box);
-        assert_eq!(doc.get_rounded(&[0, 0], Scope::Box), vec![true]);
-        assert_eq!(doc.get_rounded(&[0, 0], Scope::Siblings), vec![true, false]);
+        let siblings = doc.siblings(&[0, 0], Scope::Siblings);
+        assert_eq!(
+            siblings.iter().map(|node| node.label()).collect::<Vec<_>>(),
+            vec!["c", "d"]
+        );
+        assert_eq!(siblings[0].colour(), Some(3));
+        assert_eq!(siblings[1].colour(), None);
     }
 
     #[test]

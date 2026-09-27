@@ -1,4 +1,4 @@
-use crate::diagram::{children, parent_of, Scope};
+use crate::diagram::{children, parent_of, Node, Scope};
 use crate::palette::next_on_palette;
 use crate::state::action::Action;
 use crate::state::history::undo;
@@ -97,7 +97,11 @@ fn cycle_colour(mut state: State, path: Vec<usize>) -> State {
 }
 
 fn next_row_colour(state: &State, path: &[usize]) -> Option<u8> {
-    let mut colours = state.doc.get_colour(path, Scope::Siblings).into_iter();
+    let mut colours = state
+        .doc
+        .siblings(path, Scope::Siblings)
+        .into_iter()
+        .map(Node::colour);
     let first = colours.next().flatten();
     if colours.all(|colour| colour == first) {
         next_on_palette(first)
@@ -114,17 +118,9 @@ fn cycle_siblings_colour(mut state: State, path: Vec<usize>) -> State {
 }
 
 fn toggle_siblings_fill(mut state: State, path: Vec<usize>) -> State {
-    if state
-        .doc
-        .get_colour(&path, Scope::Siblings)
-        .iter()
-        .any(Option::is_some)
-    {
-        let all_filled = state
-            .doc
-            .get_fill(&path, Scope::Siblings)
-            .into_iter()
-            .all(|filled| filled);
+    let siblings = state.doc.siblings(&path, Scope::Siblings);
+    if siblings.iter().any(|node| node.colour().is_some()) {
+        let all_filled = siblings.iter().all(|node| node.filled());
         state.doc.set_fill(&path, !all_filled, Scope::Siblings);
     }
     state.selected = Some(path);
@@ -170,9 +166,9 @@ fn paste_box(mut state: State, selected: Option<Vec<usize>>, count: usize) -> St
 fn toggle_siblings_rounded(mut state: State, path: Vec<usize>) -> State {
     let all_rounded = state
         .doc
-        .get_rounded(&path, Scope::Siblings)
+        .siblings(&path, Scope::Siblings)
         .into_iter()
-        .all(|rounded| rounded);
+        .all(Node::rounded);
     state.doc.set_rounded(&path, !all_rounded, Scope::Siblings);
     state.selected = Some(path);
     state
