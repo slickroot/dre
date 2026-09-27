@@ -17,6 +17,10 @@ const RESET_BACKGROUND_COLOUR: &str = "\x1b]111\x1b\\";
 
 pub(crate) const RESIZE: &str = "\x1bRESIZE";
 
+const ESC: u8 = 0x1b;
+const ESCAPE_TIMEOUT_MS: u16 = 25;
+const CSI_FINAL_BYTES: std::ops::RangeInclusive<u8> = 0x40..=0x7e;
+
 pub(crate) struct RawMode {
     fd: RawFd,
     saved: Termios,
@@ -145,7 +149,42 @@ pub(crate) fn poll_read(
     if n == 0 {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
     }
-    Ok(Some((byte[0] as char).to_string()))
+    let mut key = (byte[0] as char).to_string();
+    if byte[0] == ESC {
+        read_escape_sequence(borrowed, &mut key)?;
+    }
+    Ok(Some(key))
+}
+
+fn read_escape_sequence(fd: BorrowedFd, key: &mut String) -> io::Result<()> {
+    let Some(introducer) = read_byte_within_escape_timeout(fd)? else {
+        return Ok(());
+    };
+    key.push(introducer as char);
+    if introducer != b'[' {
+        return Ok(());
+    }
+    while let Some(byte) = read_byte_within_escape_timeout(fd)? {
+        key.push(byte as char);
+        if CSI_FINAL_BYTES.contains(&byte) {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn read_byte_within_escape_timeout(fd: BorrowedFd) -> io::Result<Option<u8>> {
+    let mut fds = [PollFd::new(fd, PollFlags::POLLIN)];
+    let ready = retry_on_eintr(|| poll(&mut fds, PollTimeout::from(ESCAPE_TIMEOUT_MS)))?;
+    if ready == 0 {
+        return Ok(None);
+    }
+    let mut byte = [0u8; 1];
+    let n = retry_on_eintr(|| read(fd, &mut byte))?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
+    }
+    Ok(Some(byte[0]))
 }
 
 #[cfg(test)]
@@ -223,6 +262,47 @@ mod tests {
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
         let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
         assert_eq!(result.unwrap(), Some("x".to_string()));
+    }
+
+    fn poll_read_key(read: &std::os::fd::OwnedFd) -> Option<String> {
+        use std::os::fd::AsRawFd;
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000).unwrap()
+    }
+
+    #[test]
+    fn poll_read_returns_a_whole_escape_sequence_written_at_once() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b[D").unwrap();
+        assert_eq!(poll_read_key(&read), Some("\x1b[D".to_string()));
+    }
+
+    #[test]
+    fn poll_read_returns_a_lone_escape_after_the_timeout() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b").unwrap();
+        assert_eq!(poll_read_key(&read), Some("\x1b".to_string()));
+    }
+
+    #[test]
+    fn poll_read_joins_an_escape_sequence_delivered_in_two_steps() {
+        use std::time::Duration;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b").unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(ESCAPE_TIMEOUT_MS as u64 / 5));
+            nix::unistd::write(&write, b"[D").unwrap();
+        });
+        let key = poll_read_key(&read);
+        writer.join().unwrap();
+        assert_eq!(key, Some("\x1b[D".to_string()));
+    }
+
+    #[test]
+    fn poll_read_returns_an_escape_sequence_with_parameters_whole() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b[1;5C").unwrap();
+        assert_eq!(poll_read_key(&read), Some("\x1b[1;5C".to_string()));
     }
 
     #[test]
