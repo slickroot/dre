@@ -2,6 +2,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
+use super::controller::effects::StoreEffectExecutor;
 use super::controller::key_source::TtyKeySource;
 use super::controller::reducer::StateReducer;
 use super::controller::screen::TerminalScreen;
@@ -31,6 +32,9 @@ pub(crate) fn run(file: Option<String>) -> io::Result<ExitCode> {
             out: stdout,
         }),
         Box::new(StateReducer),
+        Box::new(StoreEffectExecutor::new(Box::new(FileStateStore::new(
+            Box::new(DiskFiles),
+        )))),
     );
     Editor::new(Box::new(store), Box::new(controller)).run(file.as_deref())?;
     Ok(ExitCode::SUCCESS)

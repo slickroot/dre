@@ -7,6 +7,7 @@ use std::io;
 
 use crate::state::State;
 use crate::tty;
+use effects::EffectExecutor;
 use key_source::KeySource;
 use reducer::Reducer;
 use screen::Screen;
@@ -20,6 +21,7 @@ pub(crate) struct DreController {
     keys: Box<dyn KeySource>,
     screen: Box<dyn Screen>,
     reducer: Box<dyn Reducer>,
+    executor: Box<dyn EffectExecutor>,
 }
 
 impl DreController {
@@ -27,11 +29,13 @@ impl DreController {
         keys: Box<dyn KeySource>,
         screen: Box<dyn Screen>,
         reducer: Box<dyn Reducer>,
+        executor: Box<dyn EffectExecutor>,
     ) -> Self {
         Self {
             keys,
             screen,
             reducer,
+            executor,
         }
     }
 }
@@ -43,7 +47,11 @@ impl Controller for DreController {
             self.screen.render(&state)?;
             match self.keys.next_key()? {
                 Some(key) if key == tty::RESIZE => self.screen.resize()?,
-                key => state = self.reducer.reduce(state, key.as_deref()),
+                key => {
+                    let (next, effects) = self.reducer.reduce(state, key.as_deref());
+                    self.executor.execute(effects, &next)?;
+                    state = next;
+                }
             }
         }
         Ok(state)
@@ -52,15 +60,33 @@ impl Controller for DreController {
 
 #[cfg(test)]
 mod tests {
+    use super::effects::MockEffectExecutor;
     use super::key_source::MockKeySource;
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
+    use crate::state::Effect;
     use crate::tty::RESIZE;
     use mockall::Sequence;
 
-    fn controller(keys: MockKeySource, screen: MockScreen, reducer: MockReducer) -> DreController {
-        DreController::new(Box::new(keys), Box::new(screen), Box::new(reducer))
+    fn controller(
+        keys: MockKeySource,
+        screen: MockScreen,
+        reducer: MockReducer,
+        executor: MockEffectExecutor,
+    ) -> DreController {
+        DreController::new(
+            Box::new(keys),
+            Box::new(screen),
+            Box::new(reducer),
+            Box::new(executor),
+        )
+    }
+
+    fn any_executor() -> MockEffectExecutor {
+        let mut executor = MockEffectExecutor::new();
+        executor.expect_execute().returning(|_, _| Ok(()));
+        executor
     }
 
     fn keys_reading(keys: Vec<Option<&str>>) -> MockKeySource {
@@ -93,7 +119,7 @@ mod tests {
             .expect_reduce()
             .withf(move |_, k| *k == Some(key))
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| (stopped(state), vec![]));
         reducer
     }
 
@@ -116,7 +142,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|| Ok(Some("q".to_string())));
 
-        controller(keys, screen, reducer_stopping_on("q"))
+        controller(keys, screen, reducer_stopping_on("q"), any_executor())
             .run(State::default())
             .unwrap();
     }
@@ -127,6 +153,7 @@ mod tests {
             keys_reading(vec![Some("x")]),
             any_screen(),
             reducer_stopping_on("x"),
+            any_executor(),
         )
         .run(State::default())
         .unwrap();
@@ -139,11 +166,16 @@ mod tests {
             .expect_reduce()
             .withf(|_, key| key.is_none())
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| (stopped(state), vec![]));
 
-        controller(keys_reading(vec![None]), any_screen(), reducer)
-            .run(State::default())
-            .unwrap();
+        controller(
+            keys_reading(vec![None]),
+            any_screen(),
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
     }
 
     #[test]
@@ -167,16 +199,21 @@ mod tests {
             .expect_reduce()
             .withf(|_, key| *key == Some("a"))
             .times(1)
-            .returning(|_, _| marked(2));
+            .returning(|_, _| (marked(2), vec![]));
         reducer
             .expect_reduce()
             .withf(|_, key| *key == Some("q"))
             .times(1)
-            .returning(|state, _| stopped(state));
+            .returning(|state, _| (stopped(state), vec![]));
 
-        controller(keys_reading(vec![Some("a"), Some("q")]), screen, reducer)
-            .run(marked(1))
-            .unwrap();
+        controller(
+            keys_reading(vec![Some("a"), Some("q")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(marked(1))
+        .unwrap();
     }
 
     #[test]
@@ -185,13 +222,18 @@ mod tests {
         reducer
             .expect_reduce()
             .times(1)
-            .returning(|_, _| stopped(marked(9)));
+            .returning(|_, _| (stopped(marked(9)), vec![]));
         let mut screen = MockScreen::new();
         screen.expect_render().times(1).returning(|_| Ok(()));
 
-        let state = controller(keys_reading(vec![Some("q")]), screen, reducer)
-            .run(State::default())
-            .unwrap();
+        let state = controller(
+            keys_reading(vec![Some("q")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
 
         assert!(!state.is_running());
         assert_eq!(state.pending_count(), Some(9));
@@ -206,6 +248,7 @@ mod tests {
             keys_reading(vec![Some(RESIZE), Some("q")]),
             screen,
             reducer_stopping_on("q"),
+            any_executor(),
         )
         .run(State::default())
         .unwrap();
@@ -221,10 +264,15 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer.expect_reduce().never();
 
-        let error = controller(keys_reading(vec![Some(RESIZE)]), screen, reducer)
-            .run(State::default())
-            .err()
-            .unwrap();
+        let error = controller(
+            keys_reading(vec![Some(RESIZE)]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .err()
+        .unwrap();
 
         assert_eq!(error.to_string(), "resize failed");
     }
@@ -238,7 +286,7 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer.expect_reduce().never();
 
-        let error = controller(keys, any_screen(), reducer)
+        let error = controller(keys, any_screen(), reducer, any_executor())
             .run(State::default())
             .err()
             .unwrap();
@@ -256,7 +304,7 @@ mod tests {
         let mut keys = MockKeySource::new();
         keys.expect_next_key().never();
 
-        let error = controller(keys, screen, MockReducer::new())
+        let error = controller(keys, screen, MockReducer::new(), any_executor())
             .run(State::default())
             .err()
             .unwrap();
@@ -273,10 +321,62 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer.expect_reduce().never();
 
-        let state = controller(keys, screen, reducer)
+        let state = controller(keys, screen, reducer, any_executor())
             .run(stopped(marked(7)))
             .unwrap();
 
         assert_eq!(state.pending_count(), Some(7));
+    }
+
+    #[test]
+    fn the_effects_returned_by_reduce_are_passed_to_execute_with_the_new_state() {
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("s"))
+            .times(1)
+            .returning(|_, _| (stopped(marked(4)), vec![Effect::Save]));
+        let mut executor = MockEffectExecutor::new();
+        executor
+            .expect_execute()
+            .withf(|effects, state| {
+                *effects == vec![Effect::Save] && state.pending_count() == Some(4)
+            })
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        controller(
+            keys_reading(vec![Some("s")]),
+            any_screen(),
+            reducer,
+            executor,
+        )
+        .run(State::default())
+        .unwrap();
+    }
+
+    #[test]
+    fn an_error_from_execute_stops_the_loop_and_is_returned() {
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .times(1)
+            .returning(|state, _| (state, vec![Effect::Save]));
+        let mut executor = MockEffectExecutor::new();
+        executor
+            .expect_execute()
+            .times(1)
+            .returning(|_, _| Err(io::Error::other("save failed")));
+        let mut keys = MockKeySource::new();
+        keys.expect_next_key()
+            .times(1)
+            .returning(|| Ok(Some("s".to_string())));
+
+        let error = controller(keys, any_screen(), reducer, executor)
+            .run(State::default())
+            .err()
+            .unwrap();
+
+        assert_eq!(error.to_string(), "save failed");
     }
 }

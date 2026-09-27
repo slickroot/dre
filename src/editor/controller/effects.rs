@@ -4,18 +4,15 @@ use crate::editor::store::StateStore;
 use crate::state::{Effect, State};
 
 #[cfg_attr(test, mockall::automock)]
-#[allow(dead_code)]
 pub(crate) trait EffectExecutor {
     fn execute(&self, effects: Vec<Effect>, state: &State) -> io::Result<()>;
 }
 
-#[allow(dead_code)]
 pub(crate) struct StoreEffectExecutor {
     store: Box<dyn StateStore>,
 }
 
 impl StoreEffectExecutor {
-    #[allow(dead_code)]
     pub(crate) fn new(store: Box<dyn StateStore>) -> Self {
         Self { store }
     }
