@@ -28,8 +28,8 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
     if let Mode::NamePrompt { name } = state.mode() {
         footer.push(Placement {
             node: PlacementNode::Cursor(Cursor),
-            x: footer[0].x + name.chars().count() as i64,
-            y: foot.row,
+            x: footer[1].x + name.chars().count() as i64,
+            y: footer[1].y,
             width: 1,
             height: 1,
         });
@@ -88,14 +88,12 @@ fn centre(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
 }
 
 fn align_right(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    placements
-        .into_iter()
-        .map(|placement| Placement {
-            x: area.col + area.cols - placement.width,
-            y: area.row,
-            ..placement
-        })
-        .collect()
+    let Some(bounds) = placements.first() else {
+        return placements;
+    };
+    let dx = area.col + area.cols - bounds.width;
+    let dy = area.row + area.rows - bounds.height;
+    offset(placements, dx, dy)
 }
 
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
@@ -124,7 +122,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER};
+    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER, FOOTER_MARGIN};
     use crate::state::{new_state, Mode};
     use crate::test_support::handle_key;
 
@@ -185,10 +183,27 @@ mod tests {
     }
 
     #[test]
-    fn align_right_meets_the_areas_right_edge_on_the_areas_row() {
+    fn align_right_meets_the_areas_right_and_bottom_edge() {
         let placed = align_right(vec![label_at("plans", 0, 0)], AREA);
         assert_eq!(placed[0].x + placed[0].width, AREA.col + AREA.cols);
-        assert_eq!(placed[0].y, AREA.row);
+        assert_eq!(placed[0].y + placed[0].height, AREA.row + AREA.rows);
+    }
+
+    #[test]
+    fn align_right_shifts_every_placement_by_the_same_delta() {
+        let placed = align_right(
+            vec![
+                box_at(0, 0, 10, 3),
+                label_at("plans", FOOTER_MARGIN, FOOTER_MARGIN),
+            ],
+            AREA,
+        );
+        let dx = placed[0].x;
+        let dy = placed[0].y;
+        assert_eq!(
+            placed[1],
+            label_at("plans", FOOTER_MARGIN + dx, FOOTER_MARGIN + dy)
+        );
     }
 
     #[test]
@@ -334,9 +349,21 @@ mod tests {
         assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
     }
 
+    fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
+        let text_width = text.chars().count() as i64;
+        let box_width = text_width + 2 * FOOTER_MARGIN;
+        (
+            foot.col + foot.cols - box_width,
+            foot.row + foot.rows - FOOTER_ROWS,
+            box_width,
+            FOOTER_ROWS,
+        )
+    }
+
     fn prompt_cursor_x(name: &str, text: &str) -> i64 {
         let foot = foot_of(WINDOW);
-        foot.col + foot.cols - text.chars().count() as i64 + name.chars().count() as i64
+        let (box_x, ..) = box_at_bottom_right(foot, text);
+        box_x + FOOTER_MARGIN + name.chars().count() as i64
     }
 
     #[test]
@@ -361,22 +388,19 @@ mod tests {
 
     fn assert_footer_is_bottom_right_with_cursor(state: &State, text: &str, x: i64) {
         let foot = foot_of(WINDOW);
+        let (box_x, box_y, ..) = box_at_bottom_right(foot, text);
         let footer = &editor(state, WINDOW)[1].1;
         assert_eq!(footer.len(), 3);
         assert_eq!(
             footer[1],
-            label_at(
-                text,
-                foot.col + foot.cols - text.chars().count() as i64,
-                foot.row
-            )
+            label_at(text, box_x + FOOTER_MARGIN, box_y + FOOTER_MARGIN)
         );
         assert_eq!(
             footer[2],
             Placement {
                 node: PlacementNode::Cursor(Cursor),
                 x,
-                y: foot.row,
+                y: box_y + FOOTER_MARGIN,
                 width: 1,
                 height: 1
             }
@@ -386,16 +410,18 @@ mod tests {
     fn assert_footer_is_bottom_right(state: &State, text: &str) {
         let screen = editor(state, WINDOW);
         let foot = foot_of(WINDOW);
-        let width = text.chars().count() as i64;
-        let x = foot.col + foot.cols - width;
+        let (box_x, box_y, box_width, box_height) = box_at_bottom_right(foot, text);
         let footer = &screen[1].1;
         assert_eq!(footer.len(), 2);
         assert_eq!(footer[0].node, layout::footer(text)[0].node);
         assert_eq!(
             (footer[0].x, footer[0].y, footer[0].width, footer[0].height),
-            (x, foot.row, width, 1)
+            (box_x, box_y, box_width, box_height)
         );
-        assert_eq!(footer[1], label_at(text, x, foot.row));
+        assert_eq!(
+            footer[1],
+            label_at(text, box_x + FOOTER_MARGIN, box_y + FOOTER_MARGIN)
+        );
     }
 
     #[test]
