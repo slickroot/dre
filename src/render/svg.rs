@@ -10,7 +10,7 @@ use crate::state::State;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
-const ARROWHEAD_EDGE_LENGTH: f64 = 12.0;
+const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
 
 fn label_font_size() -> f64 {
