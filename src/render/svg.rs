@@ -5,11 +5,12 @@ use super::{
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, BORDER, NO_SIDES};
+use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
 use crate::state::State;
 
-const ARROW_STROKE: i64 = BORDER / 4;
+const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
+const ARROWHEAD_EDGE_LENGTH: f64 = 12.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
 
 fn label_font_size() -> f64 {
@@ -189,8 +190,8 @@ fn escape(text: &str) -> String {
 }
 
 fn marker_defs() -> String {
-    let depth = arrowhead_depth();
-    let slope = arrowhead_slope();
+    let depth = arrowhead_depth(ARROWHEAD_EDGE_LENGTH);
+    let slope = arrowhead_slope(ARROWHEAD_EDGE_LENGTH);
     let arm = depth * slope;
     let box_width = depth.ceil() as i64;
     let box_height = (arm * 2.0).ceil() as i64;
@@ -323,7 +324,7 @@ mod tests {
     use crate::layout::diagram;
     use crate::layout::with_cursor;
     use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, SIDE_PADDING};
-    use crate::layout::{Arrow, Cursor, Label, Placement};
+    use crate::layout::{Arrow, Cursor, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
 
@@ -953,7 +954,6 @@ mod tests {
             group.matches("<path").count(),
             group.matches(&arrow_stroke).count()
         );
-        assert_eq!(ARROW_STROKE, BORDER / 4);
         assert!(svg.contains(&format!("stroke-width=\"{}\"", BORDER / 2)));
     }
 
@@ -963,8 +963,8 @@ mod tests {
 
         let svg = draw(&placements);
 
-        let depth = arrowhead_depth();
-        let slope = arrowhead_slope();
+        let depth = arrowhead_depth(ARROWHEAD_EDGE_LENGTH);
+        let slope = arrowhead_slope(ARROWHEAD_EDGE_LENGTH);
         let arm = depth * slope;
         let box_width = depth.ceil() as i64;
         let box_height = (arm * 2.0).ceil() as i64;
@@ -1023,8 +1023,8 @@ mod tests {
     }
 
     fn expected_marker() -> String {
-        let depth = arrowhead_depth();
-        let slope = arrowhead_slope();
+        let depth = arrowhead_depth(ARROWHEAD_EDGE_LENGTH);
+        let slope = arrowhead_slope(ARROWHEAD_EDGE_LENGTH);
         let arm = depth * slope;
         let box_width = depth.ceil() as i64;
         let box_height = (arm * 2.0).ceil() as i64;

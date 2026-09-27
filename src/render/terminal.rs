@@ -15,6 +15,7 @@ const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
 
 pub(super) const ARROW_STROKE: i64 = 3;
+const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 
 pub(crate) const CACHE_LIMIT: usize = 512;
 
@@ -396,6 +397,7 @@ impl TerminalRenderer {
             shaft_row: self.cells_to_pixels_y(arrow.shaft) + self.window.cell_height / 2,
             trunk,
             stroke: ARROW_STROKE,
+            arrowhead_edge_length: ARROWHEAD_EDGE_LENGTH,
             ink: [r, g, b, (ARROW_OPACITY * OPAQUE as f64).round() as u8],
         };
         Canvas::fill(width, height, &shape)
