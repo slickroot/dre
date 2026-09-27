@@ -68,15 +68,11 @@ impl Document {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
-    pub(crate) fn siblings(&self, path: &[usize], scope: Scope) -> Vec<&Node> {
-        let targets: Vec<Vec<usize>> = match scope {
+    pub(crate) fn siblings(&self, path: &[usize], scope: Scope) -> Vec<Vec<usize>> {
+        match scope {
             Scope::Box => vec![path.to_vec()],
             Scope::Siblings => children(&self.root, parent_of(path)).collect(),
-        };
-        targets
-            .into_iter()
-            .map(|target| self.root.value(&target))
-            .collect()
+        }
     }
 
     pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
@@ -574,24 +570,14 @@ mod tests {
     }
 
     #[test]
-    fn siblings_returns_the_box_node_or_every_sibling_node_in_order() {
-        let mut doc = row();
-        doc.set_colour(&[0, 0], Some(3), Scope::Box);
+    fn siblings_returns_the_box_path_or_every_sibling_path_in_order() {
+        let doc = row();
 
-        let boxed = doc.siblings(&[0, 0], Scope::Box);
+        assert_eq!(doc.siblings(&[0, 0], Scope::Box), vec![vec![0, 0]]);
         assert_eq!(
-            boxed.iter().map(|node| node.label()).collect::<Vec<_>>(),
-            vec!["c"]
+            doc.siblings(&[0, 0], Scope::Siblings),
+            vec![vec![0, 0], vec![0, 1]]
         );
-        assert_eq!(boxed[0].colour(), Some(3));
-
-        let siblings = doc.siblings(&[0, 0], Scope::Siblings);
-        assert_eq!(
-            siblings.iter().map(|node| node.label()).collect::<Vec<_>>(),
-            vec!["c", "d"]
-        );
-        assert_eq!(siblings[0].colour(), Some(3));
-        assert_eq!(siblings[1].colour(), None);
     }
 
     #[test]
