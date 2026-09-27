@@ -307,8 +307,8 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
     use crate::layout::with_cursor;
-    use crate::layout::FOOTER_ROWS;
     use crate::layout::{Arrow, Cursor, Label, Placement};
+    use crate::layout::{FOOTER_MARGIN, FOOTER_ROWS};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
 
@@ -1300,6 +1300,34 @@ mod tests {
         label_at(foot.col + foot.cols - footer_width(), foot.row, FOOTER_TEXT)
     }
 
+    fn footer_box_area(foot: Area) -> Area {
+        let width = footer_width() + 2 * FOOTER_MARGIN;
+        Area {
+            col: foot.col + foot.cols - width,
+            row: foot.row + foot.rows - FOOTER_ROWS,
+            cols: width,
+            rows: FOOTER_ROWS,
+        }
+    }
+
+    fn padded_footer_box(foot: Area) -> String {
+        let area = footer_box_area(foot);
+        rect_at(area.col, area.row, area.cols, area.rows, None, None, false)
+    }
+
+    fn padded_footer_label(foot: Area) -> String {
+        let area = footer_box_area(foot);
+        label_at(
+            area.col + FOOTER_MARGIN,
+            area.row + FOOTER_MARGIN,
+            FOOTER_TEXT,
+        )
+    }
+
+    fn padded_footer(foot: Area) -> String {
+        format!("{}{}", padded_footer_box(foot), padded_footer_label(foot))
+    }
+
     #[test]
     fn a_canvas_is_the_window_in_pixels() {
         let svg = render_to_string(
@@ -1335,7 +1363,7 @@ mod tests {
             body,
         );
         let body_svg = nested(body, &paint(&diagram));
-        let foot_svg = nested(foot, &footer_label(foot));
+        let foot_svg = nested(foot, &padded_footer(foot));
         let body_at = svg.find(&body_svg).expect("the body is a nested svg");
         let foot_at = svg.find(&foot_svg).expect("the footer is a nested svg");
         assert!(body_at < foot_at);
@@ -1449,7 +1477,7 @@ mod tests {
             &example_state(),
         );
 
-        assert!(svg.contains(&footer_label(body_and_foot(CANVAS).1)));
+        assert!(svg.contains(&padded_footer(body_and_foot(CANVAS).1)));
         assert!(svg.contains(&format!("viewBox=\"{}\"", pixel_box(CANVAS))));
     }
 
