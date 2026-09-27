@@ -68,6 +68,10 @@ impl Document {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
+    pub(crate) fn siblings(&self, path: &[usize]) -> Vec<Vec<usize>> {
+        children(&self.root, parent_of(path)).collect()
+    }
+
     pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
         self.root.push(parent, subtree.clone())
     }
@@ -560,6 +564,13 @@ mod tests {
         let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_rounded(true))]);
         doc.set_rounded(&[0], false, Scope::Box);
         assert!(!doc.tree().value(&[0]).rounded());
+    }
+
+    #[test]
+    fn siblings_returns_every_siblings_path_in_order_including_the_target() {
+        let doc = row();
+
+        assert_eq!(doc.siblings(&[0, 0]), vec![vec![0, 0], vec![0, 1]]);
     }
 
     #[test]

@@ -98,7 +98,11 @@ fn cycle_colour(mut state: State, path: Vec<usize>) -> State {
 
 fn next_row_colour(state: &State, path: &[usize]) -> Option<u8> {
     let tree = state.doc.tree();
-    let mut colours = children(tree, parent_of(path)).map(|sibling| tree.value(&sibling).colour());
+    let mut colours = state
+        .doc
+        .siblings(path)
+        .into_iter()
+        .map(|sibling| tree.value(&sibling).colour());
     let first = colours.next().flatten();
     if colours.all(|colour| colour == first) {
         next_on_palette(first)
@@ -115,13 +119,13 @@ fn cycle_siblings_colour(mut state: State, path: Vec<usize>) -> State {
 }
 
 fn toggle_siblings_fill(mut state: State, path: Vec<usize>) -> State {
+    let siblings = state.doc.siblings(&path);
     let tree = state.doc.tree();
-    let siblings: Vec<Vec<usize>> = children(tree, parent_of(&path)).collect();
-    if siblings
+    let has_colour = siblings
         .iter()
-        .any(|sibling| tree.value(sibling).colour().is_some())
-    {
-        let all_filled = siblings.iter().all(|sibling| tree.value(sibling).filled());
+        .any(|sibling| tree.value(sibling).colour().is_some());
+    let all_filled = siblings.iter().all(|sibling| tree.value(sibling).filled());
+    if has_colour {
         state.doc.set_fill(&path, !all_filled, Scope::Siblings);
     }
     state.selected = Some(path);
@@ -165,9 +169,9 @@ fn paste_box(mut state: State, selected: Option<Vec<usize>>, count: usize) -> St
 }
 
 fn toggle_siblings_rounded(mut state: State, path: Vec<usize>) -> State {
+    let siblings = state.doc.siblings(&path);
     let tree = state.doc.tree();
-    let all_rounded =
-        children(tree, parent_of(&path)).all(|sibling| tree.value(&sibling).rounded());
+    let all_rounded = siblings.iter().all(|sibling| tree.value(sibling).rounded());
     state.doc.set_rounded(&path, !all_rounded, Scope::Siblings);
     state.selected = Some(path);
     state
