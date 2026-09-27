@@ -12,6 +12,9 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
+const GLOW_MARGIN: i64 = 6;
+const GLOW_BLUR_STD_DEVIATION: f64 = 6.0;
+const GLOW_FILTER_ID: &str = "glow";
 
 fn label_font_size() -> f64 {
     (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
@@ -113,6 +116,13 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
     }) {
         svg.push_str(&marker_defs());
     }
+    if areas.iter().any(|(_, placements)| {
+        placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Box { selected: true, .. }))
+    }) {
+        svg.push_str(&glow_filter_defs());
+    }
     for (area, placements) in areas {
         let (x, y, width, height) = pixels(*area);
         svg.push_str(&format!(
@@ -129,6 +139,19 @@ fn paint(placements: &[Placement]) -> String {
     for placement in placements {
         if let PlacementNode::Arrow(arrow) = &placement.node {
             svg.push_str(&arrow_paths(placement, arrow));
+        }
+    }
+    for placement in placements {
+        if let PlacementNode::Box {
+            colour,
+            rounded,
+            selected,
+            ..
+        } = &placement.node
+        {
+            if *selected {
+                svg.push_str(&glow_rect(placement, *colour, *rounded));
+            }
         }
     }
     for placement in placements {
@@ -246,6 +269,31 @@ fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arro
     }
     paths.push_str("</g>");
     paths
+}
+
+fn glow_filter_defs() -> String {
+    format!(
+        "<defs><filter id=\"{GLOW_FILTER_ID}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"/></filter></defs>"
+    )
+}
+
+fn glow_rect(placement: &crate::layout::Placement, edge: Option<u8>, rounded: bool) -> String {
+    use super::ROUNDED_RADIUS;
+    use std::fmt::Write as _;
+
+    let (r, g, b) = colour(edge);
+    let mut rect = format!(
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"rgb({r},{g},{b})\" filter=\"url(#{GLOW_FILTER_ID})\"",
+        placement.x * CELL_WIDTH - GLOW_MARGIN,
+        placement.y * CELL_HEIGHT - GLOW_MARGIN,
+        placement.width * CELL_WIDTH + GLOW_MARGIN * 2,
+        placement.height * CELL_HEIGHT + GLOW_MARGIN * 2,
+    );
+    if rounded {
+        write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
+    }
+    rect.push_str("/>");
+    rect
 }
 
 fn rect(
@@ -374,6 +422,13 @@ mod tests {
 
     fn plain_box(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
         box_placement(x, y, width, height, None, None, false)
+    }
+
+    fn selected(mut placement: Placement<'static>) -> Placement<'static> {
+        if let PlacementNode::Box { selected, .. } = &mut placement.node {
+            *selected = true;
+        }
+        placement
     }
 
     fn arrow_placement(
@@ -707,6 +762,49 @@ mod tests {
                 .count(),
             rects.len() - 1
         );
+    }
+
+    #[test]
+    fn a_selected_box_glows_behind_its_own_rect_in_its_edge_colour() {
+        let placements = vec![selected(box_placement(0, 0, 4, 3, Some(2), None, false))];
+
+        let svg = draw(&placements);
+
+        let glow_fill = format!("fill=\"{}\"", rgb(colour(Some(2))));
+        let glow_pos = svg
+            .find(&glow_fill)
+            .expect("the glow rect uses the box's edge colour");
+        let box_rect = svg
+            .find(&format!("stroke=\"{}\"", rgb(colour(Some(2)))))
+            .expect("the box rect is emitted");
+        assert!(
+            glow_pos < box_rect,
+            "the glow rect is emitted before the box's own rect"
+        );
+        assert!(svg.contains("filter=\"url(#"), "the glow rect is blurred");
+    }
+
+    #[test]
+    fn an_unselected_box_renders_no_glow_rect() {
+        let selected_svg = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
+        let plain_svg = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
+
+        assert!(!plain_svg.contains("filter=\"url(#"));
+        assert_eq!(
+            plain_svg.matches("<rect").count(),
+            selected_svg.matches("<rect").count() - 1,
+            "selection adds exactly one extra rect: the glow"
+        );
+    }
+
+    #[test]
+    fn the_blur_filter_defs_are_only_emitted_when_something_is_selected() {
+        let with_selection = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
+        let without_selection = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
+
+        assert!(with_selection.contains("feGaussianBlur"));
+        assert!(!without_selection.contains("feGaussianBlur"));
+        assert!(!without_selection.contains("<filter"));
     }
 
     fn label_placement(text: &str, x: i64, y: i64) -> Placement<'_> {
