@@ -112,7 +112,7 @@ const ROUNDED_RADIUS: i64 = 20;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
-pub(crate) const BOX_FILL_OPACITY: f64 = 0.3;
+pub(crate) const BOX_FILL_OPACITY: f64 = 0.12;
 pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {

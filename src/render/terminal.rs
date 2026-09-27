@@ -427,12 +427,11 @@ mod tests {
     }
 
     #[test]
-    fn fill_colour_of_the_footer_opacity_is_dimmer_than_a_regular_box_fill() {
+    fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
         let box_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(BOX_FILL_OPACITY));
         let footer_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         assert!(box_fill.0 > 0);
-        assert!(footer_fill.0 > 0);
-        assert!(footer_fill.0 < box_fill.0);
+        assert_eq!(footer_fill, box_fill);
     }
 
     fn edge_rgba(index: Option<u8>) -> (u8, u8, u8, u8) {
@@ -612,10 +611,7 @@ mod tests {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
-        assert_eq!(
-            pixel_at(&pixels, CORNER_SIZE, 20, 4),
-            (55, 108, 108, OPAQUE)
-        );
+        assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (33, 91, 76, OPAQUE));
     }
 
     #[test]
