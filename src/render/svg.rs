@@ -1328,8 +1328,9 @@ mod tests {
 
         let diagram = centre(
             with_cursor(
-                diagram(state.doc().tree()),
+                diagram(state.doc().tree(), None),
                 state.selected().map(<[usize]>::to_vec),
+                None,
             ),
             body,
         );

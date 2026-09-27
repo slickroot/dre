@@ -38,10 +38,15 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
 }
 
 pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
+    let (editing, edit_index) = match state.mode() {
+        Mode::Insert { cursor } => (state.selected(), Some(*cursor)),
+        _ => (None, None),
+    };
     centre(
         with_cursor(
-            layout::diagram(state.doc().tree()),
+            layout::diagram(state.doc().tree(), editing),
             state.selected().map(<[usize]>::to_vec),
+            edit_index,
         ),
         area,
     )
@@ -283,7 +288,7 @@ mod tests {
         let body = body_of(WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(layout::diagram(state.doc().tree()), body)
+            centre(layout::diagram(state.doc().tree(), None), body)
         );
     }
 
@@ -301,7 +306,7 @@ mod tests {
         assert_eq!(
             screen[0].1,
             centre(
-                with_cursor(layout::diagram(state.doc().tree()), selected),
+                with_cursor(layout::diagram(state.doc().tree(), None), selected, None),
                 body_of(WINDOW)
             )
         );
