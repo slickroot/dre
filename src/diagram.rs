@@ -68,11 +68,8 @@ impl Document {
         self.set(path, scope, |node| node.rounded = rounded);
     }
 
-    pub(crate) fn siblings(&self, path: &[usize], scope: Scope) -> Vec<Vec<usize>> {
-        match scope {
-            Scope::Box => vec![path.to_vec()],
-            Scope::Siblings => children(&self.root, parent_of(path)).collect(),
-        }
+    pub(crate) fn siblings(&self, path: &[usize]) -> Vec<Vec<usize>> {
+        children(&self.root, parent_of(path)).collect()
     }
 
     pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
@@ -570,14 +567,10 @@ mod tests {
     }
 
     #[test]
-    fn siblings_returns_the_box_path_or_every_sibling_path_in_order() {
+    fn siblings_returns_every_siblings_path_in_order_including_the_target() {
         let doc = row();
 
-        assert_eq!(doc.siblings(&[0, 0], Scope::Box), vec![vec![0, 0]]);
-        assert_eq!(
-            doc.siblings(&[0, 0], Scope::Siblings),
-            vec![vec![0, 0], vec![0, 1]]
-        );
+        assert_eq!(doc.siblings(&[0, 0]), vec![vec![0, 0], vec![0, 1]]);
     }
 
     #[test]
