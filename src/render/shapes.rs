@@ -94,26 +94,28 @@ impl Shape for BoxShape {
 pub(super) struct GlowShape {
     pub(super) width: i64,
     pub(super) height: i64,
-    pub(super) margin_x: i64,
-    pub(super) margin_y: i64,
+    pub(super) padding_x: i64,
+    pub(super) padding_y: i64,
+    pub(super) thickness: i64,
     pub(super) colour: [u8; 3],
     pub(super) peak_alpha: u8,
 }
 
 impl Shape for GlowShape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
-        let px = x as f64 - self.margin_x as f64 + 0.5;
-        let py = y as f64 - self.margin_y as f64 + 0.5;
+        let px = x as f64 - self.padding_x as f64 + 0.5;
+        let py = y as f64 - self.padding_y as f64 + 0.5;
         let outside_x = (-px).max(px - self.width as f64).max(0.0);
         let outside_y = (-py).max(py - self.height as f64).max(0.0);
-        let alpha = if outside_x == 0.0 && outside_y == 0.0 {
-            self.peak_alpha as f64
+        let distance = if outside_x > 0.0 || outside_y > 0.0 {
+            outside_x.hypot(outside_y)
         } else {
-            let spread = (outside_x / self.margin_x as f64)
-                .hypot(outside_y / self.margin_y as f64)
-                .clamp(0.0, 1.0);
-            self.peak_alpha as f64 * (1.0 - spread)
+            px.min(self.width as f64 - px)
+                .min(py)
+                .min(self.height as f64 - py)
         };
+        let fade = (1.0 - distance / self.thickness as f64).clamp(0.0, 1.0);
+        let alpha = self.peak_alpha as f64 * fade;
         if alpha <= 0.0 {
             return None;
         }
@@ -283,22 +285,40 @@ mod tests {
 
     const GLOW_COLOUR: [u8; 3] = [40, 50, 60];
 
-    fn glow_shape(width: i64, height: i64, margin_x: i64, margin_y: i64) -> GlowShape {
+    fn glow_shape(width: i64, height: i64, padding_x: i64, padding_y: i64) -> GlowShape {
         GlowShape {
             width,
             height,
-            margin_x,
-            margin_y,
+            padding_x,
+            padding_y,
+            thickness: 4,
             colour: GLOW_COLOUR,
             peak_alpha: OPAQUE,
         }
     }
 
     #[test]
-    fn the_box_area_of_a_glow_is_at_peak_opacity() {
+    fn a_glow_fades_inward_from_the_box_edge() {
         let shape = glow_shape(10, 10, 4, 4);
-        assert_eq!(shape.colour_at(4, 4), Some([40, 50, 60, OPAQUE]));
-        assert_eq!(shape.colour_at(13, 13), Some([40, 50, 60, OPAQUE]));
+        let edge = shape.colour_at(4, 7).unwrap()[3];
+        let inside = shape.colour_at(6, 7).unwrap()[3];
+        assert!(edge > inside, "expected {edge} > {inside}");
+    }
+
+    #[test]
+    fn the_deep_interior_of_a_glow_is_fully_transparent() {
+        let shape = glow_shape(10, 10, 4, 4);
+        assert_eq!(shape.colour_at(8, 8), None);
+    }
+
+    #[test]
+    fn just_outside_the_box_edge_the_glow_is_near_peak_opacity() {
+        let shape = glow_shape(10, 10, 4, 4);
+        let alpha = shape.colour_at(3, 7).unwrap()[3];
+        assert!(
+            alpha as f64 > OPAQUE as f64 * 0.8,
+            "expected near-peak alpha just outside the edge, got {alpha}"
+        );
     }
 
     #[test]
@@ -307,6 +327,16 @@ mod tests {
         let near = shape.colour_at(2, 7).unwrap()[3];
         let far = shape.colour_at(0, 7).unwrap()[3];
         assert!(near > far, "expected {near} > {far}");
+    }
+
+    #[test]
+    fn a_glow_has_the_same_pixel_thickness_on_each_axis() {
+        let shape = glow_shape(20, 20, 8, 12);
+        for distance in 0..shape.thickness {
+            let left = shape.colour_at(shape.padding_x - 1 - distance, shape.padding_y + 10);
+            let top = shape.colour_at(shape.padding_x + 10, shape.padding_y - 1 - distance);
+            assert_eq!(left, top);
+        }
     }
 
     #[test]

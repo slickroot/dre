@@ -21,10 +21,15 @@ pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
-const BOX_Z: i32 = -2;
-const GLOW_Z: i32 = BOX_Z - 1;
-const GLOW_MARGIN_CELLS: i64 = 1;
+const BOX_Z: i32 = -3;
+const GLOW_Z: i32 = -2;
+const CONTENT_Z: i32 = -1;
+const GLOW_THICKNESS_PX: i64 = 6;
 const GLOW_PEAK_OPACITY: f64 = 0.5;
+
+fn glow_padding_cells(cell_size: i64) -> i64 {
+    (GLOW_THICKNESS_PX + cell_size - 1) / cell_size
+}
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -310,12 +315,14 @@ impl TerminalRenderer {
                 let drawn = self.outline_glow(placement);
                 self.remember(key.clone(), drawn);
             }
+            let padding_cells_x = glow_padding_cells(self.window.cell_width);
+            let padding_cells_y = glow_padding_cells(self.window.cell_height);
             let glow_placement = Placement {
                 node: placement.node.clone(),
-                x: placement.x - GLOW_MARGIN_CELLS,
-                y: placement.y - GLOW_MARGIN_CELLS,
-                width: placement.width + 2 * GLOW_MARGIN_CELLS,
-                height: placement.height + 2 * GLOW_MARGIN_CELLS,
+                x: placement.x - padding_cells_x,
+                y: placement.y - padding_cells_y,
+                width: placement.width + 2 * padding_cells_x,
+                height: placement.height + 2 * padding_cells_y,
             };
             frame.place(&self.cache[&key], &glow_placement, area, GLOW_Z);
         }
@@ -330,7 +337,7 @@ impl TerminalRenderer {
             let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area, -1);
+        frame.place(&self.cache[&key], placement, area, CONTENT_Z);
     }
 
     fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
@@ -346,7 +353,7 @@ impl TerminalRenderer {
                 continue;
             }
             let glyph = self.glyph_source.glyph(character);
-            frame.place(glyph, &char_placement, area, -1);
+            frame.place(glyph, &char_placement, area, CONTENT_Z);
         }
     }
 
@@ -361,7 +368,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        frame.place(&canvas, placement, area, -1);
+        frame.place(&canvas, placement, area, CONTENT_Z);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -415,18 +422,19 @@ impl TerminalRenderer {
         };
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
-        let margin_x = self.cells_to_pixels_x(GLOW_MARGIN_CELLS);
-        let margin_y = self.cells_to_pixels_y(GLOW_MARGIN_CELLS);
+        let padding_x = self.cells_to_pixels_x(glow_padding_cells(self.window.cell_width));
+        let padding_y = self.cells_to_pixels_y(glow_padding_cells(self.window.cell_height));
         let (r, g, b) = colour(edge);
         let shape = GlowShape {
             width,
             height,
-            margin_x,
-            margin_y,
+            padding_x,
+            padding_y,
+            thickness: GLOW_THICKNESS_PX,
             colour: [r, g, b],
             peak_alpha: (GLOW_PEAK_OPACITY * OPAQUE as f64).round() as u8,
         };
-        Canvas::fill(width + 2 * margin_x, height + 2 * margin_y, &shape)
+        Canvas::fill(width + 2 * padding_x, height + 2 * padding_y, &shape)
     }
 
     fn outline_arrow(&self, placement: &Placement) -> Canvas {
@@ -923,14 +931,25 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_box_places_a_glow_behind_it() {
+    fn a_selected_box_places_its_glow_above_the_fill_and_below_content() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(1));
-        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
-        assert_eq!(images.len(), 2);
+        let images = sprites(
+            &mut r,
+            &[
+                box_placement(&node, 4, 4, 4, 4),
+                label_placement("x", 5, 5, 1, 1),
+            ],
+        );
+        assert_eq!(images.len(), 3);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         let boxed = images.iter().find(|image| image.z == BOX_Z).unwrap();
-        assert!(glow.z < boxed.z);
+        let content = images
+            .iter()
+            .find(|image| image.col == 5 && image.row == 5)
+            .unwrap();
+        assert!(boxed.z < glow.z);
+        assert!(glow.z < content.z);
     }
 
     #[test]
@@ -939,16 +958,35 @@ mod tests {
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
-        assert_eq!(glow.col, 4 - GLOW_MARGIN_CELLS);
-        assert_eq!(glow.row, 4 - GLOW_MARGIN_CELLS);
+        let padding_cells_x = glow_padding_cells(r.window.cell_width);
+        let padding_cells_y = glow_padding_cells(r.window.cell_height);
+        assert_eq!(glow.col, 4 - padding_cells_x);
+        assert_eq!(glow.row, 4 - padding_cells_y);
         assert_eq!(
             glow.canvas.width,
-            (4 + 2 * GLOW_MARGIN_CELLS) * r.window.cell_width
+            (4 + 2 * padding_cells_x) * r.window.cell_width
         );
         assert_eq!(
             glow.canvas.height,
-            (4 + 2 * GLOW_MARGIN_CELLS) * r.window.cell_height
+            (4 + 2 * padding_cells_y) * r.window.cell_height
         );
+    }
+
+    #[test]
+    fn transparent_sprite_padding_is_cell_aligned_independently_of_glow_thickness() {
+        let mut r = renderer_on(window(20, 20, 5, 9));
+        let node = selected_box_node(Some(1));
+        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let padding_cells_x = glow_padding_cells(r.window.cell_width);
+        let padding_cells_y = glow_padding_cells(r.window.cell_height);
+        assert_eq!(glow.col, 4 - padding_cells_x);
+        assert_eq!(glow.row, 4 - padding_cells_y);
+        let padding_px_x = padding_cells_x * r.window.cell_width;
+        let padding_px_y = padding_cells_y * r.window.cell_height;
+        assert_ne!(padding_px_x, padding_px_y);
+        assert!(padding_px_x >= GLOW_THICKNESS_PX);
+        assert!(padding_px_y >= GLOW_THICKNESS_PX);
     }
 
     #[test]
