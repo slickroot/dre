@@ -344,9 +344,9 @@ mod tests {
     }
 
     #[test]
-    fn editor_ends_with_no_name_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
+    fn editor_ends_with_the_hint_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
         let state = state(None);
-        assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
+        assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
     }
 
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn cancelling_the_prompt_restores_the_footer() {
         let state = handle_key(handle_key(state(None), "n"), "\x1b");
-        assert_footer_is_bottom_right(&state, "[no name] \u{2022} dre");
+        assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
     }
 
     fn assert_footer_is_bottom_right_with_cursor(state: &State, text: &str, x: i64) {

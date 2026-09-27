@@ -68,6 +68,13 @@ mod tests {
     }
 
     #[test]
+    fn enter_confirms_the_name_and_drops_the_hint_from_the_footer() {
+        let state = new_state(vec![], prompt("plans"), None);
+        let result = handle_key(state, "\r");
+        assert_eq!(result.footer(), "plans \u{2022} dre");
+    }
+
+    #[test]
     fn enter_always_adds_the_extension() {
         let name = format!("plans{EXTENSION}");
         let state = new_state(vec![], prompt(&name), None);
