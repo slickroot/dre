@@ -24,7 +24,7 @@ const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
-const GLOW_THICKNESS_PX: i64 = 6;
+const GLOW_THICKNESS_PX: i64 = 8;
 const GLOW_PEAK_OPACITY: f64 = 0.5;
 
 fn glow_padding_cells(cell_size: i64) -> i64 {

@@ -12,8 +12,8 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
-const GLOW_STROKE_WIDTH: i64 = 6;
-const GLOW_BLUR_STD_DEVIATION: f64 = 6.0;
+const GLOW_STROKE_WIDTH: i64 = 8;
+const GLOW_BLUR_STD_DEVIATION: f64 = 8.0;
 const GLOW_FILTER_ID: &str = "glow";
 
 fn label_font_size() -> f64 {
@@ -790,6 +790,11 @@ mod tests {
         assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
         assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
         assert!(glow.contains("fill=\"none\""));
+        let blur = svg
+            .split('<')
+            .find(|element| element.starts_with("feGaussianBlur "))
+            .expect("the selected box renders a glow blur");
+        assert!(blur.contains(&format!("stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"")));
     }
 
     #[test]
