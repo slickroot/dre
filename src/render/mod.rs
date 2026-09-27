@@ -122,7 +122,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER, BORDERS};
+    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER, SIDE_PADDING};
     use crate::state::{new_state, Mode};
     use crate::test_support::handle_key;
 
@@ -194,7 +194,7 @@ mod tests {
         let placed = align_right(
             vec![
                 box_at(0, 0, 10, 3),
-                label_at("plans", BORDERS / 2, BORDERS / 2),
+                label_at("plans", SIDE_PADDING / 2, SIDE_PADDING / 2),
             ],
             AREA,
         );
@@ -202,7 +202,7 @@ mod tests {
         let dy = placed[0].y;
         assert_eq!(
             placed[1],
-            label_at("plans", BORDERS / 2 + dx, BORDERS / 2 + dy)
+            label_at("plans", SIDE_PADDING / 2 + dx, SIDE_PADDING / 2 + dy)
         );
     }
 
@@ -351,7 +351,7 @@ mod tests {
 
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
         let text_width = text.chars().count() as i64;
-        let box_width = text_width + BORDERS;
+        let box_width = text_width + SIDE_PADDING * 2;
         (
             foot.col + foot.cols - box_width,
             foot.row + foot.rows - FOOTER_ROWS,

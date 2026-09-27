@@ -5,8 +5,9 @@ pub(crate) const BOX_HEIGHT: i64 = 3;
 #[allow(dead_code)]
 pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
-pub(crate) const BORDERS: i64 = 2;
+pub(crate) const SIDE_PADDING: i64 = 2;
 pub(crate) const BORDER: i64 = 4;
+const BORDER_COLUMNS: i64 = 2;
 
 pub type Sides = (bool, bool, bool, bool);
 pub const ALL_SIDES: Sides = (true, true, true, true);
@@ -20,7 +21,7 @@ pub(crate) fn interior(label: &str) -> i64 {
 }
 
 pub(crate) fn width(node: &Node) -> i64 {
-    interior(node.label()) + BORDERS
+    interior(node.label()) + SIDE_PADDING * 2
 }
 
 #[allow(dead_code)]
@@ -29,7 +30,7 @@ pub(crate) fn height(_node: &Node) -> i64 {
 }
 
 pub(crate) fn centre(width: i64, label: &str) -> i64 {
-    let leftover = width - BORDERS - interior(label);
+    let leftover = width - BORDER_COLUMNS - interior(label);
     1 + leftover - leftover.div_euclid(2)
 }
 
@@ -227,7 +228,7 @@ pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
 pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
     let text_width = text.chars().count() as i64;
-    let box_width = interior(text) + BORDERS;
+    let box_width = interior(text) + SIDE_PADDING * 2;
     let corner_box = PlacementNode::Box {
         colour: None,
         fill: None,
@@ -332,7 +333,7 @@ mod tests {
             placements[1].node,
             PlacementNode::Label(Label { text, path: vec![] })
         );
-        let box_width = interior(text) + BORDERS;
+        let box_width = interior(text) + SIDE_PADDING * 2;
         assert_eq!(
             (
                 placements[0].x,
@@ -420,13 +421,13 @@ mod tests {
     }
 
     #[test]
-    fn width_is_interior_plus_borders() {
-        assert_eq!(width(&labelled("hi")), 2 + BORDERS);
+    fn width_is_interior_plus_side_padding() {
+        assert_eq!(width(&labelled("hi")), 2 + SIDE_PADDING * 2);
     }
 
     #[test]
-    fn width_of_empty_label_box_is_one_plus_borders() {
-        assert_eq!(width(&labelled("")), 1 + BORDERS);
+    fn width_of_empty_label_box_is_one_plus_side_padding() {
+        assert_eq!(width(&labelled("")), 1 + SIDE_PADDING * 2);
     }
 
     #[test]
@@ -442,7 +443,17 @@ mod tests {
 
     #[test]
     fn centre_of_a_tightly_fit_label_is_one() {
-        assert_eq!(centre(2 + BORDERS, "hi"), 1);
+        assert_eq!(centre(2 + BORDER_COLUMNS, "hi"), 1);
+    }
+
+    #[test]
+    fn centre_of_a_boxs_minimum_width_pads_both_sides_evenly() {
+        let width = interior("hi") + SIDE_PADDING * 2;
+        let start = centre(width, "hi");
+        let left_padding = start - 1;
+        let right_padding = width - 1 - interior("hi") - start;
+        assert_eq!(left_padding, right_padding);
+        assert_eq!(left_padding, SIDE_PADDING - 1);
     }
 
     #[test]
@@ -788,7 +799,7 @@ mod tests {
             let cursor = result.last().unwrap();
             assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
             assert_eq!(cursor.x, label.x + index as i64);
-            assert!(cursor.x < edited_box.x + edited_box.width - BORDERS + 1);
+            assert!(cursor.x < edited_box.x + edited_box.width - SIDE_PADDING + 1);
         }
     }
 
