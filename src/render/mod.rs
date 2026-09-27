@@ -25,7 +25,7 @@ pub trait Renderer {
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
     let mut footer = align_right(layout::footer(state.footer()), foot);
-    if let Mode::NamePrompt { name } = state.mode() {
+    if let Mode::NamePrompt { name, .. } = state.mode() {
         footer.push(Placement {
             node: PlacementNode::Cursor(Cursor),
             x: footer[1].x + name.chars().count() as i64,

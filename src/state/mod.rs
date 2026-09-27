@@ -6,7 +6,6 @@ mod input;
 mod insert;
 mod mode;
 mod name_prompt;
-mod save_prompt;
 mod text_edit;
 
 use crate::diagram::{Document, Node};
@@ -19,7 +18,6 @@ pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
 use types::Tree;
 
-const DEFAULT_FILENAME: &str = "diagram.dre";
 const NO_NAME: &str = "[no name — press n to name it]";
 const PLACEHOLDER: &str = "type a name";
 const FOOTER_SUFFIX: &str = " • dre";
@@ -106,8 +104,10 @@ impl State {
 
     pub(crate) fn refresh_footer(&mut self) {
         self.footer = match &self.mode {
-            Mode::NamePrompt { name } if name.is_empty() => format!("{PLACEHOLDER}{FOOTER_SUFFIX}"),
-            Mode::NamePrompt { name } => format!("{name}{FOOTER_SUFFIX}"),
+            Mode::NamePrompt { name, .. } if name.is_empty() => {
+                format!("{PLACEHOLDER}{FOOTER_SUFFIX}")
+            }
+            Mode::NamePrompt { name, .. } => format!("{name}{FOOTER_SUFFIX}"),
             _ => footer_text(self.save_to.as_deref()),
         };
     }
@@ -152,7 +152,6 @@ fn apply(mut state: State, action: action::Action) -> State {
     }
     history::recorded(state, &action, |state| match action.mode() {
         ActionMode::Insert => insert::reduce(state, action),
-        ActionMode::SavePrompt => save_prompt::reduce(state, action),
         ActionMode::NamePrompt => name_prompt::reduce(state, action),
         ActionMode::Command => command::reduce(state, action),
     })
@@ -440,27 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_hide_in_save_prompt_mode_leaves_the_selection_alone() {
-        let selected = vec![0];
-        let state = new_state(
-            vec![node("a")],
-            Mode::SavePrompt {
-                filename: "a.dre".to_string(),
-            },
-            Some(selected.clone()),
-        );
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.selected, Some(selected));
-        assert_eq!(hidden.last_selected, None);
-    }
-
-    #[test]
     fn an_idle_hide_in_name_prompt_mode_leaves_the_selection_alone() {
         let selected = vec![0];
         let state = new_state(
             vec![node("a")],
             Mode::NamePrompt {
                 name: "a".to_string(),
+                quits: false,
             },
             Some(selected.clone()),
         );

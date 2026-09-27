@@ -5,10 +5,8 @@ pub(crate) enum Mode {
     Insert {
         cursor: usize,
     },
-    SavePrompt {
-        filename: String,
-    },
     NamePrompt {
         name: String,
+        quits: bool,
     },
 }
