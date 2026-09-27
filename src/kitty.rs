@@ -22,12 +22,12 @@ pub(crate) fn clear() -> Command {
     Command(DELETE_ALL.to_string())
 }
 
-pub(crate) fn show(canvas: &Canvas, col: i64, row: i64) -> Command {
+pub(crate) fn show(canvas: &Canvas, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
         "\x1b[{};{}H{}",
         row + 1,
         col + 1,
-        transmission(&canvas.pixels, canvas.width, canvas.height)
+        transmission(&canvas.pixels, canvas.width, canvas.height, z)
     ))
 }
 
@@ -121,11 +121,11 @@ fn escape(keys: &str, payload: &str) -> String {
     format!("\x1b_G{keys};{payload}\x1b\\")
 }
 
-fn transmission(pixels: &[u8], width: i64, height: i64) -> String {
+fn transmission(pixels: &[u8], width: i64, height: i64, z: i32) -> String {
     let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
-        "a=T,f=32,s={width},v={height},o=z,q=2,z=-1,m={}",
+        "a=T,f=32,s={width},v={height},o=z,q=2,z={z},m={}",
         more(&chunk_list, 0)
     );
     let mut escapes = vec![escape(&header, &chunk_list[0])];
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn transmission_single_chunk_has_expected_header_and_m0() {
         let pixels = vec![1u8, 2, 3, 4];
-        let result = transmission(&pixels, 2, 1);
+        let result = transmission(&pixels, 2, 1, -1);
 
         let expected_payload = encode(&pixels);
         let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0".to_string();
@@ -221,7 +221,7 @@ mod tests {
                 (state >> 16) as u8
             })
             .collect();
-        let result = transmission(&pixels, 100, 100);
+        let result = transmission(&pixels, 100, 100, -1);
 
         let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
@@ -259,10 +259,10 @@ mod tests {
             height: 1,
         };
         assert_eq!(
-            show(&canvas, 3, 5).to_string(),
+            show(&canvas, 3, 5, -1).to_string(),
             format!(
                 "\x1b[6;4H{}",
-                transmission(&canvas.pixels, canvas.width, canvas.height)
+                transmission(&canvas.pixels, canvas.width, canvas.height, -1)
             )
         );
     }
