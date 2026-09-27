@@ -7,6 +7,7 @@ pub(crate) const GAP_HEIGHT: i64 = 3;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const SIDE_PADDING: i64 = 2;
 pub(crate) const BORDER: i64 = 4;
+const BORDER_COLUMNS: i64 = 2;
 
 pub type Sides = (bool, bool, bool, bool);
 pub const ALL_SIDES: Sides = (true, true, true, true);
@@ -29,7 +30,7 @@ pub(crate) fn height(_node: &Node) -> i64 {
 }
 
 pub(crate) fn centre(width: i64, label: &str) -> i64 {
-    let leftover = width - SIDE_PADDING * 2 - interior(label);
+    let leftover = width - BORDER_COLUMNS - interior(label);
     1 + leftover - leftover.div_euclid(2)
 }
 
@@ -437,12 +438,22 @@ mod tests {
 
     #[test]
     fn centre_centers_the_label_within_the_box() {
-        assert_eq!(centre(7, "hi"), 2);
+        assert_eq!(centre(7, "hi"), 3);
     }
 
     #[test]
     fn centre_of_a_tightly_fit_label_is_one() {
-        assert_eq!(centre(2 + SIDE_PADDING * 2, "hi"), 1);
+        assert_eq!(centre(2 + BORDER_COLUMNS, "hi"), 1);
+    }
+
+    #[test]
+    fn centre_of_a_boxs_minimum_width_pads_both_sides_evenly() {
+        let width = interior("hi") + SIDE_PADDING * 2;
+        let start = centre(width, "hi");
+        let left_padding = start - 1;
+        let right_padding = width - 1 - interior("hi") - start;
+        assert_eq!(left_padding, right_padding);
+        assert_eq!(left_padding, SIDE_PADDING - 1);
     }
 
     #[test]
