@@ -6,6 +6,7 @@ mod insert;
 mod mode;
 mod name_prompt;
 mod save_prompt;
+mod text_edit;
 
 use crate::diagram::{Document, Node};
 use crate::state::action::ActionMode;
@@ -16,7 +17,6 @@ pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
 use types::Tree;
 
-const PAD: &str = " ";
 const DEFAULT_FILENAME: &str = "diagram.dre";
 const NO_NAME: &str = "[no name]";
 const PLACEHOLDER: &str = "type a name";
@@ -171,9 +171,8 @@ pub fn reduce(state: State, key: Option<&str>) -> State {
 fn add_child_box(mut state: State, selected: Option<Vec<usize>>) -> State {
     let parent = selected.unwrap_or_default();
     let new = state.doc.insert(&parent, &Tree::leaf(Node::default()));
-    state.doc.set_label(&new, PAD.to_string());
     state.selected = Some(new);
-    state.mode = Mode::Insert;
+    state.mode = Mode::Insert { cursor: 0 };
     state
 }
 
@@ -214,6 +213,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::state::action::Action;
     use crate::state::apply as reduce;
+    use crate::state::text_edit::TextKey;
     use crate::test_support::handle_key;
 
     fn footer_of(path: &str) -> String {
@@ -314,9 +314,9 @@ mod tests {
     fn add_child_box_without_a_selection_grows_a_top_level_box_and_enters_insert_mode() {
         let state = new_state(vec![], Mode::Command, None);
         let result = add_child_box(state, None);
-        assert_eq!(*result.doc.tree(), Tree::root(vec![node(PAD)]));
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("")]));
         assert_eq!(result.selected, Some(vec![0]));
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
     }
 
     #[test]
@@ -325,10 +325,10 @@ mod tests {
         let result = add_child_box(state, Some(vec![0]));
         assert_eq!(
             *result.doc.tree(),
-            Tree::root(vec![node_with_children("a", vec![node(PAD)])])
+            Tree::root(vec![node_with_children("a", vec![node("")])])
         );
         assert_eq!(result.selected, Some(vec![0, 0]));
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
     }
 
     #[test]
@@ -414,7 +414,11 @@ mod tests {
     #[test]
     fn an_idle_hide_in_insert_mode_leaves_the_selection_alone() {
         let selected = vec![0];
-        let state = new_state(vec![node("a")], Mode::Insert, Some(selected.clone()));
+        let state = new_state(
+            vec![node("a")],
+            Mode::Insert { cursor: 1 },
+            Some(selected.clone()),
+        );
         let hidden = reduce(state, Action::Idle);
         assert_eq!(hidden.selected, Some(selected));
         assert_eq!(hidden.last_selected, None);
@@ -503,7 +507,10 @@ mod tests {
     #[test]
     fn commit_and_add_child_after_an_edit_leaves_two_snapshots() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let typed = reduce(reduce(before, Action::EditLabel), Action::InsertAppend('b'));
+        let typed = reduce(
+            reduce(before, Action::EditLabel),
+            Action::InsertKey(TextKey::Char('b')),
+        );
         let result = reduce(typed, Action::CommitAndAddChild);
         assert_eq!(result.history.len(), 2);
     }
@@ -513,7 +520,7 @@ mod tests {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let typed = reduce(
             reduce(before.clone(), Action::EditLabel),
-            Action::InsertAppend('b'),
+            Action::InsertKey(TextKey::Char('b')),
         );
         let committed = reduce(typed, Action::CommitAndAddChild);
         let once = reduce(committed, Action::Undo);

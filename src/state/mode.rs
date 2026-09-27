@@ -2,7 +2,9 @@
 pub(crate) enum Mode {
     #[default]
     Command,
-    Insert,
+    Insert {
+        cursor: usize,
+    },
     SavePrompt {
         filename: String,
     },

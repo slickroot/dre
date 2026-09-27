@@ -42,7 +42,7 @@ pub(super) fn recorded(
     let undoable = is_undoable(action);
     let state = if undoable { snapshot(state) } else { state };
     let state = reduce(state);
-    if undoable || *action == Action::Commit {
+    if (undoable && *action != Action::EditLabel) || *action == Action::Commit {
         drop_snapshot_if_unchanged(state)
     } else {
         state
@@ -70,6 +70,7 @@ pub(super) fn undo(mut state: State) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::text_edit::TextKey;
     use crate::state::{new_state, Mode};
 
     fn command_state() -> State {
@@ -131,8 +132,8 @@ mod tests {
 
     #[test]
     fn typing_in_insert_mode_is_not_undoable() {
-        assert!(!is_undoable(&Action::InsertAppend('a')));
-        assert!(!is_undoable(&Action::InsertBackspace));
+        assert!(!is_undoable(&Action::InsertKey(TextKey::Char('a'))));
+        assert!(!is_undoable(&Action::InsertKey(TextKey::Backspace)));
         assert!(!is_undoable(&Action::Commit));
     }
 }

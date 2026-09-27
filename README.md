@@ -119,6 +119,8 @@ rounded corners, and arrows, but no cursor or selection.
 | `Enter` | Finish the box and add a child box |
 | `Esc` | Switch to command mode |
 | `Backspace` | Remove the last character |
+| `←` | Move the cursor left |
+| `→` | Move the cursor right |
 
 <!-- insert-keymap:end -->
 

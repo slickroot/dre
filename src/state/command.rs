@@ -2,7 +2,7 @@ use crate::diagram::{children, parent_of, Scope};
 use crate::palette::next_on_palette;
 use crate::state::action::Action;
 use crate::state::history::undo;
-use crate::state::{add_child_box, Mode, State, DEFAULT_FILENAME, PAD};
+use crate::state::{add_child_box, Mode, State, DEFAULT_FILENAME};
 
 pub(crate) fn min_depth(command: Action) -> usize {
     match command {
@@ -31,13 +31,6 @@ fn open_name_prompt(mut state: State) -> State {
 fn interrupt(mut state: State) -> State {
     state.set_save_to(None);
     state.running = false;
-    state
-}
-
-fn enter_insert(mut state: State, path: Vec<usize>, base_label: &str) -> State {
-    state.doc.set_label(&path, format!("{base_label}{PAD}"));
-    state.selected = Some(path);
-    state.mode = Mode::Insert;
     state
 }
 
@@ -82,15 +75,17 @@ fn repeat(
     state
 }
 
-fn edit_label(state: State, path: Vec<usize>) -> State {
-    let label = state.doc.tree().value(&path).label().to_string();
-    enter_insert(state, path, &label)
+fn edit_label(mut state: State, path: Vec<usize>) -> State {
+    let cursor = state.doc.tree().value(&path).label().chars().count();
+    state.selected = Some(path);
+    state.mode = Mode::Insert { cursor };
+    state
 }
 
 fn rename_label(mut state: State, path: Vec<usize>) -> State {
-    state.doc.set_label(&path, PAD.to_string());
+    state.doc.set_label(&path, String::new());
     state.selected = Some(path);
-    state.mode = Mode::Insert;
+    state.mode = Mode::Insert { cursor: 0 };
     state
 }
 
@@ -297,8 +292,8 @@ mod tests {
     fn b_on_an_empty_canvas_appends_a_box_enters_insert_and_selects_it() {
         let state = new_state(vec![], Mode::Command, None);
         let result: State = handle_key(state, "b");
-        assert_eq!(*result.doc.tree(), Tree::root(vec![node(PAD)]));
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("")]));
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
         assert_eq!(result.selected, Some(vec![0]));
         assert!(result.running);
     }
@@ -316,10 +311,10 @@ mod tests {
         let result = handle_key(state, "b");
         assert_eq!(
             *result.doc.tree(),
-            Tree::root(vec![node_with_children("a", vec![node(PAD)])])
+            Tree::root(vec![node_with_children("a", vec![node("")])])
         );
         assert_eq!(result.selected, Some(vec![0, 0]));
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
     }
 
     #[test]
@@ -331,7 +326,7 @@ mod tests {
         let result = handle_key(state, "b");
         assert_eq!(
             *result.doc.tree(),
-            Tree::root(vec![node_with_children("a", vec![node(""), node(PAD)])])
+            Tree::root(vec![node_with_children("a", vec![node(""), node("")])])
         );
         assert_eq!(result.selected, Some(vec![0, 1]));
     }
@@ -410,9 +405,9 @@ mod tests {
     fn s_on_a_top_level_box_appends_a_sibling() {
         let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         let result = handle_key(state, "s");
-        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a"), node(PAD)]));
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a"), node("")]));
         assert_eq!(result.selected, Some(vec![1]));
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
     }
 
     #[test]
@@ -422,7 +417,7 @@ mod tests {
         let result = handle_key(state, "s");
         assert_eq!(
             *result.doc.tree(),
-            Tree::root(vec![node_with_children("a", vec![node("b"), node(PAD)])])
+            Tree::root(vec![node_with_children("a", vec![node("b"), node("")])])
         );
         assert_eq!(result.selected, Some(vec![0, 1]));
     }
@@ -651,15 +646,12 @@ mod tests {
     }
 
     #[test]
-    fn i_enters_insert_and_appends_pad_to_the_selected_boxs_label() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![1]));
+    fn i_enters_insert_with_the_cursor_at_the_end_of_the_selected_boxs_label() {
+        let state = new_state(vec![node("a"), node("bcd")], Mode::Command, Some(vec![1]));
         let result = handle_key(state, "i");
-        assert_eq!(result.mode, Mode::Insert);
+        assert_eq!(result.mode, Mode::Insert { cursor: 3 });
         assert_eq!(result.selected, Some(vec![1]));
-        assert_eq!(
-            *result.doc.tree(),
-            Tree::root(vec![node("a"), node(&format!("b{PAD}"))])
-        );
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a"), node("bcd")]));
     }
 
     #[test]
@@ -674,8 +666,8 @@ mod tests {
     fn capital_i_clears_the_selected_boxs_label() {
         let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![1]));
         let result = handle_key(state, "I");
-        assert_eq!(result.mode, Mode::Insert);
-        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a"), node(PAD)]));
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("a"), node("")]));
     }
 
     #[test]

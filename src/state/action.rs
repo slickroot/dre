@@ -1,3 +1,5 @@
+use crate::state::text_edit::TextKey;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Action {
     Undo,
@@ -23,8 +25,7 @@ pub(crate) enum Action {
     CancelCount,
     Commit,
     CommitAndAddChild,
-    InsertBackspace,
-    InsertAppend(char),
+    InsertKey(TextKey),
     Confirm,
     Cancel,
     SavePromptBackspace,
@@ -47,10 +48,7 @@ pub(crate) enum ActionMode {
 impl Action {
     pub(crate) fn mode(&self) -> ActionMode {
         match self {
-            Action::Commit
-            | Action::CommitAndAddChild
-            | Action::InsertBackspace
-            | Action::InsertAppend(_) => ActionMode::Insert,
+            Action::Commit | Action::CommitAndAddChild | Action::InsertKey(_) => ActionMode::Insert,
             Action::Confirm
             | Action::Cancel
             | Action::SavePromptBackspace
@@ -91,7 +89,10 @@ mod tests {
 
     #[test]
     fn actions_map_to_their_mode() {
-        assert_eq!(Action::InsertAppend('a').mode(), ActionMode::Insert);
+        assert_eq!(
+            Action::InsertKey(TextKey::Char('a')).mode(),
+            ActionMode::Insert
+        );
         assert_eq!(Action::Confirm.mode(), ActionMode::SavePrompt);
         assert_eq!(Action::NameConfirm.mode(), ActionMode::NamePrompt);
         assert_eq!(Action::OpenNamePrompt.mode(), ActionMode::Command);
