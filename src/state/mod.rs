@@ -6,6 +6,7 @@ mod insert;
 mod mode;
 mod name_prompt;
 mod save_prompt;
+mod text_edit;
 
 use crate::diagram::{Document, Node};
 use crate::state::action::ActionMode;
