@@ -1,5 +1,6 @@
 use crate::diagram::{children, Node};
 use crate::palette::FOREGROUND;
+use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
 use types::Tree;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
@@ -9,9 +10,6 @@ pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const SIDE_PADDING: i64 = 2;
 pub(crate) const BORDER: i64 = 4;
 const BORDER_COLUMNS: i64 = 2;
-
-pub(crate) const BOX_FILL_OPACITY: f64 = 0.3;
-pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 pub type Sides = (bool, bool, bool, bool);
 pub const ALL_SIDES: Sides = (true, true, true, true);

@@ -5,7 +5,7 @@ use super::{
     CELL_WIDTH,
 };
 use crate::composer::Area;
-use crate::layout::{Placement, PlacementNode, ALL_SIDES, BORDER};
+use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, BORDER, NO_SIDES};
 use crate::state::State;
 
 const ARROW_STROKE: i64 = BORDER / 4;
@@ -128,15 +128,16 @@ fn paint(placements: &[Placement]) -> String {
         if let PlacementNode::Box {
             colour,
             fill,
+            opacity,
             rounded,
             sides,
             ..
         } = &placement.node
         {
-            if *sides != ALL_SIDES {
+            if *sides != ALL_SIDES && fill.is_none() {
                 continue;
             }
-            svg.push_str(&rect(placement, *colour, *fill, *rounded));
+            svg.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
         }
     }
     for placement in placements {
@@ -244,31 +245,39 @@ fn rect(
     placement: &crate::layout::Placement,
     edge: Option<u8>,
     fill: Option<u8>,
+    opacity: Option<f64>,
     rounded: bool,
+    sides: Sides,
 ) -> String {
-    use super::{OPAQUE, ROUNDED_RADIUS};
+    use super::ROUNDED_RADIUS;
     use crate::layout::BORDER;
     use std::fmt::Write as _;
 
-    let (r, g, b) = colour(edge);
-    let stroke = format!("rgb({r},{g},{b})");
     let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT,
         placement.width * CELL_WIDTH,
         placement.height * CELL_HEIGHT,
-        BORDER / 2,
     );
+    if sides != NO_SIDES {
+        let (r, g, b) = colour(edge);
+        write!(
+            rect,
+            " stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
+            BORDER / 2
+        )
+        .unwrap();
+    }
     if rounded {
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
     if let Some(colour) = fill {
         let (fr, fg, fb) = crate::palette::palette(colour).unwrap();
-        let opacity = super::FILL_ALPHA as f64 / OPAQUE as f64;
+        let fill_opacity = opacity.unwrap_or(0.0);
         write!(
             rect,
-            " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{opacity}\""
+            " fill=\"rgb({fr},{fg},{fb})\" fill-opacity=\"{fill_opacity}\""
         )
         .unwrap();
     } else {
@@ -297,10 +306,10 @@ mod tests {
     use super::super::arrowhead_slope;
     use super::super::centre;
     use super::super::colour;
+    use super::super::BOX_FILL_OPACITY;
     use super::super::CELL_HEIGHT;
     use super::super::CELL_WIDTH;
-    use super::super::FILL_ALPHA;
-    use super::super::OPAQUE;
+    use super::super::FOOTER_FILL_OPACITY;
     use super::super::ROUNDED_RADIUS;
     use super::*;
     use crate::composer::Area;
@@ -309,7 +318,7 @@ mod tests {
     use crate::layout::with_cursor;
     use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, SIDE_PADDING};
     use crate::layout::{Arrow, Cursor, Label, Placement};
-    use crate::palette::{palette, BACKGROUND};
+    use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
 
     fn box_placement(
@@ -325,9 +334,26 @@ mod tests {
             node: PlacementNode::Box {
                 colour,
                 fill,
-                opacity: None,
+                opacity: fill.map(|_| BOX_FILL_OPACITY),
                 rounded,
                 sides: ALL_SIDES,
+                border: BORDER,
+            },
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn footer_placement(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
+        Placement {
+            node: PlacementNode::Box {
+                colour: None,
+                fill: Some(FOREGROUND),
+                opacity: Some(FOOTER_FILL_OPACITY),
+                rounded: false,
+                sides: NO_SIDES,
                 border: BORDER,
             },
             x,
@@ -417,7 +443,7 @@ mod tests {
     }
 
     fn fill_opacity() -> String {
-        format!("{}", FILL_ALPHA as f64 / OPAQUE as f64)
+        format!("{BOX_FILL_OPACITY}")
     }
 
     #[test]
@@ -473,6 +499,32 @@ mod tests {
         assert!(svg.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
         assert!(svg.contains(&format!("fill=\"{}\"", rgb(palette(1).unwrap()))));
         assert!(svg.contains(&format!("fill-opacity=\"{}\"", fill_opacity())));
+    }
+
+    #[test]
+    fn a_filled_all_sides_box_uses_the_box_fill_opacity() {
+        let placements = vec![box_placement(0, 0, 4, 3, Some(1), Some(1), false)];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains(&format!("fill-opacity=\"{BOX_FILL_OPACITY}\"")));
+    }
+
+    #[test]
+    fn a_footer_box_is_filled_without_a_visible_border() {
+        let placements = vec![footer_placement(0, 0, 7, 3)];
+
+        let svg = draw(&placements);
+
+        let rect = svg
+            .split("</svg>")
+            .next()
+            .expect("the document closes the svg tag")
+            .split('<')
+            .find(|element| element.starts_with("rect ") && !element.contains(&background_fill()))
+            .expect("the footer box renders a filled rect");
+        assert!(!rect.contains("stroke="));
+        assert!(rect.contains(&format!("fill-opacity=\"{FOOTER_FILL_OPACITY}\"")));
     }
 
     #[test]
@@ -1320,10 +1372,20 @@ mod tests {
         )
     }
 
-    // The footer box's sides are all disabled, so `paint` (which only draws a
-    // box rect when every side is on) does not render it: only the label appears.
+    fn footer_rect(foot: Area) -> String {
+        let area = footer_box_area(foot);
+        format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" fill-opacity=\"{FOOTER_FILL_OPACITY}\"/>",
+            area.col * CELL_WIDTH,
+            area.row * CELL_HEIGHT,
+            area.cols * CELL_WIDTH,
+            area.rows * CELL_HEIGHT,
+            rgb(palette(FOREGROUND).unwrap()),
+        )
+    }
+
     fn padded_footer(foot: Area) -> String {
-        padded_footer_label(foot)
+        format!("{}{}", footer_rect(foot), padded_footer_label(foot))
     }
 
     #[test]
