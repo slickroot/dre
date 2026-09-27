@@ -47,8 +47,8 @@ prompt. In command mode, every key runs a command (see the table below);
 mode.
 
 To quit, press `q`. With a filename, `q` saves to that file and quits. Without
-a filename, `q` asks "Save as:" — pre-filled with `diagram.dre` — and `Enter`
-saves, `Esc` quits without saving. `Ctrl-C` quits without saving.
+a filename, `q` asks for one, and `Enter` saves and quits, `Esc` quits
+without saving. `Ctrl-C` quits without saving.
 
 ## Example
 
@@ -130,7 +130,7 @@ Any printable character appends to the label.
 ## Other keys
 
 Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
-removes a character from the filename.
+removes a character from the name.
 
 `Ctrl-C` quits without saving.
 

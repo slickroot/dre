@@ -392,6 +392,20 @@ mod tests {
         assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
     }
 
+    #[test]
+    fn the_quit_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
+        let state = handle_key(state(None), "q");
+        let text = "type a name \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
+    }
+
+    #[test]
+    fn the_quit_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
+        let state = handle_key(handle_key(handle_key(state(None), "q"), "a"), "b");
+        let text = "ab \u{2022} dre";
+        assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
+    }
+
     fn assert_footer_is_bottom_right_with_cursor(state: &State, text: &str, x: i64) {
         let foot = foot_of(WINDOW);
         let (box_x, box_y, box_width, _) = box_at_bottom_right(foot, text);
