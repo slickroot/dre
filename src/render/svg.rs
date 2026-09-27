@@ -307,7 +307,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
     use crate::layout::with_cursor;
-    use crate::layout::{centre as centre_label, BORDERS, BOX_HEIGHT, FOOTER_ROWS};
+    use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, SIDE_PADDING};
     use crate::layout::{Arrow, Cursor, Label, Placement};
     use crate::palette::{palette, BACKGROUND};
     use crate::state::Mode;
@@ -1301,7 +1301,7 @@ mod tests {
     }
 
     fn footer_box_area(foot: Area) -> Area {
-        let width = footer_width() + BORDERS;
+        let width = footer_width() + SIDE_PADDING * 2;
         Area {
             col: foot.col + foot.cols - width,
             row: foot.row + foot.rows - FOOTER_ROWS,
