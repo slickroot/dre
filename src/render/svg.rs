@@ -345,6 +345,7 @@ mod tests {
                 rounded,
                 sides: ALL_SIDES,
                 border: BORDER,
+                selected: false,
             },
             x,
             y,
@@ -362,6 +363,7 @@ mod tests {
                 rounded: false,
                 sides: NO_SIDES,
                 border: BORDER,
+                selected: false,
             },
             x,
             y,
@@ -1439,7 +1441,7 @@ mod tests {
 
         let diagram = centre(
             with_cursor(
-                diagram(state.doc().tree(), None),
+                diagram(state.doc().tree(), None, state.selected()),
                 state.selected().map(<[usize]>::to_vec),
                 None,
             ),

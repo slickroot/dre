@@ -44,7 +44,7 @@ pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
     };
     centre(
         with_cursor(
-            layout::diagram(state.doc().tree(), editing),
+            layout::diagram(state.doc().tree(), editing, state.selected()),
             state.selected().map(<[usize]>::to_vec),
             edit_index,
         ),
@@ -149,6 +149,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            selected: false,
         }
     }
 
@@ -308,7 +309,7 @@ mod tests {
         let body = body_of(WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(layout::diagram(state.doc().tree(), None), body)
+            centre(layout::diagram(state.doc().tree(), None, None), body)
         );
     }
 
@@ -326,7 +327,11 @@ mod tests {
         assert_eq!(
             screen[0].1,
             centre(
-                with_cursor(layout::diagram(state.doc().tree(), None), selected, None),
+                with_cursor(
+                    layout::diagram(state.doc().tree(), None, state.selected()),
+                    selected,
+                    None,
+                ),
                 body_of(WINDOW)
             )
         );

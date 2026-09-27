@@ -104,6 +104,7 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             rounded,
             sides,
             border,
+            selected: _,
         } => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
@@ -349,6 +350,7 @@ impl TerminalRenderer {
                 rounded,
                 sides,
                 border,
+                selected: _,
             } => (*colour, *fill, *opacity, *rounded, *sides, *border),
             _ => unreachable!("outline_box is only called for Box placements"),
         };
@@ -672,6 +674,7 @@ mod tests {
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
+            selected: false,
         }
     }
 
@@ -683,6 +686,7 @@ mod tests {
                 opacity,
                 rounded,
                 border,
+                selected,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -691,6 +695,7 @@ mod tests {
                 rounded,
                 sides: new_sides,
                 border,
+                selected,
             },
             _ => panic!("expected a Box"),
         }
@@ -704,6 +709,7 @@ mod tests {
                 opacity,
                 rounded,
                 sides,
+                selected,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -712,6 +718,7 @@ mod tests {
                 rounded,
                 sides,
                 border: new_border,
+                selected,
             },
             _ => panic!("expected a Box"),
         }
@@ -1891,7 +1898,7 @@ mod tests {
     }
 
     fn leaf_box(state: &State) -> Placement<'_> {
-        crate::layout::diagram(state.doc().tree(), None)
+        crate::layout::diagram(state.doc().tree(), None, None)
             .into_iter()
             .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .unwrap()
