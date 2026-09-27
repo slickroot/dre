@@ -24,7 +24,6 @@ fn is_undoable(action: &Action) -> bool {
 
 fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
-    state.dirty = true;
     state
 }
 
@@ -72,18 +71,6 @@ pub(super) fn undo(mut state: State) -> State {
 mod tests {
     use super::*;
     use crate::state::text_edit::TextKey;
-    use crate::state::{new_state, Mode};
-
-    fn command_state() -> State {
-        new_state(vec![], Mode::Command, None)
-    }
-
-    #[test]
-    fn snapshot_marks_the_state_as_dirty() {
-        let state = command_state();
-        assert!(!state.dirty);
-        assert!(snapshot(state).dirty);
-    }
 
     #[test]
     fn scroll_idle_and_interrupt_are_not_undoable() {
