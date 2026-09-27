@@ -1,13 +1,13 @@
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum TextKey {
+    #[allow(dead_code)]
     Left,
+    #[allow(dead_code)]
     Right,
     Backspace,
     Char(char),
 }
 
-#[allow(dead_code)]
 pub(crate) fn edit(text: &str, cursor: usize, key: TextKey) -> (String, usize) {
     let mut chars: Vec<char> = text.chars().collect();
     let cursor = match key {

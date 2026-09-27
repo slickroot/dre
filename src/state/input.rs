@@ -1,4 +1,5 @@
 use crate::state::action::Action;
+use crate::state::text_edit::TextKey;
 use crate::state::{KeyBinding, Mode, State};
 
 pub(crate) const INTERRUPT: &str = "\x03";
@@ -6,7 +7,7 @@ pub(crate) const INTERRUPT: &str = "\x03";
 pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
     match &state.mode {
         Mode::Command => command_parse(key),
-        Mode::Insert => insert_parse(key),
+        Mode::Insert { .. } => insert_parse(key),
         Mode::SavePrompt { .. } => save_prompt_parse(key),
         Mode::NamePrompt { .. } => name_prompt_parse(key),
     }
@@ -43,8 +44,8 @@ fn insert_parse(key: &str) -> Option<Action> {
     match key {
         "\x1b" => Some(Action::Commit),
         "\r" => Some(Action::CommitAndAddChild),
-        "\x7f" => Some(Action::InsertBackspace),
-        _ => printable(key).map(Action::InsertAppend),
+        "\x7f" => Some(Action::InsertKey(TextKey::Backspace)),
+        _ => printable(key).map(|c| Action::InsertKey(TextKey::Char(c))),
     }
 }
 
@@ -178,7 +179,7 @@ pub(crate) const INSERT_KEYMAP: &[KeyBinding<Action>] = &[
     },
     KeyBinding {
         keys: &["Backspace"],
-        command: Action::InsertBackspace,
+        command: Action::InsertKey(TextKey::Backspace),
         description: "Remove the last character",
     },
 ];
@@ -224,8 +225,8 @@ mod tests {
     fn parse_dispatches_on_the_mode() {
         assert_eq!(parse(&key_state(Mode::Command), "b"), Some(Action::NewBox));
         assert_eq!(
-            parse(&key_state(Mode::Insert), "b"),
-            Some(Action::InsertAppend('b'))
+            parse(&key_state(Mode::Insert { cursor: 0 }), "b"),
+            Some(Action::InsertKey(TextKey::Char('b')))
         );
         let prompt = Mode::SavePrompt {
             filename: String::new(),
@@ -394,17 +395,26 @@ mod tests {
 
     #[test]
     fn parse_maps_delete_to_backspace() {
-        assert_eq!(insert_parse("\x7f"), Some(Action::InsertBackspace));
+        assert_eq!(
+            insert_parse("\x7f"),
+            Some(Action::InsertKey(TextKey::Backspace))
+        );
     }
 
     #[test]
     fn parse_maps_the_lower_printable_boundary_to_append() {
-        assert_eq!(insert_parse("\x20"), Some(Action::InsertAppend('\x20')));
+        assert_eq!(
+            insert_parse("\x20"),
+            Some(Action::InsertKey(TextKey::Char('\x20')))
+        );
     }
 
     #[test]
     fn parse_maps_the_upper_printable_boundary_to_append() {
-        assert_eq!(insert_parse("\x7e"), Some(Action::InsertAppend('\x7e')));
+        assert_eq!(
+            insert_parse("\x7e"),
+            Some(Action::InsertKey(TextKey::Char('\x7e')))
+        );
     }
 
     #[test]
