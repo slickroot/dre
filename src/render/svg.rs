@@ -85,16 +85,22 @@ fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) ->
     let content = canvas_content(areas);
     match mode {
         Mode::Editor => format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{}{content}</svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{}{}{content}</svg>",
+            font_face_defs(),
             background_rect(0, 0, &width.to_string(), &height.to_string())
         ),
         Mode::Export => format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">{}<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">{content}</svg></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">{}{}<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">{content}</svg></svg>",
+            font_face_defs(),
             background_rect(0, 0, "100%", "100%"),
             width / 2,
             height / 2
         ),
     }
+}
+
+fn font_face_defs() -> String {
+    "<defs><style>@font-face{font-family:\"Iosevka\";src:url(\"https://raw.githubusercontent.com/slickroot/dre/main/assets/IosevkaRegular.ttf\") format(\"truetype\");}</style></defs>".to_string()
 }
 
 fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
@@ -282,7 +288,7 @@ fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label
     let chars = label.text.chars().count() as i64;
     let (r, g, b) = colour(None);
     format!(
-        "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
         label_font_size(),
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
@@ -506,11 +512,16 @@ mod tests {
 
         let background = expected_background(0, 0, 0, 0);
         let opening_end = svg.find('>').expect("the document opens with the svg tag") + 1;
+        assert!(
+            svg[opening_end..].starts_with(&expected_font_face()),
+            "the font-face defs immediately follow the opening svg tag"
+        );
+        let font_face_end = opening_end + expected_font_face().len();
         assert_eq!(
             svg.find(&background)
                 .expect("the background rect is emitted"),
-            opening_end,
-            "the background rect immediately follows the opening svg tag"
+            font_face_end,
+            "the background rect immediately follows the font-face defs"
         );
 
         let body = svg
@@ -539,7 +550,7 @@ mod tests {
             .find(&background)
             .expect("the background rect is emitted");
         let opening_end = svg.find('>').expect("the document opens with the svg tag") + 1;
-        assert_eq!(background_pos, opening_end);
+        assert_eq!(background_pos, opening_end + expected_font_face().len());
 
         let body = svg
             .split("</svg>")
@@ -560,8 +571,8 @@ mod tests {
         }
 
         assert!(
-            background_pos < svg.find("<defs>").expect("arrows emit defs"),
-            "the background rect precedes defs"
+            background_pos < svg.find("<marker").expect("arrows emit a marker"),
+            "the background rect precedes the arrow marker defs"
         );
         assert!(
             background_pos < svg.find("<text").expect("labels draw text"),
@@ -667,7 +678,7 @@ mod tests {
         let svg = draw(&placements);
 
         assert!(svg.contains(&format!(
-            "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\"",
+            "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\"",
             label_font_size(),
             label_x * CELL_WIDTH,
             label_y * CELL_HEIGHT + CELL_HEIGHT / 2,
@@ -857,7 +868,7 @@ mod tests {
         let svg = draw(&placements);
 
         let group_open = format!("<g opacity=\"{ARROW_OPACITY}\">");
-        let without_defs = svg.split_once("</defs>").expect("arrows emit defs").1;
+        let without_defs = svg.rsplit_once("</defs>").expect("arrows emit defs").1;
         let outside_groups = without_defs
             .split(&group_open)
             .enumerate()
@@ -919,10 +930,12 @@ mod tests {
         assert!(svg.contains(&format!("stroke=\"{}\"", rgb(colour(None)))));
         assert!(svg.contains(&format!("stroke-width=\"{}\"", ARROW_STROKE)));
         assert!(svg.contains("fill=\"none\""));
-        let marker = svg
-            .split("</defs>")
-            .next()
-            .expect("arrows emit a defs block")
+        let marker_start = svg.find("<marker").expect("arrows emit a marker");
+        let marker_end = svg[marker_start..]
+            .find("</defs>")
+            .expect("the marker defs block closes")
+            + marker_start;
+        let marker = svg[marker_start..marker_end]
             .split('<')
             .find(|element| element.starts_with("path "))
             .expect("the marker contains a path");
@@ -935,7 +948,12 @@ mod tests {
 
         let svg = draw(&placements);
 
-        assert!(!svg.contains("<defs>"));
+        assert_eq!(
+            svg.matches("<defs>").count(),
+            1,
+            "only the font-face defs are emitted without arrows"
+        );
+        assert!(svg.contains(&expected_font_face()));
         assert!(!svg.contains("marker-end"));
         assert!(!svg.contains("arrowhead"));
     }
@@ -945,6 +963,10 @@ mod tests {
             "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"{}\"/>",
             background_fill()
         )
+    }
+
+    fn expected_font_face() -> String {
+        "<defs><style>@font-face{font-family:\"Iosevka\";src:url(\"https://raw.githubusercontent.com/slickroot/dre/main/assets/IosevkaRegular.ttf\") format(\"truetype\");}</style></defs>".to_string()
     }
 
     fn expected_marker() -> String {
@@ -1006,7 +1028,7 @@ mod tests {
     fn label_at(x: i64, y: i64, text: &str) -> String {
         let chars = text.chars().count() as i64;
         format!(
-            "<text xml:space=\"preserve\" font-family=\"monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\">{text}</text>",
+            "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\">{text}</text>",
             label_font_size(),
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
@@ -1106,8 +1128,9 @@ mod tests {
         ]
         .concat();
         let expected = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>{}{}{}{}</svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" {}>{}{}{}{}{}</svg>",
             root_size(window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
+            expected_font_face(),
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
@@ -1417,7 +1440,8 @@ mod tests {
                 .replace("width=\"0\"", "width=\"100%\"")
                 .replace("height=\"0\"", "height=\"100%\"");
             assert!(svg.starts_with(&format!(
-                "{SCALING_ROOT}{screen_background}{}",
+                "{SCALING_ROOT}{}{screen_background}{}",
+                expected_font_face(),
                 viewport_open(FULL_HD_WIDTH, FULL_HD_HEIGHT)
             )));
             assert!(svg.ends_with("</svg></svg>"));
