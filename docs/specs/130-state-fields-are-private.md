@@ -85,6 +85,12 @@ impl State {
 - `editor/controller`'s `stopped(state)` becomes `state.with_running(false)`.
 - `render/terminal.rs`'s dirty-marker test uses `.with_dirty(true)`.
 - They exist in test builds only, so production code still cannot set a field.
+- `stopped` and `marked` stay as small local helpers in each test module,
+  rewritten on top of the builders (`stopped(marked(9))` becomes
+  `State::default().with_pending_count(9).with_running(false)`).
+- `with_running` is needed: the controller's tests use a `MockReducer` on
+  purpose, and it has to hand back a stopped state.
+- A new builder is added only when a test needs a field it cannot set yet.
 
 ### Inside `state/`
 
@@ -99,3 +105,15 @@ keep using the fields directly.
   digits for a pending count): correct, but long fixtures, and the tests would
   depend on keymaps they are not about.
 - Getters for every field: most are never read outside `state/`.
+- Sending a quit key through the real `reduce` to stop the loop in
+  `editor/controller`'s tests: those tests use a `MockReducer` to stay
+  independent of the keymap and the reducer.
+- `set_*` methods (`set_running`, ...): `state::reduce` is the only way to
+  change a `State`, and a setter would be a second one.
+- A closure builder (`State::default().with(|s| s.running = false)`): the
+  closure is written outside `state/`, so it still cannot touch a private
+  field.
+- One `StateSpec` struct with public fields and `State::from_spec(spec)`: it
+  can build any state, but it mirrors every field and needs `Option`s to tell
+  "not set" from `false`. Revisit it if tests start needing many fields at
+  once.
