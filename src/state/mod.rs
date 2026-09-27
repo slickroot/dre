@@ -42,7 +42,6 @@ pub struct State {
     footer: String,
     new_file: bool,
     pending_count: Option<usize>,
-    dirty: bool,
 }
 
 impl State {
@@ -139,7 +138,6 @@ impl Default for State {
             footer: footer_text(None),
             new_file: false,
             pending_count: None,
-            dirty: false,
         }
     }
 }
@@ -190,7 +188,6 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         footer: footer_text(None),
         new_file: false,
         pending_count: None,
-        dirty: false,
     }
 }
 
@@ -268,11 +265,6 @@ mod tests {
         state.set_save_to(Some("docs/plans.dre".to_string()));
         assert_eq!(state.footer(), footer_for("plans"));
         assert_eq!(state.save_to(), Some("docs/plans.dre"));
-    }
-
-    #[test]
-    fn a_default_state_is_not_dirty() {
-        assert!(!State::default().dirty);
     }
 
     #[test]
