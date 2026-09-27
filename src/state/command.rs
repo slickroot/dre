@@ -164,6 +164,15 @@ fn paste_box(mut state: State, selected: Option<Vec<usize>>, count: usize) -> St
     state
 }
 
+fn toggle_siblings_rounded(mut state: State, path: Vec<usize>) -> State {
+    let tree = state.doc.tree();
+    let all_rounded =
+        children(tree, parent_of(&path)).all(|sibling| tree.value(&sibling).rounded());
+    state.doc.set_rounded(&path, !all_rounded, Scope::Siblings);
+    state.selected = Some(path);
+    state
+}
+
 fn toggle_rounded(mut state: State, path: Vec<usize>) -> State {
     let rounded = !state.doc.tree().value(&path).rounded();
     state.doc.set_rounded(&path, rounded, Scope::Box);
@@ -235,6 +244,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
         (Action::Delete, Some(path)) => delete_box(state, path),
         (Action::Paste, selected) => paste_box(state, selected, count),
         (Action::ToggleRounded, Some(path)) => toggle_rounded(state, path),
+        (Action::ToggleSiblingsRounded, Some(path)) => toggle_siblings_rounded(state, path),
         _ => state,
     }
 }
@@ -249,7 +259,7 @@ mod tests {
     use crate::test_support::handle_key;
     use types::Tree;
 
-    const COMMANDS: [Action; 17] = [
+    const COMMANDS: [Action; 18] = [
         Action::Undo,
         Action::NewBox,
         Action::NewSibling,
@@ -266,6 +276,7 @@ mod tests {
         Action::ToggleSiblingsFill,
         Action::ToggleFill,
         Action::ToggleRounded,
+        Action::ToggleSiblingsRounded,
         Action::Quit,
     ];
 
@@ -894,6 +905,85 @@ mod tests {
         let result = handle_key(state.clone(), "F");
         assert_eq!(*result.doc.tree(), *state.doc.tree());
         assert_eq!(result.selected, state.selected);
+    }
+
+    #[test]
+    fn capital_r_with_nothing_selected_does_nothing() {
+        let state = new_state(vec![node("a")], Mode::Command, None);
+        let result = handle_key(state.clone(), "R");
+        assert_eq!(*result.doc.tree(), *state.doc.tree());
+        assert_eq!(result.selected, state.selected);
+    }
+
+    #[test]
+    fn capital_r_rounds_every_sibling_in_a_square_row() {
+        let boxes = vec![node_with_children(
+            "a",
+            vec![node_with_children("c", vec![node("e")]), node("d")],
+        )];
+        let state = new_state(boxes, Mode::Command, Some(vec![0, 0]));
+        let result = handle_key(state, "R");
+        assert!(!result.doc.tree().value(&[0]).rounded());
+        assert!(result.doc.tree().value(&[0, 0]).rounded());
+        assert!(result.doc.tree().value(&[0, 1]).rounded());
+        assert!(!result.doc.tree().value(&[0, 0, 0]).rounded());
+        assert_eq!(result.selected, Some(vec![0, 0]));
+    }
+
+    #[test]
+    fn capital_r_rounds_every_sibling_in_a_mixed_row() {
+        let c = labelled("c").with_rounded(false);
+        let d = labelled("d").with_rounded(true);
+        let boxes = vec![node_with_children("a", vec![Tree::leaf(c), Tree::leaf(d)])];
+        let state = new_state(boxes, Mode::Command, Some(vec![0, 0]));
+        let result = handle_key(state, "R");
+        assert!(result.doc.tree().value(&[0, 0]).rounded());
+        assert!(result.doc.tree().value(&[0, 1]).rounded());
+    }
+
+    #[test]
+    fn capital_r_squares_every_sibling_in_a_rounded_row() {
+        let c = labelled("c").with_rounded(true);
+        let d = labelled("d").with_rounded(true);
+        let boxes = vec![node_with_children("a", vec![Tree::leaf(c), Tree::leaf(d)])];
+        let state = new_state(boxes, Mode::Command, Some(vec![0, 1]));
+        let result = handle_key(state, "R");
+        assert!(!result.doc.tree().value(&[0, 0]).rounded());
+        assert!(!result.doc.tree().value(&[0, 1]).rounded());
+        assert_eq!(result.selected, Some(vec![0, 1]));
+    }
+
+    #[test]
+    fn capital_r_leaves_other_rows_untouched() {
+        let boxes = vec![
+            node_with_children("a", vec![node("c"), node("d")]),
+            node("other"),
+        ];
+        let state = new_state(boxes, Mode::Command, Some(vec![0, 0]));
+        let result = handle_key(state, "R");
+        assert!(result.doc.tree().value(&[0, 0]).rounded());
+        assert!(result.doc.tree().value(&[0, 1]).rounded());
+        assert!(!result.doc.tree().value(&[1]).rounded());
+    }
+
+    #[test]
+    fn capital_r_works_on_a_row_of_top_level_boxes() {
+        let boxes = vec![node("a"), node("b")];
+        let state = new_state(boxes, Mode::Command, Some(vec![0]));
+        let result = handle_key(state, "R");
+        assert!(result.doc.tree().value(&[0]).rounded());
+        assert!(result.doc.tree().value(&[1]).rounded());
+        assert_eq!(result.selected, Some(vec![0]));
+    }
+
+    #[test]
+    fn u_after_capital_r_restores_the_whole_row_in_one_undo() {
+        let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
+        let before = new_state(boxes, Mode::Command, Some(vec![0, 0]));
+        let after = handle_key(before.clone(), "R");
+        let undone = handle_key(after, "u");
+        assert_eq!(*undone.doc.tree(), *before.doc.tree());
+        assert_eq!(undone.selected, before.selected);
     }
 
     #[test]

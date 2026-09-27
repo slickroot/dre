@@ -14,6 +14,7 @@ fn is_undoable(action: &Action) -> bool {
             | Action::ToggleRounded
             | Action::CycleSiblingsColour
             | Action::ToggleSiblingsFill
+            | Action::ToggleSiblingsRounded
             | Action::RenameLabel
             | Action::EditLabel
             | Action::NewSibling
