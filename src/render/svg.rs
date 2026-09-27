@@ -12,7 +12,7 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
-const GLOW_MARGIN: i64 = 6;
+const GLOW_STROKE_WIDTH: i64 = 6;
 const GLOW_BLUR_STD_DEVIATION: f64 = 6.0;
 const GLOW_FILTER_ID: &str = "glow";
 
@@ -144,19 +144,6 @@ fn paint(placements: &[Placement]) -> String {
     for placement in placements {
         if let PlacementNode::Box {
             colour,
-            rounded,
-            selected,
-            ..
-        } = &placement.node
-        {
-            if *selected {
-                svg.push_str(&glow_rect(placement, *colour, *rounded));
-            }
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Box {
-            colour,
             fill,
             opacity,
             rounded,
@@ -168,6 +155,19 @@ fn paint(placements: &[Placement]) -> String {
                 continue;
             }
             svg.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
+        }
+    }
+    for placement in placements {
+        if let PlacementNode::Box {
+            colour,
+            rounded,
+            selected,
+            ..
+        } = &placement.node
+        {
+            if *selected {
+                svg.push_str(&glow_rect(placement, *colour, *rounded));
+            }
         }
     }
     for placement in placements {
@@ -283,11 +283,11 @@ fn glow_rect(placement: &crate::layout::Placement, edge: Option<u8>, rounded: bo
 
     let (r, g, b) = colour(edge);
     let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"rgb({r},{g},{b})\" filter=\"url(#{GLOW_FILTER_ID})\"",
-        placement.x * CELL_WIDTH - GLOW_MARGIN,
-        placement.y * CELL_HEIGHT - GLOW_MARGIN,
-        placement.width * CELL_WIDTH + GLOW_MARGIN * 2,
-        placement.height * CELL_HEIGHT + GLOW_MARGIN * 2,
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{GLOW_STROKE_WIDTH}\" fill=\"none\" filter=\"url(#{GLOW_FILTER_ID})\"",
+        placement.x * CELL_WIDTH,
+        placement.y * CELL_HEIGHT,
+        placement.width * CELL_WIDTH,
+        placement.height * CELL_HEIGHT,
     );
     if rounded {
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
@@ -765,23 +765,64 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_box_glows_behind_its_own_rect_in_its_edge_colour() {
-        let placements = vec![selected(box_placement(0, 0, 4, 3, Some(2), None, false))];
+    fn a_selected_box_glows_along_its_exact_border_in_its_edge_colour() {
+        let (x, y, width, height) = (2, 3, 4, 3);
+        let placements = vec![selected(box_placement(
+            x,
+            y,
+            width,
+            height,
+            Some(2),
+            None,
+            false,
+        ))];
 
         let svg = draw(&placements);
 
-        let glow_fill = format!("fill=\"{}\"", rgb(colour(Some(2))));
-        let glow_pos = svg
-            .find(&glow_fill)
-            .expect("the glow rect uses the box's edge colour");
+        let glow = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
+            .expect("the selected box renders a glow rect");
+        assert!(glow.contains(&format!("x=\"{}\"", x * CELL_WIDTH)));
+        assert!(glow.contains(&format!("y=\"{}\"", y * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("width=\"{}\"", width * CELL_WIDTH)));
+        assert!(glow.contains(&format!("height=\"{}\"", height * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
+        assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
+        assert!(glow.contains("fill=\"none\""));
+    }
+
+    #[test]
+    fn a_rounded_selected_box_uses_the_same_rounding_for_its_glow() {
+        let placements = vec![selected(box_placement(0, 0, 4, 3, Some(2), None, true))];
+
+        let svg = draw(&placements);
+
+        let glow = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
+            .expect("the selected box renders a glow rect");
+        assert!(glow.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
+    }
+
+    #[test]
+    fn a_filled_selected_box_paints_its_fill_then_glow_then_label() {
+        let placements = vec![
+            selected(box_placement(0, 0, 4, 3, Some(2), Some(2), false)),
+            label_placement("hi", 1, 1),
+        ];
+
+        let svg = draw(&placements);
+
         let box_rect = svg
-            .find(&format!("stroke=\"{}\"", rgb(colour(Some(2)))))
-            .expect("the box rect is emitted");
-        assert!(
-            glow_pos < box_rect,
-            "the glow rect is emitted before the box's own rect"
-        );
-        assert!(svg.contains("filter=\"url(#"), "the glow rect is blurred");
+            .find(&format!("fill=\"{}\"", rgb(palette(2).unwrap())))
+            .expect("the selected box renders its fill");
+        let glow = svg
+            .find("filter=\"url(#")
+            .expect("the selected box renders a glow");
+        let label = svg.find("<text").expect("the box renders its label");
+        assert!(box_rect < glow, "the fill is emitted before the glow");
+        assert!(glow < label, "the glow is emitted before the label");
     }
 
     #[test]
