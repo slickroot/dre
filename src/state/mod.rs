@@ -20,7 +20,7 @@ pub(crate) use crate::state::mode::Mode;
 use types::Tree;
 
 const DEFAULT_FILENAME: &str = "diagram.dre";
-const NO_NAME: &str = "[no name]";
+const NO_NAME: &str = "[no name — press n to name it]";
 const PLACEHOLDER: &str = "type a name";
 const FOOTER_SUFFIX: &str = " • dre";
 
@@ -256,6 +256,14 @@ mod tests {
     #[test]
     fn footer_of_a_default_state_has_no_name() {
         assert_eq!(State::default().footer(), footer_for(NO_NAME));
+    }
+
+    #[test]
+    fn footer_of_a_default_state_pins_the_hint_text() {
+        assert_eq!(
+            State::default().footer(),
+            "[no name — press n to name it] • dre"
+        );
     }
 
     #[test]
