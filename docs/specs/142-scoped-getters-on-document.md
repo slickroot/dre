@@ -18,8 +18,8 @@ Each site duplicates the same `children(tree, parent_of(path))` lookup that `Doc
 
 ## Technical Design
 
-- `Document` gains `get_colour`, `get_fill` and `get_rounded`, one per existing setter, each with the signature `(&self, path: &[usize], scope: Scope) -> Vec<T>` (`T` is the field's type: `Option<u8>`, `bool`, `bool`). `Scope::Box` returns a single-element `Vec` (the value at `path`); `Scope::Siblings` returns one element per child of `parent_of(path)`, including the node at `path` itself — the same node set `Scope::Siblings` already writes to.
-- The getters hand back the raw per-node values only. They do no aggregation — callers keep doing their own `.all()`/`.any()`/first-and-compare, exactly as they do today, just over `Vec<T>` instead of re-deriving the sibling paths first.
-- The getters' scope-resolution logic is not shared with `set`'s private `targets` computation — `get` and `set` each resolve `Box`/`Siblings` independently.
-- `state/command.rs` updates its three read sites to call `state.doc.get_colour(&path, Scope::Siblings)`, `get_fill`, and `get_rounded` instead of `children(tree, parent_of(path))` + `tree.value(...)`. `new_sibling` and `delete_box` are left as they are.
-- `diagram.rs` gets one focused test per getter (box scope returns one value, siblings scope returns every sibling's value in order, including the target node), rather than growing the file's existing test duplication further.
+- `Document` gains a single `siblings(&self, path: &[usize], scope: Scope) -> Vec<&Node>`. `Scope::Box` returns a single-element `Vec` (the node at `path`); `Scope::Siblings` returns one element per child of `parent_of(path)`, including the node at `path` itself — the same node set `Scope::Siblings` already writes to.
+- `siblings` hands back the raw nodes only. It does no aggregation and reads no field — callers keep doing their own `.all()`/`.any()`/first-and-compare over the returned nodes' existing `pub(crate)` accessors (`colour()`, `filled()`, `rounded()`), exactly as they do today, just over `Vec<&Node>` instead of re-deriving the sibling paths first.
+- `siblings`'s scope-resolution logic is not shared with `set`'s private `targets` computation — `siblings` and `set` each resolve `Box`/`Siblings` independently.
+- `state/command.rs` updates its three read sites to call `state.doc.siblings(&path, Scope::Siblings)` and map/filter over the returned nodes, instead of `children(tree, parent_of(path))` + `tree.value(...)`. `new_sibling` and `delete_box` are left as they are.
+- `diagram.rs` gets one focused test for `siblings` (box scope returns one node, siblings scope returns every sibling in order, including the target node), rather than growing the file's existing test duplication further.
