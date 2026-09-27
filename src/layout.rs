@@ -227,7 +227,7 @@ pub(crate) struct Arrow {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Cursor;
+pub(crate) struct Caret;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode<'a> {
@@ -242,7 +242,7 @@ pub(crate) enum PlacementNode<'a> {
     },
     Label(Label<'a>),
     Arrow(Arrow),
-    Cursor(Cursor),
+    Caret(Caret),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -324,18 +324,20 @@ pub(crate) fn diagram<'a>(
     boxes_first
 }
 
-pub(crate) fn with_cursor<'a>(
+pub(crate) fn with_caret<'a>(
     placements: Vec<Placement<'a>>,
-    selected: Option<Vec<usize>>,
-    edit_index: Option<usize>,
+    editing: Option<(Vec<usize>, usize)>,
 ) -> Vec<Placement<'a>> {
+    let Some((path, index)) = editing else {
+        return placements;
+    };
     for placement in &placements {
         if let PlacementNode::Label(label) = &placement.node {
-            if Some(&label.path) == selected.as_ref() {
+            if label.path == path {
                 let mut result = placements.clone();
                 result.push(Placement {
-                    node: PlacementNode::Cursor(Cursor),
-                    x: placement.x + edit_index.map_or(placement.width - 1, |index| index as i64),
+                    node: PlacementNode::Caret(Caret),
+                    x: placement.x + index as i64,
                     y: placement.y,
                     width: 1,
                     height: 1,
@@ -857,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn with_cursor_appends_a_cursor_when_selected_matches_a_labels_path() {
+    fn with_caret_appends_a_caret_when_editing_matches_a_labels_path() {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = diagram(&nodes, None, None);
         let label = placements
@@ -866,12 +868,12 @@ mod tests {
             .expect("layout of a leaf box includes a label placement")
             .clone();
 
-        let result = with_cursor(placements.clone(), Some(vec![0]), None);
+        let result = with_caret(placements.clone(), Some((vec![0], 1)));
         assert_eq!(result.len(), placements.len() + 1);
-        let cursor = result.last().unwrap();
-        assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
-        assert_eq!(cursor.x, label.x + label.width - 1);
-        assert_eq!(cursor.y, label.y);
+        let caret = result.last().unwrap();
+        assert!(matches!(caret.node, PlacementNode::Caret(_)));
+        assert_eq!(caret.x, label.x + 1);
+        assert_eq!(caret.y, label.y);
     }
 
     fn box_and_label<'a>(placements: &[Placement<'a>]) -> (Placement<'a>, Placement<'a>) {
@@ -903,12 +905,12 @@ mod tests {
     }
 
     #[test]
-    fn the_widened_width_does_not_change_as_the_cursor_moves() {
+    fn the_widened_width_does_not_change_as_the_caret_moves() {
         let nodes = Tree::root(vec![node("hi")]);
         let widths: Vec<i64> = (0..=2)
-            .map(|cursor| {
+            .map(|index| {
                 let placements = diagram(&nodes, Some(&[0]), None);
-                let placements = with_cursor(placements, Some(vec![0]), Some(cursor));
+                let placements = with_caret(placements, Some((vec![0], index)));
                 box_and_label(&placements).0.width
             })
             .collect();
@@ -916,41 +918,31 @@ mod tests {
     }
 
     #[test]
-    fn in_insert_mode_the_cursor_lands_at_the_edit_index() {
+    fn in_insert_mode_the_caret_lands_at_the_edit_index() {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = diagram(&nodes, Some(&[0]), None);
         let (edited_box, label) = box_and_label(&placements);
         for index in 0..=2 {
-            let result = with_cursor(placements.clone(), Some(vec![0]), Some(index));
-            let cursor = result.last().unwrap();
-            assert!(matches!(cursor.node, PlacementNode::Cursor(_)));
-            assert_eq!(cursor.x, label.x + index as i64);
-            assert!(cursor.x < edited_box.x + edited_box.width - SIDE_PADDING + 1);
+            let result = with_caret(placements.clone(), Some((vec![0], index)));
+            let caret = result.last().unwrap();
+            assert!(matches!(caret.node, PlacementNode::Caret(_)));
+            assert_eq!(caret.x, label.x + index as i64);
+            assert!(caret.x < edited_box.x + edited_box.width - SIDE_PADDING + 1);
         }
     }
 
     #[test]
-    fn in_command_mode_the_cursor_stays_on_the_last_letter_of_an_unwidened_label() {
+    fn with_caret_adds_nothing_without_editing() {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = diagram(&nodes, None, None);
-        let (plain_box, label) = box_and_label(&placements);
-        assert_eq!(plain_box.width, width(nodes.value(&[0])));
-        let result = with_cursor(placements, Some(vec![0]), None);
-        assert_eq!(result.last().unwrap().x, label.x + label.width - 1);
+        assert_eq!(with_caret(placements.clone(), None), placements);
     }
 
     #[test]
-    fn with_cursor_adds_nothing_without_a_selection() {
+    fn with_caret_leaves_placements_unchanged_when_nothing_matches() {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = diagram(&nodes, None, None);
-        assert_eq!(with_cursor(placements.clone(), None, None), placements);
-    }
-
-    #[test]
-    fn with_cursor_leaves_placements_unchanged_when_nothing_matches() {
-        let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
-        let result = with_cursor(placements.clone(), Some(vec![99]), None);
+        let result = with_caret(placements.clone(), Some((vec![99], 0)));
         assert_eq!(result, placements);
     }
 
@@ -1045,13 +1037,13 @@ mod tests {
             _ => panic!("expected an Arrow variant"),
         }
 
-        let cursor_placement = Placement {
-            node: PlacementNode::Cursor(Cursor),
+        let caret_placement = Placement {
+            node: PlacementNode::Caret(Caret),
             x: 0,
             y: 0,
             width: 1,
             height: 1,
         };
-        assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
+        assert!(matches!(caret_placement.node, PlacementNode::Caret(_)));
     }
 }

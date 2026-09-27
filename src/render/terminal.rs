@@ -266,7 +266,7 @@ impl TerminalRenderer {
                 PlacementNode::Box { .. } => self.draw_box(frame, placement, area),
                 PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
                 PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
-                PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
+                PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
             }
         }
     }
@@ -312,7 +312,7 @@ impl TerminalRenderer {
         }
     }
 
-    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
+    fn draw_caret(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
         let (r, g, b) = colour(None);
@@ -908,14 +908,14 @@ mod tests {
         }
     }
 
-    fn cursor_placement(
+    fn caret_placement(
         x: i64,
         y: i64,
         width: i64,
         height: i64,
     ) -> crate::layout::Placement<'static> {
         crate::layout::Placement {
-            node: crate::layout::PlacementNode::Cursor(crate::layout::Cursor),
+            node: crate::layout::PlacementNode::Caret(crate::layout::Caret),
             x,
             y,
             width,
@@ -1220,15 +1220,15 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_is_drawn_last_as_a_solid_sprite() {
+    fn the_caret_is_drawn_last_as_a_solid_sprite() {
         let mut r = renderer_on(window(20, 10, 1, 1));
         let [box_at, label] = a_labelled_box(4, 3);
-        let cursor = cursor_placement(label.x + label.width - 1, label.y, 1, 1);
-        let images = sprites(&mut r, &[box_at, label, cursor]);
-        let cursor_image = images.last().expect("a sprite is drawn for the cursor");
+        let caret = caret_placement(label.x + label.width - 1, label.y, 1, 1);
+        let images = sprites(&mut r, &[box_at, label, caret]);
+        let caret_image = images.last().expect("a sprite is drawn for the caret");
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
-        assert!(cursor_image
+        assert!(caret_image
             .canvas
             .pixels
             .chunks(4)
@@ -1318,44 +1318,44 @@ mod tests {
     }
 
     #[test]
-    fn cursor_is_drawn_after_the_label() {
+    fn caret_is_drawn_after_the_label() {
         let node = box_node(None, None, false);
         let placements = vec![
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
+            caret_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(5, 3, 1, 1));
         let frame = drawn_frame(&mut r, &placements);
         assert_eq!(rows(&frame)[1], "     ".to_string());
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
-        let is_cursor = |image: &&Placed| image.canvas.pixels.chunks(4).all(|pixel| pixel == solid);
-        let cursor_cols: Vec<i64> = frame
+        let is_caret = |image: &&Placed| image.canvas.pixels.chunks(4).all(|pixel| pixel == solid);
+        let caret_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
-            .filter(is_cursor)
+            .filter(is_caret)
             .map(|image| image.col)
             .collect();
-        assert_eq!(cursor_cols, vec![3]);
+        assert_eq!(caret_cols, vec![3]);
         let label_cols: Vec<i64> = frame
             .images
             .iter()
             .filter(|image| image.row == 1)
-            .filter(|image| !is_cursor(image))
+            .filter(|image| !is_caret(image))
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![1, 2]);
     }
 
     #[test]
-    fn label_and_cursor_past_the_edge_are_clipped() {
+    fn label_and_caret_past_the_edge_are_clipped() {
         let node = box_node(None, None, false);
         let placements = vec![
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
+            caret_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(3, 3, 1, 1));
         let frame = drawn_frame(&mut r, &placements);
@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     #[test]
-    fn a_box_does_not_draw_a_cursor() {
+    fn a_box_does_not_draw_a_caret() {
         let grid = grid(
             &mut renderer_on(window(5, 3, 1, 1)),
             &[box_placement(&box_node(None, None, false), 0, 0, 5, 3)],
@@ -1378,9 +1378,9 @@ mod tests {
     }
 
     #[test]
-    fn cursor_placement_is_drawn_at_its_own_position() {
+    fn caret_placement_is_drawn_at_its_own_position() {
         let mut r = renderer_on(window(4, 3, 1, 1));
-        let images = sprites(&mut r, &[cursor_placement(2, 1, 1, 1)]);
+        let images = sprites(&mut r, &[caret_placement(2, 1, 1, 1)]);
         assert_eq!(images.len(), 1);
         assert_eq!((images[0].col, images[0].row), (2, 1));
         let (cr, cg, cb) = colour(None);
@@ -1388,9 +1388,9 @@ mod tests {
     }
 
     #[test]
-    fn a_cursor_outside_the_grid_is_clipped() {
+    fn a_caret_outside_the_grid_is_clipped() {
         let mut r = renderer_on(window(4, 3, 1, 1));
-        let images = sprites(&mut r, &[cursor_placement(9, 9, 1, 1)]);
+        let images = sprites(&mut r, &[caret_placement(9, 9, 1, 1)]);
         assert!(images.is_empty());
     }
 
@@ -1409,7 +1409,7 @@ mod tests {
         let placements = vec![
             box_placement(&node, 0, 0, 5, 3),
             label_placement("hi", 1, 1, 2, 1),
-            cursor_placement(3, 1, 1, 1),
+            caret_placement(3, 1, 1, 1),
         ];
         let grid = grid(&mut renderer_on(window(5, 3, 1, 1)), &placements);
         assert!(!grid.join("").contains('\x1b'));
@@ -1425,9 +1425,9 @@ mod tests {
     }
 
     #[test]
-    fn a_cursor_has_a_sprite() {
+    fn a_caret_has_a_sprite() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        assert_eq!(sprites(&mut r, &[cursor_placement(1, 1, 1, 1)]).len(), 1);
+        assert_eq!(sprites(&mut r, &[caret_placement(1, 1, 1, 1)]).len(), 1);
     }
 
     #[test]

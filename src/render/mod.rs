@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::composer::{self, Area};
-use crate::layout::{self, with_cursor, Cursor, Placement, PlacementNode, FOOTER_ROWS};
+use crate::layout::{self, with_caret, Caret, Placement, PlacementNode, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
 use crate::state::{Mode, State};
 
@@ -27,7 +27,7 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
     let mut footer = align_right(layout::footer(&state.footer()), foot);
     if let Mode::NamePrompt { name, .. } = state.mode() {
         footer.push(Placement {
-            node: PlacementNode::Cursor(Cursor),
+            node: PlacementNode::Caret(Caret),
             x: footer[1].x + name.chars().count() as i64,
             y: footer[1].y,
             width: 1,
@@ -38,15 +38,15 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
 }
 
 pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
-    let (editing, edit_index) = match state.mode() {
-        Mode::Insert { cursor } => (state.selected(), Some(*cursor)),
-        _ => (None, None),
+    let editing_caret: Option<(Vec<usize>, usize)> = match state.mode() {
+        Mode::Insert { cursor } => state.selected().map(|path| (path.to_vec(), *cursor)),
+        _ => None,
     };
+    let editing = editing_caret.as_ref().map(|(path, _)| path.as_slice());
     centre(
-        with_cursor(
+        with_caret(
             layout::diagram(state.doc().tree(), editing, state.selected()),
-            state.selected().map(<[usize]>::to_vec),
-            edit_index,
+            editing_caret,
         ),
         area,
     )
@@ -320,17 +320,26 @@ mod tests {
     }
 
     #[test]
-    fn editor_puts_the_cursor_in_the_body_when_something_is_selected() {
-        let selected = Some(vec![0]);
-        let state = state(selected.clone());
+    fn command_mode_shows_no_caret_even_when_something_is_selected() {
+        let state = state(Some(vec![0]));
+        let screen = editor(&state, WINDOW);
+        assert!(!screen[0]
+            .1
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
+    }
+
+    #[test]
+    fn insert_mode_puts_the_caret_in_the_body_at_the_typed_index() {
+        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let state = new_state(boxes, Mode::Insert { cursor: 1 }, Some(vec![0]));
         let screen = editor(&state, WINDOW);
         assert_eq!(
             screen[0].1,
             centre(
-                with_cursor(
-                    layout::diagram(state.doc().tree(), None, state.selected()),
-                    selected,
-                    None,
+                with_caret(
+                    layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
+                    Some((vec![0], 1)),
                 ),
                 body_of(WINDOW)
             )
@@ -338,7 +347,7 @@ mod tests {
         assert!(screen[0]
             .1
             .iter()
-            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+            .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
     }
 
     fn state_saved_to(path: &str) -> State {
@@ -426,7 +435,7 @@ mod tests {
         assert_eq!(
             footer[2],
             Placement {
-                node: PlacementNode::Cursor(Cursor),
+                node: PlacementNode::Caret(Caret),
                 x,
                 y: box_y + layout::BOX_HEIGHT / 2,
                 width: 1,

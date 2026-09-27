@@ -59,16 +59,16 @@ impl Renderer for SvgRenderer {
         };
         let areas = match self.mode {
             Mode::Editor => editor(state, window),
-            Mode::Export => vec![(window, without_cursor(body(state, window)))],
+            Mode::Export => vec![(window, without_caret(body(state, window)))],
         };
         out.write_all(document(self.canvas, self.mode, &areas).as_bytes())
     }
 }
 
-fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
+fn without_caret(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
     placements
         .into_iter()
-        .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
+        .filter(|placement| !matches!(placement.node, PlacementNode::Caret(_)))
         .collect()
 }
 
@@ -153,8 +153,8 @@ fn paint(placements: &[Placement]) -> String {
         }
     }
     for placement in placements {
-        if let PlacementNode::Cursor(_) = &placement.node {
-            svg.push_str(&cursor_rect(placement));
+        if let PlacementNode::Caret(_) = &placement.node {
+            svg.push_str(&caret_rect(placement));
         }
     }
     svg
@@ -167,7 +167,7 @@ fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String
     )
 }
 
-fn cursor_rect(placement: &crate::layout::Placement) -> String {
+fn caret_rect(placement: &crate::layout::Placement) -> String {
     let (r, g, b) = colour(None);
     format!(
         "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"rgb({r},{g},{b})\"/>",
@@ -322,9 +322,9 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
-    use crate::layout::with_cursor;
+    use crate::layout::with_caret;
     use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, SIDE_PADDING};
-    use crate::layout::{Arrow, Cursor, Label, Placement, BORDER};
+    use crate::layout::{Arrow, Caret, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
 
@@ -1196,8 +1196,12 @@ mod tests {
     }
 
     fn rendered(selected: Option<Vec<usize>>) -> String {
+        rendered_in(Mode::Command, selected)
+    }
+
+    fn rendered_in(mode: Mode, selected: Option<Vec<usize>>) -> String {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
-        let state = crate::state::new_state(boxes, Mode::Command, selected);
+        let state = crate::state::new_state(boxes, mode, selected);
         let mut out = Vec::new();
         SvgRenderer::with_canvas(100, 40)
             .render(&state, &mut out)
@@ -1225,7 +1229,7 @@ mod tests {
         );
     }
 
-    fn cursor_rect_at_cell(column: i64, row: i64) -> String {
+    fn caret_rect_at_cell(column: i64, row: i64) -> String {
         format!(
             "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"{}\"/>",
             column * CELL_WIDTH,
@@ -1234,56 +1238,62 @@ mod tests {
         )
     }
 
-    fn cursor_rects(svg: &str) -> Vec<&str> {
-        let cursor_fill = format!(
+    fn caret_rects(svg: &str) -> Vec<&str> {
+        let caret_fill = format!(
             "width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"{}\"/>",
             rgb(colour(None))
         );
         svg.split('<')
-            .filter(|element| element.starts_with("rect ") && element.ends_with(&cursor_fill))
+            .filter(|element| element.starts_with("rect ") && element.ends_with(&caret_fill))
             .collect()
     }
 
     #[test]
-    fn a_selected_box_shows_one_cursor() {
-        assert_eq!(cursor_rects(&rendered(Some(vec![0, 1]))).len(), 1);
+    fn command_mode_shows_no_caret_even_when_something_is_selected() {
+        assert!(caret_rects(&rendered(Some(vec![0, 1]))).is_empty());
     }
 
     #[test]
-    fn the_export_without_a_canvas_omits_the_cursor() {
+    fn insert_mode_shows_one_caret_for_the_edited_box() {
+        let svg = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
+        assert_eq!(caret_rects(&svg).len(), 1);
+    }
+
+    #[test]
+    fn the_export_without_a_canvas_omits_the_caret() {
         let selected = example_state().selected().map(<[usize]>::to_vec);
         assert!(selected.is_some());
-        let svg = render_to_string(SvgRenderer::default(), &example_state());
+        let svg = render_to_string(SvgRenderer::default(), &example_insert_state());
 
-        assert!(cursor_rects(&svg).is_empty());
+        assert!(caret_rects(&svg).is_empty());
     }
 
     #[test]
-    fn the_canvas_render_keeps_the_cursor() {
-        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_state());
+    fn the_canvas_render_keeps_the_caret() {
+        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_insert_state());
 
-        assert_eq!(cursor_rects(&svg).len(), 1);
+        assert_eq!(caret_rects(&svg).len(), 1);
     }
 
     #[test]
-    fn no_selection_shows_no_cursor() {
-        assert!(cursor_rects(&rendered(None)).is_empty());
+    fn no_selection_shows_no_caret() {
+        assert!(caret_rects(&rendered(None)).is_empty());
     }
 
     #[test]
-    fn moving_the_selection_moves_the_cursor() {
-        let first = rendered(Some(vec![0, 0]));
-        let second = rendered(Some(vec![0, 1]));
+    fn moving_the_selection_moves_the_caret() {
+        let first = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 0]));
+        let second = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
 
-        assert_ne!(cursor_rects(&first), cursor_rects(&second));
+        assert_ne!(caret_rects(&first), caret_rects(&second));
     }
 
     #[test]
-    fn the_cursor_is_painted_after_the_labels() {
+    fn the_caret_is_painted_after_the_labels() {
         let placements = vec![
             label_placement("hi", 1, 1),
             Placement {
-                node: PlacementNode::Cursor(Cursor),
+                node: PlacementNode::Caret(Caret),
                 x: 2,
                 y: 1,
                 width: 1,
@@ -1293,8 +1303,8 @@ mod tests {
 
         let svg = draw(&placements);
 
-        let cursor = svg.find(&cursor_rect_at_cell(2, 1)).unwrap();
-        assert!(cursor > svg.find("<text").unwrap());
+        let caret = svg.find(&caret_rect_at_cell(2, 1)).unwrap();
+        assert!(caret > svg.find("<text").unwrap());
     }
 
     const CANVAS: Area = Area {
@@ -1307,6 +1317,14 @@ mod tests {
     fn example_state() -> State {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         let mut state = crate::state::new_state(boxes, Mode::Command, Some(vec![0, 1]));
+        state.set_save_to(Some(format!("docs/{NAME}.dre")));
+        state
+    }
+
+    fn example_insert_state() -> State {
+        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let mut state =
+            crate::state::new_state(boxes, Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
         state.set_save_to(Some(format!("docs/{NAME}.dre")));
         state
     }
@@ -1440,11 +1458,7 @@ mod tests {
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
         let diagram = centre(
-            with_cursor(
-                diagram(state.doc().tree(), None, state.selected()),
-                state.selected().map(<[usize]>::to_vec),
-                None,
-            ),
+            with_caret(diagram(state.doc().tree(), None, state.selected()), None),
             body,
         );
         let body_svg = nested(body, &paint(&diagram));
