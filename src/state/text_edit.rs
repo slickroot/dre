@@ -1,8 +1,6 @@
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum TextKey {
-    #[allow(dead_code)]
     Left,
-    #[allow(dead_code)]
     Right,
     Backspace,
     Char(char),

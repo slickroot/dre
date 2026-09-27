@@ -238,4 +238,50 @@ mod tests {
             Tree::root(vec![node_with_children("abc", vec![node("")])])
         );
     }
+
+    const LEFT: &str = "\x1b[D";
+    const RIGHT: &str = "\x1b[C";
+    const UP: &str = "\x1b[A";
+
+    #[test]
+    fn moving_left_then_typing_fixes_a_typo_and_esc_keeps_the_whole_label() {
+        let state = new_state(
+            vec![node("Cche")],
+            Mode::Insert { cursor: 4 },
+            Some(vec![0]),
+        );
+        let state = press(state, &[LEFT, LEFT, LEFT, "a"]);
+        assert_eq!(*state.doc.tree(), Tree::root(vec![node("Cache")]));
+        let state = handle_key(state, "\x1b");
+        assert_eq!(state.mode, Mode::Command);
+        assert_eq!(*state.doc.tree(), Tree::root(vec![node("Cache")]));
+    }
+
+    #[test]
+    fn left_at_the_start_and_right_at_the_end_do_nothing() {
+        let state = new_state(vec![node("ab")], Mode::Insert { cursor: 0 }, Some(vec![0]));
+        let result = handle_key(state, LEFT);
+        assert_eq!(result.mode, Mode::Insert { cursor: 0 });
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("ab")]));
+
+        let state = new_state(vec![node("ab")], Mode::Insert { cursor: 2 }, Some(vec![0]));
+        let result = handle_key(state, RIGHT);
+        assert_eq!(result.mode, Mode::Insert { cursor: 2 });
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("ab")]));
+    }
+
+    #[test]
+    fn right_moves_the_cursor_back_toward_the_end() {
+        let state = new_state(vec![node("ab")], Mode::Insert { cursor: 0 }, Some(vec![0]));
+        let result = handle_key(state, RIGHT);
+        assert_eq!(result.mode, Mode::Insert { cursor: 1 });
+    }
+
+    #[test]
+    fn an_unsupported_escape_sequence_is_ignored_in_insert_mode() {
+        let state = new_state(vec![node("ab")], Mode::Insert { cursor: 1 }, Some(vec![0]));
+        let result = handle_key(state, UP);
+        assert_eq!(result.mode, Mode::Insert { cursor: 1 });
+        assert_eq!(*result.doc.tree(), Tree::root(vec![node("ab")]));
+    }
 }

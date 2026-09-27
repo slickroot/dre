@@ -45,6 +45,8 @@ fn insert_parse(key: &str) -> Option<Action> {
         "\x1b" => Some(Action::Commit),
         "\r" => Some(Action::CommitAndAddChild),
         "\x7f" => Some(Action::InsertKey(TextKey::Backspace)),
+        "\x1b[D" => Some(Action::InsertKey(TextKey::Left)),
+        "\x1b[C" => Some(Action::InsertKey(TextKey::Right)),
         _ => printable(key).map(|c| Action::InsertKey(TextKey::Char(c))),
     }
 }
@@ -181,6 +183,16 @@ pub(crate) const INSERT_KEYMAP: &[KeyBinding<Action>] = &[
         keys: &["Backspace"],
         command: Action::InsertKey(TextKey::Backspace),
         description: "Remove the last character",
+    },
+    KeyBinding {
+        keys: &["←"],
+        command: Action::InsertKey(TextKey::Left),
+        description: "Move the cursor left",
+    },
+    KeyBinding {
+        keys: &["→"],
+        command: Action::InsertKey(TextKey::Right),
+        description: "Move the cursor right",
     },
 ];
 
@@ -436,11 +448,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_maps_the_arrow_keys_to_cursor_moves() {
+        assert_eq!(
+            insert_parse("\x1b[D"),
+            Some(Action::InsertKey(TextKey::Left))
+        );
+        assert_eq!(
+            insert_parse("\x1b[C"),
+            Some(Action::InsertKey(TextKey::Right))
+        );
+    }
+
+    #[test]
+    fn parse_ignores_other_escape_sequences() {
+        assert_eq!(insert_parse("\x1b[A"), None);
+    }
+
+    #[test]
     fn insert_keymap_agrees_with_insert_parse() {
         let raw_for = |display: &str| match display {
             "Enter" => "\r",
             "Esc" => "\x1b",
             "Backspace" => "\x7f",
+            "←" => "\x1b[D",
+            "→" => "\x1b[C",
             _ => panic!("unknown display key {display}"),
         };
         let display_keys: Vec<&str> = INSERT_KEYMAP
@@ -448,7 +479,7 @@ mod tests {
             .flat_map(|binding| binding.keys)
             .copied()
             .collect();
-        assert_eq!(display_keys, vec!["Enter", "Esc", "Backspace"]);
+        assert_eq!(display_keys, vec!["Enter", "Esc", "Backspace", "←", "→"]);
         let mut unique = display_keys.clone();
         unique.sort_unstable();
         unique.dedup();
