@@ -223,28 +223,35 @@ pub(crate) struct Placement<'a> {
     pub(crate) height: i64,
 }
 
-pub(crate) const FOOTER_ROWS: i64 = 1;
+pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
 pub(crate) fn footer(text: &str) -> Vec<Placement<'_>> {
-    let width = text.chars().count() as i64;
+    let text_width = text.chars().count() as i64;
+    let box_width = interior(text) + BORDERS;
     let corner_box = PlacementNode::Box {
         colour: None,
         fill: None,
         rounded: false,
-        sides: (true, false, false, true),
+        sides: ALL_SIDES,
         border: 1,
     };
     let label = PlacementNode::Label(Label { text, path: vec![] });
-    [corner_box, label]
-        .into_iter()
-        .map(|node| Placement {
-            node,
+    vec![
+        Placement {
+            node: corner_box,
             x: 0,
             y: 0,
-            width,
+            width: box_width,
+            height: BOX_HEIGHT,
+        },
+        Placement {
+            node: label,
+            x: centre(box_width, text),
+            y: BOX_HEIGHT / 2,
+            width: text_width,
             height: 1,
-        })
-        .collect()
+        },
+    ]
 }
 
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
@@ -306,9 +313,9 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
 
     #[test]
-    fn footer_is_a_corner_box_then_a_label_both_as_wide_as_the_text_and_one_row_high() {
+    fn footer_is_a_fully_bordered_box_with_the_label_padded_inside_it() {
         let text = "plans \u{2022} dre";
-        let width = text.chars().count() as i64;
+        let text_width = text.chars().count() as i64;
         let placements = footer(text);
         assert_eq!(placements.len(), 2);
         assert_eq!(
@@ -317,7 +324,7 @@ mod tests {
                 colour: None,
                 fill: None,
                 rounded: false,
-                sides: (true, false, false, true),
+                sides: ALL_SIDES,
                 border: 1,
             }
         );
@@ -325,12 +332,25 @@ mod tests {
             placements[1].node,
             PlacementNode::Label(Label { text, path: vec![] })
         );
-        for placement in &placements {
-            assert_eq!(
-                (placement.x, placement.y, placement.width, placement.height),
-                (0, 0, width, 1)
-            );
-        }
+        let box_width = interior(text) + BORDERS;
+        assert_eq!(
+            (
+                placements[0].x,
+                placements[0].y,
+                placements[0].width,
+                placements[0].height,
+            ),
+            (0, 0, box_width, BOX_HEIGHT)
+        );
+        assert_eq!(
+            (
+                placements[1].x,
+                placements[1].y,
+                placements[1].width,
+                placements[1].height,
+            ),
+            (centre(box_width, text), BOX_HEIGHT / 2, text_width, 1)
+        );
     }
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {

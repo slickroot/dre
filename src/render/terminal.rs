@@ -1213,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_box_is_a_one_pixel_line_along_its_top_and_left_in_the_foreground() {
+    fn the_footer_box_is_a_one_pixel_line_along_all_four_sides_in_the_foreground() {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = r.frame(&empty_state());
@@ -1230,14 +1230,30 @@ mod tests {
         for x in 0..width {
             assert_eq!(at(x, 0), [cr, cg, cb, OPAQUE]);
         }
-        for x in 1..width {
+        for x in 1..width - 1 {
             assert_eq!(at(x, 1)[3], 0, "top line is 1px thick at column {x}");
         }
         for y in 0..height {
             assert_eq!(at(0, y), [cr, cg, cb, OPAQUE]);
         }
-        for y in 1..height {
+        for y in 1..height - 1 {
             assert_eq!(at(1, y)[3], 0, "left line is 1px thick at row {y}");
+        }
+        for x in 0..width {
+            assert_eq!(at(x, height - 1), [cr, cg, cb, OPAQUE]);
+        }
+        for x in 1..width - 1 {
+            assert_eq!(
+                at(x, height - 2)[3],
+                0,
+                "bottom line is 1px thick at column {x}"
+            );
+        }
+        for y in 0..height {
+            assert_eq!(at(width - 1, y), [cr, cg, cb, OPAQUE]);
+        }
+        for y in 1..height - 1 {
+            assert_eq!(at(width - 2, y)[3], 0, "right line is 1px thick at row {y}");
         }
     }
 
