@@ -91,6 +91,41 @@ impl Shape for BoxShape {
     }
 }
 
+pub(super) struct GlowShape {
+    pub(super) width: i64,
+    pub(super) height: i64,
+    pub(super) margin_x: i64,
+    pub(super) margin_y: i64,
+    pub(super) colour: [u8; 3],
+    pub(super) peak_alpha: u8,
+}
+
+impl Shape for GlowShape {
+    fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
+        let px = x as f64 - self.margin_x as f64 + 0.5;
+        let py = y as f64 - self.margin_y as f64 + 0.5;
+        let outside_x = (-px).max(px - self.width as f64).max(0.0);
+        let outside_y = (-py).max(py - self.height as f64).max(0.0);
+        let alpha = if outside_x == 0.0 && outside_y == 0.0 {
+            self.peak_alpha as f64
+        } else {
+            let spread = (outside_x / self.margin_x as f64)
+                .hypot(outside_y / self.margin_y as f64)
+                .clamp(0.0, 1.0);
+            self.peak_alpha as f64 * (1.0 - spread)
+        };
+        if alpha <= 0.0 {
+            return None;
+        }
+        Some([
+            self.colour[0],
+            self.colour[1],
+            self.colour[2],
+            python_round(alpha) as u8,
+        ])
+    }
+}
+
 pub(super) struct ArrowShape {
     pub(super) width: i64,
     pub(super) stop_rows: Vec<i64>,
@@ -244,5 +279,49 @@ mod tests {
             ..box_shape(30, 30, 0)
         };
         assert_eq!(shape.colour_at(0, 15), Some(FILL));
+    }
+
+    const GLOW_COLOUR: [u8; 3] = [40, 50, 60];
+
+    fn glow_shape(width: i64, height: i64, margin_x: i64, margin_y: i64) -> GlowShape {
+        GlowShape {
+            width,
+            height,
+            margin_x,
+            margin_y,
+            colour: GLOW_COLOUR,
+            peak_alpha: OPAQUE,
+        }
+    }
+
+    #[test]
+    fn the_box_area_of_a_glow_is_at_peak_opacity() {
+        let shape = glow_shape(10, 10, 4, 4);
+        assert_eq!(shape.colour_at(4, 4), Some([40, 50, 60, OPAQUE]));
+        assert_eq!(shape.colour_at(13, 13), Some([40, 50, 60, OPAQUE]));
+    }
+
+    #[test]
+    fn a_glow_fades_out_with_distance_from_the_box() {
+        let shape = glow_shape(10, 10, 4, 4);
+        let near = shape.colour_at(2, 7).unwrap()[3];
+        let far = shape.colour_at(0, 7).unwrap()[3];
+        assert!(near > far, "expected {near} > {far}");
+    }
+
+    #[test]
+    fn a_glow_is_fully_transparent_past_its_margin() {
+        let shape = glow_shape(10, 10, 4, 4);
+        assert_eq!(shape.colour_at(0, 0), None);
+    }
+
+    #[test]
+    fn a_glow_uses_the_box_edge_colour() {
+        let shape = glow_shape(10, 10, 4, 4);
+        let (r, g, b, _) = {
+            let pixel = shape.colour_at(2, 7).unwrap();
+            (pixel[0], pixel[1], pixel[2], pixel[3])
+        };
+        assert_eq!((r, g, b), (GLOW_COLOUR[0], GLOW_COLOUR[1], GLOW_COLOUR[2]));
     }
 }

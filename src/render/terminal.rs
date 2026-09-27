@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape};
+use super::shapes::{ArrowShape, BoxShape, GlowShape};
 use super::{colour, editor, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -20,6 +20,11 @@ const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
+
+const BOX_Z: i32 = -2;
+const GLOW_Z: i32 = BOX_Z - 1;
+const GLOW_MARGIN_CELLS: i64 = 1;
+const GLOW_PEAK_OPACITY: f64 = 0.5;
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -93,6 +98,11 @@ enum SpriteKey {
         stops: Vec<i64>,
         shaft: i64,
     },
+    Glow {
+        width: i64,
+        height: i64,
+        colour: Option<u8>,
+    },
 }
 
 fn sprite_key(placement: &Placement) -> SpriteKey {
@@ -122,6 +132,17 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             shaft: arrow.shaft,
         },
         _ => unreachable!("sprite_key is only called for Box and Arrow placements"),
+    }
+}
+
+fn glow_key(placement: &Placement) -> SpriteKey {
+    match &placement.node {
+        PlacementNode::Box { colour, .. } => SpriteKey::Glow {
+            width: placement.width,
+            height: placement.height,
+            colour: *colour,
+        },
+        _ => unreachable!("glow_key is only called for Box placements"),
     }
 }
 
@@ -280,7 +301,24 @@ impl TerminalRenderer {
             let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area, -2);
+        frame.place(&self.cache[&key], placement, area, BOX_Z);
+
+        let selected = matches!(placement.node, PlacementNode::Box { selected: true, .. });
+        if selected {
+            let key = glow_key(placement);
+            if !self.cache.contains_key(&key) {
+                let drawn = self.outline_glow(placement);
+                self.remember(key.clone(), drawn);
+            }
+            let glow_placement = Placement {
+                node: placement.node.clone(),
+                x: placement.x - GLOW_MARGIN_CELLS,
+                y: placement.y - GLOW_MARGIN_CELLS,
+                width: placement.width + 2 * GLOW_MARGIN_CELLS,
+                height: placement.height + 2 * GLOW_MARGIN_CELLS,
+            };
+            frame.place(&self.cache[&key], &glow_placement, area, GLOW_Z);
+        }
     }
 
     fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -368,6 +406,27 @@ impl TerminalRenderer {
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
         Canvas::fill(width, height, &shape)
+    }
+
+    fn outline_glow(&self, placement: &Placement) -> Canvas {
+        let edge = match &placement.node {
+            PlacementNode::Box { colour, .. } => *colour,
+            _ => unreachable!("outline_glow is only called for Box placements"),
+        };
+        let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
+        let margin_x = self.cells_to_pixels_x(GLOW_MARGIN_CELLS);
+        let margin_y = self.cells_to_pixels_y(GLOW_MARGIN_CELLS);
+        let (r, g, b) = colour(edge);
+        let shape = GlowShape {
+            width,
+            height,
+            margin_x,
+            margin_y,
+            colour: [r, g, b],
+            peak_alpha: (GLOW_PEAK_OPACITY * OPAQUE as f64).round() as u8,
+        };
+        Canvas::fill(width + 2 * margin_x, height + 2 * margin_y, &shape)
     }
 
     fn outline_arrow(&self, placement: &Placement) -> Canvas {
@@ -724,6 +783,21 @@ mod tests {
         }
     }
 
+    fn selected_box_node(colour: Option<u8>) -> PlacementNode<'static> {
+        match box_node(colour, None, false) {
+            PlacementNode::Box { fill, opacity, .. } => PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                rounded: false,
+                sides: ALL_SIDES,
+                border: BORDER,
+                selected: true,
+            },
+            _ => unreachable!(),
+        }
+    }
+
     fn box_placement(
         node: &PlacementNode<'static>,
         x: i64,
@@ -838,6 +912,59 @@ mod tests {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         assert_eq!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn an_unselected_box_places_no_glow() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let node = box_node(Some(1), None, false);
+        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn a_selected_box_places_a_glow_behind_it() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let node = selected_box_node(Some(1));
+        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        assert_eq!(images.len(), 2);
+        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let boxed = images.iter().find(|image| image.z == BOX_Z).unwrap();
+        assert!(glow.z < boxed.z);
+    }
+
+    #[test]
+    fn the_glow_is_centred_on_the_box_and_extends_beyond_it() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let node = selected_box_node(Some(1));
+        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        assert_eq!(glow.col, 4 - GLOW_MARGIN_CELLS);
+        assert_eq!(glow.row, 4 - GLOW_MARGIN_CELLS);
+        assert_eq!(
+            glow.canvas.width,
+            (4 + 2 * GLOW_MARGIN_CELLS) * r.window.cell_width
+        );
+        assert_eq!(
+            glow.canvas.height,
+            (4 + 2 * GLOW_MARGIN_CELLS) * r.window.cell_height
+        );
+    }
+
+    #[test]
+    fn the_glow_uses_the_boxs_own_edge_colour() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let node = selected_box_node(Some(3));
+        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let (edge_r, edge_g, edge_b) = colour(Some(3));
+        let has_edge_colour = glow
+            .canvas
+            .pixels
+            .chunks(4)
+            .filter(|pixel| pixel[3] > 0)
+            .any(|pixel| pixel[0] == edge_r && pixel[1] == edge_g && pixel[2] == edge_b);
+        assert!(has_edge_colour);
     }
 
     fn window(cols: i64, rows: i64, cell_width: i64, cell_height: i64) -> Window {
