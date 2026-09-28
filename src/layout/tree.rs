@@ -1,50 +1,37 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
-use crate::palette::FOREGROUND;
-use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
-use crate::state::FooterView;
+use crate::render::BOX_FILL_OPACITY;
+use crate::view::{
+    self, Arrow, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
+    SIDE_PADDING,
+};
 use types::Tree;
 
-pub(crate) const BOX_HEIGHT: i64 = 3;
-#[allow(dead_code)]
-pub(crate) const GAP_HEIGHT: i64 = 3;
-pub(crate) const GAP_WIDTH: i64 = 8;
-pub(crate) const SIDE_PADDING: i64 = 2;
-pub(crate) const BORDER: i64 = 4;
+#[cfg(test)]
 const BORDER_COLUMNS: i64 = 2;
 
-pub type Sides = (bool, bool, bool, bool);
-pub const ALL_SIDES: Sides = (true, true, true, true);
-pub const NO_SIDES: Sides = (false, false, false, false);
+#[allow(dead_code)]
+pub(crate) const GAP_HEIGHT: i64 = 3;
 #[allow(dead_code)]
 pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
 pub(crate) const LEAF_STRIDE: i64 = 2;
 
-pub(crate) fn interior(label: &str) -> i64 {
-    (label.chars().count() as i64).max(1)
-}
-
-pub(crate) fn width(node: &Node) -> i64 {
-    interior(node.label()) + SIDE_PADDING * 2
+fn width(node: &Node) -> i64 {
+    crate::view::interior(node.label()) + SIDE_PADDING * 2
 }
 
 #[allow(dead_code)]
-pub(crate) fn height(_node: &Node) -> i64 {
+fn height(_node: &Node) -> i64 {
     BOX_HEIGHT
-}
-
-pub(crate) fn centre(width: i64, label: &str) -> i64 {
-    let leftover = width - BORDER_COLUMNS - interior(label);
-    1 + leftover - leftover.div_euclid(2)
 }
 
 fn edit_room(path: &[usize], editing: Option<&[usize]>) -> i64 {
     i64::from(editing == Some(path))
 }
 
-pub(crate) fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> Vec<i64> {
+fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> Vec<i64> {
     fn widen(widths: &mut Vec<i64>, col: usize, width: i64) {
         if widths.len() <= col {
             widths.resize(col + 1, 0);
@@ -64,7 +51,7 @@ pub(crate) fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> V
 }
 
 // `offsets` has one more entry than there are columns, so `offsets[col + 1] - offsets[col]` gives column `col`'s width.
-pub(crate) fn place<'a>(
+fn place<'a>(
     tree: &'a Tree<Node>,
     offsets: &[i64],
     editing: Option<&[usize]>,
@@ -105,7 +92,7 @@ pub(crate) fn place<'a>(
             height: BOX_HEIGHT,
         }];
 
-        let start = x + centre(width - edit_room, node.label());
+        let start = x + view::label_centre(width - edit_room, node.label());
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
             node: PlacementNode::Label(Label {
@@ -114,7 +101,7 @@ pub(crate) fn place<'a>(
             }),
             x: start,
             y: middle,
-            width: interior(node.label()),
+            width: view::interior(node.label()),
             height: 1,
         });
 
@@ -195,112 +182,6 @@ pub(crate) fn place<'a>(
     placements
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Label<'a> {
-    pub text: Cow<'a, str>,
-    pub path: Vec<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Arrow {
-    pub stops: Vec<i64>,
-    pub shaft: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Caret;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cursor;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PlacementNode<'a> {
-    Box {
-        colour: Option<u8>,
-        fill: Option<u8>,
-        opacity: Option<f64>,
-        rounded: bool,
-        sides: Sides,
-        border: i64,
-    },
-    Label(Label<'a>),
-    Arrow(Arrow),
-    Caret(Caret),
-    Glow {
-        colour: Option<u8>,
-        rounded: bool,
-    },
-    Cursor(Cursor),
-    /// A round status light, e.g. the footer's mode LED.
-    Led {
-        colour: u8,
-        lit: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Placement<'a> {
-    pub node: PlacementNode<'a>,
-    pub x: i64,
-    pub y: i64,
-    pub width: i64,
-    pub height: i64,
-}
-
-pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
-
-pub(crate) const LED_WIDTH: i64 = 2;
-pub(crate) const LED_LABEL_GAP: i64 = 1;
-
-pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
-    let text = view.text.as_str();
-    let text_width = text.chars().count() as i64;
-    let inset_box_width = interior(text) + SIDE_PADDING * 2;
-    let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
-    let corner_box = PlacementNode::Box {
-        colour: None,
-        fill: Some(FOREGROUND),
-        opacity: Some(FOOTER_FILL_OPACITY),
-        rounded: false,
-        sides: if view.bordered { ALL_SIDES } else { NO_SIDES },
-        border: 1,
-    };
-    let led = PlacementNode::Led {
-        colour: view.led_colour,
-        lit: view.lit,
-    };
-    let label = PlacementNode::Label(Label {
-        text: Cow::Owned(text.to_string()),
-        path: vec![],
-    });
-    let led_x = centre(inset_box_width, text);
-    let label_x = led_x + LED_WIDTH + LED_LABEL_GAP;
-    let placements = vec![
-        Placement {
-            node: corner_box,
-            x: 0,
-            y: 0,
-            width: box_width,
-            height: BOX_HEIGHT,
-        },
-        Placement {
-            node: led,
-            x: led_x,
-            y: BOX_HEIGHT / 2,
-            width: LED_WIDTH,
-            height: 1,
-        },
-        Placement {
-            node: label,
-            x: label_x,
-            y: BOX_HEIGHT / 2,
-            width: text_width,
-            height: 1,
-        },
-    ];
-    with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
-}
-
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
     if !tree.contains(&[0]) {
         return Vec::new();
@@ -331,108 +212,19 @@ pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Ve
     boxes_first
 }
 
-pub(crate) const GLOW_MARGIN: i64 = 1;
-
-pub(crate) fn with_glow<'a>(
-    placements: Vec<Placement<'a>>,
-    selected: Option<&[usize]>,
-) -> Vec<Placement<'a>> {
-    let Some(selected) = selected else {
-        return placements;
-    };
-    let Some(label) = placements.iter().find(|placement| {
-        matches!(&placement.node, PlacementNode::Label(label) if label.path == selected)
-    }) else {
-        return placements;
-    };
-    let Some(glow) = placements
-        .iter()
-        .find_map(|placement| match &placement.node {
-            PlacementNode::Box {
-                colour, rounded, ..
-            } if placement.x <= label.x
-                && label.x < placement.x + placement.width
-                && placement.y <= label.y
-                && label.y < placement.y + placement.height =>
-            {
-                Some(Placement {
-                    node: PlacementNode::Glow {
-                        colour: *colour,
-                        rounded: *rounded,
-                    },
-                    x: placement.x - GLOW_MARGIN,
-                    y: placement.y - GLOW_MARGIN,
-                    width: placement.width + 2 * GLOW_MARGIN,
-                    height: placement.height + 2 * GLOW_MARGIN,
-                })
-            }
-            _ => None,
-        })
-    else {
-        return placements;
-    };
-    let mut result = Vec::with_capacity(placements.len() + 1);
-    result.push(glow);
-    result.extend(placements);
-    result
-}
-
-pub(crate) fn with_cursor<'a>(
-    placements: Vec<Placement<'a>>,
-    path: Option<Vec<usize>>,
-    cursor: Option<usize>,
-) -> Vec<Placement<'a>> {
-    let (Some(path), Some(index)) = (path, cursor) else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Cursor(Cursor),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
-    }
-    placements
-}
-
-pub(crate) fn with_caret<'a>(
-    placements: Vec<Placement<'a>>,
-    editing: Option<(Vec<usize>, usize)>,
-) -> Vec<Placement<'a>> {
-    let Some((path, index)) = editing else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Caret(Caret),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
-    }
-    placements
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children};
     use crate::palette;
+    use crate::palette::FOREGROUND;
+    use crate::render::FOOTER_FILL_OPACITY;
+    use crate::state::FooterView;
+    use crate::view::{
+        footer, interior, label_centre as centre, with_caret, with_glow, Arrow, Caret, Label,
+        PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GLOW_MARGIN, LED_LABEL_GAP, LED_WIDTH,
+        NO_SIDES, SIDE_PADDING,
+    };
 
     fn footer_view(
         text: &str,
@@ -535,7 +327,6 @@ mod tests {
                 rounded: false,
                 sides: ALL_SIDES,
                 border: 1,
-                selected: false,
             }
         );
     }

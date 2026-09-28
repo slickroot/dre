@@ -6,10 +6,10 @@ use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
-use crate::layout::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
 use crate::palette::palette;
 use crate::tty::Window;
 use crate::view::Scene;
+use crate::view::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -515,9 +515,9 @@ mod tests {
     use super::super::font::FakeGlyphSource;
     use super::super::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
     use super::*;
-    use crate::layout::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::state::Mode;
     use crate::view::editor;
+    use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::State;
 
     #[test]
@@ -834,8 +834,8 @@ mod tests {
         y: i64,
         width: i64,
         height: i64,
-    ) -> crate::layout::Placement<'static> {
-        crate::layout::Placement {
+    ) -> crate::view::Placement<'static> {
+        crate::view::Placement {
             node: node.clone(),
             x,
             y,
@@ -851,9 +851,9 @@ mod tests {
         y: i64,
         width: i64,
         height: i64,
-    ) -> crate::layout::Placement<'static> {
-        crate::layout::Placement {
-            node: crate::layout::PlacementNode::Arrow(crate::layout::Arrow { stops, shaft }),
+    ) -> crate::view::Placement<'static> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::Arrow(crate::view::Arrow { stops, shaft }),
             x,
             y,
             width,
@@ -1098,9 +1098,9 @@ mod tests {
         y: i64,
         width: i64,
         height: i64,
-    ) -> crate::layout::Placement<'_> {
-        crate::layout::Placement {
-            node: crate::layout::PlacementNode::Label(crate::layout::Label {
+    ) -> crate::view::Placement<'_> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
                 path: vec![0],
             }),
@@ -1111,14 +1111,9 @@ mod tests {
         }
     }
 
-    fn caret_placement(
-        x: i64,
-        y: i64,
-        width: i64,
-        height: i64,
-    ) -> crate::layout::Placement<'static> {
-        crate::layout::Placement {
-            node: crate::layout::PlacementNode::Caret(crate::layout::Caret),
+    fn caret_placement(x: i64, y: i64, width: i64, height: i64) -> crate::view::Placement<'static> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::Caret(crate::view::Caret),
             x,
             y,
             width,
@@ -2106,7 +2101,7 @@ mod tests {
     }
 
     fn leaf_box(state: &State) -> Placement<'_> {
-        crate::layout::diagram(state.doc().tree(), None)
+        crate::layout::tree::diagram(state.doc().tree(), None)
             .into_iter()
             .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .unwrap()
