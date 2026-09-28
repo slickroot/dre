@@ -283,7 +283,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
         fill: Some(FOREGROUND),
         opacity: Some(FOOTER_FILL_OPACITY),
         rounded: false,
-        sides: NO_SIDES,
+        sides: if view.bordered { ALL_SIDES } else { NO_SIDES },
         border: 1,
         selected: false,
     };
@@ -460,12 +460,19 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
     use crate::palette;
 
-    fn footer_view(text: &str, led_colour: u8, lit: bool, cursor: Option<usize>) -> FooterView {
+    fn footer_view(
+        text: &str,
+        led_colour: u8,
+        lit: bool,
+        cursor: Option<usize>,
+        bordered: bool,
+    ) -> FooterView {
         FooterView {
             led_colour,
             lit,
             text: text.to_string(),
             cursor,
+            bordered,
         }
     }
 
@@ -473,7 +480,7 @@ mod tests {
     fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
         let text = "MOVE plans \u{2022} dre";
         let text_width = text.chars().count() as i64;
-        let view = footer_view(text, palette::LIME, false, None);
+        let view = footer_view(text, palette::LIME, false, None, false);
         let placements = footer(&view);
         assert_eq!(placements.len(), 3);
         let inset_box_width = interior(text) + SIDE_PADDING * 2;
@@ -542,8 +549,27 @@ mod tests {
     }
 
     #[test]
+    fn footer_box_is_bordered_when_the_view_is_bordered() {
+        let text = "MOVE type a name \u{2022} dre";
+        let view = footer_view(text, palette::LIME, false, None, true);
+        let placements = footer(&view);
+        assert_eq!(
+            placements[0].node,
+            PlacementNode::Box {
+                colour: None,
+                fill: Some(FOREGROUND),
+                opacity: Some(FOOTER_FILL_OPACITY),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: 1,
+                selected: false,
+            }
+        );
+    }
+
+    #[test]
     fn label_leaves_a_blank_column_after_the_led() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
         let placements = footer(&view);
         let led = &placements[1];
         let label = &placements[2];
@@ -553,7 +579,13 @@ mod tests {
 
     #[test]
     fn a_lit_led_is_marked_lit() {
-        let view = footer_view("WRITE plans \u{2022} dre", palette::VIOLET, true, None);
+        let view = footer_view(
+            "WRITE plans \u{2022} dre",
+            palette::VIOLET,
+            true,
+            None,
+            false,
+        );
         let placements = footer(&view);
         match &placements[1].node {
             PlacementNode::Led { colour, lit } => {
@@ -566,7 +598,7 @@ mod tests {
 
     #[test]
     fn footer_with_no_cursor_has_no_cursor_placement() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
         let placements = footer(&view);
         assert!(placements
             .iter()
@@ -576,7 +608,7 @@ mod tests {
     #[test]
     fn footer_with_a_cursor_places_it_at_the_edit_index_on_the_label() {
         let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, Some(3));
+        let view = footer_view(text, palette::LIME, false, Some(3), false);
         let placements = footer(&view);
         let label = placements
             .iter()

@@ -107,18 +107,21 @@ impl State {
                 lit: true,
                 text: format!("{WRITE} {}", footer_text(self.save_to.as_deref())),
                 cursor: None,
+                bordered: false,
             },
             Mode::NamePrompt { name, .. } => FooterView {
                 led_colour: palette::LIME,
                 lit: false,
                 text: format!("{MOVE} {}", name_prompt_text(name)),
                 cursor: Some(name.chars().count()),
+                bordered: true,
             },
             Mode::Command => FooterView {
                 led_colour: palette::LIME,
                 lit: false,
                 text: format!("{MOVE} {}", footer_text(self.save_to.as_deref())),
                 cursor: None,
+                bordered: false,
             },
         }
     }
@@ -130,6 +133,7 @@ pub(crate) struct FooterView {
     pub(crate) lit: bool,
     pub(crate) text: String,
     pub(crate) cursor: Option<usize>,
+    pub(crate) bordered: bool,
 }
 
 fn footer_text(save_to: Option<&str>) -> String {
