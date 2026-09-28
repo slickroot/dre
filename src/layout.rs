@@ -255,13 +255,9 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
         sides: NO_SIDES,
         border: 1,
     };
-    let led = PlacementNode::Box {
-        colour: Some(view.led_colour),
-        fill: Some(view.led_colour),
-        opacity: Some(if view.lit { 1.0 } else { FOOTER_FILL_OPACITY }),
-        rounded: true,
-        sides: ALL_SIDES,
-        border: 0,
+    let led = PlacementNode::Led {
+        colour: view.led_colour,
+        lit: view.lit,
     };
     let label = PlacementNode::Label(Label {
         text: Cow::Owned(text.to_string()),
@@ -281,7 +277,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
             node: led,
             x: led_x,
             y: BOX_HEIGHT / 2,
-            width: 1,
+            width: 2,
             height: 1,
         },
         Placement {
@@ -396,13 +392,9 @@ mod tests {
         let led_x = centre(inset_box_width, text);
         assert_eq!(
             placements[1].node,
-            PlacementNode::Box {
-                colour: Some(palette::LIME),
-                fill: Some(palette::LIME),
-                opacity: Some(FOOTER_FILL_OPACITY),
-                rounded: true,
-                sides: ALL_SIDES,
-                border: 0,
+            PlacementNode::Led {
+                colour: palette::LIME,
+                lit: false,
             }
         );
         assert_eq!(
@@ -412,7 +404,7 @@ mod tests {
                 placements[1].width,
                 placements[1].height,
             ),
-            (led_x, BOX_HEIGHT / 2, 1, 1)
+            (led_x, BOX_HEIGHT / 2, 2, 1)
         );
 
         assert_eq!(
@@ -434,15 +426,13 @@ mod tests {
     }
 
     #[test]
-    fn a_lit_led_uses_full_opacity() {
+    fn a_lit_led_is_marked_lit() {
         let view = footer_view("WRITE plans \u{2022} dre", palette::VIOLET, true, None);
         let placements = footer(&view);
         match &placements[1].node {
-            PlacementNode::Box {
-                opacity, colour, ..
-            } => {
-                assert_eq!(*opacity, Some(1.0));
-                assert_eq!(*colour, Some(palette::VIOLET));
+            PlacementNode::Led { colour, lit } => {
+                assert!(*lit);
+                assert_eq!(*colour, palette::VIOLET);
             }
             _ => panic!("expected the second placement to be the led box"),
         }

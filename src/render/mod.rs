@@ -446,7 +446,7 @@ mod tests {
             (
                 led_x(box_x, box_width, text),
                 box_y + layout::BOX_HEIGHT / 2,
-                1,
+                2,
                 1
             )
         );

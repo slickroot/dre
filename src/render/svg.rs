@@ -1423,16 +1423,21 @@ mod tests {
         )
     }
 
-    fn footer_led_rect(foot: Area) -> String {
+    fn footer_led_circle(foot: Area) -> String {
         let area = footer_box_area(foot);
-        let (lr, lg, lb) = palette(crate::palette::LIME).unwrap();
-        format!(
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({lr},{lg},{lb})\" stroke-width=\"{}\" rx=\"{ROUNDED_RADIUS}\" fill=\"rgb({lr},{lg},{lb})\" fill-opacity=\"{FOOTER_FILL_OPACITY}\"/>",
-            footer_led_x(area) * CELL_WIDTH,
-            (area.row + BOX_HEIGHT / 2) * CELL_HEIGHT,
-            CELL_WIDTH,
-            CELL_HEIGHT,
-            BORDER / 2,
+        led_circle(
+            &Placement {
+                node: PlacementNode::Led {
+                    colour: crate::palette::LIME,
+                    lit: false,
+                },
+                x: footer_led_x(area),
+                y: area.row + BOX_HEIGHT / 2,
+                width: 2,
+                height: 1,
+            },
+            crate::palette::LIME,
+            false,
         )
     }
 
@@ -1440,8 +1445,8 @@ mod tests {
         format!(
             "{}{}{}",
             footer_rect(foot),
-            footer_led_rect(foot),
-            padded_footer_label(foot)
+            padded_footer_label(foot),
+            footer_led_circle(foot)
         )
     }
 
