@@ -12,11 +12,9 @@ pub const NO_SIDES: Sides = (false, false, false, false);
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 pub(crate) const BORDER: i64 = 4;
-pub(crate) const SIDE_PADDING: i64 = 2;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 pub(crate) const LED_WIDTH: i64 = 2;
-pub(crate) const LED_LABEL_GAP: i64 = 1;
 pub(crate) const GLOW_MARGIN: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,14 +125,15 @@ const NAME: &str = "NAME";
 struct Column {
     node: PlacementNode<'static>,
     width: i64,
-    padding: i64,
+    padding: u8,
+    cursor: Option<i64>,
 }
 
 fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64) {
     let mut placements = Vec::with_capacity(columns.len());
     let mut x = 0;
     for column in columns {
-        x += column.padding;
+        x += column.padding as i64;
         placements.push(Placement {
             node: column.node,
             x,
@@ -142,7 +141,16 @@ fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64)
             width: column.width,
             height: 1,
         });
-        x += column.width + column.padding;
+        if let Some(offset) = column.cursor {
+            placements.push(Placement {
+                node: PlacementNode::Cursor(Cursor),
+                x: x + offset,
+                y,
+                width: 1,
+                height: 1,
+            });
+        }
+        x += column.width + column.padding as i64;
     }
     (placements, x)
 }
@@ -165,6 +173,7 @@ fn footer_filename(model: &FooterModel) -> &str {
 
 pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     let mode_word = footer_mode_word(model.mode);
+    let filename = footer_filename(model);
     let columns = vec![
         Column {
             node: PlacementNode::Led {
@@ -176,7 +185,8 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                 lit: !matches!(model.mode, FooterMode::Move),
             },
             width: LED_WIDTH,
-            padding: SIDE_PADDING,
+            padding: 1,
+            cursor: None,
         },
         Column {
             node: PlacementNode::Label(Label {
@@ -184,35 +194,29 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                 colour: None,
             }),
             width: interior(mode_word),
-            padding: LED_LABEL_GAP - SIDE_PADDING,
+            padding: 1,
+            cursor: None,
+        },
+        Column {
+            node: PlacementNode::Label(Label {
+                text: Cow::Owned(filename.to_string()),
+                colour: Some(style::DIM),
+            }),
+            width: interior(filename),
+            padding: 1,
+            cursor: model.cursor.map(|c| c as i64),
+        },
+        Column {
+            node: PlacementNode::Label(Label {
+                text: Cow::Borrowed(FOOTER_SUFFIX),
+                colour: None,
+            }),
+            width: interior(FOOTER_SUFFIX),
+            padding: 1,
+            cursor: None,
         },
     ];
-    let (mut placements, word_end) = stack_columns(columns, BOX_HEIGHT / 2);
-    let filename = footer_filename(model);
-    let filename_x = word_end + SIDE_PADDING;
-    let filename_width = interior(filename);
-    placements.push(Placement {
-        node: PlacementNode::Label(Label {
-            text: Cow::Owned(filename.to_string()),
-            colour: Some(style::DIM),
-        }),
-        x: filename_x,
-        y: BOX_HEIGHT / 2,
-        width: filename_width,
-        height: 1,
-    });
-    let suffix_x = filename_x + filename_width;
-    let suffix_width = interior(FOOTER_SUFFIX);
-    placements.push(Placement {
-        node: PlacementNode::Label(Label {
-            text: Cow::Borrowed(FOOTER_SUFFIX),
-            colour: None,
-        }),
-        x: suffix_x,
-        y: BOX_HEIGHT / 2,
-        width: suffix_width,
-        height: 1,
-    });
+    let (mut placements, width) = stack_columns(columns, BOX_HEIGHT / 2);
     placements.insert(
         0,
         Placement {
@@ -230,19 +234,10 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             },
             x: 0,
             y: 0,
-            width: suffix_x + suffix_width + SIDE_PADDING,
+            width,
             height: BOX_HEIGHT,
         },
     );
-    if let Some(offset) = model.cursor {
-        placements.push(Placement {
-            node: PlacementNode::Cursor(Cursor),
-            x: filename_x + offset as i64,
-            y: BOX_HEIGHT / 2,
-            width: 1,
-            height: 1,
-        });
-    }
     placements
 }
 
@@ -380,5 +375,53 @@ mod tests {
             .1
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
+    }
+
+    fn led_column(padding: u8, cursor: Option<i64>) -> Column {
+        Column {
+            node: PlacementNode::Led {
+                colour: style::LIME,
+                lit: true,
+            },
+            width: LED_WIDTH,
+            padding,
+            cursor,
+        }
+    }
+
+    #[test]
+    fn stack_columns_emits_a_cursor_placement_right_after_its_column_when_set() {
+        let columns = vec![led_column(1, None), led_column(1, Some(2))];
+        let (placements, _) = stack_columns(columns, 0);
+        let column_placement = &placements[1];
+        assert!(matches!(column_placement.node, PlacementNode::Led { .. }));
+        let cursor_placement = &placements[2];
+        assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
+        assert_eq!(cursor_placement.x, column_placement.x + 2);
+        assert_eq!(cursor_placement.y, column_placement.y);
+    }
+
+    #[test]
+    fn stack_columns_emits_no_cursor_placement_when_column_cursor_is_none() {
+        let columns = vec![led_column(1, None)];
+        let (placements, _) = stack_columns(columns, 0);
+        assert!(!placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+    }
+
+    #[test]
+    fn stack_columns_applies_padding_symmetrically_and_additively_between_columns() {
+        let first_padding: u8 = 2;
+        let second_padding: u8 = 3;
+        let columns = vec![
+            led_column(first_padding, None),
+            led_column(second_padding, None),
+        ];
+        let (placements, _) = stack_columns(columns, 0);
+        let first = &placements[0];
+        let second = &placements[1];
+        let gap = second.x - (first.x + first.width);
+        assert_eq!(gap, first_padding as i64 + second_padding as i64);
     }
 }

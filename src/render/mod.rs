@@ -52,8 +52,7 @@ mod tests {
     use crate::test_support::handle_key;
     use crate::view::{align_right, body, centre, editor, shift, Area, Placement};
     use crate::view::{
-        label_centre, Cursor, Label, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, FOOTER_ROWS,
-        LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
+        Cursor, Label, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, FOOTER_ROWS, LED_WIDTH,
     };
     use crate::State;
 
@@ -130,19 +129,10 @@ mod tests {
 
     #[test]
     fn align_right_shifts_every_placement_by_the_same_delta() {
-        let placed = align_right(
-            vec![
-                box_at(0, 0, 10, 3),
-                label_at("plans", SIDE_PADDING / 2, SIDE_PADDING / 2),
-            ],
-            AREA,
-        );
+        let placed = align_right(vec![box_at(0, 0, 10, 3), label_at("plans", 1, 1)], AREA);
         let dx = placed[0].x;
         let dy = placed[0].y;
-        assert_eq!(
-            placed[1],
-            label_at("plans", SIDE_PADDING / 2 + dx, SIDE_PADDING / 2 + dy)
-        );
+        assert_eq!(placed[1], label_at("plans", 1 + dx, 1 + dy));
     }
 
     #[test]
@@ -344,9 +334,20 @@ mod tests {
         );
     }
 
+    const COLUMN_PADDING: i64 = 1;
+    const COLUMN_GAP: i64 = COLUMN_PADDING * 2;
+
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
         let text_width = text.chars().count() as i64;
-        let box_width = text_width + SIDE_PADDING * 2 + LED_WIDTH + LED_LABEL_GAP;
+        // `text` already contains the one space between the mode word and the
+        // filename, so only the padding beyond that single character is added.
+        let box_width = text_width - 1
+            + LED_WIDTH
+            + COLUMN_PADDING
+            + COLUMN_GAP
+            + COLUMN_GAP
+            + COLUMN_GAP
+            + COLUMN_PADDING;
         (
             foot.col + foot.cols - box_width,
             foot.row + foot.rows - FOOTER_ROWS,
@@ -355,30 +356,28 @@ mod tests {
         )
     }
 
-    fn label_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - LED_WIDTH - LED_LABEL_GAP;
-        box_x + label_centre(inset_box_width, text) + LED_WIDTH + LED_LABEL_GAP
+    fn led_x(box_x: i64) -> i64 {
+        box_x + COLUMN_PADDING
     }
 
-    fn led_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - LED_WIDTH - LED_LABEL_GAP;
-        box_x + label_centre(inset_box_width, text)
+    fn label_x(box_x: i64) -> i64 {
+        led_x(box_x) + LED_WIDTH + COLUMN_GAP
     }
 
-    fn filename_x(box_x: i64, box_width: i64, text: &str, mode_word: &str) -> i64 {
-        label_x(box_x, box_width, text) + mode_word.chars().count() as i64 + 1
+    fn filename_x(box_x: i64, mode_word: &str) -> i64 {
+        label_x(box_x) + mode_word.chars().count() as i64 + COLUMN_GAP
     }
 
     const FOOTER_SUFFIX: &str = " \u{2022} dre";
 
-    fn suffix_x(box_x: i64, box_width: i64, text: &str, mode_word: &str, name: &str) -> i64 {
-        filename_x(box_x, box_width, text, mode_word) + name.chars().count() as i64
+    fn suffix_x(box_x: i64, mode_word: &str, name: &str) -> i64 {
+        filename_x(box_x, mode_word) + name.chars().count() as i64 + COLUMN_GAP
     }
 
     fn prompt_cursor_x(name: &str, text: &str) -> i64 {
         let foot = foot_of(WINDOW);
-        let (box_x, _, box_width, _) = box_at_bottom_right(foot, text);
-        filename_x(box_x, box_width, text, "NAME") + name.chars().count() as i64
+        let (box_x, _, _, _) = box_at_bottom_right(foot, text);
+        filename_x(box_x, "NAME") + name.chars().count() as i64
     }
 
     #[test]
@@ -452,36 +451,24 @@ mod tests {
         x: i64,
     ) {
         let foot = foot_of(WINDOW);
-        let (box_x, box_y, box_width, _) = box_at_bottom_right(foot, text);
+        let (box_x, box_y, _, _) = box_at_bottom_right(foot, text);
         let footer = &editor(state, WINDOW)[1].1;
         assert_eq!(footer.len(), 6);
         assert_eq!(
             footer[2],
-            label_at(
-                mode_word,
-                label_x(box_x, box_width, text),
-                box_y + BOX_HEIGHT / 2
-            )
+            label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
         );
         assert_eq!(
             footer[3],
             colored_label_at(
                 name,
-                filename_x(box_x, box_width, text, mode_word),
+                filename_x(box_x, mode_word),
                 box_y + BOX_HEIGHT / 2,
                 Some(crate::style::DIM),
             )
         );
         assert_eq!(
             footer[4],
-            label_at(
-                FOOTER_SUFFIX,
-                suffix_x(box_x, box_width, text, mode_word, name),
-                box_y + BOX_HEIGHT / 2,
-            )
-        );
-        assert_eq!(
-            footer[5],
             Placement {
                 node: PlacementNode::Cursor(Cursor),
                 x,
@@ -489,6 +476,14 @@ mod tests {
                 width: 1,
                 height: 1
             }
+        );
+        assert_eq!(
+            footer[5],
+            label_at(
+                FOOTER_SUFFIX,
+                suffix_x(box_x, mode_word, name),
+                box_y + BOX_HEIGHT / 2,
+            )
         );
     }
 
@@ -504,21 +499,17 @@ mod tests {
         );
         assert_eq!(
             (footer[1].x, footer[1].y, footer[1].width, footer[1].height),
-            (led_x(box_x, box_width, text), box_y + BOX_HEIGHT / 2, 2, 1)
+            (led_x(box_x), box_y + BOX_HEIGHT / 2, 2, 1)
         );
         assert_eq!(
             footer[2],
-            label_at(
-                mode_word,
-                label_x(box_x, box_width, text),
-                box_y + BOX_HEIGHT / 2
-            )
+            label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
         );
         assert_eq!(
             footer[3],
             colored_label_at(
                 name,
-                filename_x(box_x, box_width, text, mode_word),
+                filename_x(box_x, mode_word),
                 box_y + BOX_HEIGHT / 2,
                 Some(crate::style::DIM),
             )
@@ -527,7 +518,7 @@ mod tests {
             footer[4],
             label_at(
                 FOOTER_SUFFIX,
-                suffix_x(box_x, box_width, text, mode_word, name),
+                suffix_x(box_x, mode_word, name),
                 box_y + BOX_HEIGHT / 2,
             )
         );
