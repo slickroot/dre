@@ -378,7 +378,6 @@ fn printable(key: &str) -> Option<char> {
     key.chars().next().filter(|c| ('\x20'..='\x7e').contains(c))
 }
 
-#[allow(dead_code)]
 pub(crate) fn command_label(state: &State, key: &str) -> Option<(String, &'static str)> {
     if matches!(state.mode, Mode::NamePrompt { .. }) {
         return None;

@@ -11,7 +11,6 @@ mod text_edit;
 use crate::diagram::{Document, Node};
 use crate::state::action::Action;
 pub(crate) use crate::state::effect::Effect;
-#[allow(unused_imports)]
 pub(crate) use crate::state::input::command_label;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
@@ -38,7 +37,6 @@ pub struct State {
     pending_count: Option<usize>,
     saved_len: usize,
     led_flash: bool,
-    #[allow(dead_code)]
     command_status: Option<CommandStatus>,
 }
 
@@ -103,7 +101,7 @@ impl State {
         self.save_to = save_to;
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn command_status(&self) -> Option<CommandStatus> {
         self.command_status.clone()
     }
@@ -187,7 +185,6 @@ pub(crate) fn flash(state: State) -> State {
     state
 }
 
-#[allow(dead_code)]
 pub(crate) fn set_command_status(
     state: State,
     key: String,
