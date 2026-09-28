@@ -47,6 +47,7 @@ struct LedStyle {
 struct LabelStyle {
     text: String,
     colour: Option<u8>,
+    bold: bool,
 }
 
 #[derive(Clone)]
@@ -364,6 +365,7 @@ impl TerminalRenderer {
                     LabelStyle {
                         text: label.text.to_string(),
                         colour: label.colour,
+                        bold: label.bold,
                     },
                 ),
                 PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
@@ -447,7 +449,7 @@ impl TerminalRenderer {
                 node: PlacementNode::Label(Label {
                     text: style.text.clone().into(),
                     colour: style.colour,
-                    bold: false,
+                    bold: style.bold,
                 }),
                 x: geometry.x + offset as i64,
                 y: geometry.y,
@@ -457,7 +459,7 @@ impl TerminalRenderer {
             if !frame.shows(&char_placement, area) {
                 continue;
             }
-            let glyph = self.glyph_source.glyph(character, style.colour);
+            let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
             frame.place(glyph, &char_placement, area, CONTENT_Z);
         }
     }
@@ -1210,11 +1212,22 @@ mod tests {
         width: i64,
         height: i64,
     ) -> crate::view::Placement<'_> {
+        bold_label_placement(text, x, y, width, height, false)
+    }
+
+    fn bold_label_placement(
+        text: &str,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        bold: bool,
+    ) -> crate::view::Placement<'_> {
         crate::view::Placement {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
                 colour: None,
-                bold: false,
+                bold,
             }),
             x,
             y,
@@ -1651,6 +1664,23 @@ mod tests {
             width,
             height,
         }
+    }
+
+    #[test]
+    fn a_bold_label_renders_a_different_glyph_than_a_regular_label() {
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let regular_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, false)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let bold_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, true)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        assert_ne!(regular_pixels, bold_pixels);
     }
 
     #[test]
