@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::num::NonZeroU32;
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
@@ -46,6 +47,13 @@ struct LedStyle {
 
 struct LabelStyle {
     text: String,
+    colour: Option<u8>,
+    bold: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphKey {
+    character: char,
     colour: Option<u8>,
     bold: bool,
 }
@@ -182,7 +190,13 @@ fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
     }
 }
 
+enum Image {
+    Fresh { id: kitty::ImageId },
+    Cached { id: kitty::ImageId },
+}
+
 struct Placed {
+    image: Image,
     canvas: Canvas,
     col: i64,
     row: i64,
@@ -193,20 +207,29 @@ struct Frame {
     window: Window,
     characters: Vec<Vec<char>>,
     images: Vec<Placed>,
+    previous_transient_images: Vec<kitty::ImageId>,
+    transient_images: Vec<kitty::ImageId>,
 }
 
 impl Frame {
+    #[cfg(test)]
     fn new(window: Window) -> Self {
+        Self::with_previous(window, Vec::new())
+    }
+
+    fn with_previous(window: Window, transient_images: Vec<kitty::ImageId>) -> Self {
         Frame {
             window,
             characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
             images: Vec::new(),
+            previous_transient_images: transient_images,
+            transient_images: Vec::new(),
         }
     }
 
     // Clipping happens by cropping: kitty::show cannot position at a negative
-    // column, and sends a=T without C=1, so an overhang would shift into view
-    // or scroll the screen instead of being cut off.
+    // column, so an overhang would shift into view or scroll the screen instead
+    // of being cut off.
     fn crop<G: Into<Geometry>>(&self, geometry: G, area: Area) -> Option<Crop> {
         let geometry = geometry.into();
         let (left, top) = (geometry.x, geometry.y);
@@ -235,12 +258,47 @@ impl Frame {
         self.crop(geometry, area).is_some()
     }
 
-    fn place<G: Into<Geometry>>(&mut self, canvas: &Canvas, geometry: G, area: Area, z: i32) {
+    fn place<G: Into<Geometry>>(
+        &mut self,
+        image: Image,
+        canvas: &Canvas,
+        geometry: G,
+        area: Area,
+        z: i32,
+    ) {
+        let Some(crop) = self.crop(geometry, area) else {
+            return;
+        };
+        let cropped = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
+        self.images.push(Placed {
+            image: match image {
+                Image::Fresh { id } => Image::Fresh { id },
+                Image::Cached { id } => Image::Cached { id },
+            },
+            canvas: cropped,
+            col: crop.col,
+            row: crop.row,
+            z,
+        });
+    }
+
+    fn place_cached<G: Into<Geometry>>(
+        &mut self,
+        id: kitty::ImageId,
+        geometry: G,
+        area: Area,
+        z: i32,
+    ) {
         let Some(crop) = self.crop(geometry, area) else {
             return;
         };
         self.images.push(Placed {
-            canvas: canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y),
+            image: Image::Cached { id },
+            canvas: Canvas {
+                pixels: Vec::new(),
+                width: crop.last_x - crop.first_x,
+                height: crop.last_y - crop.first_y,
+            },
             col: crop.col,
             row: crop.row,
             z,
@@ -255,13 +313,18 @@ impl Frame {
             .collect();
         let mut bytes = HOME_CURSOR.as_bytes().to_vec();
         bytes.extend_from_slice(rows.join("\r\n").as_bytes());
-        bytes.extend_from_slice(kitty::clear().to_string().as_bytes());
+        bytes.extend_from_slice(kitty::soft_clear().to_string().as_bytes());
+        for id in &self.previous_transient_images {
+            bytes.extend_from_slice(kitty::delete(*id).to_string().as_bytes());
+        }
         for image in &self.images {
-            bytes.extend_from_slice(
-                kitty::show(&image.canvas, image.col, image.row, image.z)
-                    .to_string()
-                    .as_bytes(),
-            );
+            let command = match &image.image {
+                Image::Fresh { id } => {
+                    kitty::show(&image.canvas, *id, image.col, image.row, image.z)
+                }
+                Image::Cached { id } => kitty::place(*id, image.col, image.row, image.z),
+            };
+            bytes.extend_from_slice(command.to_string().as_bytes());
         }
         bytes
     }
@@ -282,6 +345,9 @@ pub(crate) struct TerminalRenderer {
     cache: std::collections::HashMap<SpriteKey, Canvas>,
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
+    glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
+    next_image_id: u32,
+    transient_images: Vec<kitty::ImageId>,
 }
 
 impl Renderer for TerminalRenderer {
@@ -302,6 +368,9 @@ impl TerminalRenderer {
             cache: std::collections::HashMap::new(),
             cache_limit,
             glyph_source,
+            glyph_images: std::collections::HashMap::new(),
+            next_image_id: 1,
+            transient_images: Vec::new(),
         }
     }
 
@@ -315,10 +384,12 @@ impl TerminalRenderer {
     }
 
     fn frame(&mut self, scene: &Scene<'_>) -> Frame {
-        let mut frame = Frame::new(self.window);
+        let mut frame =
+            Frame::with_previous(self.window, std::mem::take(&mut self.transient_images));
         for (area, placements) in scene {
             self.paint(&mut frame, placements, *area);
         }
+        self.transient_images = frame.transient_images.clone();
         frame
     }
 
@@ -383,9 +454,18 @@ impl TerminalRenderer {
         }
     }
 
-    fn place(frame: &mut Frame, canvas: &Canvas, geometry: Geometry, area: Area, z: i32) {
+    fn place(
+        &mut self,
+        frame: &mut Frame,
+        canvas: &Canvas,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+    ) {
         if frame.shows(geometry, area) {
-            frame.place(canvas, geometry, area, z);
+            let id = self.allocate_image_id();
+            frame.transient_images.push(id);
+            frame.place(Image::Fresh { id }, canvas, geometry, area, z);
         }
     }
 
@@ -405,7 +485,9 @@ impl TerminalRenderer {
             let drawn = build(self);
             self.remember(key.clone(), drawn);
         }
-        Self::place(frame, &self.cache[&key], geometry, area, z);
+        let id = self.allocate_image_id();
+        frame.transient_images.push(id);
+        frame.place(Image::Fresh { id }, &self.cache[&key], geometry, area, z);
     }
 
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
@@ -459,8 +541,19 @@ impl TerminalRenderer {
             if !frame.shows(&char_placement, area) {
                 continue;
             }
-            let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
-            frame.place(glyph, &char_placement, area, CONTENT_Z);
+            let key = GlyphKey {
+                character,
+                colour: style.colour,
+                bold: style.bold,
+            };
+            if let Some(id) = self.glyph_images.get(&key).copied() {
+                frame.place_cached(id, &char_placement, area, CONTENT_Z);
+            } else {
+                let id = self.allocate_image_id();
+                self.glyph_images.insert(key, id);
+                let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
+                frame.place(Image::Fresh { id }, glyph, &char_placement, area, CONTENT_Z);
+            }
         }
     }
 
@@ -475,7 +568,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        Self::place(frame, &canvas, geometry, area, CONTENT_Z);
+        self.place(frame, &canvas, geometry, area, CONTENT_Z);
     }
 
     fn draw_cursor(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
@@ -487,6 +580,15 @@ impl TerminalRenderer {
             self.cache.clear();
         }
         self.cache.insert(key, drawn);
+    }
+
+    fn allocate_image_id(&mut self) -> kitty::ImageId {
+        let value = NonZeroU32::new(self.next_image_id).expect("image ID allocator exhausted");
+        self.next_image_id = self
+            .next_image_id
+            .checked_add(1)
+            .expect("image ID allocator exhausted");
+        kitty::ImageId::new(value)
     }
 
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
@@ -1395,7 +1497,7 @@ mod tests {
         assert_eq!(lines[0], BLANK.to_string().repeat(3));
         assert_eq!(
             lines[1],
-            format!("{}{}", BLANK.to_string().repeat(3), kitty::clear())
+            format!("{}{}", BLANK.to_string().repeat(3), kitty::soft_clear())
         );
     }
 
@@ -1409,13 +1511,13 @@ mod tests {
         let mut r = renderer_on(window(10, 3, 2, 4));
         let frame = drawn_frame(&mut r, &placements);
         assert!(frame.images.len() > 1);
-        let expected: String = std::iter::once(kitty::clear())
-            .chain(
-                frame
-                    .images
-                    .iter()
-                    .map(|image| kitty::show(&image.canvas, image.col, image.row, image.z)),
-            )
+        let expected: String = std::iter::once(kitty::soft_clear())
+            .chain(frame.images.iter().map(|image| match image.image {
+                Image::Fresh { id } => {
+                    kitty::show(&image.canvas, id, image.col, image.row, image.z)
+                }
+                Image::Cached { id } => kitty::place(id, image.col, image.row, image.z),
+            }))
             .map(|command| command.to_string())
             .collect();
         let bytes = String::from_utf8(frame.into_bytes()).unwrap();
@@ -1492,6 +1594,11 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
+    fn rendered_placements(r: &mut TerminalRenderer, placements: &[Placement<'static>]) -> String {
+        let scene = vec![(whole(r.window), placements.to_vec())];
+        String::from_utf8(r.frame(&scene).into_bytes()).unwrap()
+    }
+
     fn framed(r: &mut TerminalRenderer, state: &State) -> Frame {
         let scene = editor(state, whole(r.window));
         r.frame(&scene)
@@ -1511,7 +1618,7 @@ mod tests {
         });
         assert_eq!(
             String::from_utf8(frame.into_bytes()).unwrap(),
-            format!("{HOME_CURSOR}  \r\n  {}", kitty::clear())
+            format!("{HOME_CURSOR}  \r\n  {}", kitty::soft_clear())
         );
     }
 
@@ -1527,6 +1634,74 @@ mod tests {
     }
 
     #[test]
+    fn repeated_glyphs_transmit_once_and_place_the_cached_image() {
+        let placements = [label_placement("aa", 0, 0, 2, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        let output = rendered_placements(&mut r, &placements);
+
+        assert_eq!(output.matches("a=T").count(), 1);
+        assert_eq!(output.matches("a=p").count(), 1);
+        assert!(output.contains("i=1"));
+    }
+
+    #[test]
+    fn a_glyph_is_placed_from_the_terminal_cache_in_the_next_frame() {
+        let placements = [label_placement("a", 0, 0, 1, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        assert_eq!(first.matches("a=T").count(), 1);
+        assert_eq!(second.matches("a=T").count(), 0);
+        assert_eq!(second.matches("a=p").count(), 1);
+        assert!(second.starts_with("\x1b[H   \x1b_Ga=d,d=a,q=1;\x1b\\"));
+        assert!(!second.contains("d=I"));
+    }
+
+    #[test]
+    fn glyph_character_colour_and_weight_each_have_distinct_images() {
+        let placements = [
+            label_placement("a", 0, 0, 1, 1),
+            label_placement("b", 1, 0, 1, 1),
+            crate::view::Placement {
+                node: crate::view::PlacementNode::Label(crate::view::Label {
+                    text: "a".into(),
+                    colour: Some(1),
+                    bold: false,
+                }),
+                x: 2,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            bold_label_placement("a", 3, 0, 1, 1, true),
+        ];
+        let mut r = renderer_on(window(4, 1, 1, 1));
+
+        let output = rendered_placements(&mut r, &placements);
+
+        assert_eq!(output.matches("a=T").count(), 4);
+        assert_eq!(output.matches("a=p").count(), 0);
+    }
+
+    #[test]
+    fn transient_images_are_deleted_after_soft_clear_before_the_next_frame() {
+        let placements = [caret_placement(0, 0, 1, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        let soft_clear = second.find("d=a").unwrap();
+        let delete = second.find("d=I").unwrap();
+        let show = second.find("a=T").unwrap();
+        assert!(soft_clear < delete);
+        assert!(delete < show);
+    }
+
+    #[test]
     fn the_output_is_sized_by_the_terminal() {
         let (cols, rows) = (5, 4);
         let frame = Frame::new(Window {
@@ -1539,7 +1714,7 @@ mod tests {
         let body = output
             .strip_prefix(HOME_CURSOR)
             .unwrap()
-            .strip_suffix(&kitty::clear().to_string())
+            .strip_suffix(&kitty::soft_clear().to_string())
             .unwrap();
         assert_eq!(
             body.split("\r\n").collect::<Vec<_>>(),
