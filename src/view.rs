@@ -115,6 +115,7 @@ struct Column {
     node: PlacementNode<'static>,
     width: i64,
     padding: i64,
+    cursor: Option<i64>,
 }
 
 fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64) {
@@ -129,6 +130,15 @@ fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64)
             width: column.width,
             height: 1,
         });
+        if let Some(offset) = column.cursor {
+            placements.push(Placement {
+                node: PlacementNode::Cursor(Cursor),
+                x: x + offset,
+                y,
+                width: 1,
+                height: 1,
+            });
+        }
         x += column.width + column.padding;
     }
     (placements, x)
@@ -164,6 +174,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             },
             width: LED_WIDTH,
             padding: SIDE_PADDING,
+            cursor: None,
         },
         Column {
             node: PlacementNode::Label(Label {
@@ -172,6 +183,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             }),
             width: interior(mode_word),
             padding: LED_LABEL_GAP - SIDE_PADDING,
+            cursor: None,
         },
     ];
     let (mut placements, word_end) = stack_columns(columns, BOX_HEIGHT / 2);
@@ -364,5 +376,53 @@ mod tests {
             .1
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
+    }
+
+    fn led_column(padding: i64, cursor: Option<i64>) -> Column {
+        Column {
+            node: PlacementNode::Led {
+                colour: style::LIME,
+                lit: true,
+            },
+            width: LED_WIDTH,
+            padding,
+            cursor,
+        }
+    }
+
+    #[test]
+    fn stack_columns_emits_a_cursor_placement_right_after_its_column_when_set() {
+        let columns = vec![led_column(1, None), led_column(1, Some(2))];
+        let (placements, _) = stack_columns(columns, 0);
+        let column_placement = &placements[1];
+        assert!(matches!(column_placement.node, PlacementNode::Led { .. }));
+        let cursor_placement = &placements[2];
+        assert!(matches!(cursor_placement.node, PlacementNode::Cursor(_)));
+        assert_eq!(cursor_placement.x, column_placement.x + 2);
+        assert_eq!(cursor_placement.y, column_placement.y);
+    }
+
+    #[test]
+    fn stack_columns_emits_no_cursor_placement_when_column_cursor_is_none() {
+        let columns = vec![led_column(1, None)];
+        let (placements, _) = stack_columns(columns, 0);
+        assert!(!placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+    }
+
+    #[test]
+    fn stack_columns_applies_padding_symmetrically_and_additively_between_columns() {
+        let first_padding = 2;
+        let second_padding = 3;
+        let columns = vec![
+            led_column(first_padding, None),
+            led_column(second_padding, None),
+        ];
+        let (placements, _) = stack_columns(columns, 0);
+        let first = &placements[0];
+        let second = &placements[1];
+        let gap = second.x - (first.x + first.width);
+        assert_eq!(gap, first_padding + second_padding);
     }
 }
