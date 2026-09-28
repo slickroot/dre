@@ -453,6 +453,15 @@ mod tests {
     }
 
     #[test]
+    fn missing_input_is_a_no_op() {
+        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0])).with_pending_count(4);
+        let result = crate::state::reduce(state, None).0;
+        assert_eq!(result.selected, Some(vec![0]));
+        assert_eq!(result.pending_count, Some(4));
+        assert_eq!(result.mode, Mode::Command);
+    }
+
+    #[test]
     fn a_bare_digit_in_command_mode_leaves_the_document_unchanged() {
         let boxes = vec![node("a"), node("b")];
         let state = new_state(boxes.clone(), Mode::Command, Some(vec![1]));
