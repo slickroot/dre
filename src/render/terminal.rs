@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape};
+use super::shapes::{ArrowShape, BoxShape, LedShape};
 use super::{colour, editor, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -20,6 +20,9 @@ const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
+
+const BOX_Z: i32 = -2;
+const INK_Z: i32 = -1;
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -93,6 +96,12 @@ enum SpriteKey {
         stops: Vec<i64>,
         shaft: i64,
     },
+    Led {
+        width: i64,
+        height: i64,
+        colour: u8,
+        lit: bool,
+    },
 }
 
 fn sprite_key(placement: &Placement) -> SpriteKey {
@@ -120,7 +129,13 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             stops: arrow.stops.clone(),
             shaft: arrow.shaft,
         },
-        _ => unreachable!("sprite_key is only called for Box and Arrow placements"),
+        PlacementNode::Led { colour, lit } => SpriteKey::Led {
+            width: placement.width,
+            height: placement.height,
+            colour: *colour,
+            lit: *lit,
+        },
+        _ => unreachable!("sprite_key is only called for sprite placements"),
     }
 }
 
@@ -266,6 +281,7 @@ impl TerminalRenderer {
                 PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
                 PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
                 PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
+                PlacementNode::Led { .. } => self.draw_sprite(frame, placement, area, INK_Z),
             }
         }
     }
@@ -279,7 +295,20 @@ impl TerminalRenderer {
             let drawn = self.outline_box(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area, -2);
+        frame.place(&self.cache[&key], placement, area, BOX_Z);
+    }
+
+    /// Draws a cached LED sprite at its layer.
+    fn draw_sprite(&mut self, frame: &mut Frame, placement: &Placement, area: Area, z: i32) {
+        if !frame.shows(placement, area) {
+            return;
+        }
+        let key = sprite_key(placement);
+        if !self.cache.contains_key(&key) {
+            let drawn = self.outline_led(placement);
+            self.remember(key.clone(), drawn);
+        }
+        frame.place(&self.cache[&key], placement, area, z);
     }
 
     fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -291,7 +320,7 @@ impl TerminalRenderer {
             let drawn = self.outline_arrow(placement);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area, -1);
+        frame.place(&self.cache[&key], placement, area, INK_Z);
     }
 
     fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
@@ -307,7 +336,7 @@ impl TerminalRenderer {
                 continue;
             }
             let glyph = self.glyph_source.glyph(character);
-            frame.place(glyph, &char_placement, area, -1);
+            frame.place(glyph, &char_placement, area, INK_Z);
         }
     }
 
@@ -322,7 +351,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        frame.place(&canvas, placement, area, -1);
+        frame.place(&canvas, placement, area, INK_Z);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -364,6 +393,21 @@ impl TerminalRenderer {
             sides,
             edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
+        };
+        Canvas::fill(width, height, &shape)
+    }
+
+    fn outline_led(&self, placement: &Placement) -> Canvas {
+        let PlacementNode::Led { colour: tint, lit } = placement.node else {
+            unreachable!("outline_led is only called for Led placements");
+        };
+        let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
+        let shape = LedShape {
+            width,
+            height,
+            colour: colour(Some(tint)),
+            lit,
         };
         Canvas::fill(width, height, &shape)
     }

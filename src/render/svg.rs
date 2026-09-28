@@ -157,7 +157,25 @@ fn paint(placements: &[Placement]) -> String {
             svg.push_str(&cursor_rect(placement));
         }
     }
+    for placement in placements {
+        if let PlacementNode::Led { colour, lit } = &placement.node {
+            svg.push_str(&led_circle(placement, *colour, *lit));
+        }
+    }
     svg
+}
+
+fn led_circle(placement: &Placement, tint: u8, lit: bool) -> String {
+    let (r, g, b) = colour(Some(tint));
+    let width = placement.width * CELL_WIDTH;
+    let height = placement.height * CELL_HEIGHT;
+    let cx = placement.x * CELL_WIDTH + width / 2;
+    let cy = placement.y * CELL_HEIGHT + height / 2;
+    let radius = width.min(height) as f64 * 0.28;
+    let opacity = if lit { 1.0 } else { 0.3 };
+    format!(
+        "<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{radius}\" fill=\"rgb({r},{g},{b})\" opacity=\"{opacity}\"/>"
+    )
 }
 
 fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String {
