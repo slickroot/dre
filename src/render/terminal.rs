@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
 use crate::layout::{Label, Placement, PlacementNode, Sides};
-use crate::palette::palette;
+use crate::palette::{palette, FOREGROUND};
 use crate::state::State;
 use crate::tty::Window;
 
@@ -24,8 +24,9 @@ const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
-const GLOW_THICKNESS_PX: i64 = 16;
-const GLOW_PEAK_OPACITY: f64 = 0.5;
+const GLOW_THICKNESS_PX: i64 = 4;
+const GLOW_PEAK_OPACITY: f64 = 0.2;
+const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
 
 fn glow_padding_cells(cell_size: i64) -> i64 {
     (GLOW_THICKNESS_PX + cell_size - 1) / cell_size
@@ -96,6 +97,7 @@ enum SpriteKey {
         rounded: bool,
         sides: Sides,
         border: i64,
+        selected: bool,
     },
     Arrow {
         width: i64,
@@ -119,7 +121,7 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             rounded,
             sides,
             border,
-            selected: _,
+            selected,
         } => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
@@ -129,6 +131,7 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             rounded: *rounded,
             sides: *sides,
             border: *border,
+            selected: *selected,
         },
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
@@ -387,7 +390,7 @@ impl TerminalRenderer {
     }
 
     fn outline_box(&self, placement: &Placement) -> Canvas {
-        let (edge, fill, opacity, rounded, sides, border) = match &placement.node {
+        let (edge, fill, opacity, rounded, sides, border, selected) = match &placement.node {
             PlacementNode::Box {
                 colour,
                 fill,
@@ -395,13 +398,15 @@ impl TerminalRenderer {
                 rounded,
                 sides,
                 border,
-                selected: _,
-            } => (*colour, *fill, *opacity, *rounded, *sides, *border),
+                selected,
+            } => (
+                *colour, *fill, *opacity, *rounded, *sides, *border, *selected,
+            ),
             _ => unreachable!("outline_box is only called for Box placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
-        let (r, g, b) = colour(edge);
+        let (r, g, b) = selected_edge_colour(edge, selected);
         let (fill_r, fill_g, fill_b, fill_a) = fill_colour(fill, opacity);
         let shape = BoxShape {
             width,
@@ -471,6 +476,23 @@ impl TerminalRenderer {
         };
         Canvas::fill(width, height, &shape)
     }
+}
+
+fn selected_edge_colour(edge: Option<u8>, selected: bool) -> (u8, u8, u8) {
+    let edge = colour(edge);
+    if !selected {
+        return edge;
+    }
+    let foreground = palette(FOREGROUND).unwrap();
+    let mix = |channel: u8, target: u8| {
+        (channel as f64 + (target as f64 - channel as f64) * SELECTED_BORDER_FOREGROUND_MIX).round()
+            as u8
+    };
+    (
+        mix(edge.0, foreground.0),
+        mix(edge.1, foreground.1),
+        mix(edge.2, foreground.2),
+    )
 }
 
 #[cfg(test)]
@@ -891,6 +913,29 @@ mod tests {
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_selection() {
+        let plain = box_node(Some(1), None, false);
+        let selected = selected_box_node(Some(1));
+        let a = box_placement(&plain, 0, 0, 10, 10);
+        let b = box_placement(&selected, 0, 0, 10, 10);
+        assert_ne!(sprite_key(&a), sprite_key(&b));
+    }
+
+    #[test]
+    fn selected_box_border_is_brighter_but_keeps_its_colour_identity() {
+        let r = renderer(1, 1);
+        let plain = box_outline(&r, &box_node(Some(1), None, false), 10, 10);
+        let selected = box_outline(&r, &selected_box_node(Some(1)), 10, 10);
+        let plain_pixel = pixel_of(&plain, 5, 0);
+        let selected_pixel = pixel_of(&selected, 5, 0);
+        assert_ne!(selected_pixel, plain_pixel);
+        assert!(
+            selected_pixel.0 as u16 + selected_pixel.1 as u16 + selected_pixel.2 as u16
+                > plain_pixel.0 as u16 + plain_pixel.1 as u16 + plain_pixel.2 as u16
+        );
     }
 
     #[test]
