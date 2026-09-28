@@ -1,26 +1,7 @@
 use crate::diagram::Node;
-use crate::state::action::Action;
+use crate::state::action::{Action, CommandAction, InsertAction};
 use crate::state::State;
 use types::Tree;
-
-fn is_undoable(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::NewBox
-            | Action::Delete
-            | Action::Paste
-            | Action::CycleColour
-            | Action::ToggleFill
-            | Action::ToggleRounded
-            | Action::CycleSiblingsColour
-            | Action::ToggleSiblingsFill
-            | Action::ToggleSiblingsRounded
-            | Action::RenameLabel
-            | Action::EditLabel
-            | Action::NewSibling
-            | Action::CommitAndAddChild
-    )
-}
 
 fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
@@ -39,10 +20,12 @@ pub(super) fn recorded(
     action: &Action,
     reduce: impl FnOnce(State) -> State,
 ) -> State {
-    let undoable = is_undoable(action);
+    let undoable = action.undoable();
     let state = if undoable { snapshot(state) } else { state };
     let state = reduce(state);
-    if (undoable && *action != Action::EditLabel) || *action == Action::Commit {
+    if (undoable && *action != Action::Command(CommandAction::EditLabel))
+        || *action == Action::Insert(InsertAction::Commit)
+    {
         drop_snapshot_if_unchanged(state)
     } else {
         state
@@ -70,46 +53,47 @@ pub(super) fn undo(mut state: State) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::action::NamePromptAction;
     use crate::state::text_edit::TextKey;
 
     #[test]
     fn scroll_idle_and_interrupt_are_not_undoable() {
-        assert!(!is_undoable(&Action::Idle));
-        assert!(!is_undoable(&Action::Interrupt));
+        assert!(!Action::Command(CommandAction::Idle).undoable());
+        assert!(!Action::Command(CommandAction::Interrupt).undoable());
     }
 
     #[test]
     fn creating_and_editing_actions_are_undoable() {
         for action in [
-            Action::NewBox,
-            Action::NewSibling,
-            Action::Delete,
-            Action::Paste,
-            Action::EditLabel,
-            Action::RenameLabel,
-            Action::CommitAndAddChild,
+            CommandAction::NewBox,
+            CommandAction::NewSibling,
+            CommandAction::Delete,
+            CommandAction::Paste,
+            CommandAction::EditLabel,
+            CommandAction::RenameLabel,
         ] {
-            assert!(is_undoable(&action));
+            assert!(Action::Command(action).undoable());
         }
+        assert!(Action::Insert(InsertAction::CommitAndAddChild).undoable());
     }
 
     #[test]
     fn name_actions_are_not_undoable() {
+        assert!(!Action::Command(CommandAction::OpenNamePrompt).undoable());
         for action in [
-            Action::OpenNamePrompt,
-            Action::NameAppend('a'),
-            Action::NameBackspace,
-            Action::NameConfirm,
-            Action::NameCancel,
+            NamePromptAction::NameAppend('a'),
+            NamePromptAction::NameBackspace,
+            NamePromptAction::NameConfirm,
+            NamePromptAction::NameCancel,
         ] {
-            assert!(!is_undoable(&action));
+            assert!(!Action::NamePrompt(action).undoable());
         }
     }
 
     #[test]
     fn typing_in_insert_mode_is_not_undoable() {
-        assert!(!is_undoable(&Action::InsertKey(TextKey::Char('a'))));
-        assert!(!is_undoable(&Action::InsertKey(TextKey::Backspace)));
-        assert!(!is_undoable(&Action::Commit));
+        assert!(!Action::Insert(InsertAction::InsertKey(TextKey::Char('a'))).undoable());
+        assert!(!Action::Insert(InsertAction::InsertKey(TextKey::Backspace)).undoable());
+        assert!(!Action::Insert(InsertAction::Commit).undoable());
     }
 }

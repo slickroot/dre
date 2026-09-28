@@ -1,7 +1,7 @@
 use crate::state::text_edit::TextKey;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Action {
+pub(crate) enum CommandAction {
     Undo,
     NewBox,
     NewSibling,
@@ -22,12 +22,21 @@ pub(crate) enum Action {
     Quit,
     Idle,
     Interrupt,
+    OpenNamePrompt,
     Digit(u8),
     CancelCount,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum InsertAction {
     Commit,
     CommitAndAddChild,
     InsertKey(TextKey),
-    OpenNamePrompt,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum NamePromptAction {
     NameAppend(char),
     NameBackspace,
     NameConfirm,
@@ -35,60 +44,85 @@ pub(crate) enum Action {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ActionMode {
-    Command,
-    Insert,
-    NamePrompt,
+pub(crate) enum Action {
+    Command(CommandAction),
+    Insert(InsertAction),
+    NamePrompt(NamePromptAction),
 }
 
-impl Action {
-    pub(crate) fn mode(&self) -> ActionMode {
+impl CommandAction {
+    pub(crate) fn undoable(&self) -> bool {
         match self {
-            Action::Commit | Action::CommitAndAddChild | Action::InsertKey(_) => ActionMode::Insert,
-            Action::NameAppend(_)
-            | Action::NameBackspace
-            | Action::NameConfirm
-            | Action::NameCancel => ActionMode::NamePrompt,
-            Action::Undo
-            | Action::NewBox
-            | Action::NewSibling
-            | Action::Delete
-            | Action::Paste
-            | Action::SelectParent
-            | Action::SelectChild
-            | Action::SelectNext
-            | Action::SelectPrevious
-            | Action::EditLabel
-            | Action::RenameLabel
-            | Action::CycleColour
-            | Action::CycleSiblingsColour
-            | Action::ToggleSiblingsFill
-            | Action::ToggleSiblingsRounded
-            | Action::ToggleFill
-            | Action::ToggleRounded
-            | Action::Quit
-            | Action::Idle
-            | Action::Interrupt
-            | Action::OpenNamePrompt
-            | Action::Digit(_)
-            | Action::CancelCount => ActionMode::Command,
+            CommandAction::NewBox
+            | CommandAction::NewSibling
+            | CommandAction::Delete
+            | CommandAction::Paste
+            | CommandAction::EditLabel
+            | CommandAction::RenameLabel
+            | CommandAction::CycleColour
+            | CommandAction::CycleSiblingsColour
+            | CommandAction::ToggleSiblingsFill
+            | CommandAction::ToggleSiblingsRounded
+            | CommandAction::ToggleFill
+            | CommandAction::ToggleRounded => true,
+            CommandAction::Undo
+            | CommandAction::SelectParent
+            | CommandAction::SelectChild
+            | CommandAction::SelectNext
+            | CommandAction::SelectPrevious
+            | CommandAction::Quit
+            | CommandAction::Idle
+            | CommandAction::Interrupt
+            | CommandAction::OpenNamePrompt
+            | CommandAction::Digit(_)
+            | CommandAction::CancelCount => false,
+        }
+    }
+
+    pub(crate) fn min_depth(&self) -> usize {
+        match self {
+            CommandAction::Undo
+            | CommandAction::NewBox
+            | CommandAction::Paste
+            | CommandAction::Quit => 0,
+            CommandAction::SelectParent => 2,
+            CommandAction::NewSibling
+            | CommandAction::SelectChild
+            | CommandAction::SelectNext
+            | CommandAction::SelectPrevious
+            | CommandAction::EditLabel
+            | CommandAction::RenameLabel
+            | CommandAction::CycleColour
+            | CommandAction::CycleSiblingsColour
+            | CommandAction::ToggleSiblingsFill
+            | CommandAction::ToggleSiblingsRounded
+            | CommandAction::ToggleFill
+            | CommandAction::ToggleRounded
+            | CommandAction::Delete => 1,
+            CommandAction::Idle
+            | CommandAction::Interrupt
+            | CommandAction::OpenNamePrompt
+            | CommandAction::Digit(_)
+            | CommandAction::CancelCount => 0,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl InsertAction {
+    pub(crate) fn undoable(&self) -> bool {
+        match self {
+            InsertAction::CommitAndAddChild => true,
+            InsertAction::Commit | InsertAction::InsertKey(_) => false,
+        }
+    }
+}
 
-    #[test]
-    fn actions_map_to_their_mode() {
-        assert_eq!(
-            Action::InsertKey(TextKey::Char('a')).mode(),
-            ActionMode::Insert
-        );
-        assert_eq!(Action::NameConfirm.mode(), ActionMode::NamePrompt);
-        assert_eq!(Action::OpenNamePrompt.mode(), ActionMode::Command);
-        assert_eq!(Action::Idle.mode(), ActionMode::Command);
-        assert_eq!(Action::Interrupt.mode(), ActionMode::Command);
+impl Action {
+    pub(crate) fn undoable(&self) -> bool {
+        match self {
+            Action::Command(a) => a.undoable(),
+            Action::Insert(a) => a.undoable(),
+            Action::NamePrompt(_) => false,
+        }
     }
 }

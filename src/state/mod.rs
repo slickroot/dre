@@ -10,7 +10,6 @@ mod text_edit;
 
 use crate::diagram::{Document, Node};
 use crate::palette;
-use crate::state::action::ActionMode;
 pub(crate) use crate::state::effect::Effect;
 #[cfg(not(test))]
 use crate::state::input::INTERRUPT;
@@ -170,17 +169,17 @@ impl Default for State {
 }
 
 fn apply(state: State, action: action::Action) -> State {
-    history::recorded(state, &action, |state| match action.mode() {
-        ActionMode::Insert => insert::reduce(state, action),
-        ActionMode::NamePrompt => name_prompt::reduce(state, action),
-        ActionMode::Command => command::reduce(state, action),
+    history::recorded(state, &action, |state| match action {
+        action::Action::Insert(a) => insert::reduce(state, a),
+        action::Action::NamePrompt(a) => name_prompt::reduce(state, a),
+        action::Action::Command(a) => command::reduce(state, a),
     })
 }
 
 pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
     let action = match key {
-        None => Some(action::Action::Idle),
-        Some(INTERRUPT) => Some(action::Action::Interrupt),
+        None => Some(action::Action::Command(action::CommandAction::Idle)),
+        Some(INTERRUPT) => Some(action::Action::Command(action::CommandAction::Interrupt)),
         Some(key) => input::parse(&state, key),
     };
     let mut state = match action {
@@ -240,7 +239,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::state::action::Action;
+    use crate::state::action::{Action, CommandAction, InsertAction};
     use crate::state::apply as reduce;
     use crate::state::text_edit::TextKey;
     use crate::test_support::handle_key;
@@ -511,7 +510,7 @@ mod tests {
     fn idling_in_command_mode_leaves_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let idled = reduce(state, Action::Idle);
+        let idled = reduce(state, Action::Command(CommandAction::Idle));
         assert_eq!(idled.selected, Some(selected));
     }
 
@@ -523,7 +522,7 @@ mod tests {
             Mode::Insert { cursor: 1 },
             Some(selected.clone()),
         );
-        let idled = reduce(state, Action::Idle);
+        let idled = reduce(state, Action::Command(CommandAction::Idle));
         assert_eq!(idled.selected, Some(selected));
     }
 
@@ -538,14 +537,14 @@ mod tests {
             },
             Some(selected.clone()),
         );
-        let idled = reduce(state, Action::Idle);
+        let idled = reduce(state, Action::Command(CommandAction::Idle));
         assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
     fn idling_with_nothing_selected_is_a_noop() {
         let state = new_state(vec![node("a")], Mode::Command, None);
-        let idled = reduce(state, Action::Idle);
+        let idled = reduce(state, Action::Command(CommandAction::Idle));
         assert_eq!(idled.selected, None);
     }
 
@@ -553,16 +552,19 @@ mod tests {
     fn repeated_idling_keeps_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let idled = reduce(reduce(state, Action::Idle), Action::Idle);
+        let idled = reduce(
+            reduce(state, Action::Command(CommandAction::Idle)),
+            Action::Command(CommandAction::Idle),
+        );
         assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
     fn an_idle_is_not_undoable_and_does_not_pollute_history() {
         let mut state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        state = reduce(state, Action::ToggleRounded);
-        state = reduce(state, Action::ToggleRounded);
-        let idled = reduce(state, Action::Idle);
+        state = reduce(state, Action::Command(CommandAction::ToggleRounded));
+        state = reduce(state, Action::Command(CommandAction::ToggleRounded));
+        let idled = reduce(state, Action::Command(CommandAction::Idle));
         assert_eq!(idled.history.len(), 2);
         assert_eq!(idled.selected, Some(vec![0]));
     }
@@ -575,10 +577,10 @@ mod tests {
     fn commit_and_add_child_after_an_edit_leaves_two_snapshots() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let typed = reduce(
-            reduce(before, Action::EditLabel),
-            Action::InsertKey(TextKey::Char('b')),
+            reduce(before, Action::Command(CommandAction::EditLabel)),
+            Action::Insert(InsertAction::InsertKey(TextKey::Char('b'))),
         );
-        let result = reduce(typed, Action::CommitAndAddChild);
+        let result = reduce(typed, Action::Insert(InsertAction::CommitAndAddChild));
         assert_eq!(result.history.len(), 2);
     }
 
@@ -586,12 +588,12 @@ mod tests {
     fn commit_and_add_child_after_an_edit_needs_two_undos_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let typed = reduce(
-            reduce(before.clone(), Action::EditLabel),
-            Action::InsertKey(TextKey::Char('b')),
+            reduce(before.clone(), Action::Command(CommandAction::EditLabel)),
+            Action::Insert(InsertAction::InsertKey(TextKey::Char('b'))),
         );
-        let committed = reduce(typed, Action::CommitAndAddChild);
-        let once = reduce(committed, Action::Undo);
-        let twice = reduce(once.clone(), Action::Undo);
+        let committed = reduce(typed, Action::Insert(InsertAction::CommitAndAddChild));
+        let once = reduce(committed, Action::Command(CommandAction::Undo));
+        let twice = reduce(once.clone(), Action::Command(CommandAction::Undo));
         assert_ne!(*once.doc.tree(), *before.doc.tree());
         assert_eq!(*twice.doc.tree(), *before.doc.tree());
     }
@@ -599,33 +601,36 @@ mod tests {
     #[test]
     fn commit_and_add_child_without_a_change_keeps_the_edit_and_the_commit_snapshots() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let result = reduce(reduce(before, Action::EditLabel), Action::CommitAndAddChild);
+        let result = reduce(
+            reduce(before, Action::Command(CommandAction::EditLabel)),
+            Action::Insert(InsertAction::CommitAndAddChild),
+        );
         assert_eq!(result.history.len(), 2);
     }
 
     #[test]
     fn new_sibling_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let created = reduce(before.clone(), Action::NewSibling);
+        let created = reduce(before.clone(), Action::Command(CommandAction::NewSibling));
         assert_eq!(created.history.len(), 1);
-        let once = reduce(created, Action::Undo);
+        let once = reduce(created, Action::Command(CommandAction::Undo));
         assert_eq!(*once.doc.tree(), *before.doc.tree());
     }
 
     #[test]
     fn rename_label_leaves_one_snapshot_and_needs_one_undo_to_restore_the_document() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let renaming = reduce(before.clone(), Action::RenameLabel);
+        let renaming = reduce(before.clone(), Action::Command(CommandAction::RenameLabel));
         assert_eq!(renaming.history.len(), 1);
-        let once = reduce(renaming, Action::Undo);
+        let once = reduce(renaming, Action::Command(CommandAction::Undo));
         assert_eq!(*once.doc.tree(), *before.doc.tree());
     }
 
     #[test]
     fn committing_an_edit_label_without_a_change_leaves_history_unchanged() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let editing = reduce(before.clone(), Action::EditLabel);
-        let committed = reduce(editing, Action::Commit);
+        let editing = reduce(before.clone(), Action::Command(CommandAction::EditLabel));
+        let committed = reduce(editing, Action::Insert(InsertAction::Commit));
         assert_eq!(committed.history.len(), before.history.len());
         assert_eq!(*committed.doc.tree(), *before.doc.tree());
     }
@@ -633,7 +638,10 @@ mod tests {
     #[test]
     fn undo_does_not_add_a_snapshot() {
         let before = selecting_first(vec![node("a")], Mode::Command);
-        let edited = reduce(reduce(before, Action::NewBox), Action::Undo);
+        let edited = reduce(
+            reduce(before, Action::Command(CommandAction::NewBox)),
+            Action::Command(CommandAction::Undo),
+        );
         assert_eq!(edited.history.len(), 0);
     }
 

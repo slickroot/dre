@@ -1,4 +1,4 @@
-use crate::state::action::Action;
+use crate::state::action::{Action, CommandAction, InsertAction, NamePromptAction};
 use crate::state::text_edit::TextKey;
 use crate::state::{KeyBinding, Mode, State};
 
@@ -6,57 +6,57 @@ pub(crate) const INTERRUPT: &str = "\x03";
 
 pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
     match &state.mode {
-        Mode::Command => command_parse(key),
-        Mode::Insert { .. } => insert_parse(key),
-        Mode::NamePrompt { .. } => name_prompt_parse(key),
+        Mode::Command => command_parse(key).map(Action::Command),
+        Mode::Insert { .. } => insert_parse(key).map(Action::Insert),
+        Mode::NamePrompt { .. } => name_prompt_parse(key).map(Action::NamePrompt),
     }
 }
 
-fn command_parse(key: &str) -> Option<Action> {
+fn command_parse(key: &str) -> Option<CommandAction> {
     if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
-        return Some(Action::Digit(key.as_bytes()[0] - b'0'));
+        return Some(CommandAction::Digit(key.as_bytes()[0] - b'0'));
     }
     Some(match key {
-        "u" => Action::Undo,
-        "b" => Action::NewBox,
-        "s" => Action::NewSibling,
-        "d" => Action::Delete,
-        "p" => Action::Paste,
-        "h" => Action::SelectParent,
-        "l" => Action::SelectChild,
-        "j" => Action::SelectNext,
-        "k" => Action::SelectPrevious,
-        "i" => Action::EditLabel,
-        "I" => Action::RenameLabel,
-        "c" => Action::CycleColour,
-        "C" => Action::CycleSiblingsColour,
-        "F" => Action::ToggleSiblingsFill,
-        "f" => Action::ToggleFill,
-        "r" => Action::ToggleRounded,
-        "R" => Action::ToggleSiblingsRounded,
-        "q" => Action::Quit,
-        "n" => Action::OpenNamePrompt,
-        _ => Action::CancelCount,
+        "u" => CommandAction::Undo,
+        "b" => CommandAction::NewBox,
+        "s" => CommandAction::NewSibling,
+        "d" => CommandAction::Delete,
+        "p" => CommandAction::Paste,
+        "h" => CommandAction::SelectParent,
+        "l" => CommandAction::SelectChild,
+        "j" => CommandAction::SelectNext,
+        "k" => CommandAction::SelectPrevious,
+        "i" => CommandAction::EditLabel,
+        "I" => CommandAction::RenameLabel,
+        "c" => CommandAction::CycleColour,
+        "C" => CommandAction::CycleSiblingsColour,
+        "F" => CommandAction::ToggleSiblingsFill,
+        "f" => CommandAction::ToggleFill,
+        "r" => CommandAction::ToggleRounded,
+        "R" => CommandAction::ToggleSiblingsRounded,
+        "q" => CommandAction::Quit,
+        "n" => CommandAction::OpenNamePrompt,
+        _ => CommandAction::CancelCount,
     })
 }
 
-fn insert_parse(key: &str) -> Option<Action> {
+fn insert_parse(key: &str) -> Option<InsertAction> {
     match key {
-        "\x1b" => Some(Action::Commit),
-        "\r" => Some(Action::CommitAndAddChild),
-        "\x7f" => Some(Action::InsertKey(TextKey::Backspace)),
-        "\x1b[D" => Some(Action::InsertKey(TextKey::Left)),
-        "\x1b[C" => Some(Action::InsertKey(TextKey::Right)),
-        _ => printable(key).map(|c| Action::InsertKey(TextKey::Char(c))),
+        "\x1b" => Some(InsertAction::Commit),
+        "\r" => Some(InsertAction::CommitAndAddChild),
+        "\x7f" => Some(InsertAction::InsertKey(TextKey::Backspace)),
+        "\x1b[D" => Some(InsertAction::InsertKey(TextKey::Left)),
+        "\x1b[C" => Some(InsertAction::InsertKey(TextKey::Right)),
+        _ => printable(key).map(|c| InsertAction::InsertKey(TextKey::Char(c))),
     }
 }
 
-fn name_prompt_parse(key: &str) -> Option<Action> {
+fn name_prompt_parse(key: &str) -> Option<NamePromptAction> {
     match key {
-        "\r" => Some(Action::NameConfirm),
-        "\x1b" => Some(Action::NameCancel),
-        "\x7f" => Some(Action::NameBackspace),
-        _ => printable(key).map(Action::NameAppend),
+        "\r" => Some(NamePromptAction::NameConfirm),
+        "\x1b" => Some(NamePromptAction::NameCancel),
+        "\x7f" => Some(NamePromptAction::NameBackspace),
+        _ => printable(key).map(NamePromptAction::NameAppend),
     }
 }
 
@@ -65,129 +65,129 @@ fn printable(key: &str) -> Option<char> {
 }
 
 #[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Action>] = &[
+pub(crate) const COMMAND_KEYMAP: &[KeyBinding<CommandAction>] = &[
     KeyBinding {
         keys: &["u"],
-        command: Action::Undo,
+        command: CommandAction::Undo,
         description: "Undo the last change",
     },
     KeyBinding {
         keys: &["b"],
-        command: Action::NewBox,
+        command: CommandAction::NewBox,
         description: "Add a child box",
     },
     KeyBinding {
         keys: &["s"],
-        command: Action::NewSibling,
+        command: CommandAction::NewSibling,
         description: "Add a sibling box",
     },
     KeyBinding {
         keys: &["d"],
-        command: Action::Delete,
+        command: CommandAction::Delete,
         description: "Delete the selected box and its descendants",
     },
     KeyBinding {
         keys: &["p"],
-        command: Action::Paste,
+        command: CommandAction::Paste,
         description: "Paste the cut box and its descendants as the last child of the selected box",
     },
     KeyBinding {
         keys: &["h"],
-        command: Action::SelectParent,
+        command: CommandAction::SelectParent,
         description: "Select the parent box",
     },
     KeyBinding {
         keys: &["l"],
-        command: Action::SelectChild,
+        command: CommandAction::SelectChild,
         description: "Select the first child box",
     },
     KeyBinding {
         keys: &["j"],
-        command: Action::SelectNext,
+        command: CommandAction::SelectNext,
         description: "Select the next sibling",
     },
     KeyBinding {
         keys: &["k"],
-        command: Action::SelectPrevious,
+        command: CommandAction::SelectPrevious,
         description: "Select the previous sibling",
     },
     KeyBinding {
         keys: &["i"],
-        command: Action::EditLabel,
+        command: CommandAction::EditLabel,
         description: "Edit the selected box's label",
     },
     KeyBinding {
         keys: &["I"],
-        command: Action::RenameLabel,
+        command: CommandAction::RenameLabel,
         description: "Rename the selected box's label",
     },
     KeyBinding {
         keys: &["c"],
-        command: Action::CycleColour,
+        command: CommandAction::CycleColour,
         description: "Cycle the box's colour",
     },
     KeyBinding {
         keys: &["C"],
-        command: Action::CycleSiblingsColour,
+        command: CommandAction::CycleSiblingsColour,
         description: "Cycle the colour of every sibling",
     },
     KeyBinding {
         keys: &["f"],
-        command: Action::ToggleFill,
+        command: CommandAction::ToggleFill,
         description: "Toggle the box's fill",
     },
     KeyBinding {
         keys: &["F"],
-        command: Action::ToggleSiblingsFill,
+        command: CommandAction::ToggleSiblingsFill,
         description: "Toggle the fill of every sibling",
     },
     KeyBinding {
         keys: &["r"],
-        command: Action::ToggleRounded,
+        command: CommandAction::ToggleRounded,
         description: "Toggle rounded corners",
     },
     KeyBinding {
         keys: &["R"],
-        command: Action::ToggleSiblingsRounded,
+        command: CommandAction::ToggleSiblingsRounded,
         description: "Toggle rounded corners of every sibling",
     },
     KeyBinding {
         keys: &["q"],
-        command: Action::Quit,
+        command: CommandAction::Quit,
         description: "Save and quit (or choose where to save)",
     },
     KeyBinding {
         keys: &["n"],
-        command: Action::OpenNamePrompt,
+        command: CommandAction::OpenNamePrompt,
         description: "Name the diagram",
     },
 ];
 
 #[allow(dead_code)]
-pub(crate) const INSERT_KEYMAP: &[KeyBinding<Action>] = &[
+pub(crate) const INSERT_KEYMAP: &[KeyBinding<InsertAction>] = &[
     KeyBinding {
         keys: &["Enter"],
-        command: Action::CommitAndAddChild,
+        command: InsertAction::CommitAndAddChild,
         description: "Finish the box and add a child box",
     },
     KeyBinding {
         keys: &["Esc"],
-        command: Action::Commit,
+        command: InsertAction::Commit,
         description: "Switch to command mode",
     },
     KeyBinding {
         keys: &["Backspace"],
-        command: Action::InsertKey(TextKey::Backspace),
+        command: InsertAction::InsertKey(TextKey::Backspace),
         description: "Remove the last character",
     },
     KeyBinding {
         keys: &["←"],
-        command: Action::InsertKey(TextKey::Left),
+        command: InsertAction::InsertKey(TextKey::Left),
         description: "Move the cursor left",
     },
     KeyBinding {
         keys: &["→"],
-        command: Action::InsertKey(TextKey::Right),
+        command: InsertAction::InsertKey(TextKey::Right),
         description: "Move the cursor right",
     },
 ];
@@ -223,6 +223,7 @@ pub(crate) fn insert_keymap_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::action::{CommandAction, InsertAction, NamePromptAction};
     use crate::state::new_state;
 
     fn key_state(mode: Mode) -> State {
@@ -231,10 +232,13 @@ mod tests {
 
     #[test]
     fn parse_dispatches_on_the_mode() {
-        assert_eq!(parse(&key_state(Mode::Command), "b"), Some(Action::NewBox));
+        assert_eq!(
+            parse(&key_state(Mode::Command), "b"),
+            Some(Action::Command(CommandAction::NewBox))
+        );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "b"),
-            Some(Action::InsertKey(TextKey::Char('b')))
+            Some(Action::Insert(InsertAction::InsertKey(TextKey::Char('b'))))
         );
         let name_prompt = Mode::NamePrompt {
             name: String::new(),
@@ -242,7 +246,7 @@ mod tests {
         };
         assert_eq!(
             parse(&key_state(name_prompt), "b"),
-            Some(Action::NameAppend('b'))
+            Some(Action::NamePrompt(NamePromptAction::NameAppend('b')))
         );
     }
 
@@ -250,7 +254,7 @@ mod tests {
     fn n_in_command_mode_opens_the_name_prompt() {
         assert_eq!(
             parse(&key_state(Mode::Command), "n"),
-            Some(Action::OpenNamePrompt)
+            Some(Action::Command(CommandAction::OpenNamePrompt))
         );
     }
 
@@ -260,10 +264,22 @@ mod tests {
             name: String::new(),
             quits: false,
         });
-        assert_eq!(parse(&state, "\r"), Some(Action::NameConfirm));
-        assert_eq!(parse(&state, "\x1b"), Some(Action::NameCancel));
-        assert_eq!(parse(&state, "\x7f"), Some(Action::NameBackspace));
-        assert_eq!(parse(&state, "q"), Some(Action::NameAppend('q')));
+        assert_eq!(
+            parse(&state, "\r"),
+            Some(Action::NamePrompt(NamePromptAction::NameConfirm))
+        );
+        assert_eq!(
+            parse(&state, "\x1b"),
+            Some(Action::NamePrompt(NamePromptAction::NameCancel))
+        );
+        assert_eq!(
+            parse(&state, "\x7f"),
+            Some(Action::NamePrompt(NamePromptAction::NameBackspace))
+        );
+        assert_eq!(
+            parse(&state, "q"),
+            Some(Action::NamePrompt(NamePromptAction::NameAppend('q')))
+        );
         assert_eq!(parse(&state, "\x01"), None);
         assert_eq!(parse(&state, "é"), None);
     }
@@ -297,29 +313,32 @@ mod tests {
 
     #[test]
     fn parse_maps_known_keys_to_their_commands() {
-        assert_eq!(command_parse("u"), Some(Action::Undo));
-        assert_eq!(command_parse("b"), Some(Action::NewBox));
-        assert_eq!(command_parse("s"), Some(Action::NewSibling));
-        assert_eq!(command_parse("d"), Some(Action::Delete));
-        assert_eq!(command_parse("h"), Some(Action::SelectParent));
-        assert_eq!(command_parse("l"), Some(Action::SelectChild));
-        assert_eq!(command_parse("j"), Some(Action::SelectNext));
-        assert_eq!(command_parse("k"), Some(Action::SelectPrevious));
-        assert_eq!(command_parse("i"), Some(Action::EditLabel));
-        assert_eq!(command_parse("I"), Some(Action::RenameLabel));
-        assert_eq!(command_parse("c"), Some(Action::CycleColour));
-        assert_eq!(command_parse("C"), Some(Action::CycleSiblingsColour));
-        assert_eq!(command_parse("F"), Some(Action::ToggleSiblingsFill));
-        assert_eq!(command_parse("f"), Some(Action::ToggleFill));
-        assert_eq!(command_parse("r"), Some(Action::ToggleRounded));
-        assert_eq!(command_parse("R"), Some(Action::ToggleSiblingsRounded));
-        assert_eq!(command_parse("q"), Some(Action::Quit));
+        assert_eq!(command_parse("u"), Some(CommandAction::Undo));
+        assert_eq!(command_parse("b"), Some(CommandAction::NewBox));
+        assert_eq!(command_parse("s"), Some(CommandAction::NewSibling));
+        assert_eq!(command_parse("d"), Some(CommandAction::Delete));
+        assert_eq!(command_parse("h"), Some(CommandAction::SelectParent));
+        assert_eq!(command_parse("l"), Some(CommandAction::SelectChild));
+        assert_eq!(command_parse("j"), Some(CommandAction::SelectNext));
+        assert_eq!(command_parse("k"), Some(CommandAction::SelectPrevious));
+        assert_eq!(command_parse("i"), Some(CommandAction::EditLabel));
+        assert_eq!(command_parse("I"), Some(CommandAction::RenameLabel));
+        assert_eq!(command_parse("c"), Some(CommandAction::CycleColour));
+        assert_eq!(command_parse("C"), Some(CommandAction::CycleSiblingsColour));
+        assert_eq!(command_parse("F"), Some(CommandAction::ToggleSiblingsFill));
+        assert_eq!(command_parse("f"), Some(CommandAction::ToggleFill));
+        assert_eq!(command_parse("r"), Some(CommandAction::ToggleRounded));
+        assert_eq!(
+            command_parse("R"),
+            Some(CommandAction::ToggleSiblingsRounded)
+        );
+        assert_eq!(command_parse("q"), Some(CommandAction::Quit));
     }
 
     #[test]
     fn parse_cancels_the_count_for_an_unknown_key() {
         for key in ["x", "\x1b", "é"] {
-            assert_eq!(command_parse(key), Some(Action::CancelCount));
+            assert_eq!(command_parse(key), Some(CommandAction::CancelCount));
         }
     }
 
@@ -328,7 +347,7 @@ mod tests {
         for digit in 0..=9u8 {
             assert_eq!(
                 command_parse(&digit.to_string()),
-                Some(Action::Digit(digit))
+                Some(CommandAction::Digit(digit))
             );
         }
     }
@@ -350,7 +369,7 @@ mod tests {
         for ch in (b'a'..=b'z').chain(b'A'..=b'Z') {
             let key = (ch as char).to_string();
             if !bound.contains(&key) {
-                assert_eq!(command_parse(&key), Some(Action::CancelCount));
+                assert_eq!(command_parse(&key), Some(CommandAction::CancelCount));
             }
         }
 
@@ -362,7 +381,7 @@ mod tests {
 
     #[test]
     fn p_parses_to_paste() {
-        assert_eq!(command_parse("p"), Some(Action::Paste));
+        assert_eq!(command_parse("p"), Some(CommandAction::Paste));
     }
 
     #[test]
@@ -394,14 +413,14 @@ mod tests {
 
     #[test]
     fn parse_maps_escape_to_commit() {
-        assert_eq!(insert_parse("\x1b"), Some(Action::Commit));
+        assert_eq!(insert_parse("\x1b"), Some(InsertAction::Commit));
     }
 
     #[test]
     fn parse_maps_delete_to_backspace() {
         assert_eq!(
             insert_parse("\x7f"),
-            Some(Action::InsertKey(TextKey::Backspace))
+            Some(InsertAction::InsertKey(TextKey::Backspace))
         );
     }
 
@@ -409,7 +428,7 @@ mod tests {
     fn parse_maps_the_lower_printable_boundary_to_append() {
         assert_eq!(
             insert_parse("\x20"),
-            Some(Action::InsertKey(TextKey::Char('\x20')))
+            Some(InsertAction::InsertKey(TextKey::Char('\x20')))
         );
     }
 
@@ -417,7 +436,7 @@ mod tests {
     fn parse_maps_the_upper_printable_boundary_to_append() {
         assert_eq!(
             insert_parse("\x7e"),
-            Some(Action::InsertKey(TextKey::Char('\x7e')))
+            Some(InsertAction::InsertKey(TextKey::Char('\x7e')))
         );
     }
 
@@ -430,7 +449,7 @@ mod tests {
 
     #[test]
     fn parse_maps_enter_to_commit_and_add_child() {
-        assert_eq!(insert_parse("\r"), Some(Action::CommitAndAddChild));
+        assert_eq!(insert_parse("\r"), Some(InsertAction::CommitAndAddChild));
     }
 
     #[test]
@@ -443,11 +462,11 @@ mod tests {
     fn parse_maps_the_arrow_keys_to_cursor_moves() {
         assert_eq!(
             insert_parse("\x1b[D"),
-            Some(Action::InsertKey(TextKey::Left))
+            Some(InsertAction::InsertKey(TextKey::Left))
         );
         assert_eq!(
             insert_parse("\x1b[C"),
-            Some(Action::InsertKey(TextKey::Right))
+            Some(InsertAction::InsertKey(TextKey::Right))
         );
     }
 
