@@ -205,6 +205,44 @@ mod tests {
         assert_eq!(cut_on_left, cut_on_right + 1);
     }
 
+    fn glow_at(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
+        Placement {
+            node: PlacementNode::Glow {
+                colour: None,
+                rounded: false,
+            },
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn caret_at(x: i64, y: i64) -> Placement<'static> {
+        Placement {
+            node: PlacementNode::Caret(crate::view::Caret),
+            x,
+            y,
+            width: 1,
+            height: 1,
+        }
+    }
+
+    #[test]
+    fn centre_ignores_glow_and_caret_when_computing_the_bounding_box() {
+        let (width, height) = (6, 4);
+        let content_only = centre(vec![box_at(0, 0, width, height)], AREA);
+        let with_decorations = centre(
+            vec![
+                box_at(0, 0, width, height),
+                glow_at(-1, -1, width + 2, height + 2),
+                caret_at(width + 5, height + 5),
+            ],
+            AREA,
+        );
+        assert_eq!(content_only[0], with_decorations[0]);
+    }
+
     fn state(selected: Option<Vec<usize>>) -> State {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         new_state(boxes, Mode::Command, selected)
