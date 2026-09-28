@@ -222,6 +222,11 @@ pub(crate) enum PlacementNode<'a> {
     Label(Label<'a>),
     Arrow(Arrow),
     Cursor(Cursor),
+    /// A round status light, e.g. the footer's mode LED.
+    Led {
+        colour: u8,
+        lit: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
