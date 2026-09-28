@@ -191,16 +191,57 @@ fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
 }
 
 enum Image {
-    Fresh { id: kitty::ImageId },
+    Fresh { id: kitty::ImageId, canvas: Canvas },
     Cached { id: kitty::ImageId },
 }
 
 struct Placed {
     image: Image,
-    canvas: Canvas,
     col: i64,
     row: i64,
     z: i32,
+}
+
+impl Placed {
+    fn command(&self, placement: kitty::PlacementId) -> kitty::Command {
+        match &self.image {
+            Image::Fresh { id, canvas } => kitty::show(canvas, *id, self.col, self.row, self.z),
+            Image::Cached { id } => kitty::place(*id, placement, self.col, self.row, self.z),
+        }
+    }
+}
+
+struct ImageIds {
+    next: u32,
+    transient: Vec<kitty::ImageId>,
+}
+
+impl ImageIds {
+    fn new() -> Self {
+        ImageIds {
+            next: 1,
+            transient: Vec::new(),
+        }
+    }
+
+    fn allocate(&mut self) -> kitty::ImageId {
+        let value = NonZeroU32::new(self.next).expect("image ID allocator exhausted");
+        self.next = self
+            .next
+            .checked_add(1)
+            .expect("image ID allocator exhausted");
+        kitty::ImageId::new(value)
+    }
+
+    fn allocate_transient(&mut self) -> kitty::ImageId {
+        let id = self.allocate();
+        self.transient.push(id);
+        id
+    }
+
+    fn take_transient(&mut self) -> Vec<kitty::ImageId> {
+        std::mem::take(&mut self.transient)
+    }
 }
 
 struct Frame {
@@ -208,7 +249,6 @@ struct Frame {
     characters: Vec<Vec<char>>,
     images: Vec<Placed>,
     previous_transient_images: Vec<kitty::ImageId>,
-    transient_images: Vec<kitty::ImageId>,
 }
 
 impl Frame {
@@ -217,13 +257,12 @@ impl Frame {
         Self::with_previous(window, Vec::new())
     }
 
-    fn with_previous(window: Window, transient_images: Vec<kitty::ImageId>) -> Self {
+    fn with_previous(window: Window, previous_transient_images: Vec<kitty::ImageId>) -> Self {
         Frame {
             window,
             characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
             images: Vec::new(),
-            previous_transient_images: transient_images,
-            transient_images: Vec::new(),
+            previous_transient_images,
         }
     }
 
@@ -258,28 +297,30 @@ impl Frame {
         self.crop(geometry, area).is_some()
     }
 
-    fn place<G: Into<Geometry>>(
+    fn place_fresh<G: Into<Geometry>>(
         &mut self,
-        image: Image,
+        id: kitty::ImageId,
         canvas: &Canvas,
         geometry: G,
         area: Area,
         z: i32,
     ) {
-        let Some(crop) = self.crop(geometry, area) else {
-            return;
-        };
-        let cropped = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
-        self.images.push(Placed {
-            image: match image {
-                Image::Fresh { id } => Image::Fresh { id },
-                Image::Cached { id } => Image::Cached { id },
-            },
-            canvas: cropped,
-            col: crop.col,
-            row: crop.row,
-            z,
-        });
+        if let Some(crop) = self.crop(geometry, area) {
+            self.push_fresh(id, canvas, crop, z);
+        }
+    }
+
+    fn place_transient<G: Into<Geometry>>(
+        &mut self,
+        ids: &mut ImageIds,
+        canvas: &Canvas,
+        geometry: G,
+        area: Area,
+        z: i32,
+    ) {
+        if let Some(crop) = self.crop(geometry, area) {
+            self.push_fresh(ids.allocate_transient(), canvas, crop, z);
+        }
     }
 
     fn place_cached<G: Into<Geometry>>(
@@ -289,16 +330,19 @@ impl Frame {
         area: Area,
         z: i32,
     ) {
-        let Some(crop) = self.crop(geometry, area) else {
-            return;
-        };
+        if let Some(crop) = self.crop(geometry, area) {
+            self.push(Image::Cached { id }, crop, z);
+        }
+    }
+
+    fn push_fresh(&mut self, id: kitty::ImageId, canvas: &Canvas, crop: Crop, z: i32) {
+        let canvas = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
+        self.push(Image::Fresh { id, canvas }, crop, z);
+    }
+
+    fn push(&mut self, image: Image, crop: Crop, z: i32) {
         self.images.push(Placed {
-            image: Image::Cached { id },
-            canvas: Canvas {
-                pixels: Vec::new(),
-                width: crop.last_x - crop.first_x,
-                height: crop.last_y - crop.first_y,
-            },
+            image,
             col: crop.col,
             row: crop.row,
             z,
@@ -318,13 +362,7 @@ impl Frame {
             bytes.extend_from_slice(kitty::delete(*id).to_string().as_bytes());
         }
         for (placement, image) in Self::placement_ids().zip(&self.images) {
-            let command = match &image.image {
-                Image::Fresh { id } => {
-                    kitty::show(&image.canvas, *id, image.col, image.row, image.z)
-                }
-                Image::Cached { id } => kitty::place(*id, placement, image.col, image.row, image.z),
-            };
-            bytes.extend_from_slice(command.to_string().as_bytes());
+            bytes.extend_from_slice(image.command(placement).to_string().as_bytes());
         }
         bytes
     }
@@ -354,8 +392,7 @@ pub(crate) struct TerminalRenderer {
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
-    next_image_id: u32,
-    transient_images: Vec<kitty::ImageId>,
+    image_ids: ImageIds,
 }
 
 impl Renderer for TerminalRenderer {
@@ -377,8 +414,7 @@ impl TerminalRenderer {
             cache_limit,
             glyph_source,
             glyph_images: std::collections::HashMap::new(),
-            next_image_id: 1,
-            transient_images: Vec::new(),
+            image_ids: ImageIds::new(),
         }
     }
 
@@ -392,12 +428,10 @@ impl TerminalRenderer {
     }
 
     fn frame(&mut self, scene: &Scene<'_>) -> Frame {
-        let mut frame =
-            Frame::with_previous(self.window, std::mem::take(&mut self.transient_images));
+        let mut frame = Frame::with_previous(self.window, self.image_ids.take_transient());
         for (area, placements) in scene {
             self.paint(&mut frame, placements, *area);
         }
-        self.transient_images = frame.transient_images.clone();
         frame
     }
 
@@ -462,21 +496,6 @@ impl TerminalRenderer {
         }
     }
 
-    fn place(
-        &mut self,
-        frame: &mut Frame,
-        canvas: &Canvas,
-        geometry: Geometry,
-        area: Area,
-        z: i32,
-    ) {
-        if frame.shows(geometry, area) {
-            let id = self.allocate_image_id();
-            frame.transient_images.push(id);
-            frame.place(Image::Fresh { id }, canvas, geometry, area, z);
-        }
-    }
-
     fn place_cached(
         &mut self,
         frame: &mut Frame,
@@ -493,9 +512,7 @@ impl TerminalRenderer {
             let drawn = build(self);
             self.remember(key.clone(), drawn);
         }
-        let id = self.allocate_image_id();
-        frame.transient_images.push(id);
-        frame.place(Image::Fresh { id }, &self.cache[&key], geometry, area, z);
+        frame.place_transient(&mut self.image_ids, &self.cache[&key], geometry, area, z);
     }
 
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
@@ -557,10 +574,10 @@ impl TerminalRenderer {
             if let Some(id) = self.glyph_images.get(&key).copied() {
                 frame.place_cached(id, &char_placement, area, CONTENT_Z);
             } else {
-                let id = self.allocate_image_id();
+                let id = self.image_ids.allocate();
                 self.glyph_images.insert(key, id);
                 let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
-                frame.place(Image::Fresh { id }, glyph, &char_placement, area, CONTENT_Z);
+                frame.place_fresh(id, glyph, &char_placement, area, CONTENT_Z);
             }
         }
     }
@@ -576,7 +593,7 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        self.place(frame, &canvas, geometry, area, CONTENT_Z);
+        frame.place_transient(&mut self.image_ids, &canvas, geometry, area, CONTENT_Z);
     }
 
     fn draw_cursor(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
@@ -588,15 +605,6 @@ impl TerminalRenderer {
             self.cache.clear();
         }
         self.cache.insert(key, drawn);
-    }
-
-    fn allocate_image_id(&mut self) -> kitty::ImageId {
-        let value = NonZeroU32::new(self.next_image_id).expect("image ID allocator exhausted");
-        self.next_image_id = self
-            .next_image_id
-            .checked_add(1)
-            .expect("image ID allocator exhausted");
-        kitty::ImageId::new(value)
     }
 
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
@@ -1220,11 +1228,11 @@ mod tests {
         assert_eq!(glow.col, 8 - GLOW_MARGIN);
         assert_eq!(glow.row, 8 - GLOW_MARGIN);
         assert_eq!(
-            glow.canvas.width,
+            glow.canvas().width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas.height,
+            glow.canvas().height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1241,11 +1249,11 @@ mod tests {
         let padding_px_y = GLOW_MARGIN * r.window.cell_height;
         assert_ne!(padding_px_x, padding_px_y);
         assert_eq!(
-            glow.canvas.width,
+            glow.canvas().width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas.height,
+            glow.canvas().height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1258,12 +1266,21 @@ mod tests {
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         let (edge_r, edge_g, edge_b) = colour(Some(3));
         let has_edge_colour = glow
-            .canvas
+            .canvas()
             .pixels
             .chunks(4)
             .filter(|pixel| pixel[3] > 0)
             .any(|pixel| pixel[0] == edge_r && pixel[1] == edge_g && pixel[2] == edge_b);
         assert!(has_edge_colour);
+    }
+
+    impl Placed {
+        fn canvas(&self) -> &Canvas {
+            match &self.image {
+                Image::Fresh { canvas, .. } => canvas,
+                Image::Cached { .. } => panic!("a cached image carries no canvas"),
+            }
+        }
     }
 
     fn window(cols: i64, rows: i64, cell_width: i64, cell_height: i64) -> Window {
@@ -1523,12 +1540,12 @@ mod tests {
             .chain(
                 Frame::placement_ids()
                     .zip(&frame.images)
-                    .map(|(placement, image)| match image.image {
-                        Image::Fresh { id } => {
-                            kitty::show(&image.canvas, id, image.col, image.row, image.z)
+                    .map(|(placement, image)| match &image.image {
+                        Image::Fresh { id, canvas } => {
+                            kitty::show(canvas, *id, image.col, image.row, image.z)
                         }
                         Image::Cached { id } => {
-                            kitty::place(id, placement, image.col, image.row, image.z)
+                            kitty::place(*id, placement, image.col, image.row, image.z)
                         }
                     }),
             )
@@ -1791,7 +1808,7 @@ mod tests {
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
         assert!(caret_image
-            .canvas
+            .canvas()
             .pixels
             .chunks(4)
             .all(|pixel| pixel == solid));
@@ -1819,7 +1836,7 @@ mod tests {
             .expect("the footer box is drawn as an image");
         let (er, eg, eb, ea) =
             fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
-        for pixel in image.canvas.pixels.chunks(4) {
+        for pixel in image.canvas().pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }
     }
@@ -1904,13 +1921,13 @@ mod tests {
     fn a_bold_label_renders_a_different_glyph_than_a_regular_label() {
         let mut r = renderer_on(window(2, 1, 1, 1));
         let regular_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, false)])[0]
-            .canvas
+            .canvas()
             .pixels
             .clone();
 
         let mut r = renderer_on(window(2, 1, 1, 1));
         let bold_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, true)])[0]
-            .canvas
+            .canvas()
             .pixels
             .clone();
 
@@ -1921,7 +1938,7 @@ mod tests {
     fn a_label_with_a_colour_renders_a_different_glyph_colour_than_the_default() {
         let mut r = renderer_on(window(2, 1, 1, 1));
         let default_pixels = sprites(&mut r, &[coloured_label_placement("h", 0, 0, 1, 1, None)])[0]
-            .canvas
+            .canvas()
             .pixels
             .clone();
 
@@ -1937,7 +1954,7 @@ mod tests {
                 Some(crate::style::LIME),
             )],
         )[0]
-        .canvas
+        .canvas()
         .pixels
         .clone();
 
@@ -1948,7 +1965,7 @@ mod tests {
     fn a_label_without_a_colour_matches_todays_default_foreground_rendering() {
         let mut r = renderer_on(window(2, 1, 1, 1));
         let pixels = sprites(&mut r, &[label_placement("h", 0, 0, 1, 1)])[0]
-            .canvas
+            .canvas()
             .pixels
             .clone();
 
@@ -1968,7 +1985,8 @@ mod tests {
         assert_eq!(rows(&frame)[1], "     ".to_string());
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
-        let is_caret = |image: &&Placed| image.canvas.pixels.chunks(4).all(|pixel| pixel == solid);
+        let is_caret =
+            |image: &&Placed| image.canvas().pixels.chunks(4).all(|pixel| pixel == solid);
         let caret_cols: Vec<i64> = frame
             .images
             .iter()
@@ -2022,7 +2040,7 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert_eq!((images[0].col, images[0].row), (2, 1));
         let (cr, cg, cb) = colour(None);
-        assert_eq!(&images[0].canvas.pixels[0..4], &[cr, cg, cb, OPAQUE]);
+        assert_eq!(&images[0].canvas().pixels[0..4], &[cr, cg, cb, OPAQUE]);
     }
 
     #[test]
@@ -2087,7 +2105,7 @@ mod tests {
         );
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].col, 0);
-        assert_eq!(images[0].canvas.width, 3 * 4);
+        assert_eq!(images[0].canvas().width, 3 * 4);
     }
 
     #[test]
@@ -2098,7 +2116,7 @@ mod tests {
             &[box_placement(&box_node(None, None, false), 1, -2, 4, 5)],
         );
         assert_eq!(images[0].row, 0);
-        assert_eq!(images[0].canvas.height, 3 * 4);
+        assert_eq!(images[0].canvas().height, 3 * 4);
     }
 
     #[test]
@@ -2109,7 +2127,7 @@ mod tests {
             &[box_placement(&box_node(None, None, false), 1, 0, 6, 3)],
         );
         assert_eq!(images[0].col, 1);
-        assert_eq!(images[0].canvas.width, 3 * 4);
+        assert_eq!(images[0].canvas().width, 3 * 4);
     }
 
     #[test]
@@ -2120,7 +2138,7 @@ mod tests {
             &[box_placement(&box_node(None, None, false), 0, 1, 3, 6)],
         );
         assert_eq!(images[0].row, 1);
-        assert_eq!(images[0].canvas.height, 3 * 4);
+        assert_eq!(images[0].canvas().height, 3 * 4);
     }
 
     #[test]
@@ -2131,7 +2149,10 @@ mod tests {
             &[box_placement(&box_node(None, None, false), 1, 2, 4, 3)],
         );
         assert_eq!((images[0].col, images[0].row), (1, 2));
-        assert_eq!((images[0].canvas.width, images[0].canvas.height), (24, 36));
+        assert_eq!(
+            (images[0].canvas().width, images[0].canvas().height),
+            (24, 36)
+        );
     }
 
     #[test]
@@ -2149,7 +2170,7 @@ mod tests {
                 )],
             );
             let (px, py, pz) = colour(Some(index));
-            assert_eq!(&images[0].canvas.pixels[0..4], &[px, py, pz, OPAQUE]);
+            assert_eq!(&images[0].canvas().pixels[0..4], &[px, py, pz, OPAQUE]);
         }
     }
 
@@ -2161,7 +2182,7 @@ mod tests {
         let first = sprites(&mut r, std::slice::from_ref(&placement));
         assert_eq!(r.cache.len(), 1);
         let second = sprites(&mut r, &[placement]);
-        assert_eq!(first[0].canvas.pixels, second[0].canvas.pixels);
+        assert_eq!(first[0].canvas().pixels, second[0].canvas().pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -2176,7 +2197,7 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(Some(4), None, false), 0, 0, 4, 3)],
         );
-        assert_ne!(plain[0].canvas.pixels, blue[0].canvas.pixels);
+        assert_ne!(plain[0].canvas().pixels, blue[0].canvas().pixels);
         assert_eq!(r.cache.len(), 2);
     }
 
@@ -2203,7 +2224,7 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        assert_eq!(first[0].canvas.pixels, second[0].canvas.pixels);
+        assert_eq!(first[0].canvas().pixels, second[0].canvas().pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -2232,7 +2253,7 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 5, 2, 4, 3)],
         );
-        assert_eq!(first[0].canvas.pixels, moved[0].canvas.pixels);
+        assert_eq!(first[0].canvas().pixels, moved[0].canvas().pixels);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -2247,7 +2268,7 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 2, 0, 4, 3)],
         );
-        assert_ne!(whole[0].canvas.width, cropped[0].canvas.width);
+        assert_ne!(whole[0].canvas().width, cropped[0].canvas().width);
         assert_eq!(r.cache.len(), 1);
     }
 
@@ -2291,7 +2312,7 @@ mod tests {
         let mut r = renderer_on(window(40, 20, 2, 4));
         let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
         let two = sprites(&mut r, &[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)]);
-        assert_ne!(one[0].canvas.pixels, two[0].canvas.pixels);
+        assert_ne!(one[0].canvas().pixels, two[0].canvas().pixels);
     }
 
     #[test]
@@ -2596,7 +2617,7 @@ mod tests {
             .collect();
         assert!(!body_images.is_empty());
         for image in body_images {
-            assert!(image.row + image.canvas.height / window.cell_height <= body_rows);
+            assert!(image.row + image.canvas().height / window.cell_height <= body_rows);
         }
     }
 }
