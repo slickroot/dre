@@ -4,14 +4,6 @@ use crate::state::action::Action;
 use crate::state::history::undo;
 use crate::state::{add_child_box, Mode, State};
 
-pub(crate) fn min_depth(command: Action) -> usize {
-    match command {
-        Action::Undo | Action::NewBox | Action::Paste | Action::Quit => 0,
-        Action::SelectParent => 2,
-        _ => 1,
-    }
-}
-
 fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
         name: String::new(),
@@ -220,7 +212,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
     }
     let count = state.pending_count.take().unwrap_or(1);
     let depth = state.selected.as_ref().map_or(0, Vec::len);
-    if depth < min_depth(command) {
+    if depth < command.spec().min_depth {
         return state;
     }
     match (command, state.selected.take()) {
@@ -281,7 +273,7 @@ mod tests {
     fn a_command_below_its_minimum_depth_leaves_the_document_unchanged() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
         for command in COMMANDS {
-            let depth = min_depth(command);
+            let depth = command.spec().min_depth;
             if depth == 0 {
                 continue;
             }
@@ -1106,28 +1098,23 @@ mod tests {
     }
 
     #[test]
-    fn i_then_esc_immediately_is_not_an_undo_step() {
+    fn i_then_esc_immediately_leaves_one_no_op_undo_step() {
         let coloured = coloured_box_a_selected();
-        let undone = press(coloured.clone(), &["i", "\x1b", "u"]);
-        assert_eq!(undone.doc.tree().value(&[0]).colour(), None);
-        assert_eq!(
-            undone.doc.tree().value(&[0]).label(),
-            coloured.doc.tree().value(&[0]).label()
-        );
+        let committed = press(coloured.clone(), &["i", "\x1b"]);
+        assert_eq!(*committed.doc.tree(), *coloured.doc.tree());
+        assert_eq!(committed.history.len(), coloured.history.len() + 1);
+        let undone = handle_key(committed, "u");
+        assert_eq!(*undone.doc.tree(), *coloured.doc.tree());
     }
 
     #[test]
-    fn i_typing_then_backspacing_back_to_the_original_is_not_an_undo_step() {
+    fn i_typing_then_backspacing_back_to_the_original_leaves_one_no_op_undo_step() {
         let coloured = coloured_box_a_selected();
-        let undone = press(
-            coloured.clone(),
-            &["i", "x", "y", "\x7f", "\x7f", "\x1b", "u"],
-        );
-        assert_eq!(undone.doc.tree().value(&[0]).colour(), None);
-        assert_eq!(
-            undone.doc.tree().value(&[0]).label(),
-            coloured.doc.tree().value(&[0]).label()
-        );
+        let committed = press(coloured.clone(), &["i", "x", "y", "\x7f", "\x7f", "\x1b"]);
+        assert_eq!(*committed.doc.tree(), *coloured.doc.tree());
+        assert_eq!(committed.history.len(), coloured.history.len() + 1);
+        let undone = handle_key(committed, "u");
+        assert_eq!(*undone.doc.tree(), *coloured.doc.tree());
     }
 
     #[test]
@@ -1269,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn d_with_nothing_selected_changes_nothing_and_pushes_no_history() {
+    fn d_with_nothing_selected_changes_nothing_but_leaves_one_no_op_snapshot() {
         let start = new_state(vec![node("a")], Mode::Command, None);
         let mut coloured = start.clone();
         coloured.selected = Some(vec![0]);
@@ -1279,8 +1266,9 @@ mod tests {
         let after_d = handle_key(deselected.clone(), "d");
         assert_eq!(after_d.doc, deselected.doc);
         assert_eq!(after_d.selected, deselected.selected);
+        assert_eq!(after_d.history.len(), deselected.history.len() + 1);
         let undone = handle_key(after_d, "u");
-        assert_eq!(*undone.doc.tree(), *start.doc.tree());
+        assert_eq!(*undone.doc.tree(), *deselected.doc.tree());
     }
 
     #[test]
@@ -1410,12 +1398,13 @@ mod tests {
     }
 
     #[test]
-    fn p_with_an_empty_clipboard_changes_nothing_and_leaves_history_alone() {
+    fn p_with_an_empty_clipboard_changes_nothing_but_leaves_one_snapshot() {
         let before = handle_key(story(), "r");
         let pasted = handle_key(before.clone(), "p");
         assert_eq!(pasted.doc, before.doc);
+        assert_eq!(pasted.history.len(), before.history.len() + 1);
         let undone = handle_key(pasted, "u");
-        assert_eq!(undone.doc, story().doc);
+        assert_eq!(undone.doc, before.doc);
     }
 
     #[test]

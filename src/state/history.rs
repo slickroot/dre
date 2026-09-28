@@ -3,34 +3,8 @@ use crate::state::action::Action;
 use crate::state::State;
 use types::Tree;
 
-fn is_undoable(action: &Action) -> bool {
-    matches!(
-        action,
-        Action::NewBox
-            | Action::Delete
-            | Action::Paste
-            | Action::CycleColour
-            | Action::ToggleFill
-            | Action::ToggleRounded
-            | Action::CycleSiblingsColour
-            | Action::ToggleSiblingsFill
-            | Action::ToggleSiblingsRounded
-            | Action::RenameLabel
-            | Action::EditLabel
-            | Action::NewSibling
-            | Action::CommitAndAddChild
-    )
-}
-
 fn snapshot(mut state: State) -> State {
     state.history.push(state.doc.clone());
-    state
-}
-
-fn drop_snapshot_if_unchanged(mut state: State) -> State {
-    if state.history.last() == Some(&state.doc) {
-        state.history.pop();
-    }
     state
 }
 
@@ -39,14 +13,12 @@ pub(super) fn recorded(
     action: &Action,
     reduce: impl FnOnce(State) -> State,
 ) -> State {
-    let undoable = is_undoable(action);
-    let state = if undoable { snapshot(state) } else { state };
-    let state = reduce(state);
-    if (undoable && *action != Action::EditLabel) || *action == Action::Commit {
-        drop_snapshot_if_unchanged(state)
+    let state = if action.spec().undoable {
+        snapshot(state)
     } else {
         state
-    }
+    };
+    reduce(state)
 }
 
 fn nearest_existing(tree: &Tree<Node>, mut path: Vec<usize>) -> Option<Vec<usize>> {
@@ -74,8 +46,8 @@ mod tests {
 
     #[test]
     fn scroll_idle_and_interrupt_are_not_undoable() {
-        assert!(!is_undoable(&Action::Idle));
-        assert!(!is_undoable(&Action::Interrupt));
+        assert!(!Action::Idle.spec().undoable);
+        assert!(!Action::Interrupt.spec().undoable);
     }
 
     #[test]
@@ -89,7 +61,7 @@ mod tests {
             Action::RenameLabel,
             Action::CommitAndAddChild,
         ] {
-            assert!(is_undoable(&action));
+            assert!(action.spec().undoable);
         }
     }
 
@@ -102,14 +74,14 @@ mod tests {
             Action::NameConfirm,
             Action::NameCancel,
         ] {
-            assert!(!is_undoable(&action));
+            assert!(!action.spec().undoable);
         }
     }
 
     #[test]
     fn typing_in_insert_mode_is_not_undoable() {
-        assert!(!is_undoable(&Action::InsertKey(TextKey::Char('a'))));
-        assert!(!is_undoable(&Action::InsertKey(TextKey::Backspace)));
-        assert!(!is_undoable(&Action::Commit));
+        assert!(!Action::InsertKey(TextKey::Char('a')).spec().undoable);
+        assert!(!Action::InsertKey(TextKey::Backspace).spec().undoable);
+        assert!(!Action::Commit.spec().undoable);
     }
 }

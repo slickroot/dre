@@ -170,7 +170,7 @@ impl Default for State {
 }
 
 fn apply(state: State, action: action::Action) -> State {
-    history::recorded(state, &action, |state| match action.mode() {
+    history::recorded(state, &action, |state| match action.spec().mode {
         ActionMode::Insert => insert::reduce(state, action),
         ActionMode::NamePrompt => name_prompt::reduce(state, action),
         ActionMode::Command => command::reduce(state, action),
@@ -622,12 +622,13 @@ mod tests {
     }
 
     #[test]
-    fn committing_an_edit_label_without_a_change_leaves_history_unchanged() {
+    fn committing_an_edit_label_without_a_change_leaves_one_snapshot() {
         let before = selecting_first(vec![node("a")], Mode::Command);
         let editing = reduce(before.clone(), Action::EditLabel);
         let committed = reduce(editing, Action::Commit);
-        assert_eq!(committed.history.len(), before.history.len());
-        assert_eq!(*committed.doc.tree(), *before.doc.tree());
+        assert_eq!(committed.history.len(), before.history.len() + 1);
+        let undone = reduce(committed, Action::Undo);
+        assert_eq!(*undone.doc.tree(), *before.doc.tree());
     }
 
     #[test]
@@ -700,12 +701,13 @@ mod tests {
         }
 
         #[test]
-        fn a_no_op_edit_whose_snapshot_is_dropped_returns_no_effects() {
+        fn a_no_op_edit_still_leaves_a_snapshot_and_returns_a_save_effect() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
             let (state, effects) = crate::state::reduce(state, Some("i"));
             assert_eq!(effects, vec![]);
-            let (_, effects) = crate::state::reduce(state, Some("\x1b"));
-            assert_eq!(effects, vec![]);
+            let (state, effects) = crate::state::reduce(state, Some("\x1b"));
+            assert_eq!(effects, vec![Effect::Save]);
+            assert_eq!(state.history.len(), 1);
         }
 
         #[test]

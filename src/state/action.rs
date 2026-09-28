@@ -41,37 +41,77 @@ pub(crate) enum ActionMode {
     NamePrompt,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ActionSpec {
+    pub(crate) mode: ActionMode,
+    pub(crate) undoable: bool,
+    pub(crate) min_depth: usize,
+}
+
 impl Action {
-    pub(crate) fn mode(&self) -> ActionMode {
+    pub(crate) fn spec(&self) -> ActionSpec {
         match self {
-            Action::Commit | Action::CommitAndAddChild | Action::InsertKey(_) => ActionMode::Insert,
-            Action::NameAppend(_)
-            | Action::NameBackspace
-            | Action::NameConfirm
-            | Action::NameCancel => ActionMode::NamePrompt,
-            Action::Undo
-            | Action::NewBox
-            | Action::NewSibling
+            Action::Undo | Action::Quit => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: false,
+                min_depth: 0,
+            },
+            Action::NewBox | Action::Paste => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: true,
+                min_depth: 0,
+            },
+            Action::NewSibling
             | Action::Delete
-            | Action::Paste
-            | Action::SelectParent
-            | Action::SelectChild
-            | Action::SelectNext
-            | Action::SelectPrevious
             | Action::EditLabel
             | Action::RenameLabel
             | Action::CycleColour
             | Action::CycleSiblingsColour
-            | Action::ToggleSiblingsFill
-            | Action::ToggleSiblingsRounded
             | Action::ToggleFill
+            | Action::ToggleSiblingsFill
             | Action::ToggleRounded
-            | Action::Quit
-            | Action::Idle
+            | Action::ToggleSiblingsRounded => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: true,
+                min_depth: 1,
+            },
+            Action::SelectChild | Action::SelectNext | Action::SelectPrevious => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: false,
+                min_depth: 1,
+            },
+            Action::SelectParent => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: false,
+                min_depth: 2,
+            },
+            Action::Idle
             | Action::Interrupt
             | Action::OpenNamePrompt
             | Action::Digit(_)
-            | Action::CancelCount => ActionMode::Command,
+            | Action::CancelCount => ActionSpec {
+                mode: ActionMode::Command,
+                undoable: false,
+                min_depth: 0,
+            },
+            Action::CommitAndAddChild => ActionSpec {
+                mode: ActionMode::Insert,
+                undoable: true,
+                min_depth: 0,
+            },
+            Action::Commit | Action::InsertKey(_) => ActionSpec {
+                mode: ActionMode::Insert,
+                undoable: false,
+                min_depth: 0,
+            },
+            Action::NameAppend(_)
+            | Action::NameBackspace
+            | Action::NameConfirm
+            | Action::NameCancel => ActionSpec {
+                mode: ActionMode::NamePrompt,
+                undoable: false,
+                min_depth: 0,
+            },
         }
     }
 }
@@ -83,12 +123,12 @@ mod tests {
     #[test]
     fn actions_map_to_their_mode() {
         assert_eq!(
-            Action::InsertKey(TextKey::Char('a')).mode(),
+            Action::InsertKey(TextKey::Char('a')).spec().mode,
             ActionMode::Insert
         );
-        assert_eq!(Action::NameConfirm.mode(), ActionMode::NamePrompt);
-        assert_eq!(Action::OpenNamePrompt.mode(), ActionMode::Command);
-        assert_eq!(Action::Idle.mode(), ActionMode::Command);
-        assert_eq!(Action::Interrupt.mode(), ActionMode::Command);
+        assert_eq!(Action::NameConfirm.spec().mode, ActionMode::NamePrompt);
+        assert_eq!(Action::OpenNamePrompt.spec().mode, ActionMode::Command);
+        assert_eq!(Action::Idle.spec().mode, ActionMode::Command);
+        assert_eq!(Action::Interrupt.spec().mode, ActionMode::Command);
     }
 }
