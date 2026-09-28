@@ -170,7 +170,7 @@ impl Default for State {
 }
 
 fn apply(state: State, action: action::Action) -> State {
-    history::recorded(state, &action, |state| match action.mode() {
+    history::recorded(state, &action, |state| match action.spec().mode {
         ActionMode::Insert => insert::reduce(state, action),
         ActionMode::NamePrompt => name_prompt::reduce(state, action),
         ActionMode::Command => command::reduce(state, action),
