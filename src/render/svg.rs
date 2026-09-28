@@ -373,7 +373,6 @@ mod tests {
         label_centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH,
         SIDE_PADDING,
     };
-    use crate::view::{with_caret, with_glow};
     use crate::view::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
     use crate::State;
 
@@ -1767,10 +1766,7 @@ mod tests {
 
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
-        let diagram = with_glow(
-            centre(with_caret(diagram(state.doc().tree(), None), None), body),
-            state.selected(),
-        );
+        let diagram = centre(diagram(state.doc().tree(), None, state.selected()), body);
         let body_svg = nested(body, &paint(&diagram));
         let foot_svg = nested(foot, &padded_footer(foot));
         let body_at = svg.find(&body_svg).expect("the body is a nested svg");

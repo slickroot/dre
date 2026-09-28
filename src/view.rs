@@ -237,51 +237,6 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     placements
 }
 
-pub(crate) fn with_glow<'a>(
-    placements: Vec<Placement<'a>>,
-    selected: Option<&[usize]>,
-) -> Vec<Placement<'a>> {
-    let Some(selected) = selected else {
-        return placements;
-    };
-    let Some(label) = placements
-        .iter()
-        .find(|p| matches!(&p.node, PlacementNode::Label(label) if label.path == selected))
-    else {
-        return placements;
-    };
-    let Some(glow) = placements
-        .iter()
-        .find_map(|placement| match &placement.node {
-            PlacementNode::Box {
-                colour, rounded, ..
-            } if placement.x <= label.x
-                && label.x < placement.x + placement.width
-                && placement.y <= label.y
-                && label.y < placement.y + placement.height =>
-            {
-                Some(Placement {
-                    node: PlacementNode::Glow {
-                        colour: *colour,
-                        rounded: *rounded,
-                    },
-                    x: placement.x - GLOW_MARGIN,
-                    y: placement.y - GLOW_MARGIN,
-                    width: placement.width + 2 * GLOW_MARGIN,
-                    height: placement.height + 2 * GLOW_MARGIN,
-                })
-            }
-            _ => None,
-        })
-    else {
-        return placements;
-    };
-    let mut result = Vec::with_capacity(placements.len() + 1);
-    result.push(glow);
-    result.extend(placements);
-    result
-}
-
 #[allow(dead_code)]
 pub(crate) fn with_cursor<'a>(
     placements: Vec<Placement<'a>>,
@@ -309,31 +264,6 @@ pub(crate) fn with_cursor<'a>(
     placements
 }
 
-pub(crate) fn with_caret<'a>(
-    placements: Vec<Placement<'a>>,
-    editing: Option<(Vec<usize>, usize)>,
-) -> Vec<Placement<'a>> {
-    let Some((path, index)) = editing else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Caret(Caret),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
-    }
-    placements
-}
-
 pub type Scene<'a> = Vec<(Area, Vec<Placement<'a>>)>;
 
 pub fn editor(state: &State, window: Area) -> Scene<'_> {
@@ -347,19 +277,15 @@ pub fn editor(state: &State, window: Area) -> Scene<'_> {
 }
 
 pub fn body(state: &State, area: Area) -> Scene<'_> {
-    let editing_caret: Option<(Vec<usize>, usize)> = match state.mode() {
-        Mode::Insert { cursor } => state.selected().map(|path| (path.to_vec(), *cursor)),
+    let editing = match state.mode() {
+        Mode::Insert { cursor } => state.selected().map(|path| (path, *cursor)),
         _ => None,
     };
-    let editing = editing_caret.as_ref().map(|(path, _)| path.as_slice());
     vec![(
         area,
-        with_glow(
-            centre(
-                with_caret(tree::diagram(state.doc().tree(), editing), editing_caret),
-                area,
-            ),
-            state.selected(),
+        centre(
+            tree::diagram(state.doc().tree(), editing, state.selected()),
+            area,
         ),
     )]
 }

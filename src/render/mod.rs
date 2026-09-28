@@ -52,8 +52,8 @@ mod tests {
     use crate::test_support::handle_key;
     use crate::view::{align_right, body, centre, editor, shift, Area, Placement};
     use crate::view::{
-        label_centre, with_caret, with_glow, Cursor, Label, PlacementNode, ALL_SIDES, BORDER,
-        BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
+        label_centre, Cursor, Label, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, FOOTER_ROWS,
+        LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
     };
     use crate::State;
 
@@ -241,7 +241,10 @@ mod tests {
         let state = state(None);
         let screen = editor(&state, WINDOW);
         let body = body_of(WINDOW);
-        assert_eq!(screen[0].1, centre(diagram(state.doc().tree(), None), body));
+        assert_eq!(
+            screen[0].1,
+            centre(diagram(state.doc().tree(), None, None), body)
+        );
     }
 
     #[test]
@@ -270,12 +273,9 @@ mod tests {
         let screen = editor(&state, WINDOW);
         assert_eq!(
             screen[0].1,
-            with_glow(
-                centre(
-                    with_caret(diagram(state.doc().tree(), Some(&[0])), Some((vec![0], 1)),),
-                    body_of(WINDOW)
-                ),
-                state.selected(),
+            centre(
+                diagram(state.doc().tree(), Some((&[0], 1)), state.selected()),
+                body_of(WINDOW)
             )
         );
         assert!(screen[0]
