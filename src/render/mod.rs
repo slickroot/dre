@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::palette::{palette, FOREGROUND};
+use crate::palette::FOREGROUND;
 use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,7 +44,7 @@ pub(crate) const BOX_FILL_OPACITY: f64 = 0.12;
 pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
-    palette(colour.unwrap_or(FOREGROUND)).unwrap()
+    crate::palette::colour(colour.unwrap_or(FOREGROUND)).unwrap()
 }
 
 #[cfg(test)]

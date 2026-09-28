@@ -6,8 +6,7 @@ use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
-use crate::layout::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
-use crate::palette::palette;
+use crate::layout::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
 use crate::tty::Window;
 use crate::view::Scene;
 
@@ -27,6 +26,34 @@ const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
 const INK_Z: i32 = CONTENT_Z;
 
+#[derive(Clone, Copy)]
+struct BoxStyle {
+    colour: Option<u8>,
+    fill: Option<u8>,
+    opacity: Option<f64>,
+    rounded: bool,
+    sides: Sides,
+    border: i64,
+}
+
+#[derive(Clone, Copy)]
+struct LedStyle {
+    colour: u8,
+    lit: bool,
+}
+
+struct LabelStyle {
+    text: String,
+    path: Vec<usize>,
+    colour: Option<u8>,
+}
+
+#[derive(Clone)]
+struct ArrowStyle {
+    stops: Vec<i64>,
+    shaft: i64,
+}
+
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
@@ -39,7 +66,7 @@ fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
 fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
     match (fill, quantized_alpha(opacity)) {
         (Some(colour), Some(alpha)) => {
-            let (r, g, b) = palette(colour).unwrap();
+            let (r, g, b) = crate::palette::colour(colour).unwrap();
             let composite =
                 |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
             (composite(r), composite(g), composite(b), OPAQUE)
@@ -113,50 +140,43 @@ enum SpriteKey {
     },
 }
 
-fn sprite_key(placement: &Placement) -> SpriteKey {
-    match &placement.node {
-        PlacementNode::Box {
-            colour,
-            fill,
-            opacity,
-            rounded,
-            sides,
-            border,
-        } => SpriteKey::Box {
-            width: placement.width,
-            height: placement.height,
-            colour: *colour,
-            fill: *fill,
-            fill_alpha: quantized_alpha(*opacity),
-            rounded: *rounded,
-            sides: *sides,
-            border: *border,
-        },
-        PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
-            width: placement.width,
-            height: placement.height,
-            stops: arrow.stops.clone(),
-            shaft: arrow.shaft,
-        },
-        PlacementNode::Led { colour, lit } => SpriteKey::Led {
-            width: placement.width,
-            height: placement.height,
-            colour: *colour,
-            lit: *lit,
-        },
-        _ => unreachable!("sprite_key is only called for sprite placements"),
+fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
+    SpriteKey::Box {
+        width,
+        height,
+        colour: style.colour,
+        fill: style.fill,
+        fill_alpha: quantized_alpha(style.opacity),
+        rounded: style.rounded,
+        sides: style.sides,
+        border: style.border,
     }
 }
 
-fn glow_key(placement: &Placement) -> SpriteKey {
-    match &placement.node {
-        PlacementNode::Glow { colour, rounded } => SpriteKey::Glow {
-            width: placement.width,
-            height: placement.height,
-            colour: *colour,
-            rounded: *rounded,
-        },
-        _ => unreachable!("glow_key is only called for Glow placements"),
+fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
+    SpriteKey::Arrow {
+        width,
+        height,
+        stops: style.stops.clone(),
+        shaft: style.shaft,
+    }
+}
+
+fn glow_key(width: i64, height: i64, colour: Option<u8>, rounded: bool) -> SpriteKey {
+    SpriteKey::Glow {
+        width,
+        height,
+        colour,
+        rounded,
+    }
+}
+
+fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
+    SpriteKey::Led {
+        width,
+        height,
+        colour: style.colour,
+        lit: style.lit,
     }
 }
 
@@ -185,14 +205,15 @@ impl Frame {
     // Clipping happens by cropping: kitty::show cannot position at a negative
     // column, and sends a=T without C=1, so an overhang would shift into view
     // or scroll the screen instead of being cut off.
-    fn crop(&self, placement: &Placement, area: Area) -> Option<Crop> {
-        let (left, top) = (placement.x, placement.y);
+    fn crop<G: Into<Geometry>>(&self, geometry: G, area: Area) -> Option<Crop> {
+        let geometry = geometry.into();
+        let (left, top) = (geometry.x, geometry.y);
         let col = left.max(area.col).max(0);
         let row = top.max(area.row).max(0);
-        let right = (left + placement.width)
+        let right = (left + geometry.width)
             .min(area.col + area.cols)
             .min(self.window.cols);
-        let bottom = (top + placement.height)
+        let bottom = (top + geometry.height)
             .min(area.row + area.rows)
             .min(self.window.rows);
         if col >= right || row >= bottom {
@@ -208,12 +229,12 @@ impl Frame {
         })
     }
 
-    fn shows(&self, placement: &Placement, area: Area) -> bool {
-        self.crop(placement, area).is_some()
+    fn shows<G: Into<Geometry>>(&self, geometry: G, area: Area) -> bool {
+        self.crop(geometry, area).is_some()
     }
 
-    fn place(&mut self, canvas: &Canvas, placement: &Placement, area: Area, z: i32) {
-        let Some(crop) = self.crop(placement, area) else {
+    fn place<G: Into<Geometry>>(&mut self, canvas: &Canvas, geometry: G, area: Area, z: i32) {
+        let Some(crop) = self.crop(geometry, area) else {
             return;
         };
         self.images.push(Placed {
@@ -301,87 +322,149 @@ impl TerminalRenderer {
 
     fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
         for placement in placements {
+            let geometry = Geometry::from(placement);
             match &placement.node {
-                PlacementNode::Box { .. } => self.draw_box(frame, placement, area),
-                PlacementNode::Glow { .. } => self.draw_glow(frame, placement, area),
-                PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
-                PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
-                PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
-                PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
-                PlacementNode::Led { .. } => self.draw_sprite(frame, placement, area, INK_Z),
+                PlacementNode::Box {
+                    colour,
+                    fill,
+                    opacity,
+                    rounded,
+                    sides,
+                    border,
+                } => self.draw_box(
+                    frame,
+                    geometry,
+                    area,
+                    BoxStyle {
+                        colour: *colour,
+                        fill: *fill,
+                        opacity: *opacity,
+                        rounded: *rounded,
+                        sides: *sides,
+                        border: *border,
+                    },
+                ),
+                PlacementNode::Glow { colour, rounded } => {
+                    self.draw_glow(frame, geometry, area, *colour, *rounded)
+                }
+                PlacementNode::Arrow(arrow) => self.draw_arrow(
+                    frame,
+                    geometry,
+                    area,
+                    ArrowStyle {
+                        stops: arrow.stops.clone(),
+                        shaft: arrow.shaft,
+                    },
+                ),
+                PlacementNode::Label(label) => self.draw_label(
+                    frame,
+                    geometry,
+                    area,
+                    LabelStyle {
+                        text: label.text.to_string(),
+                        path: label.path.clone(),
+                        colour: label.colour,
+                    },
+                ),
+                PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
+                PlacementNode::Cursor(_) => self.draw_cursor(frame, geometry, area),
+                PlacementNode::Led { colour, lit } => self.draw_led(
+                    frame,
+                    geometry,
+                    area,
+                    LedStyle {
+                        colour: *colour,
+                        lit: *lit,
+                    },
+                ),
             }
         }
     }
 
-    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        if !frame.shows(placement, area) {
-            return;
+    fn place(frame: &mut Frame, canvas: &Canvas, geometry: Geometry, area: Area, z: i32) {
+        if frame.shows(geometry, area) {
+            frame.place(canvas, geometry, area, z);
         }
-        let key = sprite_key(placement);
-        if !self.cache.contains_key(&key) {
-            let drawn = self.outline_box(placement);
-            self.remember(key.clone(), drawn);
-        }
-        frame.place(&self.cache[&key], placement, area, BOX_Z);
     }
 
-    fn draw_glow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        if !frame.shows(placement, area) {
+    fn place_cached(
+        &mut self,
+        frame: &mut Frame,
+        key: SpriteKey,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+        build: impl FnOnce(&Self) -> Canvas,
+    ) {
+        if !frame.shows(geometry, area) {
             return;
         }
-        let key = glow_key(placement);
         if !self.cache.contains_key(&key) {
-            let drawn = self.outline_glow(placement);
+            let drawn = build(self);
             self.remember(key.clone(), drawn);
         }
-        frame.place(&self.cache[&key], placement, area, GLOW_Z);
+        Self::place(frame, &self.cache[&key], geometry, area, z);
     }
 
-    /// Draws a cached LED sprite at its layer.
-    fn draw_sprite(&mut self, frame: &mut Frame, placement: &Placement, area: Area, z: i32) {
-        if !frame.shows(placement, area) {
-            return;
-        }
-        let key = sprite_key(placement);
-        if !self.cache.contains_key(&key) {
-            let drawn = self.outline_led(placement);
-            self.remember(key.clone(), drawn);
-        }
-        frame.place(&self.cache[&key], placement, area, z);
+    fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
+        let key = box_key(geometry.width, geometry.height, style);
+        self.place_cached(frame, key, geometry, area, BOX_Z, |renderer| {
+            renderer.box_canvas(geometry.width, geometry.height, style)
+        });
     }
 
-    fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        if !frame.shows(placement, area) {
-            return;
-        }
-        let key = sprite_key(placement);
-        if !self.cache.contains_key(&key) {
-            let drawn = self.outline_arrow(placement);
-            self.remember(key.clone(), drawn);
-        }
-        frame.place(&self.cache[&key], placement, area, CONTENT_Z);
+    fn draw_glow(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        colour: Option<u8>,
+        rounded: bool,
+    ) {
+        let key = glow_key(geometry.width, geometry.height, colour, rounded);
+        self.place_cached(frame, key, geometry, area, GLOW_Z, |renderer| {
+            renderer.glow_canvas(geometry.width, geometry.height, colour, rounded)
+        });
     }
 
-    fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
-        for (offset, character) in label.text.chars().enumerate() {
+    fn draw_led(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LedStyle) {
+        let key = led_key(geometry.width, geometry.height, style);
+        self.place_cached(frame, key, geometry, area, INK_Z, |renderer| {
+            renderer.led_canvas(geometry.width, geometry.height, style)
+        });
+    }
+
+    fn draw_arrow(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: ArrowStyle) {
+        let key = arrow_key(geometry.width, geometry.height, &style);
+        self.place_cached(frame, key, geometry, area, CONTENT_Z, |renderer| {
+            renderer.arrow_canvas(geometry.width, geometry.height, &style)
+        });
+    }
+
+    fn draw_label(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LabelStyle) {
+        for (offset, character) in style.text.chars().enumerate() {
             let char_placement = Placement {
-                node: PlacementNode::Label(label.clone()),
-                x: placement.x + offset as i64,
-                y: placement.y,
+                node: PlacementNode::Label(Label {
+                    text: style.text.clone().into(),
+                    path: style.path.clone(),
+                    colour: style.colour,
+                }),
+                x: geometry.x + offset as i64,
+                y: geometry.y,
                 width: 1,
                 height: 1,
             };
             if !frame.shows(&char_placement, area) {
                 continue;
             }
-            let glyph = self.glyph_source.glyph(character, label.colour);
+            let glyph = self.glyph_source.glyph(character, style.colour);
             frame.place(glyph, &char_placement, area, CONTENT_Z);
         }
     }
 
-    fn draw_caret(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
+    fn draw_caret(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
+        let width = self.cells_to_pixels_x(geometry.width);
+        let height = self.cells_to_pixels_y(geometry.height);
         let (r, g, b) = colour(None);
         let canvas = Canvas::fill(
             width,
@@ -390,11 +473,11 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        frame.place(&canvas, placement, area, CONTENT_Z);
+        Self::place(frame, &canvas, geometry, area, CONTENT_Z);
     }
 
-    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        self.draw_caret(frame, placement, area);
+    fn draw_cursor(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
+        self.draw_caret(frame, geometry, area);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -412,41 +495,32 @@ impl TerminalRenderer {
         cells * self.window.cell_height
     }
 
-    fn outline_box(&self, placement: &Placement) -> Canvas {
-        let (edge, fill, opacity, rounded, sides, border) = match &placement.node {
-            PlacementNode::Box {
-                colour,
-                fill,
-                opacity,
-                rounded,
-                sides,
-                border,
-            } => (*colour, *fill, *opacity, *rounded, *sides, *border),
-            _ => unreachable!("outline_box is only called for Box placements"),
-        };
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
-        let (r, g, b) = colour(edge);
-        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(fill, opacity);
+    fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
+        let width = self.cells_to_pixels_x(cell_width);
+        let height = self.cells_to_pixels_y(cell_height);
+        let (r, g, b) = colour(style.colour);
+        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.opacity);
         let shape = BoxShape {
             width,
             height,
-            border,
-            radius: if rounded { ROUNDED_RADIUS } else { 0 },
-            sides,
+            border: style.border,
+            radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+            sides: style.sides,
             edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
         Canvas::fill(width, height, &shape)
     }
 
-    fn outline_glow(&self, placement: &Placement) -> Canvas {
-        let (edge, rounded) = match &placement.node {
-            PlacementNode::Glow { colour, rounded } => (*colour, *rounded),
-            _ => unreachable!("outline_glow is only called for Glow placements"),
-        };
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
+    fn glow_canvas(
+        &self,
+        cell_width: i64,
+        cell_height: i64,
+        edge: Option<u8>,
+        rounded: bool,
+    ) -> Canvas {
+        let width = self.cells_to_pixels_x(cell_width);
+        let height = self.cells_to_pixels_y(cell_height);
         let (r, g, b) = colour(edge);
         let shape = GlowShape {
             width,
@@ -459,29 +533,22 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &shape)
     }
 
-    fn outline_led(&self, placement: &Placement) -> Canvas {
-        let PlacementNode::Led { colour: tint, lit } = placement.node else {
-            unreachable!("outline_led is only called for Led placements");
-        };
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
+    fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
+        let width = self.cells_to_pixels_x(cell_width);
+        let height = self.cells_to_pixels_y(cell_height);
         let shape = LedShape {
             width,
             height,
-            colour: colour(Some(tint)),
-            lit,
+            colour: colour(Some(style.colour)),
+            lit: style.lit,
         };
         Canvas::fill(width, height, &shape)
     }
 
-    fn outline_arrow(&self, placement: &Placement) -> Canvas {
-        let arrow = match &placement.node {
-            PlacementNode::Arrow(arrow) => arrow,
-            _ => unreachable!("outline_arrow is only called for Arrow placements"),
-        };
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
-        let stop_rows: Vec<i64> = arrow
+    fn arrow_canvas(&self, cell_width: i64, cell_height: i64, style: &ArrowStyle) -> Canvas {
+        let width = self.cells_to_pixels_x(cell_width);
+        let height = self.cells_to_pixels_y(cell_height);
+        let stop_rows: Vec<i64> = style
             .stops
             .iter()
             .map(|stop| self.cells_to_pixels_y(*stop) + self.window.cell_height / 2)
@@ -500,7 +567,7 @@ impl TerminalRenderer {
         let shape = ArrowShape {
             width,
             stop_rows,
-            shaft_row: self.cells_to_pixels_y(arrow.shaft) + self.window.cell_height / 2,
+            shaft_row: self.cells_to_pixels_y(style.shaft) + self.window.cell_height / 2,
             trunk,
             stroke: ARROW_STROKE,
             arrowhead_edge_length: ARROWHEAD_EDGE_LENGTH,
@@ -861,13 +928,57 @@ mod tests {
         }
     }
 
+    fn key_of(placement: &Placement) -> SpriteKey {
+        match &placement.node {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                rounded,
+                sides,
+                border,
+            } => box_key(
+                placement.width,
+                placement.height,
+                BoxStyle {
+                    colour: *colour,
+                    fill: *fill,
+                    opacity: *opacity,
+                    rounded: *rounded,
+                    sides: *sides,
+                    border: *border,
+                },
+            ),
+            PlacementNode::Arrow(arrow) => arrow_key(
+                placement.width,
+                placement.height,
+                &ArrowStyle {
+                    stops: arrow.stops.clone(),
+                    shaft: arrow.shaft,
+                },
+            ),
+            PlacementNode::Led { colour, lit } => led_key(
+                placement.width,
+                placement.height,
+                LedStyle {
+                    colour: *colour,
+                    lit: *lit,
+                },
+            ),
+            PlacementNode::Glow { colour, rounded } => {
+                glow_key(placement.width, placement.height, *colour, *rounded)
+            }
+            _ => panic!("expected a cached placement"),
+        }
+    }
+
     #[test]
     fn sprite_key_of_two_identically_shaped_boxes_is_equal() {
         let node_a = box_node(Some(1), Some(1), true);
         let node_b = box_node(Some(1), Some(1), true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_eq!(sprite_key(&a), sprite_key(&b));
+        assert_eq!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -876,7 +987,7 @@ mod tests {
         let node_b = box_node(Some(2), None, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -885,7 +996,7 @@ mod tests {
         let node_b = box_node(Some(1), None, true);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -894,7 +1005,7 @@ mod tests {
         let node_b = box_node(Some(1), Some(1), false);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -903,7 +1014,7 @@ mod tests {
         let node_b = with_sides(&node_a, (true, false, false, true));
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -912,7 +1023,7 @@ mod tests {
         let node_b = with_border(&node_a, BORDER + 1);
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -947,14 +1058,14 @@ mod tests {
     fn sprite_key_of_arrows_with_different_stops_differs() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 3], 1, 0, 0, 4, 3);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
+        assert_ne!(key_of(&a), key_of(&b));
     }
 
     #[test]
     fn sprite_key_of_identical_arrows_is_equal() {
         let a = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
         let b = arrow_placement(vec![0, 2], 1, 0, 0, 4, 3);
-        assert_eq!(sprite_key(&a), sprite_key(&b));
+        assert_eq!(key_of(&a), key_of(&b));
     }
 
     #[test]
@@ -1950,7 +2061,29 @@ mod tests {
         width: i64,
         height: i64,
     ) -> Canvas {
-        r.outline_box(&box_placement(node, 0, 0, width, height))
+        let PlacementNode::Box {
+            colour,
+            fill,
+            opacity,
+            rounded,
+            sides,
+            border,
+        } = node
+        else {
+            panic!("expected a Box")
+        };
+        r.box_canvas(
+            width,
+            height,
+            BoxStyle {
+                colour: *colour,
+                fill: *fill,
+                opacity: *opacity,
+                rounded: *rounded,
+                sides: *sides,
+                border: *border,
+            },
+        )
     }
 
     fn pixel_of(sprite: &Canvas, x: i64, y: i64) -> (u8, u8, u8, u8) {
@@ -2029,7 +2162,7 @@ mod tests {
         width: i64,
         height: i64,
     ) -> Canvas {
-        r.outline_arrow(&arrow_placement(stops, shaft, 0, 0, width, height))
+        r.arrow_canvas(width, height, &ArrowStyle { stops, shaft })
     }
 
     #[test]

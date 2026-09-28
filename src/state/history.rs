@@ -42,25 +42,27 @@ pub(super) fn undo(mut state: State) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::action::{CommandAction, InsertAction, NamePromptAction};
+    use crate::state::action::{
+        ImmediateCommand, InsertAction, NamePromptAction, SelectionCommand,
+    };
     use crate::state::text_edit::TextKey;
 
     #[test]
     fn interrupt_is_not_undoable() {
-        assert!(!Action::Command(CommandAction::Interrupt).undoable());
+        assert!(!Action::Immediate(ImmediateCommand::Interrupt).undoable());
     }
 
     #[test]
     fn creating_and_editing_command_actions_are_undoable() {
         for action in [
-            CommandAction::NewBox,
-            CommandAction::NewSibling,
-            CommandAction::Delete,
-            CommandAction::Paste,
-            CommandAction::EditLabel,
-            CommandAction::RenameLabel,
+            SelectionCommand::NewBox,
+            SelectionCommand::NewSibling,
+            SelectionCommand::Delete,
+            SelectionCommand::Paste,
+            SelectionCommand::EditLabel,
+            SelectionCommand::RenameLabel,
         ] {
-            assert!(Action::Command(action).undoable());
+            assert!(Action::Selection(action).undoable());
         }
     }
 
@@ -71,7 +73,7 @@ mod tests {
 
     #[test]
     fn name_actions_are_not_undoable() {
-        assert!(!Action::Command(CommandAction::OpenNamePrompt).undoable());
+        assert!(!Action::Immediate(ImmediateCommand::OpenNamePrompt).undoable());
         for action in [
             NamePromptAction::NameAppend('a'),
             NamePromptAction::NameBackspace,
