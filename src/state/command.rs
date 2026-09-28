@@ -200,13 +200,13 @@ fn accumulate_digit(mut state: State, digit: u8) -> State {
 
 pub(crate) fn reduce(mut state: State, command: ImmediateCommand) -> State {
     match command {
-        ImmediateCommand::Digit(digit) => return accumulate_digit(state, digit),
+        ImmediateCommand::Digit(digit) => accumulate_digit(state, digit),
         ImmediateCommand::CancelCount => {
             state.pending_count = None;
-            return state;
+            state
         }
-        ImmediateCommand::Interrupt => return interrupt(state),
-        ImmediateCommand::OpenNamePrompt => return open_name_prompt(state),
+        ImmediateCommand::Interrupt => interrupt(state),
+        ImmediateCommand::OpenNamePrompt => open_name_prompt(state),
     }
 }
 

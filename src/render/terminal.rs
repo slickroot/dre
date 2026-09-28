@@ -115,6 +115,7 @@ enum SpriteKey {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 fn box_key(
     width: i64,
     height: i64,
@@ -359,6 +360,7 @@ impl TerminalRenderer {
         Self::place(frame, &self.cache[&key], placement, area, z);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_box(
         &mut self,
         frame: &mut Frame,
@@ -486,6 +488,7 @@ impl TerminalRenderer {
         cells * self.window.cell_height
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn box_canvas(
         &self,
         cell_width: i64,
