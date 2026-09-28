@@ -341,7 +341,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
     use crate::layout::with_cursor;
-    use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, SIDE_PADDING};
+    use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_GAP, SIDE_PADDING};
     use crate::layout::{Arrow, Cursor, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
@@ -1168,11 +1168,8 @@ mod tests {
             rows: 33 + FOOTER_ROWS,
         };
         let (body, foot) = body_and_foot(window);
-        let footer = vec![label_placement(
-            FOOTER_TEXT,
-            foot.col + foot.cols - footer_width(),
-            foot.row,
-        )];
+        let footer_x = foot.col + foot.cols - footer_width();
+        let footer = vec![label_placement(FOOTER_TEXT, footer_x, foot.row)];
 
         let svg = document(
             (window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
@@ -1205,7 +1202,7 @@ mod tests {
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
-            nested(foot, &footer_label(foot)),
+            nested(foot, &label_at(footer_x, foot.row, FOOTER_TEXT)),
         );
 
         assert_eq!(svg, expected);
@@ -1384,18 +1381,14 @@ mod tests {
     }
 
     const NAME: &str = "plans";
-    const FOOTER_TEXT: &str = "plans \u{2022} dre";
+    const FOOTER_TEXT: &str = "MOVE plans \u{2022} dre";
 
     fn footer_width() -> i64 {
         FOOTER_TEXT.chars().count() as i64
     }
 
-    fn footer_label(foot: Area) -> String {
-        label_at(foot.col + foot.cols - footer_width(), foot.row, FOOTER_TEXT)
-    }
-
     fn footer_box_area(foot: Area) -> Area {
-        let width = footer_width() + SIDE_PADDING * 2;
+        let width = footer_width() + SIDE_PADDING * 2 + LED_GAP;
         Area {
             col: foot.col + foot.cols - width,
             row: foot.row + foot.rows - FOOTER_ROWS,
@@ -1404,13 +1397,18 @@ mod tests {
         }
     }
 
+    fn footer_led_x(area: Area) -> i64 {
+        let inset_width = area.cols - LED_GAP;
+        area.col + centre_label(inset_width, FOOTER_TEXT)
+    }
+
+    fn footer_label_x(area: Area) -> i64 {
+        footer_led_x(area) + LED_GAP
+    }
+
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
-        label_at(
-            area.col + centre_label(area.cols, FOOTER_TEXT),
-            area.row + BOX_HEIGHT / 2,
-            FOOTER_TEXT,
-        )
+        label_at(footer_label_x(area), area.row + BOX_HEIGHT / 2, FOOTER_TEXT)
     }
 
     fn footer_rect(foot: Area) -> String {
@@ -1425,8 +1423,31 @@ mod tests {
         )
     }
 
+    fn footer_led_circle(foot: Area) -> String {
+        let area = footer_box_area(foot);
+        led_circle(
+            &Placement {
+                node: PlacementNode::Led {
+                    colour: crate::palette::LIME,
+                    lit: false,
+                },
+                x: footer_led_x(area),
+                y: area.row + BOX_HEIGHT / 2,
+                width: 2,
+                height: 1,
+            },
+            crate::palette::LIME,
+            false,
+        )
+    }
+
     fn padded_footer(foot: Area) -> String {
-        format!("{}{}", footer_rect(foot), padded_footer_label(foot))
+        format!(
+            "{}{}{}",
+            footer_rect(foot),
+            padded_footer_label(foot),
+            footer_led_circle(foot)
+        )
     }
 
     #[test]
