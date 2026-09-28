@@ -12,8 +12,6 @@ use crate::diagram::{Document, Node};
 use crate::palette;
 use crate::state::action::ActionMode;
 pub(crate) use crate::state::effect::Effect;
-#[cfg(not(test))]
-use crate::state::input::INTERRUPT;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
@@ -178,11 +176,7 @@ fn apply(state: State, action: action::Action) -> State {
 }
 
 pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
-    let action = match key {
-        None => Some(action::Action::Idle),
-        Some(INTERRUPT) => Some(action::Action::Interrupt),
-        Some(key) => input::parse(&state, key),
-    };
+    let action = key.and_then(|key| input::parse(&state, key));
     let mut state = match action {
         Some(action) => apply(state, action),
         None => state,
@@ -459,6 +453,15 @@ mod tests {
     }
 
     #[test]
+    fn missing_input_is_a_no_op() {
+        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0])).with_pending_count(4);
+        let result = crate::state::reduce(state, None).0;
+        assert_eq!(result.selected, Some(vec![0]));
+        assert_eq!(result.pending_count, Some(4));
+        assert_eq!(result.mode, Mode::Command);
+    }
+
+    #[test]
     fn a_bare_digit_in_command_mode_leaves_the_document_unchanged() {
         let boxes = vec![node("a"), node("b")];
         let state = new_state(boxes.clone(), Mode::Command, Some(vec![1]));
@@ -505,66 +508,6 @@ mod tests {
         let state = handle_key(state, "x");
         let result = handle_key(state, "j");
         assert_eq!(result.selected, Some(vec![1]));
-    }
-
-    #[test]
-    fn idling_in_command_mode_leaves_the_selection_unchanged() {
-        let selected = vec![0];
-        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let idled = reduce(state, Action::Idle);
-        assert_eq!(idled.selected, Some(selected));
-    }
-
-    #[test]
-    fn idling_in_insert_mode_leaves_the_selection_unchanged() {
-        let selected = vec![0];
-        let state = new_state(
-            vec![node("a")],
-            Mode::Insert { cursor: 1 },
-            Some(selected.clone()),
-        );
-        let idled = reduce(state, Action::Idle);
-        assert_eq!(idled.selected, Some(selected));
-    }
-
-    #[test]
-    fn idling_in_name_prompt_mode_leaves_the_selection_unchanged() {
-        let selected = vec![0];
-        let state = new_state(
-            vec![node("a")],
-            Mode::NamePrompt {
-                name: "a".to_string(),
-                quits: false,
-            },
-            Some(selected.clone()),
-        );
-        let idled = reduce(state, Action::Idle);
-        assert_eq!(idled.selected, Some(selected));
-    }
-
-    #[test]
-    fn idling_with_nothing_selected_is_a_noop() {
-        let state = new_state(vec![node("a")], Mode::Command, None);
-        let idled = reduce(state, Action::Idle);
-        assert_eq!(idled.selected, None);
-    }
-
-    #[test]
-    fn repeated_idling_keeps_the_selection_unchanged() {
-        let selected = vec![0];
-        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let idled = reduce(reduce(state, Action::Idle), Action::Idle);
-        assert_eq!(idled.selected, Some(selected));
-    }
-
-    #[test]
-    fn an_idle_is_not_undoable_and_does_not_pollute_history() {
-        let mut state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
-        state = reduce(state, Action::ToggleRounded);
-        state = reduce(state, Action::ToggleRounded);
-        let idled = reduce(state, Action::Idle);
-        assert_eq!(idled.history.len(), 2);
-        assert_eq!(idled.selected, Some(vec![0]));
     }
 
     fn selecting_first(boxes: Vec<Tree<Node>>, mode: Mode) -> State {

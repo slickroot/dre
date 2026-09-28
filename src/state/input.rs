@@ -1,62 +1,366 @@
 use crate::state::action::Action;
 use crate::state::text_edit::TextKey;
-use crate::state::{KeyBinding, Mode, State};
+use crate::state::{Mode, State};
 
 pub(crate) const INTERRUPT: &str = "\x03";
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyMatch {
+    Exact(&'static str),
+    Digit,
+    Printable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyAction {
+    Undo,
+    NewBox,
+    NewSibling,
+    Delete,
+    Paste,
+    SelectParent,
+    SelectChild,
+    SelectNext,
+    SelectPrevious,
+    EditLabel,
+    RenameLabel,
+    CycleColour,
+    CycleSiblingsColour,
+    ToggleSiblingsFill,
+    ToggleFill,
+    ToggleRounded,
+    ToggleSiblingsRounded,
+    Quit,
+    OpenNamePrompt,
+    Interrupt,
+    Digit,
+    Commit,
+    CommitAndAddChild,
+    InsertBackspace,
+    InsertLeft,
+    InsertRight,
+    InsertPrintable,
+    NameConfirm,
+    NameCancel,
+    NameBackspace,
+    NamePrintable,
+}
+
+impl KeyAction {
+    fn action(self, key: &str) -> Action {
+        match self {
+            Self::Undo => Action::Undo,
+            Self::NewBox => Action::NewBox,
+            Self::NewSibling => Action::NewSibling,
+            Self::Delete => Action::Delete,
+            Self::Paste => Action::Paste,
+            Self::SelectParent => Action::SelectParent,
+            Self::SelectChild => Action::SelectChild,
+            Self::SelectNext => Action::SelectNext,
+            Self::SelectPrevious => Action::SelectPrevious,
+            Self::EditLabel => Action::EditLabel,
+            Self::RenameLabel => Action::RenameLabel,
+            Self::CycleColour => Action::CycleColour,
+            Self::CycleSiblingsColour => Action::CycleSiblingsColour,
+            Self::ToggleSiblingsFill => Action::ToggleSiblingsFill,
+            Self::ToggleFill => Action::ToggleFill,
+            Self::ToggleRounded => Action::ToggleRounded,
+            Self::ToggleSiblingsRounded => Action::ToggleSiblingsRounded,
+            Self::Quit => Action::Quit,
+            Self::OpenNamePrompt => Action::OpenNamePrompt,
+            Self::Interrupt => Action::Interrupt,
+            Self::Digit => Action::Digit(key.as_bytes()[0] - b'0'),
+            Self::Commit => Action::Commit,
+            Self::CommitAndAddChild => Action::CommitAndAddChild,
+            Self::InsertBackspace => Action::InsertKey(TextKey::Backspace),
+            Self::InsertLeft => Action::InsertKey(TextKey::Left),
+            Self::InsertRight => Action::InsertKey(TextKey::Right),
+            Self::InsertPrintable => Action::InsertKey(TextKey::Char(printable(key).unwrap())),
+            Self::NameConfirm => Action::NameConfirm,
+            Self::NameCancel => Action::NameCancel,
+            Self::NameBackspace => Action::NameBackspace,
+            Self::NamePrintable => Action::NameAppend(printable(key).unwrap()),
+        }
+    }
+}
+
+#[allow(dead_code)]
+struct KeyBinding {
+    mode: Mode,
+    matcher: KeyMatch,
+    display: &'static str,
+    action: KeyAction,
+    description: &'static str,
+}
+
+const COMMAND: Mode = Mode::Command;
+
+const KEYMAP: &[KeyBinding] = &[
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("u"),
+        display: "u",
+        action: KeyAction::Undo,
+        description: "Undo the last change",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("b"),
+        display: "b",
+        action: KeyAction::NewBox,
+        description: "Add a child box",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("s"),
+        display: "s",
+        action: KeyAction::NewSibling,
+        description: "Add a sibling box",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("d"),
+        display: "d",
+        action: KeyAction::Delete,
+        description: "Delete the selected box and its descendants",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("p"),
+        display: "p",
+        action: KeyAction::Paste,
+        description: "Paste the cut box and its descendants as the last child of the selected box",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("h"),
+        display: "h",
+        action: KeyAction::SelectParent,
+        description: "Select the parent box",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("l"),
+        display: "l",
+        action: KeyAction::SelectChild,
+        description: "Select the first child box",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("j"),
+        display: "j",
+        action: KeyAction::SelectNext,
+        description: "Select the next sibling",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("k"),
+        display: "k",
+        action: KeyAction::SelectPrevious,
+        description: "Select the previous sibling",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("i"),
+        display: "i",
+        action: KeyAction::EditLabel,
+        description: "Edit the selected box's label",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("I"),
+        display: "I",
+        action: KeyAction::RenameLabel,
+        description: "Rename the selected box's label",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("c"),
+        display: "c",
+        action: KeyAction::CycleColour,
+        description: "Cycle the box's colour",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("C"),
+        display: "C",
+        action: KeyAction::CycleSiblingsColour,
+        description: "Cycle the colour of every sibling",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("F"),
+        display: "F",
+        action: KeyAction::ToggleSiblingsFill,
+        description: "Toggle the fill of every sibling",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("f"),
+        display: "f",
+        action: KeyAction::ToggleFill,
+        description: "Toggle the box's fill",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("r"),
+        display: "r",
+        action: KeyAction::ToggleRounded,
+        description: "Toggle rounded corners",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("R"),
+        display: "R",
+        action: KeyAction::ToggleSiblingsRounded,
+        description: "Toggle rounded corners of every sibling",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("q"),
+        display: "q",
+        action: KeyAction::Quit,
+        description: "Save and quit (or choose where to save)",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact("n"),
+        display: "n",
+        action: KeyAction::OpenNamePrompt,
+        description: "Name the diagram",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Digit,
+        display: "0–9",
+        action: KeyAction::Digit,
+        description: "Build a count prefix",
+    },
+    KeyBinding {
+        mode: COMMAND,
+        matcher: KeyMatch::Exact(INTERRUPT),
+        display: "Ctrl-C",
+        action: KeyAction::Interrupt,
+        description: "Quit without saving",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Exact("\r"),
+        display: "Enter",
+        action: KeyAction::CommitAndAddChild,
+        description: "Finish the box and add a child box",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Exact("\x1b"),
+        display: "Esc",
+        action: KeyAction::Commit,
+        description: "Switch to command mode",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Exact("\x7f"),
+        display: "Backspace",
+        action: KeyAction::InsertBackspace,
+        description: "Remove the last character",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Exact("\x1b[D"),
+        display: "←",
+        action: KeyAction::InsertLeft,
+        description: "Move the cursor left",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Exact("\x1b[C"),
+        display: "→",
+        action: KeyAction::InsertRight,
+        description: "Move the cursor right",
+    },
+    KeyBinding {
+        mode: Mode::Insert { cursor: 0 },
+        matcher: KeyMatch::Printable,
+        display: "Printable",
+        action: KeyAction::InsertPrintable,
+        description: "Append a printable character",
+    },
+    KeyBinding {
+        mode: Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        },
+        matcher: KeyMatch::Exact("\r"),
+        display: "Enter",
+        action: KeyAction::NameConfirm,
+        description: "Save the name",
+    },
+    KeyBinding {
+        mode: Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        },
+        matcher: KeyMatch::Exact("\x1b"),
+        display: "Esc",
+        action: KeyAction::NameCancel,
+        description: "Cancel naming",
+    },
+    KeyBinding {
+        mode: Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        },
+        matcher: KeyMatch::Exact("\x7f"),
+        display: "Backspace",
+        action: KeyAction::NameBackspace,
+        description: "Remove a character from the name",
+    },
+    KeyBinding {
+        mode: Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        },
+        matcher: KeyMatch::Printable,
+        display: "Printable",
+        action: KeyAction::NamePrintable,
+        description: "Append a character to the name",
+    },
+];
+
+fn same_mode(binding: &KeyBinding, mode: &Mode) -> bool {
+    matches!(
+        (&binding.mode, mode),
+        (Mode::Command, Mode::Command)
+            | (Mode::Insert { .. }, Mode::Insert { .. })
+            | (Mode::NamePrompt { .. }, Mode::NamePrompt { .. })
+    )
+}
+
+fn matches_key(matcher: KeyMatch, key: &str) -> bool {
+    match matcher {
+        KeyMatch::Exact(expected) => key == expected,
+        KeyMatch::Digit => key.len() == 1 && key.as_bytes()[0].is_ascii_digit(),
+        KeyMatch::Printable => printable(key).is_some(),
+    }
+}
+
 pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
-    match &state.mode {
-        Mode::Command => command_parse(key),
-        Mode::Insert { .. } => insert_parse(key),
-        Mode::NamePrompt { .. } => name_prompt_parse(key),
-    }
-}
-
-fn command_parse(key: &str) -> Option<Action> {
-    if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
-        return Some(Action::Digit(key.as_bytes()[0] - b'0'));
-    }
-    Some(match key {
-        "u" => Action::Undo,
-        "b" => Action::NewBox,
-        "s" => Action::NewSibling,
-        "d" => Action::Delete,
-        "p" => Action::Paste,
-        "h" => Action::SelectParent,
-        "l" => Action::SelectChild,
-        "j" => Action::SelectNext,
-        "k" => Action::SelectPrevious,
-        "i" => Action::EditLabel,
-        "I" => Action::RenameLabel,
-        "c" => Action::CycleColour,
-        "C" => Action::CycleSiblingsColour,
-        "F" => Action::ToggleSiblingsFill,
-        "f" => Action::ToggleFill,
-        "r" => Action::ToggleRounded,
-        "R" => Action::ToggleSiblingsRounded,
-        "q" => Action::Quit,
-        "n" => Action::OpenNamePrompt,
-        _ => Action::CancelCount,
-    })
-}
-
-fn insert_parse(key: &str) -> Option<Action> {
-    match key {
-        "\x1b" => Some(Action::Commit),
-        "\r" => Some(Action::CommitAndAddChild),
-        "\x7f" => Some(Action::InsertKey(TextKey::Backspace)),
-        "\x1b[D" => Some(Action::InsertKey(TextKey::Left)),
-        "\x1b[C" => Some(Action::InsertKey(TextKey::Right)),
-        _ => printable(key).map(|c| Action::InsertKey(TextKey::Char(c))),
-    }
-}
-
-fn name_prompt_parse(key: &str) -> Option<Action> {
-    match key {
-        "\r" => Some(Action::NameConfirm),
-        "\x1b" => Some(Action::NameCancel),
-        "\x7f" => Some(Action::NameBackspace),
-        _ => printable(key).map(Action::NameAppend),
+    let exact = KEYMAP.iter().find(|binding| {
+        same_mode(binding, &state.mode)
+            && matches!(binding.matcher, KeyMatch::Exact(_))
+            && matches_key(binding.matcher, key)
+    });
+    let binding = exact.or_else(|| {
+        KEYMAP.iter().find(|binding| {
+            same_mode(binding, &state.mode)
+                && !matches!(binding.matcher, KeyMatch::Exact(_))
+                && matches_key(binding.matcher, key)
+        })
+    });
+    match binding {
+        Some(binding) => Some(binding.action.action(key)),
+        None if matches!(state.mode, Mode::Command) => Some(Action::CancelCount),
+        None => None,
     }
 }
 
@@ -64,160 +368,59 @@ fn printable(key: &str) -> Option<char> {
     key.chars().next().filter(|c| ('\x20'..='\x7e').contains(c))
 }
 
-#[allow(dead_code)]
-pub(crate) const COMMAND_KEYMAP: &[KeyBinding<Action>] = &[
-    KeyBinding {
-        keys: &["u"],
-        command: Action::Undo,
-        description: "Undo the last change",
-    },
-    KeyBinding {
-        keys: &["b"],
-        command: Action::NewBox,
-        description: "Add a child box",
-    },
-    KeyBinding {
-        keys: &["s"],
-        command: Action::NewSibling,
-        description: "Add a sibling box",
-    },
-    KeyBinding {
-        keys: &["d"],
-        command: Action::Delete,
-        description: "Delete the selected box and its descendants",
-    },
-    KeyBinding {
-        keys: &["p"],
-        command: Action::Paste,
-        description: "Paste the cut box and its descendants as the last child of the selected box",
-    },
-    KeyBinding {
-        keys: &["h"],
-        command: Action::SelectParent,
-        description: "Select the parent box",
-    },
-    KeyBinding {
-        keys: &["l"],
-        command: Action::SelectChild,
-        description: "Select the first child box",
-    },
-    KeyBinding {
-        keys: &["j"],
-        command: Action::SelectNext,
-        description: "Select the next sibling",
-    },
-    KeyBinding {
-        keys: &["k"],
-        command: Action::SelectPrevious,
-        description: "Select the previous sibling",
-    },
-    KeyBinding {
-        keys: &["i"],
-        command: Action::EditLabel,
-        description: "Edit the selected box's label",
-    },
-    KeyBinding {
-        keys: &["I"],
-        command: Action::RenameLabel,
-        description: "Rename the selected box's label",
-    },
-    KeyBinding {
-        keys: &["c"],
-        command: Action::CycleColour,
-        description: "Cycle the box's colour",
-    },
-    KeyBinding {
-        keys: &["C"],
-        command: Action::CycleSiblingsColour,
-        description: "Cycle the colour of every sibling",
-    },
-    KeyBinding {
-        keys: &["f"],
-        command: Action::ToggleFill,
-        description: "Toggle the box's fill",
-    },
-    KeyBinding {
-        keys: &["F"],
-        command: Action::ToggleSiblingsFill,
-        description: "Toggle the fill of every sibling",
-    },
-    KeyBinding {
-        keys: &["r"],
-        command: Action::ToggleRounded,
-        description: "Toggle rounded corners",
-    },
-    KeyBinding {
-        keys: &["R"],
-        command: Action::ToggleSiblingsRounded,
-        description: "Toggle rounded corners of every sibling",
-    },
-    KeyBinding {
-        keys: &["q"],
-        command: Action::Quit,
-        description: "Save and quit (or choose where to save)",
-    },
-    KeyBinding {
-        keys: &["n"],
-        command: Action::OpenNamePrompt,
-        description: "Name the diagram",
-    },
-];
-
-#[allow(dead_code)]
-pub(crate) const INSERT_KEYMAP: &[KeyBinding<Action>] = &[
-    KeyBinding {
-        keys: &["Enter"],
-        command: Action::CommitAndAddChild,
-        description: "Finish the box and add a child box",
-    },
-    KeyBinding {
-        keys: &["Esc"],
-        command: Action::Commit,
-        description: "Switch to command mode",
-    },
-    KeyBinding {
-        keys: &["Backspace"],
-        command: Action::InsertKey(TextKey::Backspace),
-        description: "Remove the last character",
-    },
-    KeyBinding {
-        keys: &["←"],
-        command: Action::InsertKey(TextKey::Left),
-        description: "Move the cursor left",
-    },
-    KeyBinding {
-        keys: &["→"],
-        command: Action::InsertKey(TextKey::Right),
-        description: "Move the cursor right",
-    },
-];
-
-#[allow(dead_code)]
-pub(crate) fn command_keymap_markdown() -> String {
-    let mut out = String::from("| Key | Description |\n| --- | --- |\n");
-    for binding in COMMAND_KEYMAP {
-        let keys: Vec<String> = binding.keys.iter().map(|k| format!("`{k}`")).collect();
+#[cfg(test)]
+fn keymap_markdown() -> String {
+    let mut out = String::from("| Mode | Key | Description |\n| --- | --- | --- |\n");
+    for binding in KEYMAP {
+        let mode = match &binding.mode {
+            Mode::Command => "Command",
+            Mode::Insert { .. } => "Insert",
+            Mode::NamePrompt { .. } => "Name prompt",
+        };
         out.push_str(&format!(
-            "| {} | {} |\n",
-            keys.join(", "),
-            binding.description
+            "| {mode} | `{}` | {} |\n",
+            binding.display, binding.description
         ));
     }
     out
 }
 
-#[allow(dead_code)]
-pub(crate) fn insert_keymap_markdown() -> String {
-    let mut out = String::from("| Key | Description |\n| --- | --- |\n");
-    for binding in INSERT_KEYMAP {
-        let keys: Vec<String> = binding.keys.iter().map(|k| format!("`{k}`")).collect();
-        out.push_str(&format!(
-            "| {} | {} |\n",
-            keys.join(", "),
-            binding.description
-        ));
+#[cfg(test)]
+fn action_key(action: &Action) -> KeyAction {
+    match action {
+        Action::Undo => KeyAction::Undo,
+        Action::NewBox => KeyAction::NewBox,
+        Action::NewSibling => KeyAction::NewSibling,
+        Action::Delete => KeyAction::Delete,
+        Action::Paste => KeyAction::Paste,
+        Action::SelectParent => KeyAction::SelectParent,
+        Action::SelectChild => KeyAction::SelectChild,
+        Action::SelectNext => KeyAction::SelectNext,
+        Action::SelectPrevious => KeyAction::SelectPrevious,
+        Action::EditLabel => KeyAction::EditLabel,
+        Action::RenameLabel => KeyAction::RenameLabel,
+        Action::CycleColour => KeyAction::CycleColour,
+        Action::CycleSiblingsColour => KeyAction::CycleSiblingsColour,
+        Action::ToggleSiblingsFill => KeyAction::ToggleSiblingsFill,
+        Action::ToggleFill => KeyAction::ToggleFill,
+        Action::ToggleRounded => KeyAction::ToggleRounded,
+        Action::ToggleSiblingsRounded => KeyAction::ToggleSiblingsRounded,
+        Action::Quit => KeyAction::Quit,
+        Action::Interrupt => KeyAction::Interrupt,
+        Action::Digit(_) => KeyAction::Digit,
+        Action::CancelCount => panic!("CancelCount is not a binding"),
+        Action::Commit => KeyAction::Commit,
+        Action::CommitAndAddChild => KeyAction::CommitAndAddChild,
+        Action::InsertKey(TextKey::Backspace) => KeyAction::InsertBackspace,
+        Action::InsertKey(TextKey::Left) => KeyAction::InsertLeft,
+        Action::InsertKey(TextKey::Right) => KeyAction::InsertRight,
+        Action::InsertKey(TextKey::Char(_)) => KeyAction::InsertPrintable,
+        Action::OpenNamePrompt => KeyAction::OpenNamePrompt,
+        Action::NameAppend(_) => KeyAction::NamePrintable,
+        Action::NameBackspace => KeyAction::NameBackspace,
+        Action::NameConfirm => KeyAction::NameConfirm,
+        Action::NameCancel => KeyAction::NameCancel,
     }
-    out
 }
 
 #[cfg(test)]
@@ -230,256 +433,123 @@ mod tests {
     }
 
     #[test]
-    fn parse_dispatches_on_the_mode() {
+    fn table_parses_each_mode_and_pattern() {
         assert_eq!(parse(&key_state(Mode::Command), "b"), Some(Action::NewBox));
+        assert_eq!(
+            parse(&key_state(Mode::Command), "7"),
+            Some(Action::Digit(7))
+        );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "b"),
             Some(Action::InsertKey(TextKey::Char('b')))
         );
-        let name_prompt = Mode::NamePrompt {
-            name: String::new(),
-            quits: false,
-        };
         assert_eq!(
-            parse(&key_state(name_prompt), "b"),
+            parse(
+                &key_state(Mode::NamePrompt {
+                    name: String::new(),
+                    quits: false
+                }),
+                "b"
+            ),
             Some(Action::NameAppend('b'))
         );
     }
 
     #[test]
-    fn n_in_command_mode_opens_the_name_prompt() {
+    fn exact_matches_take_precedence_over_patterns() {
         assert_eq!(
-            parse(&key_state(Mode::Command), "n"),
-            Some(Action::OpenNamePrompt)
+            parse(&key_state(Mode::Command), INTERRUPT),
+            Some(Action::Interrupt)
+        );
+        assert_eq!(
+            parse(&key_state(Mode::Insert { cursor: 0 }), "\x1b"),
+            Some(Action::Commit)
         );
     }
 
     #[test]
-    fn name_prompt_keys_parse_to_the_name_actions() {
-        let state = key_state(Mode::NamePrompt {
-            name: String::new(),
-            quits: false,
-        });
-        assert_eq!(parse(&state, "\r"), Some(Action::NameConfirm));
-        assert_eq!(parse(&state, "\x1b"), Some(Action::NameCancel));
-        assert_eq!(parse(&state, "\x7f"), Some(Action::NameBackspace));
-        assert_eq!(parse(&state, "q"), Some(Action::NameAppend('q')));
-        assert_eq!(parse(&state, "\x01"), None);
-        assert_eq!(parse(&state, "é"), None);
+    fn unknown_command_keys_cancel_counts_and_other_unknown_keys_do_nothing() {
+        assert_eq!(
+            parse(&key_state(Mode::Command), "x"),
+            Some(Action::CancelCount)
+        );
+        assert_eq!(parse(&key_state(Mode::Insert { cursor: 0 }), "\x01"), None);
+        assert_eq!(
+            parse(
+                &key_state(Mode::NamePrompt {
+                    name: String::new(),
+                    quits: false
+                }),
+                "é"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn every_user_action_has_one_binding_and_exact_keys_are_unique_per_mode() {
+        for action in [
+            Action::Undo,
+            Action::NewBox,
+            Action::NewSibling,
+            Action::Delete,
+            Action::Paste,
+            Action::SelectParent,
+            Action::SelectChild,
+            Action::SelectNext,
+            Action::SelectPrevious,
+            Action::EditLabel,
+            Action::RenameLabel,
+            Action::CycleColour,
+            Action::CycleSiblingsColour,
+            Action::ToggleSiblingsFill,
+            Action::ToggleFill,
+            Action::ToggleRounded,
+            Action::ToggleSiblingsRounded,
+            Action::Quit,
+            Action::Interrupt,
+            Action::Digit(1),
+            Action::Commit,
+            Action::CommitAndAddChild,
+            Action::InsertKey(TextKey::Backspace),
+            Action::InsertKey(TextKey::Left),
+            Action::InsertKey(TextKey::Right),
+            Action::InsertKey(TextKey::Char('a')),
+            Action::OpenNamePrompt,
+            Action::NameAppend('a'),
+            Action::NameBackspace,
+            Action::NameConfirm,
+            Action::NameCancel,
+        ] {
+            assert_eq!(
+                KEYMAP
+                    .iter()
+                    .filter(|binding| binding.action == action_key(&action))
+                    .count(),
+                1
+            );
+        }
+        for (index, binding) in KEYMAP.iter().enumerate() {
+            for other in &KEYMAP[index + 1..] {
+                assert!(
+                    !(same_mode(binding, &other.mode)
+                        && binding.matcher == other.matcher
+                        && matches!(binding.matcher, KeyMatch::Exact(_)))
+                );
+            }
+        }
     }
 
     #[test]
     fn readme_keymap_table_stays_in_sync() {
-        let markdown = format!("\n\n{}\n", command_keymap_markdown());
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir).join("README.md");
+        let markdown = format!("\n\n{}\n", keymap_markdown());
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
         let readme = std::fs::read_to_string(&path).unwrap();
-        let start_marker = "<!-- keymap:start -->";
-        let end_marker = "<!-- keymap:end -->";
-        let start = readme
-            .find(start_marker)
-            .expect("missing <!-- keymap:start --> in README.md");
-        let end = readme
-            .find(end_marker)
-            .expect("missing <!-- keymap:end --> in README.md");
-        let start_after = start + start_marker.len();
-        let between = &readme[start_after..end];
-        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
-            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
-            std::fs::write(&path, new_readme).unwrap();
-        } else {
-            assert_eq!(
-                between, markdown,
-                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
-            );
-        }
-    }
-
-    #[test]
-    fn parse_maps_known_keys_to_their_commands() {
-        assert_eq!(command_parse("u"), Some(Action::Undo));
-        assert_eq!(command_parse("b"), Some(Action::NewBox));
-        assert_eq!(command_parse("s"), Some(Action::NewSibling));
-        assert_eq!(command_parse("d"), Some(Action::Delete));
-        assert_eq!(command_parse("h"), Some(Action::SelectParent));
-        assert_eq!(command_parse("l"), Some(Action::SelectChild));
-        assert_eq!(command_parse("j"), Some(Action::SelectNext));
-        assert_eq!(command_parse("k"), Some(Action::SelectPrevious));
-        assert_eq!(command_parse("i"), Some(Action::EditLabel));
-        assert_eq!(command_parse("I"), Some(Action::RenameLabel));
-        assert_eq!(command_parse("c"), Some(Action::CycleColour));
-        assert_eq!(command_parse("C"), Some(Action::CycleSiblingsColour));
-        assert_eq!(command_parse("F"), Some(Action::ToggleSiblingsFill));
-        assert_eq!(command_parse("f"), Some(Action::ToggleFill));
-        assert_eq!(command_parse("r"), Some(Action::ToggleRounded));
-        assert_eq!(command_parse("R"), Some(Action::ToggleSiblingsRounded));
-        assert_eq!(command_parse("q"), Some(Action::Quit));
-    }
-
-    #[test]
-    fn parse_cancels_the_count_for_an_unknown_key() {
-        for key in ["x", "\x1b", "é"] {
-            assert_eq!(command_parse(key), Some(Action::CancelCount));
-        }
-    }
-
-    #[test]
-    fn parse_maps_each_digit_key_to_its_digit() {
-        for digit in 0..=9u8 {
-            assert_eq!(
-                command_parse(&digit.to_string()),
-                Some(Action::Digit(digit))
-            );
-        }
-    }
-
-    #[test]
-    fn command_keymap_agrees_with_command_parse() {
-        let bound: Vec<String> = COMMAND_KEYMAP
-            .iter()
-            .flat_map(|binding| binding.keys)
-            .map(|key| key.to_string())
-            .collect();
-
-        for binding in COMMAND_KEYMAP {
-            for key in binding.keys {
-                assert_eq!(command_parse(key), Some(binding.command));
-            }
-        }
-
-        for ch in (b'a'..=b'z').chain(b'A'..=b'Z') {
-            let key = (ch as char).to_string();
-            if !bound.contains(&key) {
-                assert_eq!(command_parse(&key), Some(Action::CancelCount));
-            }
-        }
-
-        let mut unique = bound.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), bound.len());
-    }
-
-    #[test]
-    fn p_parses_to_paste() {
-        assert_eq!(command_parse("p"), Some(Action::Paste));
-    }
-
-    #[test]
-    fn readme_insert_keymap_table_stays_in_sync() {
-        let markdown = format!("\n\n{}\n", insert_keymap_markdown());
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir).join("README.md");
-        let readme = std::fs::read_to_string(&path).unwrap();
-        let start_marker = "<!-- insert-keymap:start -->";
-        let end_marker = "<!-- insert-keymap:end -->";
-        let start = readme
-            .find(start_marker)
-            .expect("missing <!-- insert-keymap:start --> in README.md");
-        let end = readme
-            .find(end_marker)
-            .expect("missing <!-- insert-keymap:end --> in README.md");
-        let start_after = start + start_marker.len();
-        let between = &readme[start_after..end];
-        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
-            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
-            std::fs::write(&path, new_readme).unwrap();
-        } else {
-            assert_eq!(
-                between, markdown,
-                "README.md insert keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
-            );
-        }
-    }
-
-    #[test]
-    fn parse_maps_escape_to_commit() {
-        assert_eq!(insert_parse("\x1b"), Some(Action::Commit));
-    }
-
-    #[test]
-    fn parse_maps_delete_to_backspace() {
+        let start = readme.find("<!-- keymap:start -->").unwrap();
+        let end = readme.find("<!-- keymap:end -->").unwrap();
         assert_eq!(
-            insert_parse("\x7f"),
-            Some(Action::InsertKey(TextKey::Backspace))
+            &readme[start + "<!-- keymap:start -->".len()..end],
+            markdown
         );
-    }
-
-    #[test]
-    fn parse_maps_the_lower_printable_boundary_to_append() {
-        assert_eq!(
-            insert_parse("\x20"),
-            Some(Action::InsertKey(TextKey::Char('\x20')))
-        );
-    }
-
-    #[test]
-    fn parse_maps_the_upper_printable_boundary_to_append() {
-        assert_eq!(
-            insert_parse("\x7e"),
-            Some(Action::InsertKey(TextKey::Char('\x7e')))
-        );
-    }
-
-    #[test]
-    fn parse_returns_nothing_just_outside_the_printable_range() {
-        assert_eq!(insert_parse("\x1f"), None);
-        assert_eq!(insert_parse("\x01"), None);
-        assert_eq!(insert_parse("é"), None);
-    }
-
-    #[test]
-    fn parse_maps_enter_to_commit_and_add_child() {
-        assert_eq!(insert_parse("\r"), Some(Action::CommitAndAddChild));
-    }
-
-    #[test]
-    fn parse_does_not_map_newline_or_backspace_control_to_commit_and_add_child() {
-        assert_eq!(insert_parse("\n"), None);
-        assert_eq!(insert_parse("\x08"), None);
-    }
-
-    #[test]
-    fn parse_maps_the_arrow_keys_to_cursor_moves() {
-        assert_eq!(
-            insert_parse("\x1b[D"),
-            Some(Action::InsertKey(TextKey::Left))
-        );
-        assert_eq!(
-            insert_parse("\x1b[C"),
-            Some(Action::InsertKey(TextKey::Right))
-        );
-    }
-
-    #[test]
-    fn parse_ignores_other_escape_sequences() {
-        assert_eq!(insert_parse("\x1b[A"), None);
-    }
-
-    #[test]
-    fn insert_keymap_agrees_with_insert_parse() {
-        let raw_for = |display: &str| match display {
-            "Enter" => "\r",
-            "Esc" => "\x1b",
-            "Backspace" => "\x7f",
-            "←" => "\x1b[D",
-            "→" => "\x1b[C",
-            _ => panic!("unknown display key {display}"),
-        };
-        let display_keys: Vec<&str> = INSERT_KEYMAP
-            .iter()
-            .flat_map(|binding| binding.keys)
-            .copied()
-            .collect();
-        assert_eq!(display_keys, vec!["Enter", "Esc", "Backspace", "←", "→"]);
-        let mut unique = display_keys.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), display_keys.len());
-        for binding in INSERT_KEYMAP {
-            for display in binding.keys {
-                assert_eq!(insert_parse(raw_for(display)), Some(binding.command));
-            }
-        }
     }
 }

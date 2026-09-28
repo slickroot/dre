@@ -84,34 +84,3 @@ pub fn run() -> ExitCode {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn session_with_a_box_selected() -> Session {
-        let mut session = Session::new();
-        session.press_key("b");
-        session.press_key("\x1b");
-        session
-    }
-
-    #[test]
-    fn going_idle_leaves_the_selection_unchanged() {
-        let mut session = session_with_a_box_selected();
-        let selected = session.state().selected().map(<[usize]>::to_vec);
-        assert!(selected.is_some());
-        session.go_idle();
-        assert_eq!(session.state().selected().map(<[usize]>::to_vec), selected);
-    }
-
-    #[test]
-    fn going_idle_in_insert_mode_leaves_the_caret() {
-        let mut session = Session::new();
-        session.press_key("b");
-        let selected = session.state().selected().map(<[usize]>::to_vec);
-        assert!(selected.is_some());
-        session.go_idle();
-        assert_eq!(session.state().selected().map(<[usize]>::to_vec), selected);
-    }
-}

@@ -20,7 +20,6 @@ pub(crate) enum Action {
     ToggleFill,
     ToggleRounded,
     Quit,
-    Idle,
     Interrupt,
     Digit(u8),
     CancelCount,
@@ -85,15 +84,13 @@ impl Action {
                 undoable: false,
                 min_depth: 2,
             },
-            Action::Idle
-            | Action::Interrupt
-            | Action::OpenNamePrompt
-            | Action::Digit(_)
-            | Action::CancelCount => ActionSpec {
-                mode: ActionMode::Command,
-                undoable: false,
-                min_depth: 0,
-            },
+            Action::Interrupt | Action::OpenNamePrompt | Action::Digit(_) | Action::CancelCount => {
+                ActionSpec {
+                    mode: ActionMode::Command,
+                    undoable: false,
+                    min_depth: 0,
+                }
+            }
             Action::CommitAndAddChild => ActionSpec {
                 mode: ActionMode::Insert,
                 undoable: true,
@@ -128,7 +125,6 @@ mod tests {
         );
         assert_eq!(Action::NameConfirm.spec().mode, ActionMode::NamePrompt);
         assert_eq!(Action::OpenNamePrompt.spec().mode, ActionMode::Command);
-        assert_eq!(Action::Idle.spec().mode, ActionMode::Command);
         assert_eq!(Action::Interrupt.spec().mode, ActionMode::Command);
     }
 }
