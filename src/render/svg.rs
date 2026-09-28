@@ -342,7 +342,7 @@ fn rect(
 
 fn label_text(placement: &crate::view::Placement, label: &crate::view::Label) -> String {
     let chars = label.text.chars().count() as i64;
-    let (r, g, b) = colour(None);
+    let (r, g, b) = colour(label.colour);
     format!(
         "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
         label_font_size(),
@@ -875,6 +875,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: text.into(),
                 path: vec![0],
+                colour: None,
             }),
             x,
             y,
@@ -903,6 +904,38 @@ mod tests {
             rgb(colour(None)),
         )));
         assert!(svg.contains(">hi</text>"));
+    }
+
+    #[test]
+    fn a_label_with_a_colour_renders_in_that_palette_colour() {
+        let placements = vec![Placement {
+            node: PlacementNode::Label(Label {
+                text: "hi".into(),
+                path: vec![0],
+                colour: Some(crate::style::LIME),
+            }),
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 1,
+        }];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains(&format!(
+            "fill=\"{}\"",
+            rgb(colour(Some(crate::style::LIME)))
+        )));
+        assert!(!svg.contains(&format!("fill=\"{}\">hi</text>", rgb(colour(None)))));
+    }
+
+    #[test]
+    fn a_label_without_a_colour_still_renders_in_the_default_foreground() {
+        let placements = vec![label_placement("hi", 1, 1)];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains(&format!("fill=\"{}\">hi</text>", rgb(colour(None)))));
     }
 
     #[test]
@@ -1242,6 +1275,10 @@ mod tests {
     }
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
+        label_at_with_colour(x, y, text, None)
+    }
+
+    fn label_at_with_colour(x: i64, y: i64, text: &str, label_colour: Option<u8>) -> String {
         let chars = text.chars().count() as i64;
         format!(
             "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\">{text}</text>",
@@ -1249,7 +1286,7 @@ mod tests {
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
-            rgb(colour(None)),
+            rgb(colour(label_colour)),
         )
     }
 
@@ -1558,6 +1595,8 @@ mod tests {
     }
 
     const NAME: &str = "plans";
+    const MODE_WORD: &str = "MOVE";
+    const SUFFIX_TEXT: &str = " \u{2022} dre";
     const FOOTER_TEXT: &str = "MOVE plans \u{2022} dre";
 
     fn footer_width() -> i64 {
@@ -1579,13 +1618,39 @@ mod tests {
         area.col + centre_label(inset_width, FOOTER_TEXT)
     }
 
-    fn footer_label_x(area: Area) -> i64 {
+    fn footer_mode_word_x(area: Area) -> i64 {
         footer_led_x(area) + LED_WIDTH + LED_LABEL_GAP
+    }
+
+    fn footer_filename_x(area: Area) -> i64 {
+        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + 1
+    }
+
+    fn footer_suffix_x(area: Area) -> i64 {
+        footer_filename_x(area) + NAME.chars().count() as i64
     }
 
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
-        label_at(footer_label_x(area), area.row + BOX_HEIGHT / 2, FOOTER_TEXT)
+        format!(
+            "{}{}{}",
+            label_at(
+                footer_mode_word_x(area),
+                area.row + BOX_HEIGHT / 2,
+                MODE_WORD
+            ),
+            label_at_with_colour(
+                footer_filename_x(area),
+                area.row + BOX_HEIGHT / 2,
+                NAME,
+                Some(crate::style::DIM),
+            ),
+            label_at(
+                footer_suffix_x(area),
+                area.row + BOX_HEIGHT / 2,
+                SUFFIX_TEXT,
+            )
+        )
     }
 
     fn footer_rect(foot: Area) -> String {
@@ -1841,7 +1906,9 @@ mod tests {
 
         assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
         assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
-        assert!(svg.contains(&format!(">{FOOTER_TEXT}</text>")));
+        assert!(svg.contains(&format!(">{MODE_WORD}</text>")));
+        assert!(svg.contains(&format!(">{NAME}</text>")));
+        assert!(svg.contains(&format!(">{SUFFIX_TEXT}</text>")));
     }
 
     #[test]

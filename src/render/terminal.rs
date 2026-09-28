@@ -6,6 +6,7 @@ use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
+#[cfg(test)]
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
@@ -46,6 +47,7 @@ struct LedStyle {
 struct LabelStyle {
     text: String,
     path: Vec<usize>,
+    colour: Option<u8>,
 }
 
 #[derive(Clone)]
@@ -66,7 +68,7 @@ fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
 fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
     match (fill, quantized_alpha(opacity)) {
         (Some(colour), Some(alpha)) => {
-            let (r, g, b) = palette(colour).unwrap();
+            let (r, g, b) = crate::style::colour(colour).unwrap();
             let composite =
                 |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
             (composite(r), composite(g), composite(b), OPAQUE)
@@ -363,6 +365,7 @@ impl TerminalRenderer {
                     LabelStyle {
                         text: label.text.to_string(),
                         path: label.path.clone(),
+                        colour: label.colour,
                     },
                 ),
                 PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
@@ -446,20 +449,18 @@ impl TerminalRenderer {
                 node: PlacementNode::Label(Label {
                     text: style.text.clone().into(),
                     path: style.path.clone(),
+                    colour: style.colour,
                 }),
                 x: geometry.x + offset as i64,
                 y: geometry.y,
                 width: 1,
                 height: 1,
             };
-            let glyph = self.glyph_source.glyph(character);
-            Self::place(
-                frame,
-                glyph,
-                Geometry::from(&char_placement),
-                area,
-                CONTENT_Z,
-            );
+            if !frame.shows(&char_placement, area) {
+                continue;
+            }
+            let glyph = self.glyph_source.glyph(character, style.colour);
+            frame.place(glyph, &char_placement, area, CONTENT_Z);
         }
     }
 
@@ -1215,6 +1216,7 @@ mod tests {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
                 path: vec![0],
+                colour: None,
             }),
             x,
             y,
@@ -1630,6 +1632,65 @@ mod tests {
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![1, 2]);
+    }
+
+    fn coloured_label_placement(
+        text: &str,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        colour: Option<u8>,
+    ) -> crate::view::Placement<'_> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::Label(crate::view::Label {
+                text: text.into(),
+                path: vec![0],
+                colour,
+            }),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn a_label_with_a_colour_renders_a_different_glyph_colour_than_the_default() {
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let default_pixels = sprites(&mut r, &[coloured_label_placement("h", 0, 0, 1, 1, None)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let coloured_pixels = sprites(
+            &mut r,
+            &[coloured_label_placement(
+                "h",
+                0,
+                0,
+                1,
+                1,
+                Some(crate::style::LIME),
+            )],
+        )[0]
+        .canvas
+        .pixels
+        .clone();
+
+        assert_ne!(default_pixels, coloured_pixels);
+    }
+
+    #[test]
+    fn a_label_without_a_colour_matches_todays_default_foreground_rendering() {
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let pixels = sprites(&mut r, &[label_placement("h", 0, 0, 1, 1)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        assert!(pixels.iter().all(|&byte| byte == 0));
     }
 
     #[test]

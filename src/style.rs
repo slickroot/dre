@@ -13,6 +13,7 @@ pub(crate) const BACKGROUND: u8 = 6;
 pub(crate) const LIME: u8 = 0;
 pub(crate) const VIOLET: u8 = 2;
 pub(crate) const AMBER: u8 = 4;
+pub(crate) const DIM: u8 = 7;
 
 pub(crate) const CELL_WIDTH: i64 = 8;
 pub(crate) const CELL_HEIGHT: i64 = 16;
@@ -21,6 +22,14 @@ pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
+}
+
+pub(crate) fn colour(index: u8) -> Option<(u8, u8, u8)> {
+    if index == DIM {
+        Some((0x8C, 0x8E, 0x91))
+    } else {
+        palette(index)
+    }
 }
 
 pub(crate) fn next_on_palette(colour: Option<u8>) -> Option<u8> {

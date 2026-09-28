@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use crate::composer;
 use crate::layout::tree;
-use crate::state::{FooterView, Mode, State};
-use crate::style::{FOOTER_FILL_OPACITY, FOREGROUND};
+use crate::state::{FooterMode, FooterModel, Mode, State};
+use crate::style::{self, FOOTER_FILL_OPACITY, FOREGROUND};
 
 pub use crate::composer::Area;
 pub type Sides = (bool, bool, bool, bool);
@@ -23,6 +23,7 @@ pub(crate) const GLOW_MARGIN: i64 = 1;
 pub struct Label<'a> {
     pub text: Cow<'a, str>,
     pub path: Vec<usize>,
+    pub colour: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,53 +105,136 @@ pub(crate) fn label_centre(width: i64, label: &str) -> i64 {
     1 + leftover - leftover.div_euclid(2)
 }
 
-pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
-    let text = view.text.as_str();
-    let text_width = text.chars().count() as i64;
-    let inset_box_width = interior(text) + SIDE_PADDING * 2;
-    let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
-    let corner_box = PlacementNode::Box {
-        colour: None,
-        fill: Some(FOREGROUND),
-        opacity: Some(FOOTER_FILL_OPACITY),
-        rounded: false,
-        sides: if view.bordered { ALL_SIDES } else { NO_SIDES },
-        border: 1,
+const NO_NAME: &str = "[no name — press n to name it]";
+const PLACEHOLDER: &str = "type a name";
+const FOOTER_SUFFIX: &str = " • dre";
+const MOVE: &str = "MOVE";
+const WRITE: &str = "WRITE";
+const NAME: &str = "NAME";
+
+struct Column {
+    node: PlacementNode<'static>,
+    width: i64,
+    padding: i64,
+}
+
+fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64) {
+    let mut placements = Vec::with_capacity(columns.len());
+    let mut x = 0;
+    for column in columns {
+        x += column.padding;
+        placements.push(Placement {
+            node: column.node,
+            x,
+            y,
+            width: column.width,
+            height: 1,
+        });
+        x += column.width + column.padding;
+    }
+    (placements, x)
+}
+
+fn footer_mode_word(mode: FooterMode) -> &'static str {
+    match mode {
+        FooterMode::Move => MOVE,
+        FooterMode::Write => WRITE,
+        FooterMode::Naming => NAME,
+    }
+}
+
+fn footer_filename(model: &FooterModel) -> &str {
+    let placeholder = match model.mode {
+        FooterMode::Naming => PLACEHOLDER,
+        FooterMode::Move | FooterMode::Write => NO_NAME,
     };
-    let led = PlacementNode::Led {
-        colour: view.led_colour,
-        lit: view.lit,
-    };
-    let label = PlacementNode::Label(Label {
-        text: Cow::Owned(text.to_string()),
-        path: vec![],
-    });
-    let led_x = label_centre(inset_box_width, text);
-    let label_x = led_x + LED_WIDTH + LED_LABEL_GAP;
-    let placements = vec![
-        Placement {
-            node: corner_box,
-            x: 0,
-            y: 0,
-            width: box_width,
-            height: BOX_HEIGHT,
-        },
-        Placement {
-            node: led,
-            x: led_x,
-            y: BOX_HEIGHT / 2,
+    model.filename.as_deref().unwrap_or(placeholder)
+}
+
+pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
+    let mode_word = footer_mode_word(model.mode);
+    let columns = vec![
+        Column {
+            node: PlacementNode::Led {
+                colour: match model.mode {
+                    FooterMode::Move => style::LIME,
+                    FooterMode::Write => style::VIOLET,
+                    FooterMode::Naming => style::AMBER,
+                },
+                lit: !matches!(model.mode, FooterMode::Move),
+            },
             width: LED_WIDTH,
-            height: 1,
+            padding: SIDE_PADDING,
         },
-        Placement {
-            node: label,
-            x: label_x,
-            y: BOX_HEIGHT / 2,
-            width: text_width,
-            height: 1,
+        Column {
+            node: PlacementNode::Label(Label {
+                text: Cow::Borrowed(mode_word),
+                path: vec![],
+                colour: None,
+            }),
+            width: interior(mode_word),
+            padding: LED_LABEL_GAP - SIDE_PADDING,
         },
     ];
-    with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
+    let (mut placements, word_end) = stack_columns(columns, BOX_HEIGHT / 2);
+    let filename = footer_filename(model);
+    let filename_x = word_end + SIDE_PADDING;
+    let filename_width = interior(filename);
+    placements.push(Placement {
+        node: PlacementNode::Label(Label {
+            text: Cow::Owned(filename.to_string()),
+            path: vec![],
+            colour: Some(style::DIM),
+        }),
+        x: filename_x,
+        y: BOX_HEIGHT / 2,
+        width: filename_width,
+        height: 1,
+    });
+    let suffix_x = filename_x + filename_width;
+    let suffix_width = interior(FOOTER_SUFFIX);
+    placements.push(Placement {
+        node: PlacementNode::Label(Label {
+            text: Cow::Borrowed(FOOTER_SUFFIX),
+            path: vec![],
+            colour: None,
+        }),
+        x: suffix_x,
+        y: BOX_HEIGHT / 2,
+        width: suffix_width,
+        height: 1,
+    });
+    placements.insert(
+        0,
+        Placement {
+            node: PlacementNode::Box {
+                colour: None,
+                fill: Some(FOREGROUND),
+                opacity: Some(FOOTER_FILL_OPACITY),
+                rounded: false,
+                sides: if model.mode == FooterMode::Naming {
+                    ALL_SIDES
+                } else {
+                    NO_SIDES
+                },
+                border: 1,
+            },
+            x: 0,
+            y: 0,
+            width: suffix_x + suffix_width + SIDE_PADDING,
+            height: BOX_HEIGHT,
+        },
+    );
+    if let Some(offset) = model.cursor {
+        placements.push(Placement {
+            node: PlacementNode::Cursor(Cursor),
+            x: filename_x + offset as i64,
+            y: BOX_HEIGHT / 2,
+            width: 1,
+            height: 1,
+        });
+    }
+    placements
 }
 
 pub(crate) fn with_glow<'a>(
@@ -198,6 +282,7 @@ pub(crate) fn with_glow<'a>(
     result
 }
 
+#[allow(dead_code)]
 pub(crate) fn with_cursor<'a>(
     placements: Vec<Placement<'a>>,
     path: Option<Vec<usize>>,
