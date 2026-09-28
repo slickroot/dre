@@ -1,10 +1,11 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, CELL_HEIGHT, CELL_WIDTH,
-    LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA,
+    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, LED_DIM_ALPHA,
+    LED_DOT_RATIO, LED_HALO_ALPHA,
 };
 use crate::composer::Area;
+use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 use crate::view::Scene;
 use crate::view::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
 
@@ -181,7 +182,7 @@ fn led_glow_circle(cx: i64, cy: i64, height: f64, (r, g, b): (u8, u8, u8)) -> St
 }
 
 fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String {
-    let (r, g, b) = crate::palette::palette(crate::palette::BACKGROUND).unwrap();
+    let (r, g, b) = crate::style::palette(crate::style::BACKGROUND).unwrap();
     format!(
         "<rect x=\"{min_x}\" y=\"{min_y}\" width=\"{span_x}\" height=\"{span_y}\" fill=\"rgb({r},{g},{b})\"/>"
     )
@@ -325,7 +326,7 @@ fn rect(
         write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
     }
     if let Some(colour) = fill {
-        let (fr, fg, fb) = crate::palette::palette(colour).unwrap();
+        let (fr, fg, fb) = crate::style::palette(colour).unwrap();
         let fill_opacity = opacity.unwrap_or(0.0);
         write!(
             rect,
@@ -357,17 +358,16 @@ mod tests {
     use super::super::arrowhead_depth;
     use super::super::arrowhead_slope;
     use super::super::colour;
-    use super::super::BOX_FILL_OPACITY;
-    use super::super::CELL_HEIGHT;
-    use super::super::CELL_WIDTH;
-    use super::super::FOOTER_FILL_OPACITY;
     use super::super::ROUNDED_RADIUS;
     use super::*;
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::tree::diagram;
-    use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
+    use crate::style::{
+        palette, BACKGROUND, BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY,
+        FOREGROUND,
+    };
     use crate::view::{self, centre};
     use crate::view::{
         label_centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH,
@@ -1605,7 +1605,7 @@ mod tests {
         led_circle(
             &Placement {
                 node: PlacementNode::Led {
-                    colour: crate::palette::LIME,
+                    colour: crate::style::LIME,
                     lit: false,
                 },
                 x: footer_led_x(area),
@@ -1613,7 +1613,7 @@ mod tests {
                 width: 2,
                 height: 1,
             },
-            crate::palette::LIME,
+            crate::style::LIME,
             false,
         )
     }
@@ -1623,7 +1623,7 @@ mod tests {
         led_circle(
             &Placement {
                 node: PlacementNode::Led {
-                    colour: crate::palette::LIME,
+                    colour: crate::style::LIME,
                     lit: true,
                 },
                 x: footer_led_x(area),
@@ -1631,7 +1631,7 @@ mod tests {
                 width: 2,
                 height: 1,
             },
-            crate::palette::LIME,
+            crate::style::LIME,
             true,
         )
     }

@@ -13,9 +13,9 @@ mod filesystem;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
-mod palette;
 mod render;
 mod state;
+mod style;
 #[cfg(test)]
 mod test_support;
 #[cfg(not(target_arch = "wasm32"))]

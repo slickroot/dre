@@ -9,12 +9,12 @@ mod name_prompt;
 mod text_edit;
 
 use crate::diagram::{Document, Node};
-use crate::palette;
 use crate::state::action::Action;
 pub(crate) use crate::state::effect::Effect;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
+use crate::style;
 use types::Tree;
 
 const NO_NAME: &str = "[no name — press n to name it]";
@@ -104,21 +104,21 @@ impl State {
     pub(crate) fn footer(&self) -> FooterView {
         match &self.mode {
             Mode::Insert { .. } => FooterView {
-                led_colour: palette::VIOLET,
+                led_colour: style::VIOLET,
                 lit: true,
                 text: format!("{WRITE} {}", footer_text(self.save_to.as_deref())),
                 cursor: None,
                 bordered: false,
             },
             Mode::NamePrompt { name, .. } => FooterView {
-                led_colour: palette::AMBER,
+                led_colour: style::AMBER,
                 lit: true,
                 text: format!("{NAME} {}", name_prompt_text(name)),
                 cursor: Some(NAME.chars().count() + 1 + name.chars().count()),
                 bordered: true,
             },
             Mode::Command => FooterView {
-                led_colour: palette::LIME,
+                led_colour: style::LIME,
                 lit: false,
                 text: format!("{MOVE} {}", footer_text(self.save_to.as_deref())),
                 cursor: None,
@@ -311,7 +311,7 @@ mod tests {
     fn command_mode_footer_shows_a_dim_lime_led_and_no_cursor() {
         let state = new_state(vec![], Mode::Command, None);
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::LIME);
+        assert_eq!(footer.led_colour, style::LIME);
         assert!(!footer.lit);
         assert_eq!(footer.cursor, None);
         assert!(footer.text.starts_with(MOVE));
@@ -321,7 +321,7 @@ mod tests {
     fn insert_mode_footer_shows_a_lit_violet_led_and_no_cursor() {
         let state = new_state(vec![node("a")], Mode::Insert { cursor: 0 }, Some(vec![0]));
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::VIOLET);
+        assert_eq!(footer.led_colour, style::VIOLET);
         assert!(footer.lit);
         assert_eq!(footer.cursor, None);
         assert!(footer.text.starts_with(WRITE));
@@ -345,7 +345,7 @@ mod tests {
             None,
         );
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::AMBER);
+        assert_eq!(footer.led_colour, style::AMBER);
         assert!(footer.lit);
         assert!(footer.text.starts_with(NAME));
     }

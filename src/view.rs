@@ -2,9 +2,8 @@ use std::borrow::Cow;
 
 use crate::composer;
 use crate::layout::tree;
-use crate::palette::FOREGROUND;
-use crate::render::FOOTER_FILL_OPACITY;
 use crate::state::{FooterView, Mode, State};
+use crate::style::{FOOTER_FILL_OPACITY, FOREGROUND};
 
 pub use crate::composer::Area;
 pub type Sides = (bool, bool, bool, bool);

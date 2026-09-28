@@ -46,8 +46,8 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     let window = view::Area {
         col: 0,
         row: 0,
-        cols: crate::render::FULL_HD_WIDTH / crate::render::CELL_WIDTH,
-        rows: crate::render::FULL_HD_HEIGHT / crate::render::CELL_HEIGHT,
+        cols: crate::render::FULL_HD_WIDTH / crate::style::CELL_WIDTH,
+        rows: crate::render::FULL_HD_HEIGHT / crate::style::CELL_HEIGHT,
     };
     SvgRenderer::default().render(
         &view::body(&state, window),
