@@ -4,7 +4,7 @@ use crate::diagram::{children, Node};
 use crate::style::BOX_FILL_OPACITY;
 use crate::view::{
     self, Arrow, Caret, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
-    GLOW_MARGIN, SIDE_PADDING,
+    GLOW_MARGIN,
 };
 use types::Tree;
 
@@ -18,8 +18,11 @@ pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
 pub(crate) const LEAF_STRIDE: i64 = 2;
 
+// Diagram-node padding, independent of the footer's own per-column padding.
+const NODE_PADDING: i64 = 2;
+
 fn width(node: &Node) -> i64 {
-    crate::view::interior(node.label()) + SIDE_PADDING * 2
+    crate::view::interior(node.label()) + NODE_PADDING * 2
 }
 
 #[allow(dead_code)]
@@ -254,7 +257,7 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
     use crate::view::{
         interior, label_centre as centre, Arrow, Caret, Label, PlacementNode, ALL_SIDES, BORDER,
-        BOX_HEIGHT, GLOW_MARGIN, SIDE_PADDING,
+        BOX_HEIGHT, GLOW_MARGIN,
     };
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
@@ -325,12 +328,12 @@ mod tests {
 
     #[test]
     fn width_is_interior_plus_side_padding() {
-        assert_eq!(width(&labelled("hi")), 2 + SIDE_PADDING * 2);
+        assert_eq!(width(&labelled("hi")), 2 + NODE_PADDING * 2);
     }
 
     #[test]
     fn width_of_empty_label_box_is_one_plus_side_padding() {
-        assert_eq!(width(&labelled("")), 1 + SIDE_PADDING * 2);
+        assert_eq!(width(&labelled("")), 1 + NODE_PADDING * 2);
     }
 
     #[test]
@@ -351,12 +354,12 @@ mod tests {
 
     #[test]
     fn centre_of_a_boxs_minimum_width_pads_both_sides_evenly() {
-        let width = interior("hi") + SIDE_PADDING * 2;
+        let width = interior("hi") + NODE_PADDING * 2;
         let start = centre(width, "hi");
         let left_padding = start - 1;
         let right_padding = width - 1 - interior("hi") - start;
         assert_eq!(left_padding, right_padding);
-        assert_eq!(left_padding, SIDE_PADDING - 1);
+        assert_eq!(left_padding, NODE_PADDING - 1);
     }
 
     #[test]
@@ -757,7 +760,7 @@ mod tests {
                 .find(|p| matches!(p.node, PlacementNode::Caret(_)))
                 .expect("insert mode emits a caret placement");
             assert_eq!(caret.x, label.x + index as i64);
-            assert!(caret.x < edited_box.x + edited_box.width - SIDE_PADDING + 1);
+            assert!(caret.x < edited_box.x + edited_box.width - NODE_PADDING + 1);
         }
     }
 

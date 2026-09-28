@@ -369,11 +369,8 @@ mod tests {
         FOREGROUND,
     };
     use crate::view::{self, centre};
-    use crate::view::{
-        label_centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH,
-        SIDE_PADDING,
-    };
     use crate::view::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
+    use crate::view::{BOX_HEIGHT, FOOTER_ROWS, LED_WIDTH};
     use crate::State;
 
     fn box_placement(
@@ -1600,8 +1597,19 @@ mod tests {
         FOOTER_TEXT.chars().count() as i64
     }
 
+    const COLUMN_PADDING: i64 = 1;
+    const COLUMN_GAP: i64 = COLUMN_PADDING * 2;
+
     fn footer_box_area(foot: Area) -> Area {
-        let width = footer_width() + SIDE_PADDING * 2 + LED_WIDTH + LED_LABEL_GAP;
+        // `footer_width` already counts the one space between the mode word and
+        // the filename, so only the padding beyond that single character is added.
+        let width = footer_width() - 1
+            + LED_WIDTH
+            + COLUMN_PADDING
+            + COLUMN_GAP
+            + COLUMN_GAP
+            + COLUMN_GAP
+            + COLUMN_PADDING;
         Area {
             col: foot.col + foot.cols - width,
             row: foot.row + foot.rows - FOOTER_ROWS,
@@ -1611,20 +1619,19 @@ mod tests {
     }
 
     fn footer_led_x(area: Area) -> i64 {
-        let inset_width = area.cols - LED_WIDTH - LED_LABEL_GAP;
-        area.col + centre_label(inset_width, FOOTER_TEXT)
+        area.col + COLUMN_PADDING
     }
 
     fn footer_mode_word_x(area: Area) -> i64 {
-        footer_led_x(area) + LED_WIDTH + LED_LABEL_GAP
+        footer_led_x(area) + LED_WIDTH + COLUMN_GAP
     }
 
     fn footer_filename_x(area: Area) -> i64 {
-        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + 1
+        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + COLUMN_GAP
     }
 
     fn footer_suffix_x(area: Area) -> i64 {
-        footer_filename_x(area) + NAME.chars().count() as i64
+        footer_filename_x(area) + NAME.chars().count() as i64 + COLUMN_GAP
     }
 
     fn padded_footer_label(foot: Area) -> String {
