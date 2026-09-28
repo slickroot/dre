@@ -5,8 +5,8 @@ use super::{
     LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA,
 };
 use crate::composer::Area;
-use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
 use crate::view::Scene;
+use crate::view::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -187,7 +187,7 @@ fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String
     )
 }
 
-fn caret_rect(placement: &crate::layout::Placement) -> String {
+fn caret_rect(placement: &crate::view::Placement) -> String {
     let (r, g, b) = colour(None);
     format!(
         "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"rgb({r},{g},{b})\"/>",
@@ -227,7 +227,7 @@ fn marker_defs() -> String {
     )
 }
 
-fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arrow) -> String {
+fn arrow_paths(placement: &crate::view::Placement, arrow: &crate::view::Arrow) -> String {
     let left = placement.x * CELL_WIDTH;
     let right = placement.x * CELL_WIDTH + placement.width * CELL_WIDTH - 1;
     let trunk_x = placement.x * CELL_WIDTH + (placement.width * CELL_WIDTH) / 2;
@@ -274,7 +274,7 @@ fn glow_filter_defs() -> String {
     )
 }
 
-fn glow_rect(placement: &crate::layout::Placement, edge: Option<u8>, rounded: bool) -> String {
+fn glow_rect(placement: &crate::view::Placement, edge: Option<u8>, rounded: bool) -> String {
     use super::ROUNDED_RADIUS;
     use std::fmt::Write as _;
 
@@ -294,7 +294,7 @@ fn glow_rect(placement: &crate::layout::Placement, edge: Option<u8>, rounded: bo
 }
 
 fn rect(
-    placement: &crate::layout::Placement,
+    placement: &crate::view::Placement,
     edge: Option<u8>,
     fill: Option<u8>,
     opacity: Option<f64>,
@@ -302,7 +302,7 @@ fn rect(
     sides: Sides,
 ) -> String {
     use super::ROUNDED_RADIUS;
-    use crate::layout::BORDER;
+    use crate::view::BORDER;
     use std::fmt::Write as _;
 
     let mut rect = format!(
@@ -339,7 +339,7 @@ fn rect(
     rect
 }
 
-fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label) -> String {
+fn label_text(placement: &crate::view::Placement, label: &crate::view::Label) -> String {
     let chars = label.text.chars().count() as i64;
     let (r, g, b) = colour(None);
     format!(
@@ -365,15 +365,16 @@ mod tests {
     use super::*;
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::diagram;
-    use crate::layout::{
-        centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
-    };
-    use crate::layout::{with_caret, with_glow};
-    use crate::layout::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
+    use crate::layout::tree::diagram;
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
     use crate::view::{self, centre};
+    use crate::view::{
+        label_centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH,
+        SIDE_PADDING,
+    };
+    use crate::view::{with_caret, with_glow};
+    use crate::view::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
     use crate::State;
 
     fn box_placement(
