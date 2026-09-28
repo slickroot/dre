@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape, GlowShape};
+use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
 use super::{colour, editor, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -26,6 +26,7 @@ const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
 const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
+const INK_Z: i32 = CONTENT_Z;
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -106,6 +107,12 @@ enum SpriteKey {
         colour: Option<u8>,
         rounded: bool,
     },
+    Led {
+        width: i64,
+        height: i64,
+        colour: u8,
+        lit: bool,
+    },
 }
 
 fn sprite_key(placement: &Placement) -> SpriteKey {
@@ -135,7 +142,13 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             stops: arrow.stops.clone(),
             shaft: arrow.shaft,
         },
-        _ => unreachable!("sprite_key is only called for Box and Arrow placements"),
+        PlacementNode::Led { colour, lit } => SpriteKey::Led {
+            width: placement.width,
+            height: placement.height,
+            colour: *colour,
+            lit: *lit,
+        },
+        _ => unreachable!("sprite_key is only called for sprite placements"),
     }
 }
 
@@ -294,6 +307,8 @@ impl TerminalRenderer {
                 PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
                 PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
                 PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
+                PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
+                PlacementNode::Led { .. } => self.draw_sprite(frame, placement, area, INK_Z),
             }
         }
     }
@@ -320,6 +335,19 @@ impl TerminalRenderer {
             self.remember(key.clone(), drawn);
         }
         frame.place(&self.cache[&key], placement, area, GLOW_Z);
+    }
+
+    /// Draws a cached LED sprite at its layer.
+    fn draw_sprite(&mut self, frame: &mut Frame, placement: &Placement, area: Area, z: i32) {
+        if !frame.shows(placement, area) {
+            return;
+        }
+        let key = sprite_key(placement);
+        if !self.cache.contains_key(&key) {
+            let drawn = self.outline_led(placement);
+            self.remember(key.clone(), drawn);
+        }
+        frame.place(&self.cache[&key], placement, area, z);
     }
 
     fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -363,6 +391,10 @@ impl TerminalRenderer {
             },
         );
         frame.place(&canvas, placement, area, CONTENT_Z);
+    }
+
+    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
+        self.draw_caret(frame, placement, area);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -426,6 +458,21 @@ impl TerminalRenderer {
             margin_y: self.cells_to_pixels_y(GLOW_MARGIN),
             radius: if rounded { ROUNDED_RADIUS } else { 0 },
             colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
+        };
+        Canvas::fill(width, height, &shape)
+    }
+
+    fn outline_led(&self, placement: &Placement) -> Canvas {
+        let PlacementNode::Led { colour: tint, lit } = placement.node else {
+            unreachable!("outline_led is only called for Led placements");
+        };
+        let width = self.cells_to_pixels_x(placement.width);
+        let height = self.cells_to_pixels_y(placement.height);
+        let shape = LedShape {
+            width,
+            height,
+            colour: colour(Some(tint)),
+            lit,
         };
         Canvas::fill(width, height, &shape)
     }
@@ -506,12 +553,11 @@ mod tests {
     }
 
     #[test]
-    fn fill_colour_of_the_footer_opacity_is_dimmer_than_a_regular_box_fill() {
+    fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
         let box_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(BOX_FILL_OPACITY));
         let footer_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         assert!(box_fill.0 > 0);
-        assert!(footer_fill.0 > 0);
-        assert!(footer_fill.0 < box_fill.0);
+        assert_eq!(footer_fill, box_fill);
     }
 
     fn edge_rgba(index: Option<u8>) -> (u8, u8, u8, u8) {
@@ -691,10 +737,7 @@ mod tests {
         let edge = edge_rgba(Some(1));
         let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
-        assert_eq!(
-            pixel_at(&pixels, CORNER_SIZE, 20, 4),
-            (55, 108, 108, OPAQUE)
-        );
+        assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (33, 91, 76, OPAQUE));
     }
 
     #[test]

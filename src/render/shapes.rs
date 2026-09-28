@@ -193,6 +193,50 @@ impl Shape for ArrowShape {
     }
 }
 
+/// A round status light, centred in its sprite. Lit, it is a solid dot with a
+/// soft halo; unlit, it is the same dot, dimmed, with no halo.
+pub(super) struct LedShape {
+    pub(super) width: i64,
+    pub(super) height: i64,
+    pub(super) colour: (u8, u8, u8),
+    pub(super) lit: bool,
+}
+
+pub(super) const LED_DOT_RATIO: f64 = 0.28;
+pub(super) const LED_HALO_ALPHA: f64 = 0.45;
+pub(super) const LED_DIM_ALPHA: f64 = 0.3;
+
+impl LedShape {
+    fn short_side(&self) -> f64 {
+        self.width.min(self.height) as f64
+    }
+}
+
+impl Shape for LedShape {
+    fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
+        let dx = x as f64 + 0.5 - self.width as f64 / 2.0;
+        let dy = y as f64 + 0.5 - self.height as f64 / 2.0;
+        let dot_radius = self.short_side() * LED_DOT_RATIO;
+        let reach = self.short_side() / 2.0 - dot_radius;
+        let distance = dx.hypot(dy) - dot_radius;
+        let dot = (0.5 - distance).clamp(0.0, 1.0);
+        let (dot_alpha, halo) = if self.lit {
+            let halo = if distance > 0.0 && reach > 0.0 {
+                (1.0 - distance / reach).max(0.0).powi(2) * LED_HALO_ALPHA
+            } else {
+                0.0
+            };
+            (1.0, halo)
+        } else {
+            (LED_DIM_ALPHA, 0.0)
+        };
+        let alpha = dot * dot_alpha + (1.0 - dot) * halo;
+        let alpha = python_round(alpha * 255.0) as u8;
+        let (r, g, b) = self.colour;
+        (alpha > 0).then_some([r, g, b, alpha])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +323,41 @@ mod tests {
                 assert_eq!(rounded.colour_at(x, y), square.colour_at(x, y));
             }
         }
+    }
+
+    fn led(lit: bool) -> LedShape {
+        LedShape {
+            width: 20,
+            height: 40,
+            colour: (1, 2, 3),
+            lit,
+        }
+    }
+
+    #[test]
+    fn a_lit_led_is_a_solid_dot_in_its_colour() {
+        assert_eq!(led(true).colour_at(10, 20), Some([1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn an_unlit_led_is_the_same_dot_dimmed() {
+        let alpha = led(false).colour_at(10, 20).unwrap()[3];
+        assert_eq!(alpha, python_round(LED_DIM_ALPHA * 255.0) as u8);
+    }
+
+    #[test]
+    fn only_a_lit_led_has_a_halo() {
+        let just_outside = (10, 20 + 7);
+        assert!(led(true)
+            .colour_at(just_outside.0, just_outside.1)
+            .is_some());
+        assert_eq!(led(false).colour_at(just_outside.0, just_outside.1), None);
+    }
+
+    #[test]
+    fn an_led_stays_round_in_a_tall_cell() {
+        assert_eq!(led(true).colour_at(10, 2), None);
+        assert_eq!(led(true).colour_at(0, 0), None);
     }
 
     #[test]

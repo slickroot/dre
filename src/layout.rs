@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use crate::diagram::{children, Node};
 use crate::palette::FOREGROUND;
 use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
+use crate::state::FooterView;
 use types::Tree;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
@@ -230,6 +231,9 @@ pub(crate) struct Arrow {
 pub(crate) struct Caret;
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Cursor;
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PlacementNode<'a> {
     Box {
         colour: Option<u8>,
@@ -247,6 +251,12 @@ pub(crate) enum PlacementNode<'a> {
         colour: Option<u8>,
         rounded: bool,
     },
+    Cursor(Cursor),
+    /// A round status light, e.g. the footer's mode LED.
+    Led {
+        colour: u8,
+        lit: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -260,9 +270,13 @@ pub(crate) struct Placement<'a> {
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
-pub(crate) fn footer(text: &str) -> Vec<Placement<'static>> {
+pub(crate) const LED_GAP: i64 = 2;
+
+pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
+    let text = view.text.as_str();
     let text_width = text.chars().count() as i64;
-    let box_width = interior(text) + SIDE_PADDING * 2;
+    let inset_box_width = interior(text) + SIDE_PADDING * 2;
+    let box_width = inset_box_width + LED_GAP;
     let corner_box = PlacementNode::Box {
         colour: None,
         fill: Some(FOREGROUND),
@@ -272,11 +286,17 @@ pub(crate) fn footer(text: &str) -> Vec<Placement<'static>> {
         border: 1,
         selected: false,
     };
+    let led = PlacementNode::Led {
+        colour: view.led_colour,
+        lit: view.lit,
+    };
     let label = PlacementNode::Label(Label {
         text: Cow::Owned(text.to_string()),
         path: vec![],
     });
-    vec![
+    let led_x = centre(inset_box_width, text);
+    let label_x = led_x + LED_GAP;
+    let placements = vec![
         Placement {
             node: corner_box,
             x: 0,
@@ -285,13 +305,21 @@ pub(crate) fn footer(text: &str) -> Vec<Placement<'static>> {
             height: BOX_HEIGHT,
         },
         Placement {
+            node: led,
+            x: led_x,
+            y: BOX_HEIGHT / 2,
+            width: 2,
+            height: 1,
+        },
+        Placement {
             node: label,
-            x: centre(box_width, text),
+            x: label_x,
             y: BOX_HEIGHT / 2,
             width: text_width,
             height: 1,
         },
-    ]
+    ];
+    with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
 }
 
 pub(crate) fn diagram<'a>(
@@ -374,6 +402,32 @@ pub(crate) fn with_glow<'a>(
     result
 }
 
+pub(crate) fn with_cursor<'a>(
+    placements: Vec<Placement<'a>>,
+    path: Option<Vec<usize>>,
+    cursor: Option<usize>,
+) -> Vec<Placement<'a>> {
+    let (Some(path), Some(index)) = (path, cursor) else {
+        return placements;
+    };
+    for placement in &placements {
+        if let PlacementNode::Label(label) = &placement.node {
+            if label.path == path {
+                let mut result = placements.clone();
+                result.push(Placement {
+                    node: PlacementNode::Cursor(Cursor),
+                    x: placement.x + index as i64,
+                    y: placement.y,
+                    width: 1,
+                    height: 1,
+                });
+                return result;
+            }
+        }
+    }
+    placements
+}
+
 pub(crate) fn with_caret<'a>(
     placements: Vec<Placement<'a>>,
     editing: Option<(Vec<usize>, usize)>,
@@ -403,13 +457,26 @@ pub(crate) fn with_caret<'a>(
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children};
+    use crate::palette;
+
+    fn footer_view(text: &str, led_colour: u8, lit: bool, cursor: Option<usize>) -> FooterView {
+        FooterView {
+            led_colour,
+            lit,
+            text: text.to_string(),
+            cursor,
+        }
+    }
 
     #[test]
     fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
-        let text = "plans \u{2022} dre";
+        let text = "MOVE plans \u{2022} dre";
         let text_width = text.chars().count() as i64;
-        let placements = footer(text);
-        assert_eq!(placements.len(), 2);
+        let view = footer_view(text, palette::LIME, false, None);
+        let placements = footer(&view);
+        assert_eq!(placements.len(), 3);
+        let inset_box_width = interior(text) + SIDE_PADDING * 2;
+        let box_width = inset_box_width + LED_GAP;
         assert_eq!(
             placements[0].node,
             PlacementNode::Box {
@@ -423,14 +490,6 @@ mod tests {
             }
         );
         assert_eq!(
-            placements[1].node,
-            PlacementNode::Label(Label {
-                text: text.into(),
-                path: vec![]
-            })
-        );
-        let box_width = interior(text) + SIDE_PADDING * 2;
-        assert_eq!(
             (
                 placements[0].x,
                 placements[0].y,
@@ -439,6 +498,15 @@ mod tests {
             ),
             (0, 0, box_width, BOX_HEIGHT)
         );
+
+        let led_x = centre(inset_box_width, text);
+        assert_eq!(
+            placements[1].node,
+            PlacementNode::Led {
+                colour: palette::LIME,
+                lit: false,
+            }
+        );
         assert_eq!(
             (
                 placements[1].x,
@@ -446,8 +514,64 @@ mod tests {
                 placements[1].width,
                 placements[1].height,
             ),
-            (centre(box_width, text), BOX_HEIGHT / 2, text_width, 1)
+            (led_x, BOX_HEIGHT / 2, 2, 1)
         );
+
+        assert_eq!(
+            placements[2].node,
+            PlacementNode::Label(Label {
+                text: text.into(),
+                path: vec![]
+            })
+        );
+        assert_eq!(
+            (
+                placements[2].x,
+                placements[2].y,
+                placements[2].width,
+                placements[2].height,
+            ),
+            (led_x + LED_GAP, BOX_HEIGHT / 2, text_width, 1)
+        );
+    }
+
+    #[test]
+    fn a_lit_led_is_marked_lit() {
+        let view = footer_view("WRITE plans \u{2022} dre", palette::VIOLET, true, None);
+        let placements = footer(&view);
+        match &placements[1].node {
+            PlacementNode::Led { colour, lit } => {
+                assert!(*lit);
+                assert_eq!(*colour, palette::VIOLET);
+            }
+            _ => panic!("expected the second placement to be the led box"),
+        }
+    }
+
+    #[test]
+    fn footer_with_no_cursor_has_no_cursor_placement() {
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let placements = footer(&view);
+        assert!(placements
+            .iter()
+            .all(|p| !matches!(p.node, PlacementNode::Cursor(_))));
+    }
+
+    #[test]
+    fn footer_with_a_cursor_places_it_at_the_edit_index_on_the_label() {
+        let text = "MOVE type a name \u{2022} dre";
+        let view = footer_view(text, palette::LIME, false, Some(3));
+        let placements = footer(&view);
+        let label = placements
+            .iter()
+            .find(|p| matches!(p.node, PlacementNode::Label(_)))
+            .expect("the footer has a label placement");
+        let cursor = placements
+            .iter()
+            .find(|p| matches!(p.node, PlacementNode::Cursor(_)))
+            .expect("a cursor is present when view.cursor is Some");
+        assert_eq!(cursor.x, label.x + 3);
+        assert_eq!(cursor.y, label.y);
     }
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {

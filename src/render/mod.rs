@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::composer::{self, Area};
-use crate::layout::{self, with_caret, with_glow, Caret, Placement, PlacementNode, FOOTER_ROWS};
+use crate::layout::{self, with_caret, with_glow, Placement, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
 use crate::state::{Mode, State};
 
@@ -24,16 +24,7 @@ pub trait Renderer {
 
 pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
     let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
-    let mut footer = align_right(layout::footer(&state.footer()), foot);
-    if let Mode::NamePrompt { name, .. } = state.mode() {
-        footer.push(Placement {
-            node: PlacementNode::Caret(Caret),
-            x: footer[1].x + name.chars().count() as i64,
-            y: footer[1].y,
-            width: 1,
-            height: 1,
-        });
-    }
+    let footer = align_right(layout::footer(&state.footer()), foot);
     vec![(body, self::body(state, body)), (foot, footer)]
 }
 
@@ -115,7 +106,7 @@ const ROUNDED_RADIUS: i64 = 20;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
-pub(crate) const BOX_FILL_OPACITY: f64 = 0.3;
+pub(crate) const BOX_FILL_OPACITY: f64 = 0.12;
 pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
@@ -365,18 +356,18 @@ mod tests {
     #[test]
     fn editor_ends_with_the_name_and_dre_in_the_bottom_right_corner_when_there_is_a_path() {
         let state = state_saved_to("docs/plans.dre");
-        assert_footer_is_bottom_right(&state, "plans \u{2022} dre");
+        assert_footer_is_bottom_right(&state, "MOVE plans \u{2022} dre");
     }
 
     #[test]
     fn editor_ends_with_the_hint_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
         let state = state(None);
-        assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
+        assert_footer_is_bottom_right(&state, "MOVE [no name — press n to name it] \u{2022} dre");
     }
 
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
         let text_width = text.chars().count() as i64;
-        let box_width = text_width + SIDE_PADDING * 2;
+        let box_width = text_width + SIDE_PADDING * 2 + layout::LED_GAP;
         (
             foot.col + foot.cols - box_width,
             foot.row + foot.rows - FOOTER_ROWS,
@@ -385,43 +376,53 @@ mod tests {
         )
     }
 
+    fn label_x(box_x: i64, box_width: i64, text: &str) -> i64 {
+        let inset_box_width = box_width - layout::LED_GAP;
+        box_x + layout::centre(inset_box_width, text) + layout::LED_GAP
+    }
+
+    fn led_x(box_x: i64, box_width: i64, text: &str) -> i64 {
+        let inset_box_width = box_width - layout::LED_GAP;
+        box_x + layout::centre(inset_box_width, text)
+    }
+
     fn prompt_cursor_x(name: &str, text: &str) -> i64 {
         let foot = foot_of(WINDOW);
         let (box_x, _, box_width, _) = box_at_bottom_right(foot, text);
-        box_x + layout::centre(box_width, text) + name.chars().count() as i64
+        label_x(box_x, box_width, text) + name.chars().count() as i64
     }
 
     #[test]
     fn the_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "n");
-        let text = "type a name \u{2022} dre";
+        let text = "MOVE type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
     }
 
     #[test]
     fn the_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "n"), "a"), "b");
-        let text = "ab \u{2022} dre";
+        let text = "MOVE ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
     }
 
     #[test]
     fn cancelling_the_prompt_restores_the_footer() {
         let state = handle_key(handle_key(state(None), "n"), "\x1b");
-        assert_footer_is_bottom_right(&state, "[no name — press n to name it] \u{2022} dre");
+        assert_footer_is_bottom_right(&state, "MOVE [no name — press n to name it] \u{2022} dre");
     }
 
     #[test]
     fn the_quit_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "q");
-        let text = "type a name \u{2022} dre";
+        let text = "MOVE type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
     }
 
     #[test]
     fn the_quit_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "q"), "a"), "b");
-        let text = "ab \u{2022} dre";
+        let text = "MOVE ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
     }
 
@@ -429,19 +430,19 @@ mod tests {
         let foot = foot_of(WINDOW);
         let (box_x, box_y, box_width, _) = box_at_bottom_right(foot, text);
         let footer = &editor(state, WINDOW)[1].1;
-        assert_eq!(footer.len(), 3);
+        assert_eq!(footer.len(), 4);
         assert_eq!(
-            footer[1],
+            footer[2],
             label_at(
                 text,
-                box_x + layout::centre(box_width, text),
+                label_x(box_x, box_width, text),
                 box_y + layout::BOX_HEIGHT / 2
             )
         );
         assert_eq!(
-            footer[2],
+            footer[3],
             Placement {
-                node: PlacementNode::Caret(Caret),
+                node: PlacementNode::Cursor(crate::layout::Cursor),
                 x,
                 y: box_y + layout::BOX_HEIGHT / 2,
                 width: 1,
@@ -455,17 +456,25 @@ mod tests {
         let foot = foot_of(WINDOW);
         let (box_x, box_y, box_width, box_height) = box_at_bottom_right(foot, text);
         let footer = &screen[1].1;
-        assert_eq!(footer.len(), 2);
-        assert_eq!(footer[0].node, layout::footer(text)[0].node);
+        assert_eq!(footer.len(), 3);
         assert_eq!(
             (footer[0].x, footer[0].y, footer[0].width, footer[0].height),
             (box_x, box_y, box_width, box_height)
         );
         assert_eq!(
-            footer[1],
+            (footer[1].x, footer[1].y, footer[1].width, footer[1].height),
+            (
+                led_x(box_x, box_width, text),
+                box_y + layout::BOX_HEIGHT / 2,
+                2,
+                1
+            )
+        );
+        assert_eq!(
+            footer[2],
             label_at(
                 text,
-                box_x + layout::centre(box_width, text),
+                label_x(box_x, box_width, text),
                 box_y + layout::BOX_HEIGHT / 2
             )
         );

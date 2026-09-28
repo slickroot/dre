@@ -9,6 +9,7 @@ mod name_prompt;
 mod text_edit;
 
 use crate::diagram::{Document, Node};
+use crate::palette;
 use crate::state::action::ActionMode;
 pub(crate) use crate::state::effect::Effect;
 #[cfg(not(test))]
@@ -21,6 +22,8 @@ use types::Tree;
 const NO_NAME: &str = "[no name — press n to name it]";
 const PLACEHOLDER: &str = "type a name";
 const FOOTER_SUFFIX: &str = " • dre";
+const MOVE: &str = "MOVE";
+const WRITE: &str = "WRITE";
 
 #[allow(dead_code)]
 struct KeyBinding<C> {
@@ -99,20 +102,49 @@ impl State {
         self.save_to = save_to;
     }
 
-    pub(crate) fn footer(&self) -> String {
+    pub(crate) fn footer(&self) -> FooterView {
         match &self.mode {
-            Mode::NamePrompt { name, .. } if name.is_empty() => {
-                format!("{PLACEHOLDER}{FOOTER_SUFFIX}")
-            }
-            Mode::NamePrompt { name, .. } => format!("{name}{FOOTER_SUFFIX}"),
-            _ => footer_text(self.save_to.as_deref()),
+            Mode::Insert { .. } => FooterView {
+                led_colour: palette::VIOLET,
+                lit: true,
+                text: format!("{WRITE} {}", footer_text(self.save_to.as_deref())),
+                cursor: None,
+            },
+            Mode::NamePrompt { name, .. } => FooterView {
+                led_colour: palette::LIME,
+                lit: false,
+                text: format!("{MOVE} {}", name_prompt_text(name)),
+                cursor: Some(name.chars().count()),
+            },
+            Mode::Command => FooterView {
+                led_colour: palette::LIME,
+                lit: false,
+                text: format!("{MOVE} {}", footer_text(self.save_to.as_deref())),
+                cursor: None,
+            },
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FooterView {
+    pub(crate) led_colour: u8,
+    pub(crate) lit: bool,
+    pub(crate) text: String,
+    pub(crate) cursor: Option<usize>,
 }
 
 fn footer_text(save_to: Option<&str>) -> String {
     let name = save_to.map_or(NO_NAME, file_stem_without_dre);
     format!("{name}{FOOTER_SUFFIX}")
+}
+
+fn name_prompt_text(name: &str) -> String {
+    if name.is_empty() {
+        format!("{PLACEHOLDER}{FOOTER_SUFFIX}")
+    } else {
+        format!("{name}{FOOTER_SUFFIX}")
+    }
 }
 
 fn file_stem_without_dre(path: &str) -> &str {
@@ -214,11 +246,13 @@ mod tests {
     use crate::test_support::handle_key;
 
     fn footer_of(path: &str) -> String {
-        State::open(Document::default(), Some(path.to_string())).footer()
+        State::open(Document::default(), Some(path.to_string()))
+            .footer()
+            .text
     }
 
     fn footer_for(name: &str) -> String {
-        format!("{name}{FOOTER_SUFFIX}")
+        format!("{MOVE} {name}{FOOTER_SUFFIX}")
     }
 
     #[test]
@@ -238,21 +272,21 @@ mod tests {
 
     #[test]
     fn footer_of_a_default_state_has_no_name() {
-        assert_eq!(State::default().footer(), footer_for(NO_NAME));
+        assert_eq!(State::default().footer().text, footer_for(NO_NAME));
     }
 
     #[test]
     fn footer_of_a_default_state_pins_the_hint_text() {
         assert_eq!(
-            State::default().footer(),
-            "[no name — press n to name it] • dre"
+            State::default().footer().text,
+            "MOVE [no name — press n to name it] • dre"
         );
     }
 
     #[test]
     fn footer_of_a_new_file_is_named_after_its_path() {
         assert_eq!(
-            State::new_file("docs/plans.dre".to_string()).footer(),
+            State::new_file("docs/plans.dre".to_string()).footer().text,
             footer_for("plans")
         );
     }
@@ -261,7 +295,7 @@ mod tests {
     fn set_save_to_none_after_a_path_goes_back_to_no_name() {
         let mut state = State::open(Document::default(), Some("plans.dre".to_string()));
         state.set_save_to(None);
-        assert_eq!(state.footer(), footer_for(NO_NAME));
+        assert_eq!(state.footer().text, footer_for(NO_NAME));
         assert_eq!(state.save_to(), None);
     }
 
@@ -269,8 +303,81 @@ mod tests {
     fn set_save_to_a_path_after_none_updates_the_footer() {
         let mut state = State::default();
         state.set_save_to(Some("docs/plans.dre".to_string()));
-        assert_eq!(state.footer(), footer_for("plans"));
+        assert_eq!(state.footer().text, footer_for("plans"));
         assert_eq!(state.save_to(), Some("docs/plans.dre"));
+    }
+
+    #[test]
+    fn command_mode_footer_shows_a_dim_lime_led_and_no_cursor() {
+        let state = new_state(vec![], Mode::Command, None);
+        let footer = state.footer();
+        assert_eq!(footer.led_colour, palette::LIME);
+        assert!(!footer.lit);
+        assert_eq!(footer.cursor, None);
+        assert!(footer.text.starts_with(MOVE));
+    }
+
+    #[test]
+    fn insert_mode_footer_shows_a_lit_violet_led_and_no_cursor() {
+        let state = new_state(vec![node("a")], Mode::Insert { cursor: 0 }, Some(vec![0]));
+        let footer = state.footer();
+        assert_eq!(footer.led_colour, palette::VIOLET);
+        assert!(footer.lit);
+        assert_eq!(footer.cursor, None);
+        assert!(footer.text.starts_with(WRITE));
+    }
+
+    #[test]
+    fn insert_mode_footer_text_is_prefixed_with_write() {
+        let mut state = new_state(vec![], Mode::Insert { cursor: 0 }, None);
+        state.set_save_to(Some("docs/plans.dre".to_string()));
+        assert_eq!(state.footer().text, format!("{WRITE} plans{FOOTER_SUFFIX}"));
+    }
+
+    #[test]
+    fn name_prompt_footer_shows_the_same_dim_lime_led_as_command_mode() {
+        let state = new_state(
+            vec![],
+            Mode::NamePrompt {
+                name: "ab".to_string(),
+                quits: false,
+            },
+            None,
+        );
+        let footer = state.footer();
+        assert_eq!(footer.led_colour, palette::LIME);
+        assert!(!footer.lit);
+        assert!(footer.text.starts_with(MOVE));
+    }
+
+    #[test]
+    fn name_prompt_footer_cursor_sits_at_the_end_of_the_typed_name() {
+        let state = new_state(
+            vec![],
+            Mode::NamePrompt {
+                name: "ab".to_string(),
+                quits: false,
+            },
+            None,
+        );
+        assert_eq!(state.footer().cursor, Some(2));
+    }
+
+    #[test]
+    fn an_empty_name_prompt_cursor_sits_at_index_zero() {
+        let state = new_state(
+            vec![],
+            Mode::NamePrompt {
+                name: String::new(),
+                quits: false,
+            },
+            None,
+        );
+        assert_eq!(state.footer().cursor, Some(0));
+        assert_eq!(
+            state.footer().text,
+            format!("{MOVE} {PLACEHOLDER}{FOOTER_SUFFIX}")
+        );
     }
 
     #[test]

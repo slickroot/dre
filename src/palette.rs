@@ -10,6 +10,8 @@ const PALETTE: [(&str, (u8, u8, u8)); 7] = [
 
 pub(crate) const FOREGROUND: u8 = 5;
 pub(crate) const BACKGROUND: u8 = 6;
+pub(crate) const LIME: u8 = 0;
+pub(crate) const VIOLET: u8 = 2;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
@@ -40,6 +42,16 @@ mod tests {
     #[test]
     fn palette_has_the_background_colour_at_its_index() {
         assert_eq!(palette(BACKGROUND), Some((10, 11, 13)));
+    }
+
+    #[test]
+    fn palette_has_the_lime_colour_at_its_index() {
+        assert_eq!(palette(LIME), Some((198, 255, 0)));
+    }
+
+    #[test]
+    fn palette_has_the_violet_colour_at_its_index() {
+        assert_eq!(palette(VIOLET), Some((179, 136, 255)));
     }
 
     #[test]
