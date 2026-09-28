@@ -13,7 +13,6 @@ mod svg;
 #[cfg(not(target_arch = "wasm32"))]
 mod terminal;
 #[cfg(not(target_arch = "wasm32"))]
-#[cfg_attr(not(test), allow(dead_code))]
 mod tiles;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use font::GlyphCache;

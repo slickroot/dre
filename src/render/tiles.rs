@@ -38,7 +38,7 @@ fn band(extent: i64, cell: i64) -> i64 {
     (covered + cell - 1) / cell
 }
 
-fn cells_with_middle(band: i64) -> i64 {
+pub(super) fn cells_with_middle(band: i64) -> i64 {
     2 * band + 1
 }
 

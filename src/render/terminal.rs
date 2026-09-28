@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
-use super::tiles::CellSize;
+use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -425,6 +425,8 @@ pub(crate) struct TerminalRenderer {
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
+    tile_canvases: std::collections::HashMap<TileKey, Canvas>,
+    tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
     image_ids: ImageIds,
 }
 
@@ -447,6 +449,8 @@ impl TerminalRenderer {
             cache_limit,
             glyph_source,
             glyph_images: std::collections::HashMap::new(),
+            tile_canvases: std::collections::HashMap::new(),
+            tile_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
         }
     }
@@ -548,7 +552,50 @@ impl TerminalRenderer {
         frame.place_transient(&mut self.image_ids, &self.cache[&key], geometry, area, z);
     }
 
+    fn place_tiles(
+        &mut self,
+        frame: &mut Frame,
+        style: TileStyle,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+    ) -> bool {
+        let shape = TileShape {
+            style,
+            cell: self.cell_size(),
+        };
+        let Some(tiles) = shape.tiles(geometry.width, geometry.height) else {
+            return false;
+        };
+        for (col, row, key) in tiles {
+            let cell = Geometry {
+                x: geometry.x + col,
+                y: geometry.y + row,
+                width: 1,
+                height: 1,
+            };
+            if !frame.shows(cell, area) {
+                continue;
+            }
+            if let Some(id) = self.tile_images.get(&key).copied() {
+                frame.place_cached(id, cell, area, z);
+            } else {
+                let id = self.image_ids.allocate();
+                self.tile_images.insert(key, id);
+                let tile = self
+                    .tile_canvases
+                    .entry(key)
+                    .or_insert_with(|| key.canvas());
+                frame.place_fresh(id, tile, cell, area, z);
+            }
+        }
+        true
+    }
+
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
+        if self.place_tiles(frame, TileStyle::Box(style), geometry, area, BOX_Z) {
+            return;
+        }
         let key = box_key(geometry.width, geometry.height, style);
         self.place_cached(frame, key, geometry, area, BOX_Z, |renderer| {
             renderer.box_canvas(geometry.width, geometry.height, style)
@@ -563,6 +610,10 @@ impl TerminalRenderer {
         colour: Option<u8>,
         rounded: bool,
     ) {
+        let style = GlowStyle { colour, rounded };
+        if self.place_tiles(frame, TileStyle::Glow(style), geometry, area, GLOW_Z) {
+            return;
+        }
         let key = glow_key(geometry.width, geometry.height, colour, rounded);
         self.place_cached(frame, key, geometry, area, GLOW_Z, |renderer| {
             renderer.glow_canvas(geometry.width, geometry.height, colour, rounded)
@@ -725,9 +776,10 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
+    use super::super::tiles::{cells_with_middle, TileShape, TileStyle};
     use super::*;
     use crate::state::Mode;
-    use crate::style::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
+    use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
     use crate::view::editor;
     use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::State;
@@ -1242,15 +1294,19 @@ mod tests {
                 label_placement("x", 5, 5, 1, 1),
             ],
         );
-        assert_eq!(images.len(), 3);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
-        let boxed = images.iter().find(|image| image.z == BOX_Z).unwrap();
+        let layers: std::collections::BTreeSet<i32> = images.iter().map(|image| image.z).collect();
+        let glow = composed(&images, GLOW_Z, r.window);
+        let boxed = composed(&images, BOX_Z, r.window);
         let content = images
             .iter()
-            .find(|image| image.col == 5 && image.row == 5)
+            .find(|image| (image.col, image.row) == (5, 5) && ![BOX_Z, GLOW_Z].contains(&image.z))
             .unwrap();
-        assert!(boxed.z < glow.z);
-        assert!(glow.z < content.z);
+        assert_eq!((boxed.col, boxed.row), (4, 4));
+        assert_eq!((glow.col, glow.row), (3, 3));
+        assert_eq!(
+            layers.into_iter().collect::<Vec<_>>(),
+            vec![BOX_Z, GLOW_Z, content.z]
+        );
     }
 
     #[test]
@@ -1258,15 +1314,15 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         assert_eq!(glow.col, 8 - GLOW_MARGIN);
         assert_eq!(glow.row, 8 - GLOW_MARGIN);
         assert_eq!(
-            glow.canvas().width,
+            glow.canvas.width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas().height,
+            glow.canvas.height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1276,18 +1332,18 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 5, 9));
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         assert_eq!(glow.col, 4 - GLOW_MARGIN);
         assert_eq!(glow.row, 4 - GLOW_MARGIN);
         let padding_px_x = GLOW_MARGIN * r.window.cell_width;
         let padding_px_y = GLOW_MARGIN * r.window.cell_height;
         assert_ne!(padding_px_x, padding_px_y);
         assert_eq!(
-            glow.canvas().width,
+            glow.canvas.width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas().height,
+            glow.canvas.height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1297,10 +1353,10 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(3));
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         let (edge_r, edge_g, edge_b) = colour(Some(3));
         let has_edge_colour = glow
-            .canvas()
+            .canvas
             .pixels
             .chunks(4)
             .filter(|pixel| pixel[3] > 0)
@@ -1314,6 +1370,68 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
             }
+        }
+    }
+
+    struct Sprite {
+        col: i64,
+        row: i64,
+        canvas: Canvas,
+    }
+
+    fn composed<'a>(images: &'a [Placed], z: i32, window: Window) -> Sprite {
+        let layer: Vec<&'a Placed> = images.iter().filter(|image| image.z == z).collect();
+        let fresh: std::collections::HashMap<kitty::ImageId, &'a Canvas> = layer
+            .iter()
+            .filter_map(|image| match &image.image {
+                Image::Fresh { id, canvas } => Some((*id, canvas)),
+                Image::Cached { .. } => None,
+            })
+            .collect();
+        let canvas_of = |image: &'a Placed| -> &'a Canvas {
+            match &image.image {
+                Image::Fresh { canvas, .. } => canvas,
+                Image::Cached { id } => fresh[id],
+            }
+        };
+        let col = layer.iter().map(|image| image.col).min().expect("a layer");
+        let row = layer.iter().map(|image| image.row).min().expect("a layer");
+        let origin = |image: &Placed| {
+            (
+                (image.col - col) * window.cell_width,
+                (image.row - row) * window.cell_height,
+            )
+        };
+        let width = layer
+            .iter()
+            .map(|image| origin(image).0 + canvas_of(image).width)
+            .max()
+            .expect("a layer");
+        let height = layer
+            .iter()
+            .map(|image| origin(image).1 + canvas_of(image).height)
+            .max()
+            .expect("a layer");
+        let channels = 4;
+        let mut pixels = vec![0u8; (width * height * channels) as usize];
+        for image in &layer {
+            let (x, y) = origin(image);
+            let canvas = canvas_of(image);
+            let span = (canvas.width * channels) as usize;
+            for line in 0..canvas.height {
+                let from = (line * canvas.width * channels) as usize;
+                let to = (((y + line) * width + x) * channels) as usize;
+                pixels[to..to + span].copy_from_slice(&canvas.pixels[from..from + span]);
+            }
+        }
+        Sprite {
+            col,
+            row,
+            canvas: Canvas {
+                pixels,
+                width,
+                height,
+            },
         }
     }
 
@@ -1920,15 +2038,12 @@ mod tests {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = framed(&mut r, &empty_state());
-        let image = frame
-            .images
-            .first()
-            .expect("the footer box is drawn as an image");
+        let footer = composed(&frame.images, BOX_Z, r.window);
         let (er, eg, eb, ea) = fill_colour(
             Some(crate::style::FOREGROUND),
             quantized_alpha(Some(FOOTER_FILL_OPACITY)),
         );
-        for pixel in image.canvas().pixels.chunks(4) {
+        for pixel in footer.canvas.pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }
     }
@@ -2240,11 +2355,9 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, 2, 4, 3)],
         );
-        assert_eq!((images[0].col, images[0].row), (1, 2));
-        assert_eq!(
-            (images[0].canvas().width, images[0].canvas().height),
-            (24, 36)
-        );
+        let boxed = composed(&images, BOX_Z, r.window);
+        assert_eq!((boxed.col, boxed.row), (1, 2));
+        assert_eq!((boxed.canvas.width, boxed.canvas.height), (24, 36));
     }
 
     #[test]
@@ -2711,5 +2824,248 @@ mod tests {
         for image in body_images {
             assert!(image.row + image.canvas().height / window.cell_height <= body_rows);
         }
+    }
+
+    const EXTRA_CELLS: i64 = 3;
+
+    fn tiled_window() -> Window {
+        window(60, 30, CELL_WIDTH, CELL_HEIGHT)
+    }
+
+    fn tile_shape(r: &TerminalRenderer, node: &PlacementNode<'static>) -> TileShape {
+        let style = match node {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                rounded,
+                sides,
+                border,
+            } => TileStyle::Box(BoxStyle {
+                colour: *colour,
+                fill: *fill,
+                fill_alpha: quantized_alpha(*opacity),
+                rounded: *rounded,
+                sides: *sides,
+                border: *border,
+            }),
+            PlacementNode::Glow { colour, rounded } => TileStyle::Glow(GlowStyle {
+                colour: *colour,
+                rounded: *rounded,
+            }),
+            _ => panic!("expected a box or a glow"),
+        };
+        TileShape {
+            style,
+            cell: r.cell_size(),
+        }
+    }
+
+    fn smallest_tiled(r: &TerminalRenderer, node: &PlacementNode<'static>) -> (i64, i64) {
+        let (column_band, row_band) = tile_shape(r, node).bands();
+        (cells_with_middle(column_band), cells_with_middle(row_band))
+    }
+
+    fn glow_node(colour: Option<u8>) -> PlacementNode<'static> {
+        PlacementNode::Glow {
+            colour,
+            rounded: true,
+        }
+    }
+
+    fn outlined_node(colour: Option<u8>) -> PlacementNode<'static> {
+        box_node(colour, colour, true)
+    }
+
+    fn smallest_tiled_selected_box(r: &TerminalRenderer, colour: Option<u8>) -> (i64, i64) {
+        let (box_cols, box_rows) = smallest_tiled(r, &outlined_node(colour));
+        let (glow_cols, glow_rows) = smallest_tiled(r, &glow_node(colour));
+        (
+            box_cols.max(glow_cols - 2 * GLOW_MARGIN),
+            box_rows.max(glow_rows - 2 * GLOW_MARGIN),
+        )
+    }
+
+    fn selected_box(
+        colour: Option<u8>,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+    ) -> [Placement<'static>; 2] {
+        [
+            box_placement(&outlined_node(colour), x, y, width, height),
+            box_placement(
+                &glow_node(colour),
+                x - GLOW_MARGIN,
+                y - GLOW_MARGIN,
+                width + 2 * GLOW_MARGIN,
+                height + 2 * GLOW_MARGIN,
+            ),
+        ]
+    }
+
+    fn image_ids(output: &str) -> std::collections::HashSet<String> {
+        shown_ids(output)
+            .into_iter()
+            .chain(placed_ids(output))
+            .collect()
+    }
+
+    fn cells_of(placement: &Placement) -> Vec<(i64, i64)> {
+        let geometry = Geometry::from(placement);
+        (geometry.y..geometry.y + geometry.height)
+            .flat_map(|row| (geometry.x..geometry.x + geometry.width).map(move |col| (col, row)))
+            .collect()
+    }
+
+    #[test]
+    fn widening_a_tiled_box_transmits_no_tile_and_places_one_more_per_tiled_row() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+        let narrow = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
+        let wide = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width + 1, height);
+
+        let first = rendered_placements(&mut r, &narrow);
+        let second = rendered_placements(&mut r, &wide);
+
+        let tiled_rows: i64 = narrow.iter().map(|placement| placement.height).sum();
+        let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
+        assert!(shown_ids(&second).is_empty());
+        assert!(deleted_ids(&second).is_empty());
+        assert_eq!(
+            placed_ids(&second).len(),
+            first_placements + tiled_rows as usize
+        );
+    }
+
+    #[test]
+    fn tiled_boxes_of_one_style_and_different_sizes_share_every_tile_image() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+
+        let small = rendered_placements(
+            &mut r,
+            &selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+        let large = rendered_placements(
+            &mut r,
+            &selected_box(
+                colour,
+                GLOW_MARGIN,
+                GLOW_MARGIN,
+                width + EXTRA_CELLS,
+                height + 1,
+            ),
+        );
+
+        assert_eq!(image_ids(&small), image_ids(&large));
+    }
+
+    #[test]
+    fn tiled_boxes_of_different_styles_share_no_tile_image() {
+        let mut r = renderer_on(tiled_window());
+        let (width, height) = smallest_tiled_selected_box(&r, Some(1));
+
+        let one = rendered_placements(
+            &mut r,
+            &selected_box(Some(1), GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+        let other = rendered_placements(
+            &mut r,
+            &selected_box(Some(2), GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+
+        assert!(image_ids(&one).is_disjoint(&image_ids(&other)));
+    }
+
+    #[test]
+    fn a_partly_clipped_tiled_box_shows_only_its_whole_tiles_inside_the_area() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let area = Area {
+            col: 2,
+            row: 2,
+            cols: width,
+            rows: height,
+        };
+        let placement = box_placement(&node, area.col - 1, area.row + 1, width, height);
+        let mut frame = Frame::new(r.window);
+
+        r.paint(&mut frame, std::slice::from_ref(&placement), area);
+
+        let inside = |&(col, row): &(i64, i64)| {
+            (area.col..area.col + area.cols).contains(&col)
+                && (area.row..area.row + area.rows).contains(&row)
+        };
+        let expected: Vec<(i64, i64)> = cells_of(&placement).into_iter().filter(inside).collect();
+        let positions: Vec<(i64, i64)> = frame
+            .images
+            .iter()
+            .map(|image| (image.col, image.row))
+            .collect();
+        assert_eq!(positions, expected);
+        for image in &frame.images {
+            if let Image::Fresh { canvas, .. } = &image.image {
+                assert_eq!(
+                    (canvas.width, canvas.height),
+                    (r.window.cell_width, r.window.cell_height)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tiles_keep_their_sprites_z_and_are_queued_row_major_in_scene_order() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+        let [boxed, glow] = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
+
+        let images = sprites(&mut r, &[boxed.clone(), glow.clone()]);
+
+        let queued: Vec<(i64, i64, i32)> = images
+            .iter()
+            .map(|image| (image.col, image.row, image.z))
+            .collect();
+        let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
+            .into_iter()
+            .map(|(col, row)| (col, row, BOX_Z))
+            .chain(
+                cells_of(&glow)
+                    .into_iter()
+                    .map(|(col, row)| (col, row, GLOW_Z)),
+            )
+            .collect();
+        assert_eq!(queued, expected);
+    }
+
+    #[test]
+    fn a_box_too_small_to_tile_is_one_transient_whole_sprite() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let placements = [box_placement(&node, 0, 0, width - 1, height)];
+
+        let images = sprites(&mut r, &placements);
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        let [image] = images.as_slice() else {
+            panic!("expected a single whole sprite");
+        };
+        assert_eq!(
+            (image.canvas().width, image.canvas().height),
+            (
+                (width - 1) * r.window.cell_width,
+                height * r.window.cell_height
+            )
+        );
+        assert_eq!(shown_ids(&first).len(), 1);
+        assert!(placed_ids(&second).is_empty());
+        assert_eq!(deleted_ids(&second), shown_ids(&first));
     }
 }
