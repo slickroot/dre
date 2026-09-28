@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::composer::{self, Area};
-use crate::layout::{self, with_caret, Caret, Placement, PlacementNode, FOOTER_ROWS};
+use crate::layout::{self, with_caret, with_glow, Caret, Placement, PlacementNode, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
 use crate::state::{Mode, State};
 
@@ -43,12 +43,15 @@ pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
         _ => None,
     };
     let editing = editing_caret.as_ref().map(|(path, _)| path.as_slice());
-    centre(
-        with_caret(
-            layout::diagram(state.doc().tree(), editing, state.selected()),
-            editing_caret,
+    with_glow(
+        centre(
+            with_caret(
+                layout::diagram(state.doc().tree(), editing, state.selected()),
+                editing_caret,
+            ),
+            area,
         ),
-        area,
+        state.selected(),
     )
 }
 
@@ -336,12 +339,15 @@ mod tests {
         let screen = editor(&state, WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(
-                with_caret(
-                    layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
-                    Some((vec![0], 1)),
+            with_glow(
+                centre(
+                    with_caret(
+                        layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
+                        Some((vec![0], 1)),
+                    ),
+                    body_of(WINDOW)
                 ),
-                body_of(WINDOW)
+                state.selected(),
             )
         );
         assert!(screen[0]

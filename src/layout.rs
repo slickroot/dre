@@ -243,6 +243,10 @@ pub(crate) enum PlacementNode<'a> {
     Label(Label<'a>),
     Arrow(Arrow),
     Caret(Caret),
+    Glow {
+        colour: Option<u8>,
+        rounded: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -322,6 +326,48 @@ pub(crate) fn diagram<'a>(
         .collect();
     boxes_first.append(&mut rest);
     boxes_first
+}
+
+pub(crate) const GLOW_MARGIN: i64 = 1;
+
+pub(crate) fn with_glow<'a>(
+    placements: Vec<Placement<'a>>,
+    selected: Option<&[usize]>,
+) -> Vec<Placement<'a>> {
+    let Some(selected) = selected else {
+        return placements;
+    };
+    let Some(label) = placements.iter().find(|placement| {
+        matches!(&placement.node, PlacementNode::Label(label) if label.path == selected)
+    }) else {
+        return placements;
+    };
+    let Some(glow) = placements.iter().find_map(|placement| match &placement.node {
+        PlacementNode::Box { colour, rounded, .. }
+            if placement.x <= label.x
+                && label.x < placement.x + placement.width
+                && placement.y <= label.y
+                && label.y < placement.y + placement.height =>
+        {
+            Some(Placement {
+                node: PlacementNode::Glow {
+                    colour: *colour,
+                    rounded: *rounded,
+                },
+                x: placement.x - GLOW_MARGIN,
+                y: placement.y - GLOW_MARGIN,
+                width: placement.width + 2 * GLOW_MARGIN,
+                height: placement.height + 2 * GLOW_MARGIN,
+            })
+        }
+        _ => None,
+    }) else {
+        return placements;
+    };
+    let mut result = Vec::with_capacity(placements.len() + 1);
+    result.push(glow);
+    result.extend(placements);
+    result
 }
 
 pub(crate) fn with_caret<'a>(

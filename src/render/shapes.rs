@@ -91,40 +91,47 @@ impl Shape for BoxShape {
     }
 }
 
+fn rounded_rect_distance(px: f64, py: f64, width: f64, height: f64, radius: f64) -> f64 {
+    let half_x = width / 2.0;
+    let half_y = height / 2.0;
+    let qx = (px - half_x).abs() - (half_x - radius);
+    let qy = (py - half_y).abs() - (half_y - radius);
+    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
+}
+
 pub(super) struct GlowShape {
     pub(super) width: i64,
     pub(super) height: i64,
-    pub(super) padding_x: i64,
-    pub(super) padding_y: i64,
-    pub(super) thickness: i64,
-    pub(super) colour: [u8; 3],
-    pub(super) peak_alpha: u8,
+    pub(super) margin_x: i64,
+    pub(super) margin_y: i64,
+    pub(super) radius: i64,
+    pub(super) colour: Rgba,
+}
+
+impl GlowShape {
+    fn reach(&self) -> f64 {
+        (self.margin_x.min(self.margin_y) - 1).max(1) as f64
+    }
 }
 
 impl Shape for GlowShape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
-        let px = x as f64 - self.padding_x as f64 + 0.5;
-        let py = y as f64 - self.padding_y as f64 + 0.5;
-        let outside_x = (-px).max(px - self.width as f64).max(0.0);
-        let outside_y = (-py).max(py - self.height as f64).max(0.0);
-        let distance = if outside_x > 0.0 || outside_y > 0.0 {
-            outside_x.hypot(outside_y)
-        } else {
-            px.min(self.width as f64 - px)
-                .min(py)
-                .min(self.height as f64 - py)
-        };
-        let fade = (1.0 - distance / self.thickness as f64).clamp(0.0, 1.0);
-        let alpha = self.peak_alpha as f64 * fade;
-        if alpha <= 0.0 {
+        let box_width = self.width - 2 * self.margin_x;
+        let box_height = self.height - 2 * self.margin_y;
+        let radius = self.radius.min(box_width / 2).min(box_height / 2) as f64;
+        let distance = rounded_rect_distance(
+            x as f64 + 0.5 - self.margin_x as f64,
+            y as f64 + 0.5 - self.margin_y as f64,
+            box_width as f64,
+            box_height as f64,
+            radius,
+        );
+        if distance <= 0.0 || distance >= self.reach() {
             return None;
         }
-        Some([
-            self.colour[0],
-            self.colour[1],
-            self.colour[2],
-            python_round(alpha) as u8,
-        ])
+        let falloff = (1.0 - distance / self.reach()).powf(1.6);
+        let alpha = python_round(self.colour[3] as f64 * falloff) as u8;
+        (alpha > 0).then_some([self.colour[0], self.colour[1], self.colour[2], alpha])
     }
 }
 
@@ -287,22 +294,21 @@ mod tests {
 
     fn glow_shape(width: i64, height: i64, padding_x: i64, padding_y: i64) -> GlowShape {
         GlowShape {
-            width,
-            height,
-            padding_x,
-            padding_y,
-            thickness: 4,
-            colour: GLOW_COLOUR,
-            peak_alpha: OPAQUE,
+            width: width + 2 * padding_x,
+            height: height + 2 * padding_y,
+            margin_x: padding_x,
+            margin_y: padding_y,
+            radius: 0,
+            colour: [GLOW_COLOUR[0], GLOW_COLOUR[1], GLOW_COLOUR[2], OPAQUE],
         }
     }
 
     #[test]
     fn a_glow_fades_inward_from_the_box_edge() {
         let shape = glow_shape(10, 10, 4, 4);
-        let edge = shape.colour_at(4, 7).unwrap()[3];
-        let inside = shape.colour_at(6, 7).unwrap()[3];
-        assert!(edge > inside, "expected {edge} > {inside}");
+        let edge = shape.colour_at(3, 7).unwrap()[3];
+        let farther = shape.colour_at(2, 7).unwrap()[3];
+        assert!(edge > farther, "expected {edge} > {farther}");
     }
 
     #[test]
@@ -325,16 +331,16 @@ mod tests {
     fn a_glow_fades_out_with_distance_from_the_box() {
         let shape = glow_shape(10, 10, 4, 4);
         let near = shape.colour_at(2, 7).unwrap()[3];
-        let far = shape.colour_at(0, 7).unwrap()[3];
+        let far = shape.colour_at(1, 7).unwrap()[3];
         assert!(near > far, "expected {near} > {far}");
     }
 
     #[test]
     fn a_glow_has_the_same_pixel_thickness_on_each_axis() {
         let shape = glow_shape(20, 20, 8, 12);
-        for distance in 0..shape.thickness {
-            let left = shape.colour_at(shape.padding_x - 1 - distance, shape.padding_y + 10);
-            let top = shape.colour_at(shape.padding_x + 10, shape.padding_y - 1 - distance);
+        for distance in 0..shape.margin_x {
+            let left = shape.colour_at(shape.margin_x - 1 - distance, shape.margin_y + 10);
+            let top = shape.colour_at(shape.margin_x + 10, shape.margin_y - 1 - distance);
             assert_eq!(left, top);
         }
     }

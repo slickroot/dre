@@ -6,7 +6,7 @@ use super::{colour, editor, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
-use crate::layout::{Label, Placement, PlacementNode, Sides};
+use crate::layout::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
 use crate::palette::{palette, FOREGROUND};
 use crate::state::State;
 use crate::tty::Window;
@@ -24,10 +24,11 @@ const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
+const GLOW_OPACITY: f64 = 0.7;
 const GLOW_THICKNESS_PX: i64 = 4;
-const GLOW_PEAK_OPACITY: f64 = 0.2;
 const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
 
+#[cfg(test)]
 fn glow_padding_cells(cell_size: i64) -> i64 {
     (GLOW_THICKNESS_PX + cell_size - 1) / cell_size
 }
@@ -109,6 +110,7 @@ enum SpriteKey {
         width: i64,
         height: i64,
         colour: Option<u8>,
+        rounded: bool,
     },
 }
 
@@ -145,12 +147,13 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
 
 fn glow_key(placement: &Placement) -> SpriteKey {
     match &placement.node {
-        PlacementNode::Box { colour, .. } => SpriteKey::Glow {
+        PlacementNode::Glow { colour, rounded } => SpriteKey::Glow {
             width: placement.width,
             height: placement.height,
             colour: *colour,
+            rounded: *rounded,
         },
-        _ => unreachable!("glow_key is only called for Box placements"),
+        _ => unreachable!("glow_key is only called for Glow placements"),
     }
 }
 
@@ -293,6 +296,7 @@ impl TerminalRenderer {
         for placement in placements {
             match &placement.node {
                 PlacementNode::Box { .. } => self.draw_box(frame, placement, area),
+                PlacementNode::Glow { .. } => self.draw_glow(frame, placement, area),
                 PlacementNode::Arrow(_) => self.draw_arrow(frame, placement, area),
                 PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
                 PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
@@ -311,24 +315,18 @@ impl TerminalRenderer {
         }
         frame.place(&self.cache[&key], placement, area, BOX_Z);
 
-        let selected = matches!(placement.node, PlacementNode::Box { selected: true, .. });
-        if selected {
-            let key = glow_key(placement);
-            if !self.cache.contains_key(&key) {
-                let drawn = self.outline_glow(placement);
-                self.remember(key.clone(), drawn);
-            }
-            let padding_cells_x = glow_padding_cells(self.window.cell_width);
-            let padding_cells_y = glow_padding_cells(self.window.cell_height);
-            let glow_placement = Placement {
-                node: placement.node.clone(),
-                x: placement.x - padding_cells_x,
-                y: placement.y - padding_cells_y,
-                width: placement.width + 2 * padding_cells_x,
-                height: placement.height + 2 * padding_cells_y,
-            };
-            frame.place(&self.cache[&key], &glow_placement, area, GLOW_Z);
+    }
+
+    fn draw_glow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
+        if !frame.shows(placement, area) {
+            return;
         }
+        let key = glow_key(placement);
+        if !self.cache.contains_key(&key) {
+            let drawn = self.outline_glow(placement);
+            self.remember(key.clone(), drawn);
+        }
+        frame.place(&self.cache[&key], placement, area, GLOW_Z);
     }
 
     fn draw_arrow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -421,25 +419,22 @@ impl TerminalRenderer {
     }
 
     fn outline_glow(&self, placement: &Placement) -> Canvas {
-        let edge = match &placement.node {
-            PlacementNode::Box { colour, .. } => *colour,
-            _ => unreachable!("outline_glow is only called for Box placements"),
+        let (edge, rounded) = match &placement.node {
+            PlacementNode::Glow { colour, rounded } => (*colour, *rounded),
+            _ => unreachable!("outline_glow is only called for Glow placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
-        let padding_x = self.cells_to_pixels_x(glow_padding_cells(self.window.cell_width));
-        let padding_y = self.cells_to_pixels_y(glow_padding_cells(self.window.cell_height));
         let (r, g, b) = colour(edge);
         let shape = GlowShape {
             width,
             height,
-            padding_x,
-            padding_y,
-            thickness: GLOW_THICKNESS_PX,
-            colour: [r, g, b],
-            peak_alpha: (GLOW_PEAK_OPACITY * OPAQUE as f64).round() as u8,
+            margin_x: self.cells_to_pixels_x(GLOW_MARGIN),
+            margin_y: self.cells_to_pixels_y(GLOW_MARGIN),
+            radius: if rounded { ROUNDED_RADIUS } else { 0 },
+            colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
         };
-        Canvas::fill(width + 2 * padding_x, height + 2 * padding_y, &shape)
+        Canvas::fill(width, height, &shape)
     }
 
     fn outline_arrow(&self, placement: &Placement) -> Canvas {
@@ -1088,7 +1083,29 @@ mod tests {
     }
 
     fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
-        drawn_frame(r, placements).images
+        let mut with_glows = Vec::new();
+        for placement in placements {
+            if let PlacementNode::Box {
+                colour,
+                rounded,
+                selected: true,
+                ..
+            } = &placement.node
+            {
+                with_glows.push(Placement {
+                    node: PlacementNode::Glow {
+                        colour: *colour,
+                        rounded: *rounded,
+                    },
+                    x: placement.x - GLOW_MARGIN,
+                    y: placement.y - GLOW_MARGIN,
+                    width: placement.width + 2 * GLOW_MARGIN,
+                    height: placement.height + 2 * GLOW_MARGIN,
+                });
+            }
+            with_glows.push(placement.clone());
+        }
+        drawn_frame(r, &with_glows).images
     }
 
     fn lines_of(frame: &str) -> Vec<&str> {
