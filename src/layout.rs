@@ -160,15 +160,7 @@ pub(crate) fn place<'a>(
         if child_paths.is_empty() {
             let row = *free;
             *free += LEAF_STRIDE as usize;
-            let placements = emit(
-                node,
-                x,
-                row,
-                width,
-                &path,
-                &[],
-                edit_room(&path, editing),
-            );
+            let placements = emit(node, x, row, width, &path, &[], edit_room(&path, editing));
             return (placements, row);
         }
 
@@ -176,9 +168,7 @@ pub(crate) fn place<'a>(
         let mut child_placements = Vec::new();
         let mut child_rows = Vec::new();
         for child_path in child_paths {
-            let (placements, row) = visit(
-                tree, child_col, child_path, offsets, editing, free,
-            );
+            let (placements, row) = visit(tree, child_col, child_path, offsets, editing, free);
             child_placements.extend(placements);
             child_rows.push(row);
         }
@@ -311,10 +301,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
     with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
 }
 
-pub(crate) fn diagram<'a>(
-    tree: &'a Tree<Node>,
-    editing: Option<&[usize]>,
-) -> Vec<Placement<'a>> {
+pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
     if !tree.contains(&[0]) {
         return Vec::new();
     }
@@ -1021,7 +1008,9 @@ mod tests {
             .collect();
         assert_eq!(glows.len(), 1);
         let (colour, rounded) = match selected_box.node {
-            PlacementNode::Box { colour, rounded, .. } => (colour, rounded),
+            PlacementNode::Box {
+                colour, rounded, ..
+            } => (colour, rounded),
             _ => unreachable!(),
         };
         assert_eq!(glows[0].1, colour);

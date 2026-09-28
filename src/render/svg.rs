@@ -366,10 +366,10 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
-    use crate::layout::{with_caret, with_glow};
     use crate::layout::{
         centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
     };
+    use crate::layout::{with_caret, with_glow};
     use crate::layout::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
@@ -423,7 +423,10 @@ mod tests {
     }
 
     fn selected(placement: Placement<'static>) -> Placement<'static> {
-        let PlacementNode::Box { colour, rounded, .. } = placement.node else {
+        let PlacementNode::Box {
+            colour, rounded, ..
+        } = placement.node
+        else {
             unreachable!();
         };
         Placement {
@@ -788,8 +791,14 @@ mod tests {
             .expect("the selected box renders a glow rect");
         assert!(glow.contains(&format!("x=\"{}\"", (x - GLOW_MARGIN) * CELL_WIDTH)));
         assert!(glow.contains(&format!("y=\"{}\"", (y - GLOW_MARGIN) * CELL_HEIGHT)));
-        assert!(glow.contains(&format!("width=\"{}\"", (width + 2 * GLOW_MARGIN) * CELL_WIDTH)));
-        assert!(glow.contains(&format!("height=\"{}\"", (height + 2 * GLOW_MARGIN) * CELL_HEIGHT)));
+        assert!(glow.contains(&format!(
+            "width=\"{}\"",
+            (width + 2 * GLOW_MARGIN) * CELL_WIDTH
+        )));
+        assert!(glow.contains(&format!(
+            "height=\"{}\"",
+            (height + 2 * GLOW_MARGIN) * CELL_HEIGHT
+        )));
         assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
         assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
         assert!(glow.contains("fill=\"none\""));

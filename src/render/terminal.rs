@@ -920,7 +920,11 @@ mod tests {
         let r = renderer(1, 1);
         let plain = box_outline(&r, &box_node(Some(1), None, false), 10, 10);
         let plain_pixel = pixel_of(&plain, 5, 0);
-        let selected_pixel = pixel_of(&box_outline(&r, &box_node(Some(1), None, false), 10, 10), 5, 0);
+        let selected_pixel = pixel_of(
+            &box_outline(&r, &box_node(Some(1), None, false), 10, 10),
+            5,
+            0,
+        );
         assert_eq!(selected_pixel, plain_pixel);
     }
 

@@ -28,10 +28,7 @@ pub fn body(state: &State, area: Area) -> Scene<'_> {
         area,
         with_glow(
             centre(
-                with_caret(
-                    layout::diagram(state.doc().tree(), editing),
-                    editing_caret,
-                ),
+                with_caret(layout::diagram(state.doc().tree(), editing), editing_caret),
                 area,
             ),
             state.selected(),
