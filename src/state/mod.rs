@@ -22,6 +22,7 @@ const PLACEHOLDER: &str = "type a name";
 const FOOTER_SUFFIX: &str = " • dre";
 const MOVE: &str = "MOVE";
 const WRITE: &str = "WRITE";
+const NAME: &str = "NAME";
 
 #[allow(dead_code)]
 struct KeyBinding<C> {
@@ -110,10 +111,10 @@ impl State {
                 bordered: false,
             },
             Mode::NamePrompt { name, .. } => FooterView {
-                led_colour: palette::LIME,
-                lit: false,
-                text: format!("{MOVE} {}", name_prompt_text(name)),
-                cursor: Some(name.chars().count()),
+                led_colour: palette::AMBER,
+                lit: true,
+                text: format!("{NAME} {}", name_prompt_text(name)),
+                cursor: Some(NAME.chars().count() + 1 + name.chars().count()),
                 bordered: true,
             },
             Mode::Command => FooterView {
@@ -333,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn name_prompt_footer_shows_the_same_dim_lime_led_as_command_mode() {
+    fn name_prompt_footer_shows_a_lit_amber_led() {
         let state = new_state(
             vec![],
             Mode::NamePrompt {
@@ -343,9 +344,9 @@ mod tests {
             None,
         );
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::LIME);
-        assert!(!footer.lit);
-        assert!(footer.text.starts_with(MOVE));
+        assert_eq!(footer.led_colour, palette::AMBER);
+        assert!(footer.lit);
+        assert!(footer.text.starts_with(NAME));
     }
 
     #[test]
@@ -358,7 +359,7 @@ mod tests {
             },
             None,
         );
-        assert_eq!(state.footer().cursor, Some(2));
+        assert_eq!(state.footer().cursor, Some(NAME.chars().count() + 1 + 2));
     }
 
     #[test]
@@ -371,10 +372,10 @@ mod tests {
             },
             None,
         );
-        assert_eq!(state.footer().cursor, Some(0));
+        assert_eq!(state.footer().cursor, Some(NAME.chars().count() + 1));
         assert_eq!(
             state.footer().text,
-            format!("{MOVE} {PLACEHOLDER}{FOOTER_SUFFIX}")
+            format!("{NAME} {PLACEHOLDER}{FOOTER_SUFFIX}")
         );
     }
 
