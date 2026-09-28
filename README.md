@@ -87,43 +87,41 @@ rounded corners, and arrows, but no cursor or selection.
 
 <!-- keymap:start -->
 
-| Key | Description |
-| --- | --- |
-| `u` | Undo the last change |
-| `b` | Add a child box |
-| `s` | Add a sibling box |
-| `d` | Delete the selected box and its descendants |
-| `p` | Paste the cut box and its descendants as the last child of the selected box |
-| `h` | Select the parent box |
-| `l` | Select the first child box |
-| `j` | Select the next sibling |
-| `k` | Select the previous sibling |
-| `i` | Edit the selected box's label |
-| `I` | Rename the selected box's label |
-| `c` | Cycle the box's colour |
-| `C` | Cycle the colour of every sibling |
-| `f` | Toggle the box's fill |
-| `F` | Toggle the fill of every sibling |
-| `r` | Toggle rounded corners |
-| `R` | Toggle rounded corners of every sibling |
-| `q` | Save and quit (or choose where to save) |
-| `n` | Name the diagram |
+| Mode | Key | Description |
+| --- | --- | --- |
+| Command | `u` | Undo the last change |
+| Command | `b` | Add a child box |
+| Command | `s` | Add a sibling box |
+| Command | `d` | Delete the selected box and its descendants |
+| Command | `p` | Paste the cut box and its descendants as the last child of the selected box |
+| Command | `h` | Select the parent box |
+| Command | `l` | Select the first child box |
+| Command | `j` | Select the next sibling |
+| Command | `k` | Select the previous sibling |
+| Command | `i` | Edit the selected box's label |
+| Command | `I` | Rename the selected box's label |
+| Command | `c` | Cycle the box's colour |
+| Command | `C` | Cycle the colour of every sibling |
+| Command | `F` | Toggle the fill of every sibling |
+| Command | `f` | Toggle the box's fill |
+| Command | `r` | Toggle rounded corners |
+| Command | `R` | Toggle rounded corners of every sibling |
+| Command | `q` | Save and quit (or choose where to save) |
+| Command | `n` | Name the diagram |
+| Command | `0–9` | Build a count prefix |
+| Command | `Ctrl-C` | Quit without saving |
+| Insert | `Enter` | Finish the box and add a child box |
+| Insert | `Esc` | Switch to command mode |
+| Insert | `Backspace` | Remove the last character |
+| Insert | `←` | Move the cursor left |
+| Insert | `→` | Move the cursor right |
+| Insert | `Printable` | Append a printable character |
+| Name prompt | `Enter` | Save the name |
+| Name prompt | `Esc` | Cancel naming |
+| Name prompt | `Backspace` | Remove a character from the name |
+| Name prompt | `Printable` | Append a character to the name |
 
 <!-- keymap:end -->
-
-## Insert mode
-
-<!-- insert-keymap:start -->
-
-| Key | Description |
-| --- | --- |
-| `Enter` | Finish the box and add a child box |
-| `Esc` | Switch to command mode |
-| `Backspace` | Remove the last character |
-| `←` | Move the cursor left |
-| `→` | Move the cursor right |
-
-<!-- insert-keymap:end -->
 
 Any printable character appends to the label.
 

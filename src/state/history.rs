@@ -45,8 +45,7 @@ mod tests {
     use crate::state::text_edit::TextKey;
 
     #[test]
-    fn scroll_idle_and_interrupt_are_not_undoable() {
-        assert!(!Action::Idle.spec().undoable);
+    fn interrupt_is_not_undoable() {
         assert!(!Action::Interrupt.spec().undoable);
     }
 

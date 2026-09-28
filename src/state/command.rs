@@ -205,7 +205,6 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
             state.pending_count = None;
             return state;
         }
-        Action::Idle => return state,
         Action::Interrupt => return interrupt(state),
         Action::OpenNamePrompt => return open_name_prompt(state),
         _ => {}
