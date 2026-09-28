@@ -1,6 +1,6 @@
 use crate::diagram::{children, parent_of, Scope};
 use crate::palette::next_on_palette;
-use crate::state::action::CommandAction;
+use crate::state::action::{ImmediateCommand, SelectionCommand};
 use crate::state::history::undo;
 use crate::state::{add_child_box, Mode, State};
 
@@ -198,34 +198,19 @@ fn accumulate_digit(mut state: State, digit: u8) -> State {
     state
 }
 
-pub(crate) fn reduce(mut state: State, command: CommandAction) -> State {
+pub(crate) fn reduce(mut state: State, command: ImmediateCommand) -> State {
     match command {
-        CommandAction::Digit(digit) => return accumulate_digit(state, digit),
-        CommandAction::CancelCount => {
+        ImmediateCommand::Digit(digit) => return accumulate_digit(state, digit),
+        ImmediateCommand::CancelCount => {
             state.pending_count = None;
             return state;
         }
-        CommandAction::Interrupt => return interrupt(state),
-        CommandAction::OpenNamePrompt => return open_name_prompt(state),
-        CommandAction::Undo
-        | CommandAction::NewBox
-        | CommandAction::NewSibling
-        | CommandAction::Delete
-        | CommandAction::Paste
-        | CommandAction::SelectParent
-        | CommandAction::SelectChild
-        | CommandAction::SelectNext
-        | CommandAction::SelectPrevious
-        | CommandAction::EditLabel
-        | CommandAction::RenameLabel
-        | CommandAction::CycleColour
-        | CommandAction::CycleSiblingsColour
-        | CommandAction::ToggleSiblingsFill
-        | CommandAction::ToggleSiblingsRounded
-        | CommandAction::ToggleFill
-        | CommandAction::ToggleRounded
-        | CommandAction::Quit => {}
+        ImmediateCommand::Interrupt => return interrupt(state),
+        ImmediateCommand::OpenNamePrompt => return open_name_prompt(state),
     }
+}
+
+pub(crate) fn reduce_selection(mut state: State, command: SelectionCommand) -> State {
     let count = state.pending_count.take().unwrap_or(1);
     let depth = state.selected.as_ref().map_or(0, Vec::len);
     if depth < command.min_depth() {
@@ -234,85 +219,79 @@ pub(crate) fn reduce(mut state: State, command: CommandAction) -> State {
     dispatch(state, command, count)
 }
 
-fn dispatch(mut state: State, command: CommandAction, count: usize) -> State {
+fn dispatch(mut state: State, command: SelectionCommand, count: usize) -> State {
     match command {
-        CommandAction::Undo => {
+        SelectionCommand::Undo => {
             let selected = state.selected.take();
             undo(reselect(state, selected))
         }
-        CommandAction::NewBox => {
+        SelectionCommand::NewBox => {
             let selected = state.selected.take();
             add_child_box(state, selected)
         }
-        CommandAction::Quit => {
+        SelectionCommand::Quit => {
             let selected = state.selected.take();
             quit(reselect(state, selected))
         }
-        CommandAction::Paste => {
+        SelectionCommand::Paste => {
             let selected = state.selected.take();
             paste_box(state, selected, count)
         }
-        CommandAction::NewSibling => {
+        SelectionCommand::NewSibling => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             new_sibling(state, path)
         }
-        CommandAction::SelectParent => {
+        SelectionCommand::SelectParent => {
             let path = state.selected.take().expect("depth guard requires depth 2");
             repeat(state, path, count, select_parent)
         }
-        CommandAction::SelectChild => {
+        SelectionCommand::SelectChild => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             select_child(state, path)
         }
-        CommandAction::SelectNext => {
+        SelectionCommand::SelectNext => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             repeat(state, path, count, select_next)
         }
-        CommandAction::SelectPrevious => {
+        SelectionCommand::SelectPrevious => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             repeat(state, path, count, select_previous)
         }
-        CommandAction::EditLabel => {
+        SelectionCommand::EditLabel => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             edit_label(state, path)
         }
-        CommandAction::RenameLabel => {
+        SelectionCommand::RenameLabel => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             rename_label(state, path)
         }
-        CommandAction::CycleColour => {
+        SelectionCommand::CycleColour => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             cycle_colour(state, path)
         }
-        CommandAction::CycleSiblingsColour => {
+        SelectionCommand::CycleSiblingsColour => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             cycle_siblings_colour(state, path)
         }
-        CommandAction::ToggleSiblingsFill => {
+        SelectionCommand::ToggleSiblingsFill => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             toggle_siblings_fill(state, path)
         }
-        CommandAction::ToggleFill => {
+        SelectionCommand::ToggleFill => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             toggle_fill(state, path)
         }
-        CommandAction::Delete => {
+        SelectionCommand::Delete => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             delete_box(state, path)
         }
-        CommandAction::ToggleRounded => {
+        SelectionCommand::ToggleRounded => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             toggle_rounded(state, path)
         }
-        CommandAction::ToggleSiblingsRounded => {
+        SelectionCommand::ToggleSiblingsRounded => {
             let path = state.selected.take().expect("depth guard requires depth 1");
             toggle_siblings_rounded(state, path)
-        }
-        CommandAction::Digit(_)
-        | CommandAction::CancelCount
-        | CommandAction::Interrupt
-        | CommandAction::OpenNamePrompt => {
-            unreachable!("handled before the depth guard in reduce")
         }
     }
 }
@@ -328,25 +307,25 @@ mod tests {
     use crate::test_support::handle_key;
     use types::Tree;
 
-    const COMMANDS: [CommandAction; 18] = [
-        CommandAction::Undo,
-        CommandAction::NewBox,
-        CommandAction::NewSibling,
-        CommandAction::Delete,
-        CommandAction::Paste,
-        CommandAction::SelectParent,
-        CommandAction::SelectChild,
-        CommandAction::SelectNext,
-        CommandAction::SelectPrevious,
-        CommandAction::EditLabel,
-        CommandAction::RenameLabel,
-        CommandAction::CycleColour,
-        CommandAction::CycleSiblingsColour,
-        CommandAction::ToggleSiblingsFill,
-        CommandAction::ToggleFill,
-        CommandAction::ToggleRounded,
-        CommandAction::ToggleSiblingsRounded,
-        CommandAction::Quit,
+    const COMMANDS: [SelectionCommand; 18] = [
+        SelectionCommand::Undo,
+        SelectionCommand::NewBox,
+        SelectionCommand::NewSibling,
+        SelectionCommand::Delete,
+        SelectionCommand::Paste,
+        SelectionCommand::SelectParent,
+        SelectionCommand::SelectChild,
+        SelectionCommand::SelectNext,
+        SelectionCommand::SelectPrevious,
+        SelectionCommand::EditLabel,
+        SelectionCommand::RenameLabel,
+        SelectionCommand::CycleColour,
+        SelectionCommand::CycleSiblingsColour,
+        SelectionCommand::ToggleSiblingsFill,
+        SelectionCommand::ToggleFill,
+        SelectionCommand::ToggleRounded,
+        SelectionCommand::ToggleSiblingsRounded,
+        SelectionCommand::Quit,
     ];
 
     #[test]
@@ -362,7 +341,7 @@ mod tests {
                 _ => Some(vec![0; depth - 1]),
             };
             let state = new_state(boxes.clone(), Mode::Command, selected);
-            let result = reduce(state.clone(), Action::Command(command));
+            let result = reduce(state.clone(), Action::Selection(command));
             assert_eq!(result.doc, state.doc);
             assert_eq!(result.selected, state.selected);
         }
@@ -1509,16 +1488,16 @@ mod tests {
     #[test]
     fn digits_accumulate_into_the_pending_count() {
         let state = selecting(vec![node("a")], &[0]);
-        let state = reduce(state, Action::Command(CommandAction::Digit(1)));
-        let state = reduce(state, Action::Command(CommandAction::Digit(2)));
+        let state = reduce(state, Action::Immediate(ImmediateCommand::Digit(1)));
+        let state = reduce(state, Action::Immediate(ImmediateCommand::Digit(2)));
         assert_eq!(state.pending_count, Some(12));
     }
 
     #[test]
     fn cancel_count_clears_the_pending_count() {
-        let state = reduce(story(), Action::Command(CommandAction::Digit(4)));
+        let state = reduce(story(), Action::Immediate(ImmediateCommand::Digit(4)));
         assert_eq!(
-            reduce(state, Action::Command(CommandAction::CancelCount)).pending_count,
+            reduce(state, Action::Immediate(ImmediateCommand::CancelCount)).pending_count,
             None
         );
     }
@@ -1527,7 +1506,7 @@ mod tests {
     fn interrupt_stops_running_and_drops_the_save_path() {
         let mut state = new_state(vec![node("a")], Mode::Command, None);
         state.set_save_to(Some("a.dre".to_string()));
-        let result = reduce(state, Action::Command(CommandAction::Interrupt));
+        let result = reduce(state, Action::Immediate(ImmediateCommand::Interrupt));
         assert!(!result.running);
         assert_eq!(result.save_to(), None);
     }
