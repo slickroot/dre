@@ -61,6 +61,19 @@ pub enum PlacementNode<'a> {
     },
 }
 
+impl<'a> PlacementNode<'a> {
+    pub(crate) fn is_decoration(&self) -> bool {
+        match self {
+            PlacementNode::Glow { .. } | PlacementNode::Caret(_) => true,
+            PlacementNode::Box { .. }
+            | PlacementNode::Label(_)
+            | PlacementNode::Arrow(_)
+            | PlacementNode::Cursor(_)
+            | PlacementNode::Led { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement<'a> {
     pub node: PlacementNode<'a>,
@@ -275,17 +288,20 @@ fn offset(placements: Vec<Placement<'_>>, dx: i64, dy: i64) -> Vec<Placement<'_>
 }
 
 pub(crate) fn centre(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    let Some(min_x) = placements.iter().map(|placement| placement.x).min() else {
+    let content = || {
+        placements
+            .iter()
+            .filter(|placement| !placement.node.is_decoration())
+    };
+    let Some(min_x) = content().map(|placement| placement.x).min() else {
         return placements;
     };
-    let span = placements
-        .iter()
+    let span = content()
         .map(|placement| placement.x + placement.width)
         .max()
         .unwrap()
         - min_x;
-    let height = placements
-        .iter()
+    let height = content()
         .map(|placement| placement.y + placement.height)
         .max()
         .unwrap();
