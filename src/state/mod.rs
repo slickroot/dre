@@ -9,20 +9,12 @@ mod name_prompt;
 mod text_edit;
 
 use crate::diagram::{Document, Node};
-use crate::palette;
 use crate::state::action::Action;
 pub(crate) use crate::state::effect::Effect;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
 use types::Tree;
-
-const NO_NAME: &str = "[no name — press n to name it]";
-const PLACEHOLDER: &str = "type a name";
-const FOOTER_SUFFIX: &str = " • dre";
-const MOVE: &str = "MOVE";
-const WRITE: &str = "WRITE";
-const NAME: &str = "NAME";
 
 #[allow(dead_code)]
 struct KeyBinding<C> {
@@ -101,58 +93,47 @@ impl State {
         self.save_to = save_to;
     }
 
-    pub(crate) fn footer(&self) -> FooterView {
+    pub(crate) fn footer(&self) -> FooterModel {
         match &self.mode {
-            Mode::Insert { .. } => FooterView {
-                led_colour: palette::VIOLET,
-                lit: true,
-                text: format!("{WRITE} {}", footer_text(self.save_to.as_deref())),
+            Mode::Insert { .. } => FooterModel {
+                mode: FooterMode::Write,
+                filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
-                bordered: false,
             },
-            Mode::NamePrompt { name, .. } => FooterView {
-                led_colour: palette::AMBER,
-                lit: true,
-                text: format!("{NAME} {}", name_prompt_text(name)),
-                cursor: Some(NAME.chars().count() + 1 + name.chars().count()),
-                bordered: true,
+            Mode::NamePrompt { name, .. } => FooterModel {
+                mode: FooterMode::Naming,
+                filename: (!name.is_empty()).then(|| name.clone()),
+                cursor: Some(name.chars().count()),
             },
-            Mode::Command => FooterView {
-                led_colour: palette::LIME,
-                lit: false,
-                text: format!("{MOVE} {}", footer_text(self.save_to.as_deref())),
+            Mode::Command => FooterModel {
+                mode: FooterMode::Move,
+                filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
-                bordered: false,
             },
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FooterMode {
+    Move,
+    Write,
+    Naming,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct FooterView {
-    pub(crate) led_colour: u8,
-    pub(crate) lit: bool,
-    pub(crate) text: String,
+pub(crate) struct FooterModel {
+    pub(crate) mode: FooterMode,
+    pub(crate) filename: Option<String>,
     pub(crate) cursor: Option<usize>,
-    pub(crate) bordered: bool,
 }
 
-fn footer_text(save_to: Option<&str>) -> String {
-    let name = save_to.map_or(NO_NAME, file_stem_without_dre);
-    format!("{name}{FOOTER_SUFFIX}")
-}
-
-fn name_prompt_text(name: &str) -> String {
-    if name.is_empty() {
-        format!("{PLACEHOLDER}{FOOTER_SUFFIX}")
-    } else {
-        format!("{name}{FOOTER_SUFFIX}")
-    }
-}
-
-fn file_stem_without_dre(path: &str) -> &str {
+fn file_stem_without_dre(path: &str) -> String {
     let file_name = path.rsplit('/').next().unwrap_or(path);
-    file_name.strip_suffix(".dre").unwrap_or(file_name)
+    file_name
+        .strip_suffix(".dre")
+        .unwrap_or(file_name)
+        .to_string()
 }
 
 impl Default for State {
@@ -244,49 +225,42 @@ mod tests {
     use crate::state::text_edit::TextKey;
     use crate::test_support::handle_key;
 
-    fn footer_of(path: &str) -> String {
+    fn footer_filename_of(path: &str) -> Option<String> {
         State::open(Document::default(), Some(path.to_string()))
             .footer()
-            .text
-    }
-
-    fn footer_for(name: &str) -> String {
-        format!("{MOVE} {name}{FOOTER_SUFFIX}")
+            .filename
     }
 
     #[test]
     fn footer_strips_the_folder_and_the_dre_extension() {
-        assert_eq!(footer_of("docs/plans.dre"), footer_for("plans"));
+        assert_eq!(
+            footer_filename_of("docs/plans.dre"),
+            Some("plans".to_string())
+        );
     }
 
     #[test]
     fn footer_strips_the_dre_extension_of_a_bare_file_name() {
-        assert_eq!(footer_of("plans.dre"), footer_for("plans"));
+        assert_eq!(footer_filename_of("plans.dre"), Some("plans".to_string()));
     }
 
     #[test]
     fn footer_of_a_path_without_the_dre_extension_only_strips_the_folder() {
-        assert_eq!(footer_of("docs/plans"), footer_for("plans"));
+        assert_eq!(footer_filename_of("docs/plans"), Some("plans".to_string()));
     }
 
     #[test]
     fn footer_of_a_default_state_has_no_name() {
-        assert_eq!(State::default().footer().text, footer_for(NO_NAME));
-    }
-
-    #[test]
-    fn footer_of_a_default_state_pins_the_hint_text() {
-        assert_eq!(
-            State::default().footer().text,
-            "MOVE [no name — press n to name it] • dre"
-        );
+        assert_eq!(State::default().footer().filename, None);
     }
 
     #[test]
     fn footer_of_a_new_file_is_named_after_its_path() {
         assert_eq!(
-            State::new_file("docs/plans.dre".to_string()).footer().text,
-            footer_for("plans")
+            State::new_file("docs/plans.dre".to_string())
+                .footer()
+                .filename,
+            Some("plans".to_string())
         );
     }
 
@@ -294,7 +268,7 @@ mod tests {
     fn set_save_to_none_after_a_path_goes_back_to_no_name() {
         let mut state = State::open(Document::default(), Some("plans.dre".to_string()));
         state.set_save_to(None);
-        assert_eq!(state.footer().text, footer_for(NO_NAME));
+        assert_eq!(state.footer().filename, None);
         assert_eq!(state.save_to(), None);
     }
 
@@ -302,39 +276,35 @@ mod tests {
     fn set_save_to_a_path_after_none_updates_the_footer() {
         let mut state = State::default();
         state.set_save_to(Some("docs/plans.dre".to_string()));
-        assert_eq!(state.footer().text, footer_for("plans"));
+        assert_eq!(state.footer().filename, Some("plans".to_string()));
         assert_eq!(state.save_to(), Some("docs/plans.dre"));
     }
 
     #[test]
-    fn command_mode_footer_shows_a_dim_lime_led_and_no_cursor() {
+    fn command_mode_footer_is_move_with_no_cursor() {
         let state = new_state(vec![], Mode::Command, None);
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::LIME);
-        assert!(!footer.lit);
+        assert_eq!(footer.mode, FooterMode::Move);
         assert_eq!(footer.cursor, None);
-        assert!(footer.text.starts_with(MOVE));
     }
 
     #[test]
-    fn insert_mode_footer_shows_a_lit_violet_led_and_no_cursor() {
+    fn insert_mode_footer_is_write_with_no_cursor() {
         let state = new_state(vec![node("a")], Mode::Insert { cursor: 0 }, Some(vec![0]));
         let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::VIOLET);
-        assert!(footer.lit);
+        assert_eq!(footer.mode, FooterMode::Write);
         assert_eq!(footer.cursor, None);
-        assert!(footer.text.starts_with(WRITE));
     }
 
     #[test]
-    fn insert_mode_footer_text_is_prefixed_with_write() {
+    fn insert_mode_footer_filename_reflects_save_to() {
         let mut state = new_state(vec![], Mode::Insert { cursor: 0 }, None);
         state.set_save_to(Some("docs/plans.dre".to_string()));
-        assert_eq!(state.footer().text, format!("{WRITE} plans{FOOTER_SUFFIX}"));
+        assert_eq!(state.footer().filename, Some("plans".to_string()));
     }
 
     #[test]
-    fn name_prompt_footer_shows_a_lit_amber_led() {
+    fn name_prompt_footer_is_naming() {
         let state = new_state(
             vec![],
             Mode::NamePrompt {
@@ -343,10 +313,7 @@ mod tests {
             },
             None,
         );
-        let footer = state.footer();
-        assert_eq!(footer.led_colour, palette::AMBER);
-        assert!(footer.lit);
-        assert!(footer.text.starts_with(NAME));
+        assert_eq!(state.footer().mode, FooterMode::Naming);
     }
 
     #[test]
@@ -359,7 +326,8 @@ mod tests {
             },
             None,
         );
-        assert_eq!(state.footer().cursor, Some(NAME.chars().count() + 1 + 2));
+        assert_eq!(state.footer().cursor, Some(2));
+        assert_eq!(state.footer().filename, Some("ab".to_string()));
     }
 
     #[test]
@@ -372,11 +340,8 @@ mod tests {
             },
             None,
         );
-        assert_eq!(state.footer().cursor, Some(NAME.chars().count() + 1));
-        assert_eq!(
-            state.footer().text,
-            format!("{NAME} {PLACEHOLDER}{FOOTER_SUFFIX}")
-        );
+        assert_eq!(state.footer().cursor, Some(0));
+        assert_eq!(state.footer().filename, None);
     }
 
     #[test]

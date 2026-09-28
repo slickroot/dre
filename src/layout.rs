@@ -1,10 +1,19 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
+use crate::palette;
 use crate::palette::FOREGROUND;
 use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
-use crate::state::FooterView;
+use crate::state::{FooterMode, FooterModel};
 use types::Tree;
+
+const NO_NAME: &str = "[no name — press n to name it]";
+const PLACEHOLDER: &str = "type a name";
+const FOOTER_SUFFIX: &str = " • dre";
+const MOVE: &str = "MOVE";
+const WRITE: &str = "WRITE";
+const NAME: &str = "NAME";
+const FILENAME_COLOUR: u8 = palette::MINT;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 #[allow(dead_code)]
@@ -249,14 +258,12 @@ pub struct Placement<'a> {
     pub height: i64,
 }
 
-#[allow(dead_code)]
 struct Column<'a> {
     node: PlacementNode<'a>,
     width: i64,
     padding: i64,
 }
 
-#[allow(dead_code)]
 fn stack_columns(columns: Vec<Column<'static>>, y: i64) -> (Vec<Placement<'static>>, i64) {
     let mut placements = Vec::with_capacity(columns.len());
     let mut x = 0;
@@ -279,54 +286,106 @@ pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 pub(crate) const LED_WIDTH: i64 = 2;
 pub(crate) const LED_LABEL_GAP: i64 = 1;
 
-pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
-    let text = view.text.as_str();
-    let text_width = text.chars().count() as i64;
-    let inset_box_width = interior(text) + SIDE_PADDING * 2;
-    let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
-    let corner_box = PlacementNode::Box {
-        colour: None,
-        fill: Some(FOREGROUND),
-        opacity: Some(FOOTER_FILL_OPACITY),
-        rounded: false,
-        sides: if view.bordered { ALL_SIDES } else { NO_SIDES },
-        border: 1,
-    };
-    let led = PlacementNode::Led {
-        colour: view.led_colour,
-        lit: view.lit,
-    };
-    let label = PlacementNode::Label(Label {
-        text: Cow::Owned(text.to_string()),
-        path: vec![],
-        colour: None,
-    });
-    let led_x = centre(inset_box_width, text);
-    let label_x = led_x + LED_WIDTH + LED_LABEL_GAP;
-    let placements = vec![
-        Placement {
-            node: corner_box,
-            x: 0,
-            y: 0,
-            width: box_width,
-            height: BOX_HEIGHT,
+fn footer_mode_word(mode: FooterMode) -> &'static str {
+    match mode {
+        FooterMode::Move => MOVE,
+        FooterMode::Write => WRITE,
+        FooterMode::Naming => NAME,
+    }
+}
+
+fn footer_led(mode: FooterMode) -> PlacementNode<'static> {
+    match mode {
+        FooterMode::Move => PlacementNode::Led {
+            colour: palette::LIME,
+            lit: false,
         },
-        Placement {
-            node: led,
-            x: led_x,
-            y: BOX_HEIGHT / 2,
+        FooterMode::Write => PlacementNode::Led {
+            colour: palette::VIOLET,
+            lit: true,
+        },
+        FooterMode::Naming => PlacementNode::Led {
+            colour: palette::AMBER,
+            lit: true,
+        },
+    }
+}
+
+fn footer_filename_text(model: &FooterModel) -> String {
+    let placeholder = match model.mode {
+        FooterMode::Naming => PLACEHOLDER,
+        FooterMode::Move | FooterMode::Write => NO_NAME,
+    };
+    let name = model.filename.as_deref().unwrap_or(placeholder);
+    format!("{name}{FOOTER_SUFFIX}")
+}
+
+const MODE_WORD_PADDING: i64 = LED_LABEL_GAP - SIDE_PADDING;
+
+pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
+    let mode_word = footer_mode_word(model.mode);
+    let filename_text = footer_filename_text(model);
+
+    let columns = vec![
+        Column {
+            node: footer_led(model.mode),
             width: LED_WIDTH,
-            height: 1,
+            padding: SIDE_PADDING,
         },
-        Placement {
-            node: label,
-            x: label_x,
-            y: BOX_HEIGHT / 2,
-            width: text_width,
-            height: 1,
+        Column {
+            node: PlacementNode::Label(Label {
+                text: Cow::Borrowed(mode_word),
+                path: vec![],
+                colour: None,
+            }),
+            width: interior(mode_word),
+            padding: MODE_WORD_PADDING,
+        },
+        Column {
+            node: PlacementNode::Label(Label {
+                text: Cow::Owned(filename_text.clone()),
+                path: vec![],
+                colour: Some(FILENAME_COLOUR),
+            }),
+            width: interior(&filename_text),
+            padding: SIDE_PADDING,
         },
     ];
-    with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
+
+    let (mut placements, total_width) = stack_columns(columns, BOX_HEIGHT / 2);
+    let filename_x = placements[2].x;
+
+    let corner_box = Placement {
+        node: PlacementNode::Box {
+            colour: None,
+            fill: Some(FOREGROUND),
+            opacity: Some(FOOTER_FILL_OPACITY),
+            rounded: false,
+            sides: if model.mode == FooterMode::Naming {
+                ALL_SIDES
+            } else {
+                NO_SIDES
+            },
+            border: 1,
+        },
+        x: 0,
+        y: 0,
+        width: total_width,
+        height: BOX_HEIGHT,
+    };
+    placements.insert(0, corner_box);
+
+    if let Some(offset) = model.cursor {
+        placements.push(Placement {
+            node: PlacementNode::Cursor(Cursor),
+            x: filename_x + offset as i64,
+            y: BOX_HEIGHT / 2,
+            width: 1,
+            height: 1,
+        });
+    }
+
+    placements
 }
 
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
@@ -405,6 +464,7 @@ pub(crate) fn with_glow<'a>(
     result
 }
 
+#[allow(dead_code)]
 pub(crate) fn with_cursor<'a>(
     placements: Vec<Placement<'a>>,
     path: Option<Vec<usize>>,
@@ -462,31 +522,28 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
     use crate::palette;
 
-    fn footer_view(
-        text: &str,
-        led_colour: u8,
-        lit: bool,
+    fn footer_model(
+        mode: FooterMode,
+        filename: Option<&str>,
         cursor: Option<usize>,
-        bordered: bool,
-    ) -> FooterView {
-        FooterView {
-            led_colour,
-            lit,
-            text: text.to_string(),
+    ) -> FooterModel {
+        FooterModel {
+            mode,
+            filename: filename.map(str::to_string),
             cursor,
-            bordered,
+        }
+    }
+
+    fn filename_label<'a>(placements: &'a [Placement<'static>]) -> &'a Label<'static> {
+        match &placements[3].node {
+            PlacementNode::Label(label) => label,
+            _ => panic!("expected the fourth placement to be the filename label"),
         }
     }
 
     #[test]
-    fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
-        let text = "MOVE plans \u{2022} dre";
-        let text_width = text.chars().count() as i64;
-        let view = footer_view(text, palette::LIME, false, None, false);
-        let placements = footer(&view);
-        assert_eq!(placements.len(), 3);
-        let inset_box_width = interior(text) + SIDE_PADDING * 2;
-        let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
+    fn footer_box_is_borderless_and_tinted_with_the_foreground_colour_outside_naming() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
         assert_eq!(
             placements[0].node,
             PlacementNode::Box {
@@ -498,63 +555,13 @@ mod tests {
                 border: 1,
             }
         );
-        assert_eq!(
-            (
-                placements[0].x,
-                placements[0].y,
-                placements[0].width,
-                placements[0].height,
-            ),
-            (0, 0, box_width, BOX_HEIGHT)
-        );
-
-        let led_x = centre(inset_box_width, text);
-        assert_eq!(
-            placements[1].node,
-            PlacementNode::Led {
-                colour: palette::LIME,
-                lit: false,
-            }
-        );
-        assert_eq!(
-            (
-                placements[1].x,
-                placements[1].y,
-                placements[1].width,
-                placements[1].height,
-            ),
-            (led_x, BOX_HEIGHT / 2, LED_WIDTH, 1)
-        );
-
-        assert_eq!(
-            placements[2].node,
-            PlacementNode::Label(Label {
-                text: text.into(),
-                path: vec![],
-                colour: None,
-            })
-        );
-        assert_eq!(
-            (
-                placements[2].x,
-                placements[2].y,
-                placements[2].width,
-                placements[2].height,
-            ),
-            (
-                led_x + LED_WIDTH + LED_LABEL_GAP,
-                BOX_HEIGHT / 2,
-                text_width,
-                1
-            )
-        );
+        assert_eq!((placements[0].x, placements[0].y), (0, 0));
+        assert_eq!(placements[0].height, BOX_HEIGHT);
     }
 
     #[test]
-    fn footer_box_is_bordered_when_the_view_is_bordered() {
-        let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, None, true);
-        let placements = footer(&view);
+    fn footer_box_is_bordered_in_naming_mode() {
+        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
         assert_eq!(
             placements[0].node,
             PlacementNode::Box {
@@ -569,58 +576,119 @@ mod tests {
     }
 
     #[test]
-    fn label_leaves_a_blank_column_after_the_led() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
-        let placements = footer(&view);
-        let led = &placements[1];
-        let label = &placements[2];
-        assert_eq!(led.width, LED_WIDTH);
-        assert_eq!(label.x, led.x + LED_WIDTH + LED_LABEL_GAP);
+    fn bordered_box_width_matches_the_stack_total_width_exactly() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
+        let filename = filename_label(&placements);
+        let filename_end = placements[3].x + interior(&filename.text) + SIDE_PADDING;
+        assert_eq!(placements[0].width, filename_end);
     }
 
     #[test]
-    fn a_lit_led_is_marked_lit() {
-        let view = footer_view(
-            "WRITE plans \u{2022} dre",
-            palette::VIOLET,
-            true,
-            None,
-            false,
-        );
-        let placements = footer(&view);
-        match &placements[1].node {
-            PlacementNode::Led { colour, lit } => {
-                assert!(*lit);
-                assert_eq!(*colour, palette::VIOLET);
+    fn led_leaves_a_blank_column_before_the_mode_word() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
+        let led = &placements[1];
+        let mode_word = &placements[2];
+        assert_eq!(led.width, LED_WIDTH);
+        assert_eq!(mode_word.x, led.x + LED_WIDTH + LED_LABEL_GAP);
+    }
+
+    #[test]
+    fn command_mode_led_is_a_dim_lime() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
+        assert_eq!(
+            placements[1].node,
+            PlacementNode::Led {
+                colour: palette::LIME,
+                lit: false,
             }
-            _ => panic!("expected the second placement to be the led box"),
+        );
+    }
+
+    #[test]
+    fn insert_mode_led_is_a_lit_violet() {
+        let placements = footer(&footer_model(FooterMode::Write, Some("plans"), None));
+        assert_eq!(
+            placements[1].node,
+            PlacementNode::Led {
+                colour: palette::VIOLET,
+                lit: true,
+            }
+        );
+    }
+
+    #[test]
+    fn naming_mode_led_is_a_lit_amber() {
+        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
+        assert_eq!(
+            placements[1].node,
+            PlacementNode::Led {
+                colour: palette::AMBER,
+                lit: true,
+            }
+        );
+    }
+
+    #[test]
+    fn mode_word_matches_the_mode_and_renders_in_the_default_colour() {
+        for (mode, word) in [
+            (FooterMode::Move, "MOVE"),
+            (FooterMode::Write, "WRITE"),
+            (FooterMode::Naming, "NAME"),
+        ] {
+            let placements = footer(&footer_model(mode, Some("plans"), None));
+            assert_eq!(
+                placements[2].node,
+                PlacementNode::Label(Label {
+                    text: word.into(),
+                    path: vec![],
+                    colour: None,
+                })
+            );
         }
     }
 
     #[test]
+    fn filename_column_carries_its_own_colour_and_the_models_filename() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
+        let label = filename_label(&placements);
+        assert_eq!(label.text, format!("plans{FOOTER_SUFFIX}"));
+        assert_eq!(label.colour, Some(FILENAME_COLOUR));
+    }
+
+    #[test]
+    fn filename_column_shows_the_no_name_placeholder_outside_naming() {
+        for mode in [FooterMode::Move, FooterMode::Write] {
+            let placements = footer(&footer_model(mode, None, None));
+            let label = filename_label(&placements);
+            assert_eq!(label.text, format!("{NO_NAME}{FOOTER_SUFFIX}"));
+        }
+    }
+
+    #[test]
+    fn filename_column_shows_the_typing_placeholder_in_naming_mode() {
+        let placements = footer(&footer_model(FooterMode::Naming, None, Some(0)));
+        let label = filename_label(&placements);
+        assert_eq!(label.text, format!("{PLACEHOLDER}{FOOTER_SUFFIX}"));
+    }
+
+    #[test]
     fn footer_with_no_cursor_has_no_cursor_placement() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
-        let placements = footer(&view);
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
         assert!(placements
             .iter()
             .all(|p| !matches!(p.node, PlacementNode::Cursor(_))));
     }
 
     #[test]
-    fn footer_with_a_cursor_places_it_at_the_edit_index_on_the_label() {
-        let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, Some(3), false);
-        let placements = footer(&view);
-        let label = placements
-            .iter()
-            .find(|p| matches!(p.node, PlacementNode::Label(_)))
-            .expect("the footer has a label placement");
+    fn footer_with_a_cursor_places_it_at_the_filename_columns_x_plus_the_offset() {
+        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
+        let filename = &placements[3];
         let cursor = placements
             .iter()
             .find(|p| matches!(p.node, PlacementNode::Cursor(_)))
-            .expect("a cursor is present when view.cursor is Some");
-        assert_eq!(cursor.x, label.x + 3);
-        assert_eq!(cursor.y, label.y);
+            .expect("a cursor is present when model.cursor is Some");
+        assert_eq!(cursor.x, filename.x + 2);
+        assert_eq!(cursor.y, filename.y);
     }
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {

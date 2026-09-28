@@ -11,6 +11,7 @@ const PALETTE: [(&str, (u8, u8, u8)); 7] = [
 pub(crate) const FOREGROUND: u8 = 5;
 pub(crate) const BACKGROUND: u8 = 6;
 pub(crate) const LIME: u8 = 0;
+pub(crate) const MINT: u8 = 1;
 pub(crate) const VIOLET: u8 = 2;
 pub(crate) const AMBER: u8 = 4;
 

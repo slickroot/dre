@@ -1274,6 +1274,10 @@ mod tests {
     }
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
+        label_at_with_colour(x, y, text, None)
+    }
+
+    fn label_at_with_colour(x: i64, y: i64, text: &str, label_colour: Option<u8>) -> String {
         let chars = text.chars().count() as i64;
         format!(
             "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\">{text}</text>",
@@ -1281,7 +1285,7 @@ mod tests {
             x * CELL_WIDTH,
             y * CELL_HEIGHT + CELL_HEIGHT / 2,
             chars * CELL_WIDTH,
-            rgb(colour(None)),
+            rgb(colour(label_colour)),
         )
     }
 
@@ -1590,6 +1594,8 @@ mod tests {
     }
 
     const NAME: &str = "plans";
+    const MODE_WORD: &str = "MOVE";
+    const FILENAME_TEXT: &str = "plans \u{2022} dre";
     const FOOTER_TEXT: &str = "MOVE plans \u{2022} dre";
 
     fn footer_width() -> i64 {
@@ -1611,13 +1617,30 @@ mod tests {
         area.col + centre_label(inset_width, FOOTER_TEXT)
     }
 
-    fn footer_label_x(area: Area) -> i64 {
+    fn footer_mode_word_x(area: Area) -> i64 {
         footer_led_x(area) + LED_WIDTH + LED_LABEL_GAP
+    }
+
+    fn footer_filename_x(area: Area) -> i64 {
+        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + 1
     }
 
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
-        label_at(footer_label_x(area), area.row + BOX_HEIGHT / 2, FOOTER_TEXT)
+        format!(
+            "{}{}",
+            label_at(
+                footer_mode_word_x(area),
+                area.row + BOX_HEIGHT / 2,
+                MODE_WORD
+            ),
+            label_at_with_colour(
+                footer_filename_x(area),
+                area.row + BOX_HEIGHT / 2,
+                FILENAME_TEXT,
+                Some(crate::palette::MINT),
+            )
+        )
     }
 
     fn footer_rect(foot: Area) -> String {
@@ -1873,7 +1896,8 @@ mod tests {
 
         assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
         assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
-        assert!(svg.contains(&format!(">{FOOTER_TEXT}</text>")));
+        assert!(svg.contains(&format!(">{MODE_WORD}</text>")));
+        assert!(svg.contains(&format!(">{FILENAME_TEXT}</text>")));
     }
 
     #[test]

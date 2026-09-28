@@ -89,7 +89,8 @@ mod tests {
     fn enter_confirms_the_name_and_drops_the_hint_from_the_footer() {
         let state = new_state(vec![], prompt("plans"), None);
         let result = handle_key(state, "\r");
-        assert_eq!(result.footer().text, "MOVE plans \u{2022} dre");
+        assert_eq!(result.footer().mode, crate::state::FooterMode::Move);
+        assert_eq!(result.footer().filename, Some("plans".to_string()));
     }
 
     #[test]
