@@ -1,4 +1,6 @@
-use crate::state::action::{Action, CommandAction, InsertAction, NamePromptAction};
+use crate::state::action::{
+    Action, ImmediateCommand, InsertAction, NamePromptAction, SelectionCommand,
+};
 use crate::state::text_edit::TextKey;
 use crate::state::{Mode, State};
 
@@ -49,27 +51,29 @@ enum KeyAction {
 impl KeyAction {
     fn action(self, key: &str) -> Action {
         match self {
-            Self::Undo => Action::Command(CommandAction::Undo),
-            Self::NewBox => Action::Command(CommandAction::NewBox),
-            Self::NewSibling => Action::Command(CommandAction::NewSibling),
-            Self::Delete => Action::Command(CommandAction::Delete),
-            Self::Paste => Action::Command(CommandAction::Paste),
-            Self::SelectParent => Action::Command(CommandAction::SelectParent),
-            Self::SelectChild => Action::Command(CommandAction::SelectChild),
-            Self::SelectNext => Action::Command(CommandAction::SelectNext),
-            Self::SelectPrevious => Action::Command(CommandAction::SelectPrevious),
-            Self::EditLabel => Action::Command(CommandAction::EditLabel),
-            Self::RenameLabel => Action::Command(CommandAction::RenameLabel),
-            Self::CycleColour => Action::Command(CommandAction::CycleColour),
-            Self::CycleSiblingsColour => Action::Command(CommandAction::CycleSiblingsColour),
-            Self::ToggleSiblingsFill => Action::Command(CommandAction::ToggleSiblingsFill),
-            Self::ToggleFill => Action::Command(CommandAction::ToggleFill),
-            Self::ToggleRounded => Action::Command(CommandAction::ToggleRounded),
-            Self::ToggleSiblingsRounded => Action::Command(CommandAction::ToggleSiblingsRounded),
-            Self::Quit => Action::Command(CommandAction::Quit),
-            Self::OpenNamePrompt => Action::Command(CommandAction::OpenNamePrompt),
-            Self::Interrupt => Action::Command(CommandAction::Interrupt),
-            Self::Digit => Action::Command(CommandAction::Digit(key.as_bytes()[0] - b'0')),
+            Self::Undo => Action::Selection(SelectionCommand::Undo),
+            Self::NewBox => Action::Selection(SelectionCommand::NewBox),
+            Self::NewSibling => Action::Selection(SelectionCommand::NewSibling),
+            Self::Delete => Action::Selection(SelectionCommand::Delete),
+            Self::Paste => Action::Selection(SelectionCommand::Paste),
+            Self::SelectParent => Action::Selection(SelectionCommand::SelectParent),
+            Self::SelectChild => Action::Selection(SelectionCommand::SelectChild),
+            Self::SelectNext => Action::Selection(SelectionCommand::SelectNext),
+            Self::SelectPrevious => Action::Selection(SelectionCommand::SelectPrevious),
+            Self::EditLabel => Action::Selection(SelectionCommand::EditLabel),
+            Self::RenameLabel => Action::Selection(SelectionCommand::RenameLabel),
+            Self::CycleColour => Action::Selection(SelectionCommand::CycleColour),
+            Self::CycleSiblingsColour => Action::Selection(SelectionCommand::CycleSiblingsColour),
+            Self::ToggleSiblingsFill => Action::Selection(SelectionCommand::ToggleSiblingsFill),
+            Self::ToggleFill => Action::Selection(SelectionCommand::ToggleFill),
+            Self::ToggleRounded => Action::Selection(SelectionCommand::ToggleRounded),
+            Self::ToggleSiblingsRounded => {
+                Action::Selection(SelectionCommand::ToggleSiblingsRounded)
+            }
+            Self::Quit => Action::Selection(SelectionCommand::Quit),
+            Self::OpenNamePrompt => Action::Immediate(ImmediateCommand::OpenNamePrompt),
+            Self::Interrupt => Action::Immediate(ImmediateCommand::Interrupt),
+            Self::Digit => Action::Immediate(ImmediateCommand::Digit(key.as_bytes()[0] - b'0')),
             Self::Commit => Action::Insert(InsertAction::Commit),
             Self::CommitAndAddChild => Action::Insert(InsertAction::CommitAndAddChild),
             Self::InsertBackspace => Action::Insert(InsertAction::InsertKey(TextKey::Backspace)),
@@ -364,7 +368,7 @@ pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
     match binding {
         Some(binding) => Some(binding.action.action(key)),
         None if matches!(state.mode, Mode::Command) => {
-            Some(Action::Command(CommandAction::CancelCount))
+            Some(Action::Immediate(ImmediateCommand::CancelCount))
         }
         None => None,
     }
@@ -394,28 +398,30 @@ fn keymap_markdown() -> String {
 #[cfg(test)]
 fn action_key(action: &Action) -> KeyAction {
     match action {
-        Action::Command(CommandAction::Undo) => KeyAction::Undo,
-        Action::Command(CommandAction::NewBox) => KeyAction::NewBox,
-        Action::Command(CommandAction::NewSibling) => KeyAction::NewSibling,
-        Action::Command(CommandAction::Delete) => KeyAction::Delete,
-        Action::Command(CommandAction::Paste) => KeyAction::Paste,
-        Action::Command(CommandAction::SelectParent) => KeyAction::SelectParent,
-        Action::Command(CommandAction::SelectChild) => KeyAction::SelectChild,
-        Action::Command(CommandAction::SelectNext) => KeyAction::SelectNext,
-        Action::Command(CommandAction::SelectPrevious) => KeyAction::SelectPrevious,
-        Action::Command(CommandAction::EditLabel) => KeyAction::EditLabel,
-        Action::Command(CommandAction::RenameLabel) => KeyAction::RenameLabel,
-        Action::Command(CommandAction::CycleColour) => KeyAction::CycleColour,
-        Action::Command(CommandAction::CycleSiblingsColour) => KeyAction::CycleSiblingsColour,
-        Action::Command(CommandAction::ToggleSiblingsFill) => KeyAction::ToggleSiblingsFill,
-        Action::Command(CommandAction::ToggleFill) => KeyAction::ToggleFill,
-        Action::Command(CommandAction::ToggleRounded) => KeyAction::ToggleRounded,
-        Action::Command(CommandAction::ToggleSiblingsRounded) => KeyAction::ToggleSiblingsRounded,
-        Action::Command(CommandAction::Quit) => KeyAction::Quit,
-        Action::Command(CommandAction::Interrupt) => KeyAction::Interrupt,
-        Action::Command(CommandAction::Digit(_)) => KeyAction::Digit,
-        Action::Command(CommandAction::CancelCount) => panic!("CancelCount is not a binding"),
-        Action::Command(CommandAction::OpenNamePrompt) => KeyAction::OpenNamePrompt,
+        Action::Selection(SelectionCommand::Undo) => KeyAction::Undo,
+        Action::Selection(SelectionCommand::NewBox) => KeyAction::NewBox,
+        Action::Selection(SelectionCommand::NewSibling) => KeyAction::NewSibling,
+        Action::Selection(SelectionCommand::Delete) => KeyAction::Delete,
+        Action::Selection(SelectionCommand::Paste) => KeyAction::Paste,
+        Action::Selection(SelectionCommand::SelectParent) => KeyAction::SelectParent,
+        Action::Selection(SelectionCommand::SelectChild) => KeyAction::SelectChild,
+        Action::Selection(SelectionCommand::SelectNext) => KeyAction::SelectNext,
+        Action::Selection(SelectionCommand::SelectPrevious) => KeyAction::SelectPrevious,
+        Action::Selection(SelectionCommand::EditLabel) => KeyAction::EditLabel,
+        Action::Selection(SelectionCommand::RenameLabel) => KeyAction::RenameLabel,
+        Action::Selection(SelectionCommand::CycleColour) => KeyAction::CycleColour,
+        Action::Selection(SelectionCommand::CycleSiblingsColour) => KeyAction::CycleSiblingsColour,
+        Action::Selection(SelectionCommand::ToggleSiblingsFill) => KeyAction::ToggleSiblingsFill,
+        Action::Selection(SelectionCommand::ToggleFill) => KeyAction::ToggleFill,
+        Action::Selection(SelectionCommand::ToggleRounded) => KeyAction::ToggleRounded,
+        Action::Selection(SelectionCommand::ToggleSiblingsRounded) => {
+            KeyAction::ToggleSiblingsRounded
+        }
+        Action::Selection(SelectionCommand::Quit) => KeyAction::Quit,
+        Action::Immediate(ImmediateCommand::Interrupt) => KeyAction::Interrupt,
+        Action::Immediate(ImmediateCommand::Digit(_)) => KeyAction::Digit,
+        Action::Immediate(ImmediateCommand::CancelCount) => panic!("CancelCount is not a binding"),
+        Action::Immediate(ImmediateCommand::OpenNamePrompt) => KeyAction::OpenNamePrompt,
         Action::Insert(InsertAction::Commit) => KeyAction::Commit,
         Action::Insert(InsertAction::CommitAndAddChild) => KeyAction::CommitAndAddChild,
         Action::Insert(InsertAction::InsertKey(TextKey::Backspace)) => KeyAction::InsertBackspace,
@@ -442,11 +448,11 @@ mod tests {
     fn table_parses_each_mode_and_pattern() {
         assert_eq!(
             parse(&key_state(Mode::Command), "b"),
-            Some(Action::Command(CommandAction::NewBox))
+            Some(Action::Selection(SelectionCommand::NewBox))
         );
         assert_eq!(
             parse(&key_state(Mode::Command), "7"),
-            Some(Action::Command(CommandAction::Digit(7)))
+            Some(Action::Immediate(ImmediateCommand::Digit(7)))
         );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "b"),
@@ -468,7 +474,7 @@ mod tests {
     fn exact_matches_take_precedence_over_patterns() {
         assert_eq!(
             parse(&key_state(Mode::Command), INTERRUPT),
-            Some(Action::Command(CommandAction::Interrupt))
+            Some(Action::Immediate(ImmediateCommand::Interrupt))
         );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "\x1b"),
@@ -480,7 +486,7 @@ mod tests {
     fn unknown_command_keys_cancel_counts_and_other_unknown_keys_do_nothing() {
         assert_eq!(
             parse(&key_state(Mode::Command), "x"),
-            Some(Action::Command(CommandAction::CancelCount))
+            Some(Action::Immediate(ImmediateCommand::CancelCount))
         );
         assert_eq!(parse(&key_state(Mode::Insert { cursor: 0 }), "\x01"), None);
         assert_eq!(
@@ -498,33 +504,33 @@ mod tests {
     #[test]
     fn every_user_action_has_one_binding_and_exact_keys_are_unique_per_mode() {
         for action in [
-            Action::Command(CommandAction::Undo),
-            Action::Command(CommandAction::NewBox),
-            Action::Command(CommandAction::NewSibling),
-            Action::Command(CommandAction::Delete),
-            Action::Command(CommandAction::Paste),
-            Action::Command(CommandAction::SelectParent),
-            Action::Command(CommandAction::SelectChild),
-            Action::Command(CommandAction::SelectNext),
-            Action::Command(CommandAction::SelectPrevious),
-            Action::Command(CommandAction::EditLabel),
-            Action::Command(CommandAction::RenameLabel),
-            Action::Command(CommandAction::CycleColour),
-            Action::Command(CommandAction::CycleSiblingsColour),
-            Action::Command(CommandAction::ToggleSiblingsFill),
-            Action::Command(CommandAction::ToggleFill),
-            Action::Command(CommandAction::ToggleRounded),
-            Action::Command(CommandAction::ToggleSiblingsRounded),
-            Action::Command(CommandAction::Quit),
-            Action::Command(CommandAction::Interrupt),
-            Action::Command(CommandAction::Digit(1)),
+            Action::Selection(SelectionCommand::Undo),
+            Action::Selection(SelectionCommand::NewBox),
+            Action::Selection(SelectionCommand::NewSibling),
+            Action::Selection(SelectionCommand::Delete),
+            Action::Selection(SelectionCommand::Paste),
+            Action::Selection(SelectionCommand::SelectParent),
+            Action::Selection(SelectionCommand::SelectChild),
+            Action::Selection(SelectionCommand::SelectNext),
+            Action::Selection(SelectionCommand::SelectPrevious),
+            Action::Selection(SelectionCommand::EditLabel),
+            Action::Selection(SelectionCommand::RenameLabel),
+            Action::Selection(SelectionCommand::CycleColour),
+            Action::Selection(SelectionCommand::CycleSiblingsColour),
+            Action::Selection(SelectionCommand::ToggleSiblingsFill),
+            Action::Selection(SelectionCommand::ToggleFill),
+            Action::Selection(SelectionCommand::ToggleRounded),
+            Action::Selection(SelectionCommand::ToggleSiblingsRounded),
+            Action::Selection(SelectionCommand::Quit),
+            Action::Immediate(ImmediateCommand::Interrupt),
+            Action::Immediate(ImmediateCommand::Digit(1)),
             Action::Insert(InsertAction::Commit),
             Action::Insert(InsertAction::CommitAndAddChild),
             Action::Insert(InsertAction::InsertKey(TextKey::Backspace)),
             Action::Insert(InsertAction::InsertKey(TextKey::Left)),
             Action::Insert(InsertAction::InsertKey(TextKey::Right)),
             Action::Insert(InsertAction::InsertKey(TextKey::Char('a'))),
-            Action::Command(CommandAction::OpenNamePrompt),
+            Action::Immediate(ImmediateCommand::OpenNamePrompt),
             Action::NamePrompt(NamePromptAction::NameAppend('a')),
             Action::NamePrompt(NamePromptAction::NameBackspace),
             Action::NamePrompt(NamePromptAction::NameConfirm),

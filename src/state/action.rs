@@ -1,7 +1,7 @@
 use crate::state::text_edit::TextKey;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum CommandAction {
+pub(crate) enum SelectionCommand {
     Undo,
     NewBox,
     NewSibling,
@@ -20,6 +20,10 @@ pub(crate) enum CommandAction {
     ToggleFill,
     ToggleRounded,
     Quit,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ImmediateCommand {
     Interrupt,
     OpenNamePrompt,
     Digit(u8),
@@ -44,63 +48,56 @@ pub(crate) enum NamePromptAction {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Action {
-    Command(CommandAction),
+    Selection(SelectionCommand),
+    Immediate(ImmediateCommand),
     Insert(InsertAction),
     NamePrompt(NamePromptAction),
 }
 
-impl CommandAction {
+impl SelectionCommand {
     pub(crate) fn min_depth(&self) -> usize {
         match self {
-            CommandAction::Undo
-            | CommandAction::NewBox
-            | CommandAction::Paste
-            | CommandAction::Quit
-            | CommandAction::Interrupt
-            | CommandAction::OpenNamePrompt
-            | CommandAction::Digit(_)
-            | CommandAction::CancelCount => 0,
-            CommandAction::NewSibling
-            | CommandAction::SelectChild
-            | CommandAction::SelectNext
-            | CommandAction::SelectPrevious
-            | CommandAction::EditLabel
-            | CommandAction::RenameLabel
-            | CommandAction::CycleColour
-            | CommandAction::CycleSiblingsColour
-            | CommandAction::ToggleSiblingsFill
-            | CommandAction::ToggleFill
-            | CommandAction::Delete
-            | CommandAction::ToggleRounded
-            | CommandAction::ToggleSiblingsRounded => 1,
-            CommandAction::SelectParent => 2,
+            SelectionCommand::Undo
+            | SelectionCommand::NewBox
+            | SelectionCommand::Paste
+            | SelectionCommand::Quit => 0,
+            SelectionCommand::NewSibling
+            | SelectionCommand::SelectChild
+            | SelectionCommand::SelectNext
+            | SelectionCommand::SelectPrevious
+            | SelectionCommand::EditLabel
+            | SelectionCommand::RenameLabel
+            | SelectionCommand::CycleColour
+            | SelectionCommand::CycleSiblingsColour
+            | SelectionCommand::ToggleSiblingsFill
+            | SelectionCommand::ToggleFill
+            | SelectionCommand::Delete
+            | SelectionCommand::ToggleRounded
+            | SelectionCommand::ToggleSiblingsRounded => 1,
+            SelectionCommand::SelectParent => 2,
         }
     }
 
     pub(crate) fn undoable(&self) -> bool {
         match self {
-            CommandAction::NewBox
-            | CommandAction::Paste
-            | CommandAction::NewSibling
-            | CommandAction::Delete
-            | CommandAction::EditLabel
-            | CommandAction::RenameLabel
-            | CommandAction::CycleColour
-            | CommandAction::CycleSiblingsColour
-            | CommandAction::ToggleFill
-            | CommandAction::ToggleSiblingsFill
-            | CommandAction::ToggleRounded
-            | CommandAction::ToggleSiblingsRounded => true,
-            CommandAction::Undo
-            | CommandAction::Quit
-            | CommandAction::SelectParent
-            | CommandAction::SelectChild
-            | CommandAction::SelectNext
-            | CommandAction::SelectPrevious
-            | CommandAction::Interrupt
-            | CommandAction::OpenNamePrompt
-            | CommandAction::Digit(_)
-            | CommandAction::CancelCount => false,
+            SelectionCommand::NewBox
+            | SelectionCommand::Paste
+            | SelectionCommand::NewSibling
+            | SelectionCommand::Delete
+            | SelectionCommand::EditLabel
+            | SelectionCommand::RenameLabel
+            | SelectionCommand::CycleColour
+            | SelectionCommand::CycleSiblingsColour
+            | SelectionCommand::ToggleFill
+            | SelectionCommand::ToggleSiblingsFill
+            | SelectionCommand::ToggleRounded
+            | SelectionCommand::ToggleSiblingsRounded => true,
+            SelectionCommand::Undo
+            | SelectionCommand::Quit
+            | SelectionCommand::SelectParent
+            | SelectionCommand::SelectChild
+            | SelectionCommand::SelectNext
+            | SelectionCommand::SelectPrevious => false,
         }
     }
 }
@@ -117,7 +114,8 @@ impl InsertAction {
 impl Action {
     pub(crate) fn undoable(&self) -> bool {
         match self {
-            Action::Command(a) => a.undoable(),
+            Action::Selection(a) => a.undoable(),
+            Action::Immediate(_) => false,
             Action::Insert(a) => a.undoable(),
             Action::NamePrompt(_) => false,
         }
@@ -130,15 +128,15 @@ mod tests {
 
     #[test]
     fn command_actions_below_selection_depth_two_need_no_selection() {
-        assert_eq!(CommandAction::SelectParent.min_depth(), 2);
-        assert_eq!(CommandAction::EditLabel.min_depth(), 1);
-        assert_eq!(CommandAction::Undo.min_depth(), 0);
+        assert_eq!(SelectionCommand::SelectParent.min_depth(), 2);
+        assert_eq!(SelectionCommand::EditLabel.min_depth(), 1);
+        assert_eq!(SelectionCommand::Undo.min_depth(), 0);
     }
 
     #[test]
     fn only_mutating_command_and_commit_and_add_child_actions_are_undoable() {
-        assert!(CommandAction::NewBox.undoable());
-        assert!(!CommandAction::SelectChild.undoable());
+        assert!(SelectionCommand::NewBox.undoable());
+        assert!(!SelectionCommand::SelectChild.undoable());
         assert!(InsertAction::CommitAndAddChild.undoable());
         assert!(!InsertAction::Commit.undoable());
     }

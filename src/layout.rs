@@ -238,6 +238,14 @@ pub enum PlacementNode<'a> {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement<'a> {
     pub node: PlacementNode<'a>,
@@ -245,6 +253,23 @@ pub struct Placement<'a> {
     pub y: i64,
     pub width: i64,
     pub height: i64,
+}
+
+impl From<&Placement<'_>> for Geometry {
+    fn from(placement: &Placement<'_>) -> Self {
+        Geometry {
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+        }
+    }
+}
+
+impl<'a> Placement<'a> {
+    pub fn geometry(&self) -> Geometry {
+        self.into()
+    }
 }
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
@@ -535,7 +560,6 @@ mod tests {
                 rounded: false,
                 sides: ALL_SIDES,
                 border: 1,
-                selected: false,
             }
         );
     }
