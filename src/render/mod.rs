@@ -320,33 +320,33 @@ mod tests {
     #[test]
     fn editor_ends_with_the_name_and_dre_in_the_bottom_right_corner_when_there_is_a_path() {
         let state = state_saved_to("docs/plans.dre");
-        assert_footer_is_bottom_right(&state, "MOVE plans \u{2022} dre", "MOVE", "plans");
+        assert_footer_is_bottom_right(&state, "MOVE", "plans");
     }
 
     #[test]
     fn editor_ends_with_the_hint_and_dre_in_the_bottom_right_corner_when_there_is_no_path() {
         let state = state(None);
-        assert_footer_is_bottom_right(
-            &state,
-            "MOVE [no name — press n to name it] \u{2022} dre",
-            "MOVE",
-            "[no name — press n to name it]",
-        );
+        assert_footer_is_bottom_right(&state, "MOVE", "[no name — press n to name it]");
     }
 
     const COLUMN_PADDING: i64 = 1;
     const COLUMN_GAP: i64 = COLUMN_PADDING * 2;
+    const FILENAME_PREFIX: &str = "\u{2022} ";
+    const FILENAME_SUFFIX: &str = " \u{2022}";
 
-    fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
-        let text_width = text.chars().count() as i64;
-        // `text` already contains the one space between the mode word and the
-        // filename, so only the padding beyond that single character is added.
-        let box_width = text_width - 1
+    fn padded_filename(name: &str) -> String {
+        format!("{FILENAME_PREFIX}{name}{FILENAME_SUFFIX}")
+    }
+
+    fn box_at_bottom_right(foot: Area, mode_word: &str, name: &str) -> (i64, i64, i64, i64) {
+        let box_width = COLUMN_PADDING
             + LED_WIDTH
+            + COLUMN_GAP
+            + mode_word.chars().count() as i64
             + COLUMN_PADDING
-            + COLUMN_GAP
-            + COLUMN_GAP
-            + COLUMN_GAP
+            + padded_filename(name).chars().count() as i64
+            + COLUMN_PADDING
+            + FOOTER_SUFFIX.chars().count() as i64
             + COLUMN_PADDING;
         (
             foot.col + foot.cols - box_width,
@@ -365,93 +365,81 @@ mod tests {
     }
 
     fn filename_x(box_x: i64, mode_word: &str) -> i64 {
-        label_x(box_x) + mode_word.chars().count() as i64 + COLUMN_GAP
+        label_x(box_x) + mode_word.chars().count() as i64 + COLUMN_PADDING
     }
 
-    const FOOTER_SUFFIX: &str = " \u{2022} dre";
+    const FOOTER_SUFFIX: &str = "dre";
 
     fn suffix_x(box_x: i64, mode_word: &str, name: &str) -> i64 {
-        filename_x(box_x, mode_word) + name.chars().count() as i64 + COLUMN_GAP
+        filename_x(box_x, mode_word) + padded_filename(name).chars().count() as i64 + COLUMN_PADDING
     }
 
-    fn prompt_cursor_x(name: &str, text: &str) -> i64 {
+    fn prompt_cursor_x(typed: &str, displayed: &str, mode_word: &str) -> i64 {
         let foot = foot_of(WINDOW);
-        let (box_x, _, _, _) = box_at_bottom_right(foot, text);
-        filename_x(box_x, "NAME") + name.chars().count() as i64
+        let (box_x, _, _, _) = box_at_bottom_right(foot, mode_word, displayed);
+        filename_x(box_x, mode_word)
+            + FILENAME_PREFIX.chars().count() as i64
+            + typed.chars().count() as i64
     }
 
     #[test]
     fn the_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "n");
-        let text = "NAME type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(
             &state,
-            text,
             "NAME",
             "type a name",
-            prompt_cursor_x("", text),
+            prompt_cursor_x("", "type a name", "NAME"),
         );
     }
 
     #[test]
     fn the_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "n"), "a"), "b");
-        let text = "NAME ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(
             &state,
-            text,
             "NAME",
             "ab",
-            prompt_cursor_x("ab", text),
+            prompt_cursor_x("ab", "ab", "NAME"),
         );
     }
 
     #[test]
     fn cancelling_the_prompt_restores_the_footer() {
         let state = handle_key(handle_key(state(None), "n"), "\x1b");
-        assert_footer_is_bottom_right(
-            &state,
-            "MOVE [no name — press n to name it] \u{2022} dre",
-            "MOVE",
-            "[no name — press n to name it]",
-        );
+        assert_footer_is_bottom_right(&state, "MOVE", "[no name — press n to name it]");
     }
 
     #[test]
     fn the_quit_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "q");
-        let text = "NAME type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(
             &state,
-            text,
             "NAME",
             "type a name",
-            prompt_cursor_x("", text),
+            prompt_cursor_x("", "type a name", "NAME"),
         );
     }
 
     #[test]
     fn the_quit_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "q"), "a"), "b");
-        let text = "NAME ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(
             &state,
-            text,
             "NAME",
             "ab",
-            prompt_cursor_x("ab", text),
+            prompt_cursor_x("ab", "ab", "NAME"),
         );
     }
 
     fn assert_footer_is_bottom_right_with_cursor(
         state: &State,
-        text: &str,
         mode_word: &str,
         name: &str,
         x: i64,
     ) {
         let foot = foot_of(WINDOW);
-        let (box_x, box_y, _, _) = box_at_bottom_right(foot, text);
+        let (box_x, box_y, _, _) = box_at_bottom_right(foot, mode_word, name);
         let footer = &editor(state, WINDOW)[1].1;
         assert_eq!(footer.len(), 6);
         assert_eq!(
@@ -461,7 +449,7 @@ mod tests {
         assert_eq!(
             footer[3],
             colored_label_at(
-                name,
+                &padded_filename(name),
                 filename_x(box_x, mode_word),
                 box_y + BOX_HEIGHT / 2,
                 Some(crate::style::DIM),
@@ -487,10 +475,10 @@ mod tests {
         );
     }
 
-    fn assert_footer_is_bottom_right(state: &State, text: &str, mode_word: &str, name: &str) {
+    fn assert_footer_is_bottom_right(state: &State, mode_word: &str, name: &str) {
         let screen = editor(state, WINDOW);
         let foot = foot_of(WINDOW);
-        let (box_x, box_y, box_width, box_height) = box_at_bottom_right(foot, text);
+        let (box_x, box_y, box_width, box_height) = box_at_bottom_right(foot, mode_word, name);
         let footer = &screen[1].1;
         assert_eq!(footer.len(), 5);
         assert_eq!(
@@ -508,7 +496,7 @@ mod tests {
         assert_eq!(
             footer[3],
             colored_label_at(
-                name,
+                &padded_filename(name),
                 filename_x(box_x, mode_word),
                 box_y + BOX_HEIGHT / 2,
                 Some(crate::style::DIM),
