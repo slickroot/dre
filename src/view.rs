@@ -186,7 +186,10 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                     FooterMode::Write => style::VIOLET,
                     FooterMode::Naming => style::AMBER,
                 },
-                lit: !matches!(model.mode, FooterMode::Move),
+                lit: match model.mode {
+                    FooterMode::Move => model.flash,
+                    FooterMode::Write | FooterMode::Naming => true,
+                },
             },
             width: LED_WIDTH,
             padding: 1,
@@ -429,5 +432,48 @@ mod tests {
         let second = &placements[1];
         let gap = second.x - (first.x + first.width);
         assert_eq!(gap, first_padding as i64 + second_padding as i64);
+    }
+
+    fn footer_model(mode: FooterMode, flash: bool) -> FooterModel {
+        FooterModel {
+            mode,
+            filename: None,
+            cursor: None,
+            flash,
+        }
+    }
+
+    fn led_lit(model: &FooterModel) -> bool {
+        footer(model)
+            .into_iter()
+            .find_map(|placement| match placement.node {
+                PlacementNode::Led { lit, .. } => Some(lit),
+                _ => None,
+            })
+            .expect("footer placements should contain a Led node")
+    }
+
+    #[test]
+    fn footer_led_is_unlit_in_move_mode_when_not_flashing() {
+        let model = footer_model(FooterMode::Move, false);
+        assert!(!led_lit(&model));
+    }
+
+    #[test]
+    fn footer_led_is_lit_in_move_mode_when_flashing() {
+        let model = footer_model(FooterMode::Move, true);
+        assert!(led_lit(&model));
+    }
+
+    #[test]
+    fn footer_led_is_lit_in_write_mode_regardless_of_flash() {
+        let model = footer_model(FooterMode::Write, false);
+        assert!(led_lit(&model));
+    }
+
+    #[test]
+    fn footer_led_is_lit_in_naming_mode_regardless_of_flash() {
+        let model = footer_model(FooterMode::Naming, false);
+        assert!(led_lit(&model));
     }
 }

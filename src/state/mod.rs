@@ -35,6 +35,7 @@ pub struct State {
     new_file: bool,
     pending_count: Option<usize>,
     saved_len: usize,
+    led_flash: bool,
 }
 
 impl State {
@@ -85,6 +86,11 @@ impl State {
         self.new_file
     }
 
+    #[cfg(test)]
+    pub(crate) fn led_flash(&self) -> bool {
+        self.led_flash
+    }
+
     pub(crate) fn save_to(&self) -> Option<&str> {
         self.save_to.as_deref()
     }
@@ -99,16 +105,19 @@ impl State {
                 mode: FooterMode::Write,
                 filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
+                flash: false,
             },
             Mode::NamePrompt { name, .. } => FooterModel {
                 mode: FooterMode::Naming,
                 filename: (!name.is_empty()).then(|| name.clone()),
                 cursor: Some(name.chars().count()),
+                flash: false,
             },
             Mode::Command => FooterModel {
                 mode: FooterMode::Move,
                 filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
+                flash: self.led_flash,
             },
         }
     }
@@ -126,6 +135,7 @@ pub(crate) struct FooterModel {
     pub(crate) mode: FooterMode,
     pub(crate) filename: Option<String>,
     pub(crate) cursor: Option<usize>,
+    pub(crate) flash: bool,
 }
 
 fn file_stem_without_dre(path: &str) -> String {
@@ -149,8 +159,15 @@ impl Default for State {
             new_file: false,
             pending_count: None,
             saved_len: 0,
+            led_flash: false,
         }
     }
+}
+
+pub(crate) fn flash(state: State) -> State {
+    let mut state = state;
+    state.led_flash = true;
+    state
 }
 
 fn apply(state: State, action: Action) -> State {
@@ -177,6 +194,7 @@ pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
     } else {
         vec![]
     };
+    state.led_flash = false;
     (state, effects)
 }
 
@@ -201,6 +219,7 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         new_file: false,
         pending_count: None,
         saved_len: 0,
+        led_flash: false,
     }
 }
 
@@ -287,6 +306,55 @@ mod tests {
         let footer = state.footer();
         assert_eq!(footer.mode, FooterMode::Move);
         assert_eq!(footer.cursor, None);
+    }
+
+    #[test]
+    fn command_mode_footer_flash_is_false_by_default() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert!(!state.footer().flash);
+    }
+
+    #[test]
+    fn command_mode_footer_flash_is_true_after_flash() {
+        let state = flash(new_state(vec![], Mode::Command, None));
+        assert!(state.footer().flash);
+    }
+
+    #[test]
+    fn insert_mode_footer_flash_is_always_false() {
+        let state = flash(new_state(
+            vec![node("a")],
+            Mode::Insert { cursor: 0 },
+            Some(vec![0]),
+        ));
+        assert!(!state.footer().flash);
+    }
+
+    #[test]
+    fn name_prompt_footer_flash_is_always_false() {
+        let mut state = new_state(vec![], Mode::Command, None);
+        state.mode = Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        };
+        let state = flash(state);
+        assert!(!state.footer().flash);
+    }
+
+    #[test]
+    fn flash_sets_led_flash_to_true() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert!(!state.led_flash());
+        let flashed = flash(state);
+        assert!(flashed.led_flash());
+    }
+
+    #[test]
+    fn reduce_always_resets_led_flash_to_false() {
+        let state = flash(new_state(vec![], Mode::Command, None));
+        assert!(state.led_flash());
+        let result = crate::state::reduce(state, Some("j")).0;
+        assert!(!result.led_flash());
     }
 
     #[test]

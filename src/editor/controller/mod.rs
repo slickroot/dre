@@ -5,7 +5,7 @@ pub(crate) mod screen;
 
 use std::io;
 
-use crate::state::State;
+use crate::state::{self, Mode, State};
 use crate::tty;
 use effects::EffectExecutor;
 use key_source::KeySource;
@@ -48,6 +48,9 @@ impl Controller for DreController {
             match self.keys.next_key()? {
                 Some(key) if key == tty::RESIZE => self.screen.resize()?,
                 key => {
+                    if key.is_some() && *state.mode() == Mode::Command {
+                        self.screen.render(&state::flash(state.clone()))?;
+                    }
                     let (next, effects) = self.reducer.reduce(state, key.as_deref());
                     self.executor.execute(effects, &next)?;
                     state = next;
@@ -65,7 +68,7 @@ mod tests {
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
-    use crate::state::Effect;
+    use crate::state::{new_state, Effect};
     use crate::tty::RESIZE;
     use mockall::Sequence;
 
@@ -141,6 +144,11 @@ mod tests {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|| Ok(Some("q".to_string())));
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
 
         controller(keys, screen, reducer_stopping_on("q"), any_executor())
             .run(State::default())
@@ -184,13 +192,25 @@ mod tests {
         let mut screen = MockScreen::new();
         screen
             .expect_render()
-            .withf(|state| state.pending_count() == Some(1))
+            .withf(|state| state.pending_count() == Some(1) && !state.led_flash())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
         screen
             .expect_render()
-            .withf(|state| state.pending_count() == Some(2))
+            .withf(|state| state.pending_count() == Some(1) && state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.pending_count() == Some(2) && !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.pending_count() == Some(2) && state.led_flash())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -224,7 +244,7 @@ mod tests {
             .times(1)
             .returning(|_, _| (stopped(marked(9)), vec![]));
         let mut screen = MockScreen::new();
-        screen.expect_render().times(1).returning(|_| Ok(()));
+        screen.expect_render().times(2).returning(|_| Ok(()));
 
         let state = controller(
             keys_reading(vec![Some("q")]),
@@ -378,5 +398,154 @@ mod tests {
             .unwrap();
 
         assert_eq!(error.to_string(), "save failed");
+    }
+
+    #[test]
+    fn a_command_mode_keystroke_flashes_the_led_before_reducing() {
+        let mut seq = Sequence::new();
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("a"))
+            .times(1)
+            .returning(|state, _| (state, vec![]));
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("q"))
+            .times(1)
+            .returning(|state, _| (stopped(state), vec![]));
+
+        controller(
+            keys_reading(vec![Some("a"), Some("q")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+    }
+
+    #[test]
+    fn an_idle_none_poll_in_command_mode_does_not_flash() {
+        let mut seq = Sequence::new();
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|_, key| key.is_none())
+            .times(1)
+            .returning(|state, _| (state, vec![]));
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("q"))
+            .times(1)
+            .returning(|state, _| (stopped(state), vec![]));
+
+        controller(
+            keys_reading(vec![None, Some("q")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+    }
+
+    #[test]
+    fn a_resize_key_in_command_mode_does_not_flash() {
+        let mut seq = Sequence::new();
+        let mut screen = MockScreen::new();
+        screen.expect_resize().times(1).returning(|| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+
+        controller(
+            keys_reading(vec![Some(RESIZE), Some("q")]),
+            screen,
+            reducer_stopping_on("q"),
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+    }
+
+    #[test]
+    fn a_keystroke_outside_command_mode_does_not_flash() {
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .times(1)
+            .returning(|_| Ok(()));
+
+        controller(
+            keys_reading(vec![Some("x")]),
+            screen,
+            reducer_stopping_on("x"),
+            any_executor(),
+        )
+        .run(new_state(vec![], Mode::Insert { cursor: 0 }, None))
+        .unwrap();
     }
 }
