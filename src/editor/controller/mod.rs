@@ -4,6 +4,8 @@ pub(crate) mod reducer;
 pub(crate) mod screen;
 
 use std::io;
+use std::thread;
+use std::time::Duration;
 
 use crate::state::{self, Mode, State};
 use crate::tty;
@@ -22,6 +24,7 @@ pub(crate) struct DreController {
     screen: Box<dyn Screen>,
     reducer: Box<dyn Reducer>,
     executor: Box<dyn EffectExecutor>,
+    flash_time: u64
 }
 
 impl DreController {
@@ -36,6 +39,7 @@ impl DreController {
             screen,
             reducer,
             executor,
+            flash_time: 20
         }
     }
 }
@@ -50,6 +54,7 @@ impl Controller for DreController {
                 key => {
                     if key.is_some() && *state.mode() == Mode::Command {
                         self.screen.render(&state::flash(state.clone()))?;
+                        thread::sleep(Duration::from_millis(self.flash_time));
                     }
                     let (next, effects) = self.reducer.reduce(state, key.as_deref());
                     self.executor.execute(effects, &next)?;
@@ -78,12 +83,14 @@ mod tests {
         reducer: MockReducer,
         executor: MockEffectExecutor,
     ) -> DreController {
-        DreController::new(
+        let mut controller = DreController::new(
             Box::new(keys),
             Box::new(screen),
             Box::new(reducer),
             Box::new(executor),
-        )
+        );
+        controller.flash_time = 0;
+        controller
     }
 
     fn any_executor() -> MockEffectExecutor {
