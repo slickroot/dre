@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::composer;
 use crate::layout::tree;
-use crate::state::{FooterMode, FooterModel, Mode, State};
+use crate::state::{CommandStatus, FooterMode, FooterModel, Mode, State};
 use crate::style::{self, FOOTER_FILL_OPACITY, FOREGROUND};
 
 pub use crate::composer::Area;
@@ -254,6 +254,27 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     placements
 }
 
+pub(crate) fn command_status(status: &Option<CommandStatus>) -> Vec<Placement<'static>> {
+    let Some(status) = status else {
+        return vec![];
+    };
+    let text = format!(
+        "[\"{}\" {} {}ms]",
+        status.key, status.name, status.duration_ms
+    );
+    vec![Placement {
+        width: text.chars().count() as i64,
+        height: 1,
+        x: 0,
+        y: 0,
+        node: PlacementNode::Label(Label {
+            text: Cow::Owned(text),
+            colour: None,
+            bold: false,
+        }),
+    }]
+}
+
 pub type Scene<'a> = Vec<(Area, Vec<Placement<'a>>)>;
 
 pub fn editor(state: &State, window: Area) -> Scene<'_> {
@@ -263,6 +284,10 @@ pub fn editor(state: &State, window: Area) -> Scene<'_> {
     vec![
         (body_area, body_scene.into_iter().next().unwrap().1),
         (foot, footer),
+        (
+            foot,
+            align_center(command_status(&state.command_status()), foot),
+        ),
     ]
 }
 
@@ -327,6 +352,15 @@ pub(crate) fn align_right(placements: Vec<Placement<'_>>, area: Area) -> Vec<Pla
     offset(placements, dx, dy)
 }
 
+pub(crate) fn align_center(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
+    let Some(bounds) = placements.first() else {
+        return placements;
+    };
+    let dx = area.col + (area.cols - bounds.width) / 2;
+    let dy = area.row + area.rows - bounds.height;
+    offset(placements, dx, dy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,16 +392,18 @@ mod tests {
     }
 
     #[test]
-    fn editor_returns_body_then_footer() {
+    fn editor_returns_body_then_footer_then_command_status() {
         let state = state(None);
         let scene = editor(&state, WINDOW);
-        assert_eq!(scene.len(), 2);
+        assert_eq!(scene.len(), 3);
         assert_eq!(scene[0].0.rows, WINDOW.rows - FOOTER_ROWS);
         assert_eq!(scene[1].0.row, scene[0].0.row + scene[0].0.rows);
         assert!(scene[1]
             .1
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Led { .. })));
+        assert_eq!(scene[2].0, scene[1].0);
+        assert!(scene[2].1.is_empty());
     }
 
     #[test]
@@ -517,6 +553,82 @@ mod tests {
             let filename = footer_filename(&model);
             let padded_filename = format!("{FILENAME_PREFIX}{filename}{FILENAME_SUFFIX}");
             assert!(!label_bold(&model, &padded_filename));
+        }
+    }
+
+    #[test]
+    fn command_status_is_empty_when_none() {
+        assert_eq!(command_status(&None), vec![]);
+    }
+
+    #[test]
+    fn command_status_renders_the_key_name_and_duration() {
+        let status = Some(CommandStatus {
+            key: "b".to_string(),
+            name: "Add a child box",
+            duration_ms: 20,
+        });
+        let placements = command_status(&status);
+        assert_eq!(placements.len(), 1);
+        let expected = format!("[\"{}\" {} {}ms]", "b", "Add a child box", 20);
+        match &placements[0].node {
+            PlacementNode::Label(label) => assert_eq!(label.text, expected),
+            other => panic!("expected a Label placement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn align_center_returns_an_empty_vec_for_an_empty_vec() {
+        let area = Area {
+            col: 0,
+            row: 0,
+            cols: 20,
+            rows: 3,
+        };
+        assert_eq!(align_center(vec![], area), vec![]);
+    }
+
+    #[test]
+    fn align_center_centers_a_placement_horizontally_within_the_area() {
+        let area = Area {
+            col: 1,
+            row: 4,
+            cols: 20,
+            rows: 3,
+        };
+        let placements = vec![Placement {
+            node: PlacementNode::Label(Label {
+                text: Cow::Borrowed("hi"),
+                colour: None,
+                bold: false,
+            }),
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 1,
+        }];
+        let result = align_center(placements, area);
+        assert_eq!(result[0].x, area.col + (area.cols - 6) / 2);
+    }
+
+    #[test]
+    fn editor_places_command_status_centered_on_the_footer_row_when_present() {
+        let mut state = state(None);
+        state = crate::state::set_command_status(
+            state,
+            "b".to_string(),
+            "Add a child box",
+            std::time::Duration::from_millis(20),
+        );
+        let scene = editor(&state, WINDOW);
+        let (area, placements) = &scene[2];
+        assert_eq!(*area, scene[1].0);
+        assert_eq!(placements.len(), 1);
+        match &placements[0].node {
+            PlacementNode::Label(label) => {
+                assert_eq!(label.text, "[\"b\" Add a child box 20ms]")
+            }
+            other => panic!("expected a Label placement, got {other:?}"),
         }
     }
 }

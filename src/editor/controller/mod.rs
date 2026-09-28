@@ -5,7 +5,7 @@ pub(crate) mod screen;
 
 use std::io;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::state::{self, Mode, State};
 use crate::tty;
@@ -56,9 +56,18 @@ impl Controller for DreController {
                         self.screen.render(&state::flash(state.clone()))?;
                         thread::sleep(Duration::from_millis(self.flash_time));
                     }
+                    let label = key.as_deref().and_then(|k| state::command_label(&state, k));
+                    let start = label.is_some().then(Instant::now);
                     let (next, effects) = self.reducer.reduce(state, key.as_deref());
                     self.executor.execute(effects, &next)?;
-                    state = next;
+                    state = match (label, start) {
+                        (Some((label_key, name)), Some(start)) => {
+                            self.screen.render(&next)?;
+                            let elapsed = start.elapsed();
+                            state::set_command_status(next, label_key, name, elapsed)
+                        }
+                        _ => next,
+                    };
                 }
             }
         }
@@ -73,7 +82,7 @@ mod tests {
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
-    use crate::state::{new_state, Effect};
+    use crate::state::{new_state, CommandStatus, Effect};
     use crate::tty::RESIZE;
     use mockall::Sequence;
 
@@ -150,14 +159,14 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|| Ok(Some("q".to_string())));
+            .returning(|| Ok(Some("x".to_string())));
         screen
             .expect_render()
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
 
-        controller(keys, screen, reducer_stopping_on("q"), any_executor())
+        controller(keys, screen, reducer_stopping_on("x"), any_executor())
             .run(State::default())
             .unwrap();
     }
@@ -229,12 +238,12 @@ mod tests {
             .returning(|_, _| (marked(2), vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("q"))
+            .withf(|_, key| *key == Some("x"))
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         controller(
-            keys_reading(vec![Some("a"), Some("q")]),
+            keys_reading(vec![Some("a"), Some("x")]),
             screen,
             reducer,
             any_executor(),
@@ -254,7 +263,7 @@ mod tests {
         screen.expect_render().times(2).returning(|_| Ok(()));
 
         let state = controller(
-            keys_reading(vec![Some("q")]),
+            keys_reading(vec![Some("x")]),
             screen,
             reducer,
             any_executor(),
@@ -444,12 +453,12 @@ mod tests {
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("q"))
+            .withf(|_, key| *key == Some("x"))
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         controller(
-            keys_reading(vec![Some("a"), Some("q")]),
+            keys_reading(vec![Some("a"), Some("x")]),
             screen,
             reducer,
             any_executor(),
@@ -489,12 +498,12 @@ mod tests {
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("q"))
+            .withf(|_, key| *key == Some("x"))
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         controller(
-            keys_reading(vec![None, Some("q")]),
+            keys_reading(vec![None, Some("x")]),
             screen,
             reducer,
             any_executor(),
@@ -528,9 +537,9 @@ mod tests {
             .returning(|_| Ok(()));
 
         controller(
-            keys_reading(vec![Some(RESIZE), Some("q")]),
+            keys_reading(vec![Some(RESIZE), Some("x")]),
             screen,
-            reducer_stopping_on("q"),
+            reducer_stopping_on("x"),
             any_executor(),
         )
         .run(State::default())
@@ -547,12 +556,148 @@ mod tests {
             .returning(|_| Ok(()));
 
         controller(
-            keys_reading(vec![Some("x")]),
+            keys_reading(vec![Some("\x01")]),
             screen,
-            reducer_stopping_on("x"),
+            reducer_stopping_on("\x01"),
             any_executor(),
         )
         .run(new_state(vec![], Mode::Insert { cursor: 0 }, None))
         .unwrap();
+    }
+
+    fn has_command_status(state: &State, key: &str, name: &str) -> bool {
+        matches!(
+            state.command_status(),
+            Some(CommandStatus { key: k, name: n, .. }) if k == key && n == name
+        )
+    }
+
+    #[test]
+    fn a_labeled_keystroke_renders_the_reduced_state_immediately_and_records_command_status() {
+        let mut seq = Sequence::new();
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash() && state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash() && state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| has_command_status(state, "b", "Add a child box"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash() && has_command_status(state, "b", "Add a child box"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("b"))
+            .times(1)
+            .returning(|state, _| (state, vec![]));
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("x"))
+            .times(1)
+            .returning(|state, _| (stopped(state), vec![]));
+
+        let state = controller(
+            keys_reading(vec![Some("b"), Some("x")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+
+        assert!(has_command_status(&state, "b", "Add a child box"));
+    }
+
+    #[test]
+    fn a_keystroke_without_a_command_label_does_not_render_early_or_set_command_status() {
+        let mut seq = Sequence::new();
+        let mut screen = MockScreen::new();
+        screen
+            .expect_render()
+            .withf(|state| state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash() && state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash() && state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash() && state.command_status().is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("7"))
+            .times(1)
+            .returning(|state, _| (state, vec![]));
+        reducer
+            .expect_reduce()
+            .withf(|_, key| *key == Some("x"))
+            .times(1)
+            .returning(|state, _| (stopped(state), vec![]));
+
+        let state = controller(
+            keys_reading(vec![Some("7"), Some("x")]),
+            screen,
+            reducer,
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+
+        assert_eq!(state.command_status(), None);
+    }
+
+    #[test]
+    fn a_resize_key_never_touches_command_status() {
+        let mut screen = any_screen();
+        screen.expect_resize().times(1).returning(|| Ok(()));
+
+        let state = controller(
+            keys_reading(vec![Some(RESIZE), Some("x")]),
+            screen,
+            reducer_stopping_on("x"),
+            any_executor(),
+        )
+        .run(State::default())
+        .unwrap();
+
+        assert_eq!(state.command_status(), None);
     }
 }

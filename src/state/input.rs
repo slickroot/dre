@@ -378,6 +378,39 @@ fn printable(key: &str) -> Option<char> {
     key.chars().next().filter(|c| ('\x20'..='\x7e').contains(c))
 }
 
+pub(crate) fn command_label(state: &State, key: &str) -> Option<(String, &'static str)> {
+    if matches!(state.mode, Mode::NamePrompt { .. }) {
+        return None;
+    }
+    let exact = KEYMAP.iter().find(|binding| {
+        same_mode(binding, &state.mode)
+            && matches!(binding.matcher, KeyMatch::Exact(_))
+            && matches_key(binding.matcher, key)
+    });
+    let binding = exact.or_else(|| {
+        KEYMAP.iter().find(|binding| {
+            same_mode(binding, &state.mode)
+                && !matches!(binding.matcher, KeyMatch::Exact(_))
+                && matches_key(binding.matcher, key)
+        })
+    })?;
+    let action = binding.action.action(key);
+    if matches!(
+        action,
+        Action::Immediate(ImmediateCommand::Digit(_))
+            | Action::Immediate(ImmediateCommand::CancelCount)
+            | Action::Immediate(ImmediateCommand::Interrupt)
+    ) {
+        return None;
+    }
+    let key_text = if matches!(binding.matcher, KeyMatch::Printable) {
+        key.to_string()
+    } else {
+        binding.display.to_string()
+    };
+    Some((key_text, binding.description))
+}
+
 #[cfg(test)]
 fn keymap_markdown() -> String {
     let mut out = String::from("| Mode | Key | Description |\n| --- | --- | --- |\n");
@@ -580,5 +613,82 @@ mod tests {
                 "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
             );
         }
+    }
+
+    fn binding_description(mode: &Mode, display: &str) -> &'static str {
+        KEYMAP
+            .iter()
+            .find(|binding| same_mode(binding, mode) && binding.display == display)
+            .expect("binding must exist")
+            .description
+    }
+
+    #[test]
+    fn command_label_returns_key_and_description_for_a_real_command() {
+        let description = binding_description(&Mode::Command, "b");
+        assert_eq!(
+            command_label(&key_state(Mode::Command), "b"),
+            Some(("b".to_string(), description))
+        );
+    }
+
+    #[test]
+    fn command_label_returns_none_for_an_unrecognized_command_key() {
+        assert_eq!(command_label(&key_state(Mode::Command), "x"), None);
+    }
+
+    #[test]
+    fn command_label_returns_none_for_a_digit_key() {
+        assert_eq!(command_label(&key_state(Mode::Command), "7"), None);
+    }
+
+    #[test]
+    fn command_label_returns_none_for_interrupt() {
+        assert_eq!(command_label(&key_state(Mode::Command), INTERRUPT), None);
+    }
+
+    #[test]
+    fn command_label_returns_the_typed_character_for_insert_printable() {
+        let description = binding_description(&Mode::Insert { cursor: 0 }, "Printable");
+        assert_eq!(
+            command_label(&key_state(Mode::Insert { cursor: 0 }), "b"),
+            Some(("b".to_string(), description))
+        );
+    }
+
+    #[test]
+    fn command_label_returns_the_binding_display_for_insert_non_printable() {
+        let description = binding_description(&Mode::Insert { cursor: 0 }, "Esc");
+        assert_eq!(
+            command_label(&key_state(Mode::Insert { cursor: 0 }), "\x1b"),
+            Some(("Esc".to_string(), description))
+        );
+    }
+
+    #[test]
+    fn command_label_returns_none_in_name_prompt_mode() {
+        let state = key_state(Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        });
+        assert_eq!(command_label(&state, "b"), None);
+    }
+
+    #[test]
+    fn command_label_counts_non_undoable_selection_moves() {
+        let description = binding_description(&Mode::Command, "j");
+        assert_eq!(
+            command_label(&key_state(Mode::Command), "j"),
+            Some(("j".to_string(), description))
+        );
+    }
+
+    #[test]
+    fn command_label_counts_open_name_prompt() {
+        let description = binding_description(&Mode::Command, "n");
+        assert_eq!(
+            command_label(&key_state(Mode::Command), "n"),
+            Some(("n".to_string(), description))
+        );
     }
 }

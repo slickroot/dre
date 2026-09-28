@@ -11,6 +11,7 @@ mod text_edit;
 use crate::diagram::{Document, Node};
 use crate::state::action::Action;
 pub(crate) use crate::state::effect::Effect;
+pub(crate) use crate::state::input::command_label;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
@@ -36,6 +37,7 @@ pub struct State {
     pending_count: Option<usize>,
     saved_len: usize,
     led_flash: bool,
+    command_status: Option<CommandStatus>,
 }
 
 impl State {
@@ -99,6 +101,10 @@ impl State {
         self.save_to = save_to;
     }
 
+    pub(crate) fn command_status(&self) -> Option<CommandStatus> {
+        self.command_status.clone()
+    }
+
     pub(crate) fn footer(&self) -> FooterModel {
         match &self.mode {
             Mode::Insert { .. } => FooterModel {
@@ -138,6 +144,13 @@ pub(crate) struct FooterModel {
     pub(crate) flash: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CommandStatus {
+    pub(crate) key: String,
+    pub(crate) name: &'static str,
+    pub(crate) duration_ms: u128,
+}
+
 fn file_stem_without_dre(path: &str) -> String {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     file_name
@@ -160,6 +173,7 @@ impl Default for State {
             pending_count: None,
             saved_len: 0,
             led_flash: false,
+            command_status: None,
         }
     }
 }
@@ -167,6 +181,21 @@ impl Default for State {
 pub(crate) fn flash(state: State) -> State {
     let mut state = state;
     state.led_flash = true;
+    state
+}
+
+pub(crate) fn set_command_status(
+    state: State,
+    key: String,
+    name: &'static str,
+    duration: std::time::Duration,
+) -> State {
+    let mut state = state;
+    state.command_status = Some(CommandStatus {
+        key,
+        name,
+        duration_ms: duration.as_millis(),
+    });
     state
 }
 
@@ -220,6 +249,7 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         pending_count: None,
         saved_len: 0,
         led_flash: false,
+        command_status: None,
     }
 }
 
@@ -355,6 +385,42 @@ mod tests {
         assert!(state.led_flash());
         let result = crate::state::reduce(state, Some("j")).0;
         assert!(!result.led_flash());
+    }
+
+    #[test]
+    fn a_default_state_has_no_command_status() {
+        assert_eq!(State::default().command_status(), None);
+    }
+
+    #[test]
+    fn set_command_status_stores_the_key_name_and_duration() {
+        let state = new_state(vec![], Mode::Command, None);
+        let state = set_command_status(
+            state,
+            "r".to_string(),
+            "Rename",
+            std::time::Duration::from_millis(42),
+        );
+        assert_eq!(
+            state.command_status(),
+            Some(CommandStatus {
+                key: "r".to_string(),
+                name: "Rename",
+                duration_ms: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn command_status_persists_across_reduce_unlike_led_flash() {
+        let state = set_command_status(
+            new_state(vec![], Mode::Command, None),
+            "r".to_string(),
+            "Rename",
+            std::time::Duration::from_millis(42),
+        );
+        let result = crate::state::reduce(state.clone(), Some("j")).0;
+        assert_eq!(result.command_status(), state.command_status());
     }
 
     #[test]

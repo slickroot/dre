@@ -275,7 +275,10 @@ mod tests {
             .into_iter()
             .map(|(area, _)| area)
             .collect();
-        assert_eq!(areas, vec![body_of(WINDOW), foot_of(WINDOW)]);
+        assert_eq!(
+            areas,
+            vec![body_of(WINDOW), foot_of(WINDOW), foot_of(WINDOW)]
+        );
     }
 
     #[test]
