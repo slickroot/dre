@@ -317,16 +317,24 @@ impl Frame {
         for id in &self.previous_transient_images {
             bytes.extend_from_slice(kitty::delete(*id).to_string().as_bytes());
         }
-        for image in &self.images {
+        for (placement, image) in Self::placement_ids().zip(&self.images) {
             let command = match &image.image {
                 Image::Fresh { id } => {
                     kitty::show(&image.canvas, *id, image.col, image.row, image.z)
                 }
-                Image::Cached { id } => kitty::place(*id, image.col, image.row, image.z),
+                Image::Cached { id } => kitty::place(*id, placement, image.col, image.row, image.z),
             };
             bytes.extend_from_slice(command.to_string().as_bytes());
         }
         bytes
+    }
+
+    // WezTerm removes every placement of an image when a new placement of it
+    // has no placement ID, so each placement in a frame is numbered apart.
+    fn placement_ids() -> impl Iterator<Item = kitty::PlacementId> {
+        (1..)
+            .map_while(NonZeroU32::new)
+            .map(kitty::PlacementId::new)
     }
 }
 
@@ -1512,12 +1520,18 @@ mod tests {
         let frame = drawn_frame(&mut r, &placements);
         assert!(frame.images.len() > 1);
         let expected: String = std::iter::once(kitty::soft_clear())
-            .chain(frame.images.iter().map(|image| match image.image {
-                Image::Fresh { id } => {
-                    kitty::show(&image.canvas, id, image.col, image.row, image.z)
-                }
-                Image::Cached { id } => kitty::place(id, image.col, image.row, image.z),
-            }))
+            .chain(
+                Frame::placement_ids()
+                    .zip(&frame.images)
+                    .map(|(placement, image)| match image.image {
+                        Image::Fresh { id } => {
+                            kitty::show(&image.canvas, id, image.col, image.row, image.z)
+                        }
+                        Image::Cached { id } => {
+                            kitty::place(id, placement, image.col, image.row, image.z)
+                        }
+                    }),
+            )
             .map(|command| command.to_string())
             .collect();
         let bytes = String::from_utf8(frame.into_bytes()).unwrap();
@@ -1643,6 +1657,51 @@ mod tests {
         assert_eq!(output.matches("a=T").count(), 1);
         assert_eq!(output.matches("a=p").count(), 1);
         assert!(output.contains("i=1"));
+    }
+
+    fn placement_ids(output: &str) -> Vec<String> {
+        output
+            .split("\x1b_G")
+            .filter(|command| command.starts_with("a=p,"))
+            .map(|command| {
+                command
+                    .split([',', ';'])
+                    .find_map(|key| key.strip_prefix("p="))
+                    .expect("every placement names its placement ID")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn all_distinct(ids: &[String]) -> bool {
+        ids.iter().collect::<std::collections::HashSet<_>>().len() == ids.len()
+    }
+
+    #[test]
+    fn repeated_glyphs_in_a_frame_each_get_their_own_placement_id() {
+        let text = "aaa";
+        let placements = [label_placement(text, 0, 0, text.len() as i64, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        let output = rendered_placements(&mut r, &placements);
+
+        let ids = placement_ids(&output);
+        assert_eq!(ids.len(), text.len() - 1);
+        assert!(all_distinct(&ids));
+    }
+
+    #[test]
+    fn fully_cached_glyphs_in_a_later_frame_each_get_their_own_placement_id() {
+        let text = "aaa";
+        let placements = [label_placement(text, 0, 0, text.len() as i64, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        let ids = placement_ids(&second);
+        assert_eq!(ids.len(), text.len());
+        assert!(all_distinct(&ids));
     }
 
     #[test]

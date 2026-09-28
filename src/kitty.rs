@@ -32,6 +32,19 @@ impl ImageId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlacementId(NonZeroU32);
+
+impl PlacementId {
+    pub(crate) fn new(value: NonZeroU32) -> Self {
+        PlacementId(value)
+    }
+
+    fn value(self) -> u32 {
+        self.0.get()
+    }
+}
+
 pub(crate) fn soft_clear() -> Command {
     Command("\x1b_Ga=d,d=a,q=1;\x1b\\".to_string())
 }
@@ -49,12 +62,13 @@ pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> 
     ))
 }
 
-pub(crate) fn place(id: ImageId, col: i64, row: i64, z: i32) -> Command {
+pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
-        "\x1b[{};{}H\x1b_Ga=p,i={},c=1,r=1,q=1,C=1,z={};\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={},p={},c=1,r=1,q=1,C=1,z={};\x1b\\",
         row + 1,
         col + 1,
         id.value(),
+        placement.value(),
         z
     ))
 }
@@ -172,6 +186,10 @@ mod tests {
 
     fn image_id(value: u32) -> ImageId {
         ImageId::new(NonZeroU32::new(value).unwrap())
+    }
+
+    fn placement_id(value: u32) -> PlacementId {
+        PlacementId::new(NonZeroU32::new(value).unwrap())
     }
 
     #[test]
@@ -310,9 +328,16 @@ mod tests {
     #[test]
     fn place_reuses_a_named_image_without_payload_or_cursor_movement() {
         assert_eq!(
-            place(image_id(7), 3, 5, -1).to_string(),
-            "\x1b[6;4H\x1b_Ga=p,i=7,c=1,r=1,q=1,C=1,z=-1;\x1b\\"
+            place(image_id(7), placement_id(2), 3, 5, -1).to_string(),
+            "\x1b[6;4H\x1b_Ga=p,i=7,p=2,c=1,r=1,q=1,C=1,z=-1;\x1b\\"
         );
+    }
+
+    #[test]
+    fn place_names_the_requested_placement() {
+        assert!(place(image_id(7), placement_id(9), 0, 0, 0)
+            .to_string()
+            .contains(",p=9,"));
     }
 
     #[test]
