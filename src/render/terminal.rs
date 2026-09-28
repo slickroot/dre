@@ -25,13 +25,7 @@ const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
-const GLOW_THICKNESS_PX: i64 = 4;
 const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
-
-#[cfg(test)]
-fn glow_padding_cells(cell_size: i64) -> i64 {
-    (GLOW_THICKNESS_PX + cell_size - 1) / cell_size
-}
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
@@ -314,7 +308,6 @@ impl TerminalRenderer {
             self.remember(key.clone(), drawn);
         }
         frame.place(&self.cache[&key], placement, area, BOX_Z);
-
     }
 
     fn draw_glow(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
@@ -998,17 +991,15 @@ mod tests {
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 8, 8, 4, 4)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
-        let padding_cells_x = glow_padding_cells(r.window.cell_width);
-        let padding_cells_y = glow_padding_cells(r.window.cell_height);
-        assert_eq!(glow.col, 8 - padding_cells_x);
-        assert_eq!(glow.row, 8 - padding_cells_y);
+        assert_eq!(glow.col, 8 - GLOW_MARGIN);
+        assert_eq!(glow.row, 8 - GLOW_MARGIN);
         assert_eq!(
             glow.canvas.width,
-            (4 + 2 * padding_cells_x) * r.window.cell_width
+            (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
             glow.canvas.height,
-            (4 + 2 * padding_cells_y) * r.window.cell_height
+            (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
 
@@ -1018,15 +1009,19 @@ mod tests {
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
-        let padding_cells_x = glow_padding_cells(r.window.cell_width);
-        let padding_cells_y = glow_padding_cells(r.window.cell_height);
-        assert_eq!(glow.col, 4 - padding_cells_x);
-        assert_eq!(glow.row, 4 - padding_cells_y);
-        let padding_px_x = padding_cells_x * r.window.cell_width;
-        let padding_px_y = padding_cells_y * r.window.cell_height;
+        assert_eq!(glow.col, 4 - GLOW_MARGIN);
+        assert_eq!(glow.row, 4 - GLOW_MARGIN);
+        let padding_px_x = GLOW_MARGIN * r.window.cell_width;
+        let padding_px_y = GLOW_MARGIN * r.window.cell_height;
         assert_ne!(padding_px_x, padding_px_y);
-        assert!(padding_px_x >= GLOW_THICKNESS_PX);
-        assert!(padding_px_y >= GLOW_THICKNESS_PX);
+        assert_eq!(
+            glow.canvas.width,
+            (4 + 2 * GLOW_MARGIN) * r.window.cell_width
+        );
+        assert_eq!(
+            glow.canvas.height,
+            (4 + 2 * GLOW_MARGIN) * r.window.cell_height
+        );
     }
 
     #[test]

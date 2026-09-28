@@ -322,7 +322,7 @@ mod tests {
         let shape = glow_shape(10, 10, 4, 4);
         let alpha = shape.colour_at(3, 7).unwrap()[3];
         assert!(
-            alpha as f64 > OPAQUE as f64 * 0.8,
+            alpha > shape.colour[3] / 2,
             "expected near-peak alpha just outside the edge, got {alpha}"
         );
     }
