@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
 use crate::layout::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
-use crate::palette::{palette, FOREGROUND};
+use crate::palette::palette;
 use crate::tty::Window;
 use crate::view::Scene;
 
@@ -25,7 +25,6 @@ const BOX_Z: i32 = -3;
 const GLOW_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
-const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
 const INK_Z: i32 = CONTENT_Z;
 
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
@@ -93,7 +92,6 @@ enum SpriteKey {
         rounded: bool,
         sides: Sides,
         border: i64,
-        selected: bool,
     },
     Arrow {
         width: i64,
@@ -124,7 +122,6 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             rounded,
             sides,
             border,
-            selected,
         } => SpriteKey::Box {
             width: placement.width,
             height: placement.height,
@@ -134,7 +131,6 @@ fn sprite_key(placement: &Placement) -> SpriteKey {
             rounded: *rounded,
             sides: *sides,
             border: *border,
-            selected: *selected,
         },
         PlacementNode::Arrow(arrow) => SpriteKey::Arrow {
             width: placement.width,
@@ -417,7 +413,7 @@ impl TerminalRenderer {
     }
 
     fn outline_box(&self, placement: &Placement) -> Canvas {
-        let (edge, fill, opacity, rounded, sides, border, selected) = match &placement.node {
+        let (edge, fill, opacity, rounded, sides, border) = match &placement.node {
             PlacementNode::Box {
                 colour,
                 fill,
@@ -425,15 +421,12 @@ impl TerminalRenderer {
                 rounded,
                 sides,
                 border,
-                selected,
-            } => (
-                *colour, *fill, *opacity, *rounded, *sides, *border, *selected,
-            ),
+            } => (*colour, *fill, *opacity, *rounded, *sides, *border),
             _ => unreachable!("outline_box is only called for Box placements"),
         };
         let width = self.cells_to_pixels_x(placement.width);
         let height = self.cells_to_pixels_y(placement.height);
-        let (r, g, b) = selected_edge_colour(edge, selected);
+        let (r, g, b) = colour(edge);
         let (fill_r, fill_g, fill_b, fill_a) = fill_colour(fill, opacity);
         let shape = BoxShape {
             width,
@@ -515,23 +508,6 @@ impl TerminalRenderer {
         };
         Canvas::fill(width, height, &shape)
     }
-}
-
-fn selected_edge_colour(edge: Option<u8>, selected: bool) -> (u8, u8, u8) {
-    let edge = colour(edge);
-    if !selected {
-        return edge;
-    }
-    let foreground = palette(FOREGROUND).unwrap();
-    let mix = |channel: u8, target: u8| {
-        (channel as f64 + (target as f64 - channel as f64) * SELECTED_BORDER_FOREGROUND_MIX).round()
-            as u8
-    };
-    (
-        mix(edge.0, foreground.0),
-        mix(edge.1, foreground.1),
-        mix(edge.2, foreground.2),
-    )
 }
 
 #[cfg(test)]
@@ -800,7 +776,6 @@ mod tests {
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
-            selected: false,
         }
     }
 
@@ -812,7 +787,6 @@ mod tests {
                 opacity,
                 rounded,
                 border,
-                selected,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -821,7 +795,6 @@ mod tests {
                 rounded,
                 sides: new_sides,
                 border,
-                selected,
             },
             _ => panic!("expected a Box"),
         }
@@ -835,7 +808,6 @@ mod tests {
                 opacity,
                 rounded,
                 sides,
-                selected,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -844,24 +816,15 @@ mod tests {
                 rounded,
                 sides,
                 border: new_border,
-                selected,
             },
             _ => panic!("expected a Box"),
         }
     }
 
     fn selected_box_node(colour: Option<u8>) -> PlacementNode<'static> {
-        match box_node(colour, None, false) {
-            PlacementNode::Box { fill, opacity, .. } => PlacementNode::Box {
-                colour,
-                fill,
-                opacity,
-                rounded: false,
-                sides: ALL_SIDES,
-                border: BORDER,
-                selected: true,
-            },
-            _ => unreachable!(),
+        PlacementNode::Glow {
+            colour,
+            rounded: false,
         }
     }
 
@@ -953,26 +916,16 @@ mod tests {
     }
 
     #[test]
-    fn sprite_key_differs_by_selection() {
-        let plain = box_node(Some(1), None, false);
-        let selected = selected_box_node(Some(1));
-        let a = box_placement(&plain, 0, 0, 10, 10);
-        let b = box_placement(&selected, 0, 0, 10, 10);
-        assert_ne!(sprite_key(&a), sprite_key(&b));
-    }
-
-    #[test]
-    fn selected_box_border_is_brighter_but_keeps_its_colour_identity() {
+    fn box_edge_colour_is_unchanged_by_selection() {
         let r = renderer(1, 1);
         let plain = box_outline(&r, &box_node(Some(1), None, false), 10, 10);
-        let selected = box_outline(&r, &selected_box_node(Some(1)), 10, 10);
         let plain_pixel = pixel_of(&plain, 5, 0);
-        let selected_pixel = pixel_of(&selected, 5, 0);
-        assert_ne!(selected_pixel, plain_pixel);
-        assert!(
-            selected_pixel.0 as u16 + selected_pixel.1 as u16 + selected_pixel.2 as u16
-                > plain_pixel.0 as u16 + plain_pixel.1 as u16 + plain_pixel.2 as u16
+        let selected_pixel = pixel_of(
+            &box_outline(&r, &box_node(Some(1), None, false), 10, 10),
+            5,
+            0,
         );
+        assert_eq!(selected_pixel, plain_pixel);
     }
 
     #[test]
@@ -1019,7 +972,8 @@ mod tests {
         let images = sprites(
             &mut r,
             &[
-                box_placement(&node, 4, 4, 4, 4),
+                box_placement(&box_node(Some(1), None, false), 4, 4, 4, 4),
+                box_placement(&node, 3, 3, 6, 6),
                 label_placement("x", 5, 5, 1, 1),
             ],
         );
@@ -1038,7 +992,7 @@ mod tests {
     fn the_glow_is_centred_on_the_box_and_extends_beyond_it() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(1));
-        let images = sprites(&mut r, &[box_placement(&node, 8, 8, 4, 4)]);
+        let images = sprites(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         assert_eq!(glow.col, 8 - GLOW_MARGIN);
         assert_eq!(glow.row, 8 - GLOW_MARGIN);
@@ -1056,7 +1010,7 @@ mod tests {
     fn transparent_sprite_padding_is_cell_aligned_independently_of_glow_thickness() {
         let mut r = renderer_on(window(20, 20, 5, 9));
         let node = selected_box_node(Some(1));
-        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         assert_eq!(glow.col, 4 - GLOW_MARGIN);
         assert_eq!(glow.row, 4 - GLOW_MARGIN);
@@ -1077,7 +1031,7 @@ mod tests {
     fn the_glow_uses_the_boxs_own_edge_colour() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(3));
-        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
         let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
         let (edge_r, edge_g, edge_b) = colour(Some(3));
         let has_edge_colour = glow
@@ -1127,29 +1081,7 @@ mod tests {
     }
 
     fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
-        let mut with_glows = Vec::new();
-        for placement in placements {
-            if let PlacementNode::Box {
-                colour,
-                rounded,
-                selected: true,
-                ..
-            } = &placement.node
-            {
-                with_glows.push(Placement {
-                    node: PlacementNode::Glow {
-                        colour: *colour,
-                        rounded: *rounded,
-                    },
-                    x: placement.x - GLOW_MARGIN,
-                    y: placement.y - GLOW_MARGIN,
-                    width: placement.width + 2 * GLOW_MARGIN,
-                    height: placement.height + 2 * GLOW_MARGIN,
-                });
-            }
-            with_glows.push(placement.clone());
-        }
-        drawn_frame(r, &with_glows).images
+        drawn_frame(r, placements).images
     }
 
     fn lines_of(frame: &str) -> Vec<&str> {
@@ -2174,7 +2106,7 @@ mod tests {
     }
 
     fn leaf_box(state: &State) -> Placement<'_> {
-        crate::layout::diagram(state.doc().tree(), None, None)
+        crate::layout::diagram(state.doc().tree(), None)
             .into_iter()
             .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .unwrap()
