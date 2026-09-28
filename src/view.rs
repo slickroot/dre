@@ -21,6 +21,7 @@ pub(crate) const GLOW_MARGIN: i64 = 1;
 pub struct Label<'a> {
     pub text: Cow<'a, str>,
     pub colour: Option<u8>,
+    pub bold: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +200,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(mode_word),
                 colour: None,
+                bold: true,
             }),
             width: interior(mode_word),
             padding: 1,
@@ -208,6 +210,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             node: PlacementNode::Label(Label {
                 text: Cow::Owned(padded_filename.clone()),
                 colour: Some(style::DIM),
+                bold: false,
             }),
             width: interior(&padded_filename),
             padding: 0,
@@ -219,6 +222,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(FOOTER_SUFFIX),
                 colour: None,
+                bold: true,
             }),
             width: interior(FOOTER_SUFFIX),
             padding: 1,
@@ -475,5 +479,44 @@ mod tests {
     fn footer_led_is_lit_in_naming_mode_regardless_of_flash() {
         let model = footer_model(FooterMode::Naming, false);
         assert!(led_lit(&model));
+    }
+
+    fn label_bold(model: &FooterModel, text: &str) -> bool {
+        footer(model)
+            .into_iter()
+            .find_map(|placement| match placement.node {
+                PlacementNode::Label(label) if label.text == text => Some(label.bold),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                panic!("footer placements should contain a Label with text {text:?}")
+            })
+    }
+
+    #[test]
+    fn footer_mode_word_is_bold_in_every_mode() {
+        for mode in [FooterMode::Move, FooterMode::Write, FooterMode::Naming] {
+            let model = footer_model(mode, false);
+            let mode_word = footer_mode_word(mode);
+            assert!(label_bold(&model, mode_word));
+        }
+    }
+
+    #[test]
+    fn footer_suffix_is_bold_in_every_mode() {
+        for mode in [FooterMode::Move, FooterMode::Write, FooterMode::Naming] {
+            let model = footer_model(mode, false);
+            assert!(label_bold(&model, FOOTER_SUFFIX));
+        }
+    }
+
+    #[test]
+    fn footer_filename_is_not_bold_in_every_mode() {
+        for mode in [FooterMode::Move, FooterMode::Write, FooterMode::Naming] {
+            let model = footer_model(mode, false);
+            let filename = footer_filename(&model);
+            let padded_filename = format!("{FILENAME_PREFIX}{filename}{FILENAME_SUFFIX}");
+            assert!(!label_bold(&model, &padded_filename));
+        }
     }
 }

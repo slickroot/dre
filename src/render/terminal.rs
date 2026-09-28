@@ -447,6 +447,7 @@ impl TerminalRenderer {
                 node: PlacementNode::Label(Label {
                     text: style.text.clone().into(),
                     colour: style.colour,
+                    bold: false,
                 }),
                 x: geometry.x + offset as i64,
                 y: geometry.y,
@@ -1213,6 +1214,7 @@ mod tests {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
                 colour: None,
+                bold: false,
             }),
             x,
             y,
@@ -1642,6 +1644,7 @@ mod tests {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
                 colour,
+                bold: false,
             }),
             x,
             y,

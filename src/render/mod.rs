@@ -107,11 +107,26 @@ mod tests {
         colored_label_at(text, x, y, None)
     }
 
+    fn bold_label_at(text: &str, x: i64, y: i64) -> Placement<'_> {
+        Placement {
+            node: PlacementNode::Label(Label {
+                text: text.into(),
+                colour: None,
+                bold: true,
+            }),
+            x,
+            y,
+            width: text.chars().count() as i64,
+            height: 1,
+        }
+    }
+
     fn colored_label_at(text: &str, x: i64, y: i64, colour: Option<u8>) -> Placement<'_> {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
                 colour,
+                bold: false,
             }),
             x,
             y,
@@ -444,7 +459,7 @@ mod tests {
         assert_eq!(footer.len(), 6);
         assert_eq!(
             footer[2],
-            label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
+            bold_label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
         );
         assert_eq!(
             footer[3],
@@ -467,7 +482,7 @@ mod tests {
         );
         assert_eq!(
             footer[5],
-            label_at(
+            bold_label_at(
                 FOOTER_SUFFIX,
                 suffix_x(box_x, mode_word, name),
                 box_y + BOX_HEIGHT / 2,
@@ -491,7 +506,7 @@ mod tests {
         );
         assert_eq!(
             footer[2],
-            label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
+            bold_label_at(mode_word, label_x(box_x), box_y + BOX_HEIGHT / 2)
         );
         assert_eq!(
             footer[3],
@@ -504,7 +519,7 @@ mod tests {
         );
         assert_eq!(
             footer[4],
-            label_at(
+            bold_label_at(
                 FOOTER_SUFFIX,
                 suffix_x(box_x, mode_word, name),
                 box_y + BOX_HEIGHT / 2,

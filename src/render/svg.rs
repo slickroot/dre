@@ -871,6 +871,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: text.into(),
                 colour: None,
+                bold: false,
             }),
             x,
             y,
@@ -907,6 +908,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: "hi".into(),
                 colour: Some(crate::style::LIME),
+                bold: false,
             }),
             x: 1,
             y: 1,

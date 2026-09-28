@@ -119,6 +119,7 @@ fn place<'a>(
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(node.label()),
                 colour: None,
+                bold: false,
             }),
             x: start,
             y: middle,
@@ -822,6 +823,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: "a".into(),
                 colour: None,
+                bold: false,
             }),
             x: 0,
             y: 0,
@@ -835,6 +837,7 @@ mod tests {
                     Label {
                         text: "a".into(),
                         colour: None,
+                        bold: false,
                     }
                 )
             }
