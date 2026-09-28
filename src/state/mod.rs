@@ -11,6 +11,8 @@ mod text_edit;
 use crate::diagram::{Document, Node};
 use crate::state::action::Action;
 pub(crate) use crate::state::effect::Effect;
+#[allow(unused_imports)]
+pub(crate) use crate::state::input::command_label;
 #[cfg(test)]
 pub(crate) use crate::state::input::INTERRUPT;
 pub(crate) use crate::state::mode::Mode;
