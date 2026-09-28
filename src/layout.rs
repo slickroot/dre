@@ -13,7 +13,6 @@ const FOOTER_SUFFIX: &str = " • dre";
 const MOVE: &str = "MOVE";
 const WRITE: &str = "WRITE";
 const NAME: &str = "NAME";
-const FILENAME_COLOUR: u8 = palette::MINT;
 
 pub(crate) const BOX_HEIGHT: i64 = 3;
 #[allow(dead_code)]
@@ -311,20 +310,18 @@ fn footer_led(mode: FooterMode) -> PlacementNode<'static> {
     }
 }
 
-fn footer_filename_text(model: &FooterModel) -> String {
+fn footer_filename(model: &FooterModel) -> &str {
     let placeholder = match model.mode {
         FooterMode::Naming => PLACEHOLDER,
         FooterMode::Move | FooterMode::Write => NO_NAME,
     };
-    let name = model.filename.as_deref().unwrap_or(placeholder);
-    format!("{name}{FOOTER_SUFFIX}")
+    model.filename.as_deref().unwrap_or(placeholder)
 }
 
 const MODE_WORD_PADDING: i64 = LED_LABEL_GAP - SIDE_PADDING;
 
 pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     let mode_word = footer_mode_word(model.mode);
-    let filename_text = footer_filename_text(model);
 
     let columns = vec![
         Column {
@@ -341,19 +338,40 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             width: interior(mode_word),
             padding: MODE_WORD_PADDING,
         },
-        Column {
-            node: PlacementNode::Label(Label {
-                text: Cow::Owned(filename_text.clone()),
-                path: vec![],
-                colour: Some(FILENAME_COLOUR),
-            }),
-            width: interior(&filename_text),
-            padding: SIDE_PADDING,
-        },
     ];
 
-    let (mut placements, total_width) = stack_columns(columns, BOX_HEIGHT / 2);
-    let filename_x = placements[2].x;
+    let (mut placements, word_end) = stack_columns(columns, BOX_HEIGHT / 2);
+
+    let filename_text = footer_filename(model);
+    let filename_x = word_end + SIDE_PADDING;
+    let filename_width = interior(filename_text);
+    placements.push(Placement {
+        node: PlacementNode::Label(Label {
+            text: Cow::Owned(filename_text.to_string()),
+            path: vec![],
+            colour: Some(palette::DIM),
+        }),
+        x: filename_x,
+        y: BOX_HEIGHT / 2,
+        width: filename_width,
+        height: 1,
+    });
+
+    let suffix_x = filename_x + filename_width;
+    let suffix_width = interior(FOOTER_SUFFIX);
+    placements.push(Placement {
+        node: PlacementNode::Label(Label {
+            text: Cow::Borrowed(FOOTER_SUFFIX),
+            path: vec![],
+            colour: None,
+        }),
+        x: suffix_x,
+        y: BOX_HEIGHT / 2,
+        width: suffix_width,
+        height: 1,
+    });
+
+    let total_width = suffix_x + suffix_width + SIDE_PADDING;
 
     let corner_box = Placement {
         node: PlacementNode::Box {
@@ -541,6 +559,13 @@ mod tests {
         }
     }
 
+    fn suffix_label<'a>(placements: &'a [Placement<'static>]) -> &'a Label<'static> {
+        match &placements[4].node {
+            PlacementNode::Label(label) => label,
+            _ => panic!("expected the fifth placement to be the suffix label"),
+        }
+    }
+
     #[test]
     fn footer_box_is_borderless_and_tinted_with_the_foreground_colour_outside_naming() {
         let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
@@ -578,9 +603,9 @@ mod tests {
     #[test]
     fn bordered_box_width_matches_the_stack_total_width_exactly() {
         let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        let filename = filename_label(&placements);
-        let filename_end = placements[3].x + interior(&filename.text) + SIDE_PADDING;
-        assert_eq!(placements[0].width, filename_end);
+        let suffix = suffix_label(&placements);
+        let suffix_end = placements[4].x + interior(&suffix.text) + SIDE_PADDING;
+        assert_eq!(placements[0].width, suffix_end);
     }
 
     #[test]
@@ -648,11 +673,21 @@ mod tests {
     }
 
     #[test]
-    fn filename_column_carries_its_own_colour_and_the_models_filename() {
+    fn filename_column_carries_a_dim_foreground_colour_and_the_models_filename() {
         let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
         let label = filename_label(&placements);
-        assert_eq!(label.text, format!("plans{FOOTER_SUFFIX}"));
-        assert_eq!(label.colour, Some(FILENAME_COLOUR));
+        assert_eq!(label.text, "plans");
+        assert_eq!(label.colour, Some(palette::DIM));
+    }
+
+    #[test]
+    fn suffix_column_follows_the_filename_in_the_plain_default_colour() {
+        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
+        let filename = filename_label(&placements);
+        let suffix = suffix_label(&placements);
+        assert_eq!(suffix.text, FOOTER_SUFFIX);
+        assert_eq!(suffix.colour, None);
+        assert_eq!(placements[4].x, placements[3].x + interior(&filename.text));
     }
 
     #[test]
@@ -660,7 +695,7 @@ mod tests {
         for mode in [FooterMode::Move, FooterMode::Write] {
             let placements = footer(&footer_model(mode, None, None));
             let label = filename_label(&placements);
-            assert_eq!(label.text, format!("{NO_NAME}{FOOTER_SUFFIX}"));
+            assert_eq!(label.text, NO_NAME);
         }
     }
 
@@ -668,7 +703,7 @@ mod tests {
     fn filename_column_shows_the_typing_placeholder_in_naming_mode() {
         let placements = footer(&footer_model(FooterMode::Naming, None, Some(0)));
         let label = filename_label(&placements);
-        assert_eq!(label.text, format!("{PLACEHOLDER}{FOOTER_SUFFIX}"));
+        assert_eq!(label.text, PLACEHOLDER);
     }
 
     #[test]

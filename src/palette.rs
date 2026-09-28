@@ -1,4 +1,4 @@
-const PALETTE: [(&str, (u8, u8, u8)); 7] = [
+const PALETTE: [(&str, (u8, u8, u8)); 8] = [
     ("lime", (0xC6, 0xFF, 0x00)),
     ("mint", (0x39, 0xFF, 0xB0)),
     ("violet", (0xB3, 0x88, 0xFF)),
@@ -6,14 +6,15 @@ const PALETTE: [(&str, (u8, u8, u8)); 7] = [
     ("amber", (0xFF, 0xB0, 0x20)),
     ("foreground", (0xE8, 0xEA, 0xED)),
     ("background", (0x0A, 0x0B, 0x0D)),
+    ("dim", (0x8C, 0x8E, 0x91)),
 ];
 
 pub(crate) const FOREGROUND: u8 = 5;
 pub(crate) const BACKGROUND: u8 = 6;
 pub(crate) const LIME: u8 = 0;
-pub(crate) const MINT: u8 = 1;
 pub(crate) const VIOLET: u8 = 2;
 pub(crate) const AMBER: u8 = 4;
+pub(crate) const DIM: u8 = 7;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)

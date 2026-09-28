@@ -1595,7 +1595,7 @@ mod tests {
 
     const NAME: &str = "plans";
     const MODE_WORD: &str = "MOVE";
-    const FILENAME_TEXT: &str = "plans \u{2022} dre";
+    const SUFFIX_TEXT: &str = " \u{2022} dre";
     const FOOTER_TEXT: &str = "MOVE plans \u{2022} dre";
 
     fn footer_width() -> i64 {
@@ -1625,10 +1625,14 @@ mod tests {
         footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + 1
     }
 
+    fn footer_suffix_x(area: Area) -> i64 {
+        footer_filename_x(area) + NAME.chars().count() as i64
+    }
+
     fn padded_footer_label(foot: Area) -> String {
         let area = footer_box_area(foot);
         format!(
-            "{}{}",
+            "{}{}{}",
             label_at(
                 footer_mode_word_x(area),
                 area.row + BOX_HEIGHT / 2,
@@ -1637,8 +1641,13 @@ mod tests {
             label_at_with_colour(
                 footer_filename_x(area),
                 area.row + BOX_HEIGHT / 2,
-                FILENAME_TEXT,
-                Some(crate::palette::MINT),
+                NAME,
+                Some(crate::palette::DIM),
+            ),
+            label_at(
+                footer_suffix_x(area),
+                area.row + BOX_HEIGHT / 2,
+                SUFFIX_TEXT,
             )
         )
     }
@@ -1897,7 +1906,8 @@ mod tests {
         assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
         assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
         assert!(svg.contains(&format!(">{MODE_WORD}</text>")));
-        assert!(svg.contains(&format!(">{FILENAME_TEXT}</text>")));
+        assert!(svg.contains(&format!(">{NAME}</text>")));
+        assert!(svg.contains(&format!(">{SUFFIX_TEXT}</text>")));
     }
 
     #[test]

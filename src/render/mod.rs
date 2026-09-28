@@ -302,12 +302,7 @@ mod tests {
     #[test]
     fn editor_ends_with_the_name_and_dre_in_the_bottom_right_corner_when_there_is_a_path() {
         let state = state_saved_to("docs/plans.dre");
-        assert_footer_is_bottom_right(
-            &state,
-            "MOVE plans \u{2022} dre",
-            "MOVE",
-            "plans \u{2022} dre",
-        );
+        assert_footer_is_bottom_right(&state, "MOVE plans \u{2022} dre", "MOVE", "plans");
     }
 
     #[test]
@@ -317,7 +312,7 @@ mod tests {
             &state,
             "MOVE [no name — press n to name it] \u{2022} dre",
             "MOVE",
-            "[no name — press n to name it] \u{2022} dre",
+            "[no name — press n to name it]",
         );
     }
 
@@ -346,6 +341,12 @@ mod tests {
         mode_word_x(box_x, box_width, text) + mode_word.chars().count() as i64 + 1
     }
 
+    const FOOTER_SUFFIX: &str = " \u{2022} dre";
+
+    fn suffix_x(box_x: i64, box_width: i64, text: &str, mode_word: &str, name: &str) -> i64 {
+        filename_x(box_x, box_width, text, mode_word) + name.chars().count() as i64
+    }
+
     fn prompt_cursor_x(name: &str, text: &str) -> i64 {
         let foot = foot_of(WINDOW);
         let (box_x, _, box_width, _) = box_at_bottom_right(foot, text);
@@ -360,7 +361,7 @@ mod tests {
             &state,
             text,
             "NAME",
-            "type a name \u{2022} dre",
+            "type a name",
             prompt_cursor_x("", text),
         );
     }
@@ -373,7 +374,7 @@ mod tests {
             &state,
             text,
             "NAME",
-            "ab \u{2022} dre",
+            "ab",
             prompt_cursor_x("ab", text),
         );
     }
@@ -385,7 +386,7 @@ mod tests {
             &state,
             "MOVE [no name — press n to name it] \u{2022} dre",
             "MOVE",
-            "[no name — press n to name it] \u{2022} dre",
+            "[no name — press n to name it]",
         );
     }
 
@@ -397,7 +398,7 @@ mod tests {
             &state,
             text,
             "NAME",
-            "type a name \u{2022} dre",
+            "type a name",
             prompt_cursor_x("", text),
         );
     }
@@ -410,7 +411,7 @@ mod tests {
             &state,
             text,
             "NAME",
-            "ab \u{2022} dre",
+            "ab",
             prompt_cursor_x("ab", text),
         );
     }
@@ -419,13 +420,13 @@ mod tests {
         state: &State,
         text: &str,
         mode_word: &str,
-        filename_text: &str,
+        name: &str,
         x: i64,
     ) {
         let foot = foot_of(WINDOW);
         let (box_x, box_y, box_width, _) = box_at_bottom_right(foot, text);
         let footer = &editor(state, WINDOW)[1].1;
-        assert_eq!(footer.len(), 5);
+        assert_eq!(footer.len(), 6);
         assert_eq!(
             footer[2],
             label_at(
@@ -437,14 +438,22 @@ mod tests {
         assert_eq!(
             footer[3],
             colored_label_at(
-                filename_text,
+                name,
                 filename_x(box_x, box_width, text, mode_word),
                 box_y + layout::BOX_HEIGHT / 2,
-                Some(crate::palette::MINT),
+                Some(crate::palette::DIM),
             )
         );
         assert_eq!(
             footer[4],
+            label_at(
+                FOOTER_SUFFIX,
+                suffix_x(box_x, box_width, text, mode_word, name),
+                box_y + layout::BOX_HEIGHT / 2,
+            )
+        );
+        assert_eq!(
+            footer[5],
             Placement {
                 node: PlacementNode::Cursor(crate::layout::Cursor),
                 x,
@@ -455,17 +464,12 @@ mod tests {
         );
     }
 
-    fn assert_footer_is_bottom_right(
-        state: &State,
-        text: &str,
-        mode_word: &str,
-        filename_text: &str,
-    ) {
+    fn assert_footer_is_bottom_right(state: &State, text: &str, mode_word: &str, name: &str) {
         let screen = editor(state, WINDOW);
         let foot = foot_of(WINDOW);
         let (box_x, box_y, box_width, box_height) = box_at_bottom_right(foot, text);
         let footer = &screen[1].1;
-        assert_eq!(footer.len(), 4);
+        assert_eq!(footer.len(), 5);
         assert_eq!(
             (footer[0].x, footer[0].y, footer[0].width, footer[0].height),
             (box_x, box_y, box_width, box_height)
@@ -490,10 +494,18 @@ mod tests {
         assert_eq!(
             footer[3],
             colored_label_at(
-                filename_text,
+                name,
                 filename_x(box_x, box_width, text, mode_word),
                 box_y + layout::BOX_HEIGHT / 2,
-                Some(crate::palette::MINT),
+                Some(crate::palette::DIM),
+            )
+        );
+        assert_eq!(
+            footer[4],
+            label_at(
+                FOOTER_SUFFIX,
+                suffix_x(box_x, box_width, text, mode_word, name),
+                box_y + layout::BOX_HEIGHT / 2,
             )
         );
     }
