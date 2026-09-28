@@ -33,7 +33,7 @@ impl RawMode {
         let mut stdout = io::stdout();
         stdout.write_all(ENTER_ALTERNATE_SCREEN.as_bytes())?;
         stdout.write_all(HIDE_CURSOR.as_bytes())?;
-        let (r, g, b) = crate::palette::palette(crate::palette::BACKGROUND).unwrap();
+        let (r, g, b) = crate::style::palette(crate::style::BACKGROUND).unwrap();
         write!(stdout, "\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x1b\\", r, g, b)?;
         stdout.flush()?;
         let mut raw = saved.clone();

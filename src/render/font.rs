@@ -157,7 +157,8 @@ impl GlyphSource for FakeGlyphSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::{CELL_HEIGHT, CELL_WIDTH, OPAQUE};
+    use crate::render::OPAQUE;
+    use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
     // Iosevka cut down to M, B, i and g: parsing the full font is slow in a debug build.

@@ -1,8 +1,8 @@
 use crate::diagram::{children, parent_of, Scope};
-use crate::palette::next_on_palette;
 use crate::state::action::{ImmediateCommand, SelectionCommand};
 use crate::state::history::undo;
 use crate::state::{add_child_box, Mode, State};
+use crate::style::next_on_palette;
 
 fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
@@ -300,10 +300,10 @@ fn dispatch(mut state: State, command: SelectionCommand, count: usize) -> State 
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children, Node};
-    use crate::palette::palette;
     use crate::state::action::Action;
     use crate::state::apply as reduce;
     use crate::state::new_state;
+    use crate::style::palette;
     use crate::test_support::handle_key;
     use types::Tree;
 

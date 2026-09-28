@@ -6,7 +6,7 @@ use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
-use crate::palette::palette;
+use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
 use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
@@ -581,9 +581,9 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
-    use super::super::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
     use super::*;
     use crate::state::Mode;
+    use crate::style::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
     use crate::view::editor;
     use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::State;
@@ -604,8 +604,8 @@ mod tests {
 
     #[test]
     fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
-        let box_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(BOX_FILL_OPACITY));
-        let footer_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+        let box_fill = fill_colour(Some(crate::style::FOREGROUND), Some(BOX_FILL_OPACITY));
+        let footer_fill = fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         assert!(box_fill.0 > 0);
         assert_eq!(footer_fill, box_fill);
     }
@@ -1571,7 +1571,7 @@ mod tests {
             .first()
             .expect("the footer box is drawn as an image");
         let (er, eg, eb, ea) =
-            fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+            fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         for pixel in image.canvas.pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }

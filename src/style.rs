@@ -14,6 +14,11 @@ pub(crate) const LIME: u8 = 0;
 pub(crate) const VIOLET: u8 = 2;
 pub(crate) const AMBER: u8 = 4;
 
+pub(crate) const CELL_WIDTH: i64 = 8;
+pub(crate) const CELL_HEIGHT: i64 = 16;
+pub(crate) const BOX_FILL_OPACITY: f64 = 0.12;
+pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
+
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
 }

@@ -1,4 +1,4 @@
-use crate::palette::palette;
+use crate::style::palette;
 use quick_xml::events::Event;
 use quick_xml::se::Serializer;
 use quick_xml::Reader;

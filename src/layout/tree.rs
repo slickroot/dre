@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
-use crate::render::BOX_FILL_OPACITY;
+use crate::style::BOX_FILL_OPACITY;
 use crate::view::{
     self, Arrow, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
     SIDE_PADDING,
@@ -216,10 +216,9 @@ pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Ve
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children};
-    use crate::palette;
-    use crate::palette::FOREGROUND;
-    use crate::render::FOOTER_FILL_OPACITY;
     use crate::state::FooterView;
+    use crate::style;
+    use crate::style::{FOOTER_FILL_OPACITY, FOREGROUND};
     use crate::view::{
         footer, interior, label_centre as centre, with_caret, with_glow, Arrow, Caret, Label,
         PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GLOW_MARGIN, LED_LABEL_GAP, LED_WIDTH,
@@ -246,7 +245,7 @@ mod tests {
     fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
         let text = "MOVE plans \u{2022} dre";
         let text_width = text.chars().count() as i64;
-        let view = footer_view(text, palette::LIME, false, None, false);
+        let view = footer_view(text, style::LIME, false, None, false);
         let placements = footer(&view);
         assert_eq!(placements.len(), 3);
         let inset_box_width = interior(text) + SIDE_PADDING * 2;
@@ -276,7 +275,7 @@ mod tests {
         assert_eq!(
             placements[1].node,
             PlacementNode::Led {
-                colour: palette::LIME,
+                colour: style::LIME,
                 lit: false,
             }
         );
@@ -316,7 +315,7 @@ mod tests {
     #[test]
     fn footer_box_is_bordered_when_the_view_is_bordered() {
         let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, None, true);
+        let view = footer_view(text, style::LIME, false, None, true);
         let placements = footer(&view);
         assert_eq!(
             placements[0].node,
@@ -333,7 +332,7 @@ mod tests {
 
     #[test]
     fn label_leaves_a_blank_column_after_the_led() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
+        let view = footer_view("MOVE plans \u{2022} dre", style::LIME, false, None, false);
         let placements = footer(&view);
         let led = &placements[1];
         let label = &placements[2];
@@ -343,18 +342,12 @@ mod tests {
 
     #[test]
     fn a_lit_led_is_marked_lit() {
-        let view = footer_view(
-            "WRITE plans \u{2022} dre",
-            palette::VIOLET,
-            true,
-            None,
-            false,
-        );
+        let view = footer_view("WRITE plans \u{2022} dre", style::VIOLET, true, None, false);
         let placements = footer(&view);
         match &placements[1].node {
             PlacementNode::Led { colour, lit } => {
                 assert!(*lit);
-                assert_eq!(*colour, palette::VIOLET);
+                assert_eq!(*colour, style::VIOLET);
             }
             _ => panic!("expected the second placement to be the led box"),
         }
@@ -362,7 +355,7 @@ mod tests {
 
     #[test]
     fn footer_with_no_cursor_has_no_cursor_placement() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
+        let view = footer_view("MOVE plans \u{2022} dre", style::LIME, false, None, false);
         let placements = footer(&view);
         assert!(placements
             .iter()
@@ -372,7 +365,7 @@ mod tests {
     #[test]
     fn footer_with_a_cursor_places_it_at_the_edit_index_on_the_label() {
         let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, Some(3), false);
+        let view = footer_view(text, style::LIME, false, Some(3), false);
         let placements = footer(&view);
         let label = placements
             .iter()
