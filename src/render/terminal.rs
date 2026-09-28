@@ -3,6 +3,7 @@ use std::num::NonZeroU32;
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
+use super::tiles::CellSize;
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -29,14 +30,20 @@ const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
 const INK_Z: i32 = CONTENT_Z;
 
-#[derive(Clone, Copy)]
-struct BoxStyle {
-    colour: Option<u8>,
-    fill: Option<u8>,
-    opacity: Option<f64>,
-    rounded: bool,
-    sides: Sides,
-    border: i64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct BoxStyle {
+    pub(super) colour: Option<u8>,
+    pub(super) fill: Option<u8>,
+    pub(super) fill_alpha: Option<u8>,
+    pub(super) rounded: bool,
+    pub(super) sides: Sides,
+    pub(super) border: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct GlowStyle {
+    pub(super) colour: Option<u8>,
+    pub(super) rounded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -69,12 +76,12 @@ pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     start..(start + width)
 }
 
-fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
+pub(super) fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
     opacity.map(|value| (value * OPAQUE as f64).round() as u8)
 }
 
-fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
-    match (fill, quantized_alpha(opacity)) {
+fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
+    match (fill, alpha) {
         (Some(colour), Some(alpha)) => {
             let (r, g, b) = crate::style::colour(colour).unwrap();
             let composite =
@@ -82,6 +89,32 @@ fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
             (composite(r), composite(g), composite(b), OPAQUE)
         }
         _ => TRANSPARENT,
+    }
+}
+
+pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
+    let (r, g, b) = colour(style.colour);
+    let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.fill_alpha);
+    BoxShape {
+        width,
+        height,
+        border: style.border,
+        radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+        sides: style.sides,
+        edge: [r, g, b, OPAQUE],
+        fill: [fill_r, fill_g, fill_b, fill_a],
+    }
+}
+
+pub(super) fn glow_shape(width: i64, height: i64, cell: CellSize, style: GlowStyle) -> GlowShape {
+    let (r, g, b) = colour(style.colour);
+    GlowShape {
+        width,
+        height,
+        margin_x: GLOW_MARGIN * cell.width,
+        margin_y: GLOW_MARGIN * cell.height,
+        radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+        colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
     }
 }
 
@@ -156,7 +189,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         height,
         colour: style.colour,
         fill: style.fill,
-        fill_alpha: quantized_alpha(style.opacity),
+        fill_alpha: style.fill_alpha,
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
@@ -453,7 +486,7 @@ impl TerminalRenderer {
                     BoxStyle {
                         colour: *colour,
                         fill: *fill,
-                        opacity: *opacity,
+                        fill_alpha: quantized_alpha(*opacity),
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
@@ -607,6 +640,13 @@ impl TerminalRenderer {
         self.cache.insert(key, drawn);
     }
 
+    fn cell_size(&self) -> CellSize {
+        CellSize {
+            width: self.window.cell_width,
+            height: self.window.cell_height,
+        }
+    }
+
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
         cells * self.window.cell_width
     }
@@ -618,18 +658,7 @@ impl TerminalRenderer {
     fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let (r, g, b) = colour(style.colour);
-        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.opacity);
-        let shape = BoxShape {
-            width,
-            height,
-            border: style.border,
-            radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
-            sides: style.sides,
-            edge: [r, g, b, OPAQUE],
-            fill: [fill_r, fill_g, fill_b, fill_a],
-        };
-        Canvas::fill(width, height, &shape)
+        Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
     fn glow_canvas(
@@ -641,15 +670,11 @@ impl TerminalRenderer {
     ) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let (r, g, b) = colour(edge);
-        let shape = GlowShape {
-            width,
-            height,
-            margin_x: self.cells_to_pixels_x(GLOW_MARGIN),
-            margin_y: self.cells_to_pixels_y(GLOW_MARGIN),
-            radius: if rounded { ROUNDED_RADIUS } else { 0 },
-            colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
+        let style = GlowStyle {
+            colour: edge,
+            rounded,
         };
+        let shape = glow_shape(width, height, self.cell_size(), style);
         Canvas::fill(width, height, &shape)
     }
 
@@ -718,13 +743,22 @@ mod tests {
         let alpha = (BOX_FILL_OPACITY * OPAQUE as f64).round() as u8;
         let round = |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
         let expected = (round(r), round(g), round(b), OPAQUE);
-        assert_eq!(fill_colour(Some(2), Some(BOX_FILL_OPACITY)), expected);
+        assert_eq!(
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY))),
+            expected
+        );
     }
 
     #[test]
     fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
-        let box_fill = fill_colour(Some(crate::style::FOREGROUND), Some(BOX_FILL_OPACITY));
-        let footer_fill = fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+        let box_fill = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(BOX_FILL_OPACITY)),
+        );
+        let footer_fill = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(FOOTER_FILL_OPACITY)),
+        );
         assert!(box_fill.0 > 0);
         assert_eq!(footer_fill, box_fill);
     }
@@ -776,11 +810,11 @@ mod tests {
     fn a_fill_colour_is_composited_over_black_and_made_opaque() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(
             pixel_at(&pixels, size, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
@@ -788,12 +822,12 @@ mod tests {
     fn border_pixels_are_unaffected_by_fill() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(Some(3));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(pixel_at(&pixels, size, 0, 0), edge_rgba(Some(3)));
         assert_eq!(
             pixel_at(&pixels, size, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
@@ -801,7 +835,7 @@ mod tests {
     fn a_border_is_bold_at_every_edge() {
         let size = 3 * 4;
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         for offset in 0..BORDER {
             assert_eq!(pixel_at(&pixels, size, 5, offset), edge);
@@ -822,7 +856,7 @@ mod tests {
     #[test]
     fn a_square_box_is_built_from_flat_edge_and_body_rows() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
 
         let edge_px = [edge.0, edge.1, edge.2, edge.3];
@@ -843,7 +877,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_its_extreme_corners() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let (last_x, last_y) = (CORNER_SIZE - 1, CORNER_SIZE - 1);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 0, 0), TRANSPARENT);
@@ -855,7 +889,7 @@ mod tests {
     #[test]
     fn straight_edges_stay_as_crisp_as_a_square_box() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let middle_y = CORNER_SIZE / 2;
@@ -904,7 +938,7 @@ mod tests {
     #[test]
     fn border_coverage_is_composed_over_the_opaque_fill() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (33, 91, 76, OPAQUE));
     }
@@ -912,7 +946,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_more_than_a_square_one() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let alpha_total = |pixels: &[u8]| {
@@ -950,7 +984,7 @@ mod tests {
     #[test]
     fn the_sprite_holds_exactly_one_pixel_per_cell_of_its_area() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixels.len() as i64, SMALL_SIZE * SMALL_SIZE * 4);
     }
@@ -1063,7 +1097,7 @@ mod tests {
                 BoxStyle {
                     colour: *colour,
                     fill: *fill,
-                    opacity: *opacity,
+                    fill_alpha: quantized_alpha(*opacity),
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
@@ -1890,8 +1924,10 @@ mod tests {
             .images
             .first()
             .expect("the footer box is drawn as an image");
-        let (er, eg, eb, ea) =
-            fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+        let (er, eg, eb, ea) = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(FOOTER_FILL_OPACITY)),
+        );
         for pixel in image.canvas().pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }
@@ -2414,7 +2450,7 @@ mod tests {
             BoxStyle {
                 colour: *colour,
                 fill: *fill,
-                opacity: *opacity,
+                fill_alpha: quantized_alpha(*opacity),
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
@@ -2461,7 +2497,7 @@ mod tests {
         let sprite = box_outline(&r, &box_node(Some(2), Some(2), false), size, size);
         assert_eq!(
             pixel_of(&sprite, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
