@@ -24,7 +24,7 @@ pub(crate) struct DreController {
     screen: Box<dyn Screen>,
     reducer: Box<dyn Reducer>,
     executor: Box<dyn EffectExecutor>,
-    flash_time: u64
+    flash_time: u64,
 }
 
 impl DreController {
@@ -39,7 +39,7 @@ impl DreController {
             screen,
             reducer,
             executor,
-            flash_time: 20
+            flash_time: 20,
         }
     }
 }
