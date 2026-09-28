@@ -8,26 +8,17 @@ fn snapshot(mut state: State) -> State {
     state
 }
 
-fn drop_snapshot_if_unchanged(mut state: State) -> State {
-    if state.history.last() == Some(&state.doc) {
-        state.history.pop();
-    }
-    state
-}
-
 pub(super) fn recorded(
     state: State,
     action: &Action,
     reduce: impl FnOnce(State) -> State,
 ) -> State {
-    let undoable = action.spec().undoable;
-    let state = if undoable { snapshot(state) } else { state };
-    let state = reduce(state);
-    if (undoable && *action != Action::EditLabel) || *action == Action::Commit {
-        drop_snapshot_if_unchanged(state)
+    let state = if action.spec().undoable {
+        snapshot(state)
     } else {
         state
-    }
+    };
+    reduce(state)
 }
 
 fn nearest_existing(tree: &Tree<Node>, mut path: Vec<usize>) -> Option<Vec<usize>> {
