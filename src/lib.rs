@@ -97,13 +97,11 @@ mod tests {
     }
 
     #[test]
-    fn going_idle_hides_the_cursor_and_the_next_key_restores_it_on_the_same_box() {
+    fn going_idle_leaves_the_selection_unchanged() {
         let mut session = session_with_a_box_selected();
         let selected = session.state().selected().map(<[usize]>::to_vec);
         assert!(selected.is_some());
         session.go_idle();
-        assert_eq!(session.state().selected(), None);
-        session.press_key("z");
         assert_eq!(session.state().selected().map(<[usize]>::to_vec), selected);
     }
 

@@ -36,7 +36,6 @@ struct KeyBinding<C> {
 pub struct State {
     doc: Document,
     selected: Option<Vec<usize>>,
-    last_selected: Option<Vec<usize>>,
     history: Vec<Document>,
     clipboard: Option<Tree<Node>>,
     mode: Mode,
@@ -158,7 +157,6 @@ impl Default for State {
         State {
             doc: Document::default(),
             selected: None,
-            last_selected: None,
             history: Vec::new(),
             clipboard: None,
             mode: Mode::default(),
@@ -171,10 +169,7 @@ impl Default for State {
     }
 }
 
-fn apply(mut state: State, action: action::Action) -> State {
-    if let Some(selected) = state.last_selected.take() {
-        state.selected = Some(selected);
-    }
+fn apply(state: State, action: action::Action) -> State {
     history::recorded(state, &action, |state| match action.mode() {
         ActionMode::Insert => insert::reduce(state, action),
         ActionMode::NamePrompt => name_prompt::reduce(state, action),
@@ -217,7 +212,6 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
     State {
         doc: Document::with_boxes(boxes),
         selected,
-        last_selected: None,
         history: Vec::new(),
         clipboard: None,
         mode,
@@ -514,29 +508,27 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_hide_in_command_mode_clears_the_selection_and_stashes_it() {
+    fn idling_in_command_mode_leaves_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.selected, None);
-        assert_eq!(hidden.last_selected, Some(selected));
+        let idled = reduce(state, Action::Idle);
+        assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
-    fn an_idle_hide_in_insert_mode_leaves_the_selection_alone() {
+    fn idling_in_insert_mode_leaves_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(
             vec![node("a")],
             Mode::Insert { cursor: 1 },
             Some(selected.clone()),
         );
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.selected, Some(selected));
-        assert_eq!(hidden.last_selected, None);
+        let idled = reduce(state, Action::Idle);
+        assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
-    fn an_idle_hide_in_name_prompt_mode_leaves_the_selection_alone() {
+    fn idling_in_name_prompt_mode_leaves_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(
             vec![node("a")],
@@ -546,55 +538,33 @@ mod tests {
             },
             Some(selected.clone()),
         );
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.selected, Some(selected));
-        assert_eq!(hidden.last_selected, None);
+        let idled = reduce(state, Action::Idle);
+        assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
-    fn an_idle_hide_with_nothing_selected_is_a_noop() {
+    fn idling_with_nothing_selected_is_a_noop() {
         let state = new_state(vec![node("a")], Mode::Command, None);
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.selected, None);
-        assert_eq!(hidden.last_selected, None);
+        let idled = reduce(state, Action::Idle);
+        assert_eq!(idled.selected, None);
     }
 
     #[test]
-    fn repeating_idle_hides_keep_the_stashed_selection() {
+    fn repeated_idling_keeps_the_selection_unchanged() {
         let selected = vec![0];
         let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = reduce(reduce(state, Action::Idle), Action::Idle);
-        assert_eq!(hidden.selected, None);
-        assert_eq!(hidden.last_selected, Some(selected.clone()));
-        let restored = handle_key(hidden, "z");
-        assert_eq!(restored.selected, Some(selected));
+        let idled = reduce(reduce(state, Action::Idle), Action::Idle);
+        assert_eq!(idled.selected, Some(selected));
     }
 
     #[test]
-    fn the_next_key_after_a_hide_lands_every_command_on_the_hidden_box() {
-        let state = new_state(vec![node("a"), node("b")], Mode::Command, Some(vec![0]));
-        let hidden = reduce(state, Action::Idle);
-        let result = handle_key(hidden, "j");
-        assert_eq!(result.selected, Some(vec![1]));
-    }
-
-    #[test]
-    fn any_key_after_a_hide_restores_the_selection() {
-        let selected = vec![0];
-        let state = new_state(vec![node("a")], Mode::Command, Some(selected.clone()));
-        let hidden = reduce(state, Action::Idle);
-        let result = handle_key(hidden, "z");
-        assert_eq!(result.selected, Some(selected));
-    }
-
-    #[test]
-    fn an_idle_hide_is_not_undoable_and_does_not_pollute_history() {
+    fn an_idle_is_not_undoable_and_does_not_pollute_history() {
         let mut state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
         state = reduce(state, Action::ToggleRounded);
         state = reduce(state, Action::ToggleRounded);
-        let hidden = reduce(state, Action::Idle);
-        assert_eq!(hidden.history.len(), 2);
-        assert_eq!(hidden.selected, None);
+        let idled = reduce(state, Action::Idle);
+        assert_eq!(idled.history.len(), 2);
+        assert_eq!(idled.selected, Some(vec![0]));
     }
 
     fn selecting_first(boxes: Vec<Tree<Node>>, mode: Mode) -> State {

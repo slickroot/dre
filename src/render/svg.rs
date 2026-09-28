@@ -12,6 +12,9 @@ const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
+const GLOW_STROKE_WIDTH: i64 = 16;
+const GLOW_BLUR_STD_DEVIATION: f64 = 16.0;
+const GLOW_FILTER_ID: &str = "glow";
 
 fn label_font_size() -> f64 {
     (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
@@ -59,16 +62,16 @@ impl Renderer for SvgRenderer {
         };
         let areas = match self.mode {
             Mode::Editor => editor(state, window),
-            Mode::Export => vec![(window, without_cursor(body(state, window)))],
+            Mode::Export => vec![(window, without_caret(body(state, window)))],
         };
         out.write_all(document(self.canvas, self.mode, &areas).as_bytes())
     }
 }
 
-fn without_cursor(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
+fn without_caret(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
     placements
         .into_iter()
-        .filter(|placement| !matches!(placement.node, PlacementNode::Cursor(_)))
+        .filter(|placement| !matches!(placement.node, PlacementNode::Caret(_)))
         .collect()
 }
 
@@ -113,6 +116,13 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
     }) {
         svg.push_str(&marker_defs());
     }
+    if areas.iter().any(|(_, placements)| {
+        placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Box { selected: true, .. }))
+    }) {
+        svg.push_str(&glow_filter_defs());
+    }
     for (area, placements) in areas {
         let (x, y, width, height) = pixels(*area);
         svg.push_str(&format!(
@@ -148,13 +158,31 @@ fn paint(placements: &[Placement]) -> String {
         }
     }
     for placement in placements {
+        if let PlacementNode::Box {
+            colour,
+            rounded,
+            selected,
+            ..
+        } = &placement.node
+        {
+            if *selected {
+                svg.push_str(&glow_rect(placement, *colour, *rounded));
+            }
+        }
+    }
+    for placement in placements {
         if let PlacementNode::Label(label) = &placement.node {
             svg.push_str(&label_text(placement, label));
         }
     }
     for placement in placements {
+        if let PlacementNode::Caret(_) = &placement.node {
+            svg.push_str(&caret_rect(placement));
+        }
+    }
+    for placement in placements {
         if let PlacementNode::Cursor(_) = &placement.node {
-            svg.push_str(&cursor_rect(placement));
+            svg.push_str(&caret_rect(placement));
         }
     }
     for placement in placements {
@@ -185,7 +213,7 @@ fn background_rect(min_x: i64, min_y: i64, span_x: &str, span_y: &str) -> String
     )
 }
 
-fn cursor_rect(placement: &crate::layout::Placement) -> String {
+fn caret_rect(placement: &crate::layout::Placement) -> String {
     let (r, g, b) = colour(None);
     format!(
         "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"rgb({r},{g},{b})\"/>",
@@ -266,6 +294,31 @@ fn arrow_paths(placement: &crate::layout::Placement, arrow: &crate::layout::Arro
     paths
 }
 
+fn glow_filter_defs() -> String {
+    format!(
+        "<defs><filter id=\"{GLOW_FILTER_ID}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"/></filter></defs>"
+    )
+}
+
+fn glow_rect(placement: &crate::layout::Placement, edge: Option<u8>, rounded: bool) -> String {
+    use super::ROUNDED_RADIUS;
+    use std::fmt::Write as _;
+
+    let (r, g, b) = colour(edge);
+    let mut rect = format!(
+        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{GLOW_STROKE_WIDTH}\" fill=\"none\" filter=\"url(#{GLOW_FILTER_ID})\"",
+        placement.x * CELL_WIDTH,
+        placement.y * CELL_HEIGHT,
+        placement.width * CELL_WIDTH,
+        placement.height * CELL_HEIGHT,
+    );
+    if rounded {
+        write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
+    }
+    rect.push_str("/>");
+    rect
+}
+
 fn rect(
     placement: &crate::layout::Placement,
     edge: Option<u8>,
@@ -340,9 +393,9 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
-    use crate::layout::with_cursor;
+    use crate::layout::with_caret;
     use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_GAP, SIDE_PADDING};
-    use crate::layout::{Arrow, Cursor, Label, Placement, BORDER};
+    use crate::layout::{Arrow, Caret, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
 
@@ -363,6 +416,7 @@ mod tests {
                 rounded,
                 sides: ALL_SIDES,
                 border: BORDER,
+                selected: false,
             },
             x,
             y,
@@ -380,6 +434,7 @@ mod tests {
                 rounded: false,
                 sides: NO_SIDES,
                 border: BORDER,
+                selected: false,
             },
             x,
             y,
@@ -390,6 +445,13 @@ mod tests {
 
     fn plain_box(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
         box_placement(x, y, width, height, None, None, false)
+    }
+
+    fn selected(mut placement: Placement<'static>) -> Placement<'static> {
+        if let PlacementNode::Box { selected, .. } = &mut placement.node {
+            *selected = true;
+        }
+        placement
     }
 
     fn arrow_placement(
@@ -723,6 +785,95 @@ mod tests {
                 .count(),
             rects.len() - 1
         );
+    }
+
+    #[test]
+    fn a_selected_box_glows_along_its_exact_border_in_its_edge_colour() {
+        let (x, y, width, height) = (2, 3, 4, 3);
+        let placements = vec![selected(box_placement(
+            x,
+            y,
+            width,
+            height,
+            Some(2),
+            None,
+            false,
+        ))];
+
+        let svg = draw(&placements);
+
+        let glow = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
+            .expect("the selected box renders a glow rect");
+        assert!(glow.contains(&format!("x=\"{}\"", x * CELL_WIDTH)));
+        assert!(glow.contains(&format!("y=\"{}\"", y * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("width=\"{}\"", width * CELL_WIDTH)));
+        assert!(glow.contains(&format!("height=\"{}\"", height * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
+        assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
+        assert!(glow.contains("fill=\"none\""));
+        let blur = svg
+            .split('<')
+            .find(|element| element.starts_with("feGaussianBlur "))
+            .expect("the selected box renders a glow blur");
+        assert!(blur.contains(&format!("stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"")));
+    }
+
+    #[test]
+    fn a_rounded_selected_box_uses_the_same_rounding_for_its_glow() {
+        let placements = vec![selected(box_placement(0, 0, 4, 3, Some(2), None, true))];
+
+        let svg = draw(&placements);
+
+        let glow = svg
+            .split('<')
+            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
+            .expect("the selected box renders a glow rect");
+        assert!(glow.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
+    }
+
+    #[test]
+    fn a_filled_selected_box_paints_its_fill_then_glow_then_label() {
+        let placements = vec![
+            selected(box_placement(0, 0, 4, 3, Some(2), Some(2), false)),
+            label_placement("hi", 1, 1),
+        ];
+
+        let svg = draw(&placements);
+
+        let box_rect = svg
+            .find(&format!("fill=\"{}\"", rgb(palette(2).unwrap())))
+            .expect("the selected box renders its fill");
+        let glow = svg
+            .find("filter=\"url(#")
+            .expect("the selected box renders a glow");
+        let label = svg.find("<text").expect("the box renders its label");
+        assert!(box_rect < glow, "the fill is emitted before the glow");
+        assert!(glow < label, "the glow is emitted before the label");
+    }
+
+    #[test]
+    fn an_unselected_box_renders_no_glow_rect() {
+        let selected_svg = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
+        let plain_svg = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
+
+        assert!(!plain_svg.contains("filter=\"url(#"));
+        assert_eq!(
+            plain_svg.matches("<rect").count(),
+            selected_svg.matches("<rect").count() - 1,
+            "selection adds exactly one extra rect: the glow"
+        );
+    }
+
+    #[test]
+    fn the_blur_filter_defs_are_only_emitted_when_something_is_selected() {
+        let with_selection = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
+        let without_selection = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
+
+        assert!(with_selection.contains("feGaussianBlur"));
+        assert!(!without_selection.contains("feGaussianBlur"));
+        assert!(!without_selection.contains("<filter"));
     }
 
     fn label_placement(text: &str, x: i64, y: i64) -> Placement<'_> {
@@ -1209,8 +1360,12 @@ mod tests {
     }
 
     fn rendered(selected: Option<Vec<usize>>) -> String {
+        rendered_in(Mode::Command, selected)
+    }
+
+    fn rendered_in(mode: Mode, selected: Option<Vec<usize>>) -> String {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
-        let state = crate::state::new_state(boxes, Mode::Command, selected);
+        let state = crate::state::new_state(boxes, mode, selected);
         let mut out = Vec::new();
         SvgRenderer::with_canvas(100, 40)
             .render(&state, &mut out)
@@ -1238,7 +1393,7 @@ mod tests {
         );
     }
 
-    fn cursor_rect_at_cell(column: i64, row: i64) -> String {
+    fn caret_rect_at_cell(column: i64, row: i64) -> String {
         format!(
             "<rect x=\"{}\" y=\"{}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"{}\"/>",
             column * CELL_WIDTH,
@@ -1247,56 +1402,62 @@ mod tests {
         )
     }
 
-    fn cursor_rects(svg: &str) -> Vec<&str> {
-        let cursor_fill = format!(
+    fn caret_rects(svg: &str) -> Vec<&str> {
+        let caret_fill = format!(
             "width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"{}\"/>",
             rgb(colour(None))
         );
         svg.split('<')
-            .filter(|element| element.starts_with("rect ") && element.ends_with(&cursor_fill))
+            .filter(|element| element.starts_with("rect ") && element.ends_with(&caret_fill))
             .collect()
     }
 
     #[test]
-    fn a_selected_box_shows_one_cursor() {
-        assert_eq!(cursor_rects(&rendered(Some(vec![0, 1]))).len(), 1);
+    fn command_mode_shows_no_caret_even_when_something_is_selected() {
+        assert!(caret_rects(&rendered(Some(vec![0, 1]))).is_empty());
     }
 
     #[test]
-    fn the_export_without_a_canvas_omits_the_cursor() {
+    fn insert_mode_shows_one_caret_for_the_edited_box() {
+        let svg = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
+        assert_eq!(caret_rects(&svg).len(), 1);
+    }
+
+    #[test]
+    fn the_export_without_a_canvas_omits_the_caret() {
         let selected = example_state().selected().map(<[usize]>::to_vec);
         assert!(selected.is_some());
-        let svg = render_to_string(SvgRenderer::default(), &example_state());
+        let svg = render_to_string(SvgRenderer::default(), &example_insert_state());
 
-        assert!(cursor_rects(&svg).is_empty());
+        assert!(caret_rects(&svg).is_empty());
     }
 
     #[test]
-    fn the_canvas_render_keeps_the_cursor() {
-        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_state());
+    fn the_canvas_render_keeps_the_caret() {
+        let svg = render_to_string(SvgRenderer::with_canvas(100, 40), &example_insert_state());
 
-        assert_eq!(cursor_rects(&svg).len(), 1);
+        assert_eq!(caret_rects(&svg).len(), 1);
     }
 
     #[test]
-    fn no_selection_shows_no_cursor() {
-        assert!(cursor_rects(&rendered(None)).is_empty());
+    fn no_selection_shows_no_caret() {
+        assert!(caret_rects(&rendered(None)).is_empty());
     }
 
     #[test]
-    fn moving_the_selection_moves_the_cursor() {
-        let first = rendered(Some(vec![0, 0]));
-        let second = rendered(Some(vec![0, 1]));
+    fn moving_the_selection_moves_the_caret() {
+        let first = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 0]));
+        let second = rendered_in(Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
 
-        assert_ne!(cursor_rects(&first), cursor_rects(&second));
+        assert_ne!(caret_rects(&first), caret_rects(&second));
     }
 
     #[test]
-    fn the_cursor_is_painted_after_the_labels() {
+    fn the_caret_is_painted_after_the_labels() {
         let placements = vec![
             label_placement("hi", 1, 1),
             Placement {
-                node: PlacementNode::Cursor(Cursor),
+                node: PlacementNode::Caret(Caret),
                 x: 2,
                 y: 1,
                 width: 1,
@@ -1306,8 +1467,8 @@ mod tests {
 
         let svg = draw(&placements);
 
-        let cursor = svg.find(&cursor_rect_at_cell(2, 1)).unwrap();
-        assert!(cursor > svg.find("<text").unwrap());
+        let caret = svg.find(&caret_rect_at_cell(2, 1)).unwrap();
+        assert!(caret > svg.find("<text").unwrap());
     }
 
     const CANVAS: Area = Area {
@@ -1320,6 +1481,14 @@ mod tests {
     fn example_state() -> State {
         let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
         let mut state = crate::state::new_state(boxes, Mode::Command, Some(vec![0, 1]));
+        state.set_save_to(Some(format!("docs/{NAME}.dre")));
+        state
+    }
+
+    fn example_insert_state() -> State {
+        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let mut state =
+            crate::state::new_state(boxes, Mode::Insert { cursor: 0 }, Some(vec![0, 1]));
         state.set_save_to(Some(format!("docs/{NAME}.dre")));
         state
     }
@@ -1477,11 +1646,7 @@ mod tests {
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
         let diagram = centre(
-            with_cursor(
-                diagram(state.doc().tree(), None),
-                state.selected().map(<[usize]>::to_vec),
-                None,
-            ),
+            with_caret(diagram(state.doc().tree(), None, state.selected()), None),
             body,
         );
         let body_svg = nested(body, &paint(&diagram));

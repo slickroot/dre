@@ -12,14 +12,6 @@ pub(crate) fn min_depth(command: Action) -> usize {
     }
 }
 
-fn hide_idle_cursor(mut state: State) -> State {
-    if state.mode == Mode::Command && state.selected.is_some() {
-        state.last_selected = state.selected.clone();
-        state.selected = None;
-    }
-    state
-}
-
 fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
         name: String::new(),
@@ -221,7 +213,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
             state.pending_count = None;
             return state;
         }
-        Action::Idle => return hide_idle_cursor(state),
+        Action::Idle => return state,
         Action::Interrupt => return interrupt(state),
         Action::OpenNamePrompt => return open_name_prompt(state),
         _ => {}

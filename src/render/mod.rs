@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::composer::{self, Area};
-use crate::layout::{self, with_cursor, Placement, FOOTER_ROWS};
+use crate::layout::{self, with_caret, with_glow, Placement, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
 use crate::state::{Mode, State};
 
@@ -29,17 +29,20 @@ pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_
 }
 
 pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
-    let (editing, edit_index) = match state.mode() {
-        Mode::Insert { cursor } => (state.selected(), Some(*cursor)),
-        _ => (None, None),
+    let editing_caret: Option<(Vec<usize>, usize)> = match state.mode() {
+        Mode::Insert { cursor } => state.selected().map(|path| (path.to_vec(), *cursor)),
+        _ => None,
     };
-    centre(
-        with_cursor(
-            layout::diagram(state.doc().tree(), editing),
-            state.selected().map(<[usize]>::to_vec),
-            edit_index,
+    let editing = editing_caret.as_ref().map(|(path, _)| path.as_slice());
+    with_glow(
+        centre(
+            with_caret(
+                layout::diagram(state.doc().tree(), editing, state.selected()),
+                editing_caret,
+            ),
+            area,
         ),
-        area,
+        state.selected(),
     )
 }
 
@@ -114,7 +117,7 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Cursor, Label, PlacementNode, ALL_SIDES, BORDER, SIDE_PADDING};
+    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER, SIDE_PADDING};
     use crate::state::{new_state, Mode};
     use crate::test_support::handle_key;
 
@@ -140,6 +143,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            selected: false,
         }
     }
 
@@ -299,7 +303,7 @@ mod tests {
         let body = body_of(WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(layout::diagram(state.doc().tree(), None), body)
+            centre(layout::diagram(state.doc().tree(), None, None), body)
         );
     }
 
@@ -310,21 +314,37 @@ mod tests {
     }
 
     #[test]
-    fn editor_puts_the_cursor_in_the_body_when_something_is_selected() {
-        let selected = Some(vec![0]);
-        let state = state(selected.clone());
+    fn command_mode_shows_no_caret_even_when_something_is_selected() {
+        let state = state(Some(vec![0]));
+        let screen = editor(&state, WINDOW);
+        assert!(!screen[0]
+            .1
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
+    }
+
+    #[test]
+    fn insert_mode_puts_the_caret_in_the_body_at_the_typed_index() {
+        let boxes = vec![node_with_children("root", vec![node("A"), node("B")])];
+        let state = new_state(boxes, Mode::Insert { cursor: 1 }, Some(vec![0]));
         let screen = editor(&state, WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(
-                with_cursor(layout::diagram(state.doc().tree(), None), selected, None),
-                body_of(WINDOW)
+            with_glow(
+                centre(
+                    with_caret(
+                        layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
+                        Some((vec![0], 1)),
+                    ),
+                    body_of(WINDOW)
+                ),
+                state.selected(),
             )
         );
         assert!(screen[0]
             .1
             .iter()
-            .any(|placement| matches!(placement.node, PlacementNode::Cursor(_))));
+            .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
     }
 
     fn state_saved_to(path: &str) -> State {
@@ -422,7 +442,7 @@ mod tests {
         assert_eq!(
             footer[3],
             Placement {
-                node: PlacementNode::Cursor(Cursor),
+                node: PlacementNode::Cursor(crate::layout::Cursor),
                 x,
                 y: box_y + layout::BOX_HEIGHT / 2,
                 width: 1,
