@@ -4,14 +4,6 @@ use crate::state::action::Action;
 use crate::state::history::undo;
 use crate::state::{add_child_box, Mode, State};
 
-pub(crate) fn min_depth(command: Action) -> usize {
-    match command {
-        Action::Undo | Action::NewBox | Action::Paste | Action::Quit => 0,
-        Action::SelectParent => 2,
-        _ => 1,
-    }
-}
-
 fn open_name_prompt(mut state: State) -> State {
     state.mode = Mode::NamePrompt {
         name: String::new(),
@@ -220,7 +212,7 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
     }
     let count = state.pending_count.take().unwrap_or(1);
     let depth = state.selected.as_ref().map_or(0, Vec::len);
-    if depth < min_depth(command) {
+    if depth < command.spec().min_depth {
         return state;
     }
     match (command, state.selected.take()) {
@@ -281,7 +273,7 @@ mod tests {
     fn a_command_below_its_minimum_depth_leaves_the_document_unchanged() {
         let boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
         for command in COMMANDS {
-            let depth = min_depth(command);
+            let depth = command.spec().min_depth;
             if depth == 0 {
                 continue;
             }
