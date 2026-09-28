@@ -104,7 +104,7 @@ pub(crate) fn label_centre(width: i64, label: &str) -> i64 {
 
 const NO_NAME: &str = "[no name — press n to name it]";
 const PLACEHOLDER: &str = "type a name";
-const FOOTER_SUFFIX: &str = " • dre";
+const FOOTER_SUFFIX: &str = "dre";
 const MOVE: &str = "MOVE";
 const WRITE: &str = "WRITE";
 const NAME: &str = "NAME";
@@ -158,9 +158,13 @@ fn footer_filename(model: &FooterModel) -> &str {
     model.filename.as_deref().unwrap_or(placeholder)
 }
 
+const FILENAME_PREFIX: &str = "• ";
+const FILENAME_SUFFIX: &str = " •";
+
 pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     let mode_word = footer_mode_word(model.mode);
     let filename = footer_filename(model);
+    let padded_filename = format!("{FILENAME_PREFIX}{filename}{FILENAME_SUFFIX}");
     let columns = vec![
         Column {
             node: PlacementNode::Led {
@@ -186,12 +190,14 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         },
         Column {
             node: PlacementNode::Label(Label {
-                text: Cow::Owned(filename.to_string()),
+                text: Cow::Owned(padded_filename.clone()),
                 colour: Some(style::DIM),
             }),
-            width: interior(filename),
-            padding: 1,
-            cursor: model.cursor.map(|c| c as i64),
+            width: interior(&padded_filename),
+            padding: 0,
+            cursor: model
+                .cursor
+                .map(|c| c as i64 + FILENAME_PREFIX.chars().count() as i64),
         },
         Column {
             node: PlacementNode::Label(Label {

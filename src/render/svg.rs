@@ -1344,8 +1344,10 @@ mod tests {
             rows: 33 + FOOTER_ROWS,
         };
         let (body, foot) = body_and_foot(window);
-        let footer_x = foot.col + foot.cols - footer_width();
-        let footer = vec![label_placement(FOOTER_TEXT, footer_x, foot.row)];
+        const EXAMPLE_FOOTER_TEXT: &str = "MOVE \u{2022} plans \u{2022} dre";
+        let footer_width = EXAMPLE_FOOTER_TEXT.chars().count() as i64;
+        let footer_x = foot.col + foot.cols - footer_width;
+        let footer = vec![label_placement(EXAMPLE_FOOTER_TEXT, footer_x, foot.row)];
 
         let svg = document(
             Some((window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT)),
@@ -1377,7 +1379,7 @@ mod tests {
             expected_background(0, 0, window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
             expected_marker(),
             nested(body, &diagram),
-            nested(foot, &label_at(footer_x, foot.row, FOOTER_TEXT)),
+            nested(foot, &label_at(footer_x, foot.row, EXAMPLE_FOOTER_TEXT)),
         );
 
         assert_eq!(svg, expected);
@@ -1590,25 +1592,26 @@ mod tests {
 
     const NAME: &str = "plans";
     const MODE_WORD: &str = "MOVE";
-    const SUFFIX_TEXT: &str = " \u{2022} dre";
-    const FOOTER_TEXT: &str = "MOVE plans \u{2022} dre";
+    const SUFFIX_TEXT: &str = "dre";
+    const FILENAME_PREFIX: &str = "\u{2022} ";
+    const FILENAME_SUFFIX: &str = " \u{2022}";
 
-    fn footer_width() -> i64 {
-        FOOTER_TEXT.chars().count() as i64
+    fn padded_name() -> String {
+        format!("{FILENAME_PREFIX}{NAME}{FILENAME_SUFFIX}")
     }
 
     const COLUMN_PADDING: i64 = 1;
     const COLUMN_GAP: i64 = COLUMN_PADDING * 2;
 
     fn footer_box_area(foot: Area) -> Area {
-        // `footer_width` already counts the one space between the mode word and
-        // the filename, so only the padding beyond that single character is added.
-        let width = footer_width() - 1
+        let width = COLUMN_PADDING
             + LED_WIDTH
+            + COLUMN_GAP
+            + MODE_WORD.chars().count() as i64
             + COLUMN_PADDING
-            + COLUMN_GAP
-            + COLUMN_GAP
-            + COLUMN_GAP
+            + padded_name().chars().count() as i64
+            + COLUMN_PADDING
+            + SUFFIX_TEXT.chars().count() as i64
             + COLUMN_PADDING;
         Area {
             col: foot.col + foot.cols - width,
@@ -1627,11 +1630,11 @@ mod tests {
     }
 
     fn footer_filename_x(area: Area) -> i64 {
-        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + COLUMN_GAP
+        footer_mode_word_x(area) + MODE_WORD.chars().count() as i64 + COLUMN_PADDING
     }
 
     fn footer_suffix_x(area: Area) -> i64 {
-        footer_filename_x(area) + NAME.chars().count() as i64 + COLUMN_GAP
+        footer_filename_x(area) + padded_name().chars().count() as i64 + COLUMN_PADDING
     }
 
     fn padded_footer_label(foot: Area) -> String {
@@ -1646,7 +1649,7 @@ mod tests {
             label_at_with_colour(
                 footer_filename_x(area),
                 area.row + BOX_HEIGHT / 2,
-                NAME,
+                &padded_name(),
                 Some(crate::style::DIM),
             ),
             label_at(
@@ -1908,7 +1911,7 @@ mod tests {
         assert_eq!(attribute(&svg, "width"), cols * CELL_WIDTH);
         assert_eq!(attribute(&svg, "height"), rows * CELL_HEIGHT);
         assert!(svg.contains(&format!(">{MODE_WORD}</text>")));
-        assert!(svg.contains(&format!(">{NAME}</text>")));
+        assert!(svg.contains(&format!(">{}</text>", padded_name())));
         assert!(svg.contains(&format!(">{SUFFIX_TEXT}</text>")));
     }
 
