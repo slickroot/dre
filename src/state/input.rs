@@ -1,4 +1,4 @@
-use crate::state::action::Action;
+use crate::state::action::{Action, CommandAction, InsertAction, NamePromptAction};
 use crate::state::text_edit::TextKey;
 use crate::state::{Mode, State};
 
@@ -49,37 +49,41 @@ enum KeyAction {
 impl KeyAction {
     fn action(self, key: &str) -> Action {
         match self {
-            Self::Undo => Action::Undo,
-            Self::NewBox => Action::NewBox,
-            Self::NewSibling => Action::NewSibling,
-            Self::Delete => Action::Delete,
-            Self::Paste => Action::Paste,
-            Self::SelectParent => Action::SelectParent,
-            Self::SelectChild => Action::SelectChild,
-            Self::SelectNext => Action::SelectNext,
-            Self::SelectPrevious => Action::SelectPrevious,
-            Self::EditLabel => Action::EditLabel,
-            Self::RenameLabel => Action::RenameLabel,
-            Self::CycleColour => Action::CycleColour,
-            Self::CycleSiblingsColour => Action::CycleSiblingsColour,
-            Self::ToggleSiblingsFill => Action::ToggleSiblingsFill,
-            Self::ToggleFill => Action::ToggleFill,
-            Self::ToggleRounded => Action::ToggleRounded,
-            Self::ToggleSiblingsRounded => Action::ToggleSiblingsRounded,
-            Self::Quit => Action::Quit,
-            Self::OpenNamePrompt => Action::OpenNamePrompt,
-            Self::Interrupt => Action::Interrupt,
-            Self::Digit => Action::Digit(key.as_bytes()[0] - b'0'),
-            Self::Commit => Action::Commit,
-            Self::CommitAndAddChild => Action::CommitAndAddChild,
-            Self::InsertBackspace => Action::InsertKey(TextKey::Backspace),
-            Self::InsertLeft => Action::InsertKey(TextKey::Left),
-            Self::InsertRight => Action::InsertKey(TextKey::Right),
-            Self::InsertPrintable => Action::InsertKey(TextKey::Char(printable(key).unwrap())),
-            Self::NameConfirm => Action::NameConfirm,
-            Self::NameCancel => Action::NameCancel,
-            Self::NameBackspace => Action::NameBackspace,
-            Self::NamePrintable => Action::NameAppend(printable(key).unwrap()),
+            Self::Undo => Action::Command(CommandAction::Undo),
+            Self::NewBox => Action::Command(CommandAction::NewBox),
+            Self::NewSibling => Action::Command(CommandAction::NewSibling),
+            Self::Delete => Action::Command(CommandAction::Delete),
+            Self::Paste => Action::Command(CommandAction::Paste),
+            Self::SelectParent => Action::Command(CommandAction::SelectParent),
+            Self::SelectChild => Action::Command(CommandAction::SelectChild),
+            Self::SelectNext => Action::Command(CommandAction::SelectNext),
+            Self::SelectPrevious => Action::Command(CommandAction::SelectPrevious),
+            Self::EditLabel => Action::Command(CommandAction::EditLabel),
+            Self::RenameLabel => Action::Command(CommandAction::RenameLabel),
+            Self::CycleColour => Action::Command(CommandAction::CycleColour),
+            Self::CycleSiblingsColour => Action::Command(CommandAction::CycleSiblingsColour),
+            Self::ToggleSiblingsFill => Action::Command(CommandAction::ToggleSiblingsFill),
+            Self::ToggleFill => Action::Command(CommandAction::ToggleFill),
+            Self::ToggleRounded => Action::Command(CommandAction::ToggleRounded),
+            Self::ToggleSiblingsRounded => Action::Command(CommandAction::ToggleSiblingsRounded),
+            Self::Quit => Action::Command(CommandAction::Quit),
+            Self::OpenNamePrompt => Action::Command(CommandAction::OpenNamePrompt),
+            Self::Interrupt => Action::Command(CommandAction::Interrupt),
+            Self::Digit => Action::Command(CommandAction::Digit(key.as_bytes()[0] - b'0')),
+            Self::Commit => Action::Insert(InsertAction::Commit),
+            Self::CommitAndAddChild => Action::Insert(InsertAction::CommitAndAddChild),
+            Self::InsertBackspace => Action::Insert(InsertAction::InsertKey(TextKey::Backspace)),
+            Self::InsertLeft => Action::Insert(InsertAction::InsertKey(TextKey::Left)),
+            Self::InsertRight => Action::Insert(InsertAction::InsertKey(TextKey::Right)),
+            Self::InsertPrintable => Action::Insert(InsertAction::InsertKey(TextKey::Char(
+                printable(key).unwrap(),
+            ))),
+            Self::NameConfirm => Action::NamePrompt(NamePromptAction::NameConfirm),
+            Self::NameCancel => Action::NamePrompt(NamePromptAction::NameCancel),
+            Self::NameBackspace => Action::NamePrompt(NamePromptAction::NameBackspace),
+            Self::NamePrintable => {
+                Action::NamePrompt(NamePromptAction::NameAppend(printable(key).unwrap()))
+            }
         }
     }
 }
@@ -359,7 +363,9 @@ pub(crate) fn parse(state: &State, key: &str) -> Option<Action> {
     });
     match binding {
         Some(binding) => Some(binding.action.action(key)),
-        None if matches!(state.mode, Mode::Command) => Some(Action::CancelCount),
+        None if matches!(state.mode, Mode::Command) => {
+            Some(Action::Command(CommandAction::CancelCount))
+        }
         None => None,
     }
 }
@@ -388,38 +394,38 @@ fn keymap_markdown() -> String {
 #[cfg(test)]
 fn action_key(action: &Action) -> KeyAction {
     match action {
-        Action::Undo => KeyAction::Undo,
-        Action::NewBox => KeyAction::NewBox,
-        Action::NewSibling => KeyAction::NewSibling,
-        Action::Delete => KeyAction::Delete,
-        Action::Paste => KeyAction::Paste,
-        Action::SelectParent => KeyAction::SelectParent,
-        Action::SelectChild => KeyAction::SelectChild,
-        Action::SelectNext => KeyAction::SelectNext,
-        Action::SelectPrevious => KeyAction::SelectPrevious,
-        Action::EditLabel => KeyAction::EditLabel,
-        Action::RenameLabel => KeyAction::RenameLabel,
-        Action::CycleColour => KeyAction::CycleColour,
-        Action::CycleSiblingsColour => KeyAction::CycleSiblingsColour,
-        Action::ToggleSiblingsFill => KeyAction::ToggleSiblingsFill,
-        Action::ToggleFill => KeyAction::ToggleFill,
-        Action::ToggleRounded => KeyAction::ToggleRounded,
-        Action::ToggleSiblingsRounded => KeyAction::ToggleSiblingsRounded,
-        Action::Quit => KeyAction::Quit,
-        Action::Interrupt => KeyAction::Interrupt,
-        Action::Digit(_) => KeyAction::Digit,
-        Action::CancelCount => panic!("CancelCount is not a binding"),
-        Action::Commit => KeyAction::Commit,
-        Action::CommitAndAddChild => KeyAction::CommitAndAddChild,
-        Action::InsertKey(TextKey::Backspace) => KeyAction::InsertBackspace,
-        Action::InsertKey(TextKey::Left) => KeyAction::InsertLeft,
-        Action::InsertKey(TextKey::Right) => KeyAction::InsertRight,
-        Action::InsertKey(TextKey::Char(_)) => KeyAction::InsertPrintable,
-        Action::OpenNamePrompt => KeyAction::OpenNamePrompt,
-        Action::NameAppend(_) => KeyAction::NamePrintable,
-        Action::NameBackspace => KeyAction::NameBackspace,
-        Action::NameConfirm => KeyAction::NameConfirm,
-        Action::NameCancel => KeyAction::NameCancel,
+        Action::Command(CommandAction::Undo) => KeyAction::Undo,
+        Action::Command(CommandAction::NewBox) => KeyAction::NewBox,
+        Action::Command(CommandAction::NewSibling) => KeyAction::NewSibling,
+        Action::Command(CommandAction::Delete) => KeyAction::Delete,
+        Action::Command(CommandAction::Paste) => KeyAction::Paste,
+        Action::Command(CommandAction::SelectParent) => KeyAction::SelectParent,
+        Action::Command(CommandAction::SelectChild) => KeyAction::SelectChild,
+        Action::Command(CommandAction::SelectNext) => KeyAction::SelectNext,
+        Action::Command(CommandAction::SelectPrevious) => KeyAction::SelectPrevious,
+        Action::Command(CommandAction::EditLabel) => KeyAction::EditLabel,
+        Action::Command(CommandAction::RenameLabel) => KeyAction::RenameLabel,
+        Action::Command(CommandAction::CycleColour) => KeyAction::CycleColour,
+        Action::Command(CommandAction::CycleSiblingsColour) => KeyAction::CycleSiblingsColour,
+        Action::Command(CommandAction::ToggleSiblingsFill) => KeyAction::ToggleSiblingsFill,
+        Action::Command(CommandAction::ToggleFill) => KeyAction::ToggleFill,
+        Action::Command(CommandAction::ToggleRounded) => KeyAction::ToggleRounded,
+        Action::Command(CommandAction::ToggleSiblingsRounded) => KeyAction::ToggleSiblingsRounded,
+        Action::Command(CommandAction::Quit) => KeyAction::Quit,
+        Action::Command(CommandAction::Interrupt) => KeyAction::Interrupt,
+        Action::Command(CommandAction::Digit(_)) => KeyAction::Digit,
+        Action::Command(CommandAction::CancelCount) => panic!("CancelCount is not a binding"),
+        Action::Command(CommandAction::OpenNamePrompt) => KeyAction::OpenNamePrompt,
+        Action::Insert(InsertAction::Commit) => KeyAction::Commit,
+        Action::Insert(InsertAction::CommitAndAddChild) => KeyAction::CommitAndAddChild,
+        Action::Insert(InsertAction::InsertKey(TextKey::Backspace)) => KeyAction::InsertBackspace,
+        Action::Insert(InsertAction::InsertKey(TextKey::Left)) => KeyAction::InsertLeft,
+        Action::Insert(InsertAction::InsertKey(TextKey::Right)) => KeyAction::InsertRight,
+        Action::Insert(InsertAction::InsertKey(TextKey::Char(_))) => KeyAction::InsertPrintable,
+        Action::NamePrompt(NamePromptAction::NameAppend(_)) => KeyAction::NamePrintable,
+        Action::NamePrompt(NamePromptAction::NameBackspace) => KeyAction::NameBackspace,
+        Action::NamePrompt(NamePromptAction::NameConfirm) => KeyAction::NameConfirm,
+        Action::NamePrompt(NamePromptAction::NameCancel) => KeyAction::NameCancel,
     }
 }
 
@@ -434,14 +440,17 @@ mod tests {
 
     #[test]
     fn table_parses_each_mode_and_pattern() {
-        assert_eq!(parse(&key_state(Mode::Command), "b"), Some(Action::NewBox));
+        assert_eq!(
+            parse(&key_state(Mode::Command), "b"),
+            Some(Action::Command(CommandAction::NewBox))
+        );
         assert_eq!(
             parse(&key_state(Mode::Command), "7"),
-            Some(Action::Digit(7))
+            Some(Action::Command(CommandAction::Digit(7)))
         );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "b"),
-            Some(Action::InsertKey(TextKey::Char('b')))
+            Some(Action::Insert(InsertAction::InsertKey(TextKey::Char('b'))))
         );
         assert_eq!(
             parse(
@@ -451,7 +460,7 @@ mod tests {
                 }),
                 "b"
             ),
-            Some(Action::NameAppend('b'))
+            Some(Action::NamePrompt(NamePromptAction::NameAppend('b')))
         );
     }
 
@@ -459,11 +468,11 @@ mod tests {
     fn exact_matches_take_precedence_over_patterns() {
         assert_eq!(
             parse(&key_state(Mode::Command), INTERRUPT),
-            Some(Action::Interrupt)
+            Some(Action::Command(CommandAction::Interrupt))
         );
         assert_eq!(
             parse(&key_state(Mode::Insert { cursor: 0 }), "\x1b"),
-            Some(Action::Commit)
+            Some(Action::Insert(InsertAction::Commit))
         );
     }
 
@@ -471,7 +480,7 @@ mod tests {
     fn unknown_command_keys_cancel_counts_and_other_unknown_keys_do_nothing() {
         assert_eq!(
             parse(&key_state(Mode::Command), "x"),
-            Some(Action::CancelCount)
+            Some(Action::Command(CommandAction::CancelCount))
         );
         assert_eq!(parse(&key_state(Mode::Insert { cursor: 0 }), "\x01"), None);
         assert_eq!(
@@ -489,37 +498,37 @@ mod tests {
     #[test]
     fn every_user_action_has_one_binding_and_exact_keys_are_unique_per_mode() {
         for action in [
-            Action::Undo,
-            Action::NewBox,
-            Action::NewSibling,
-            Action::Delete,
-            Action::Paste,
-            Action::SelectParent,
-            Action::SelectChild,
-            Action::SelectNext,
-            Action::SelectPrevious,
-            Action::EditLabel,
-            Action::RenameLabel,
-            Action::CycleColour,
-            Action::CycleSiblingsColour,
-            Action::ToggleSiblingsFill,
-            Action::ToggleFill,
-            Action::ToggleRounded,
-            Action::ToggleSiblingsRounded,
-            Action::Quit,
-            Action::Interrupt,
-            Action::Digit(1),
-            Action::Commit,
-            Action::CommitAndAddChild,
-            Action::InsertKey(TextKey::Backspace),
-            Action::InsertKey(TextKey::Left),
-            Action::InsertKey(TextKey::Right),
-            Action::InsertKey(TextKey::Char('a')),
-            Action::OpenNamePrompt,
-            Action::NameAppend('a'),
-            Action::NameBackspace,
-            Action::NameConfirm,
-            Action::NameCancel,
+            Action::Command(CommandAction::Undo),
+            Action::Command(CommandAction::NewBox),
+            Action::Command(CommandAction::NewSibling),
+            Action::Command(CommandAction::Delete),
+            Action::Command(CommandAction::Paste),
+            Action::Command(CommandAction::SelectParent),
+            Action::Command(CommandAction::SelectChild),
+            Action::Command(CommandAction::SelectNext),
+            Action::Command(CommandAction::SelectPrevious),
+            Action::Command(CommandAction::EditLabel),
+            Action::Command(CommandAction::RenameLabel),
+            Action::Command(CommandAction::CycleColour),
+            Action::Command(CommandAction::CycleSiblingsColour),
+            Action::Command(CommandAction::ToggleSiblingsFill),
+            Action::Command(CommandAction::ToggleFill),
+            Action::Command(CommandAction::ToggleRounded),
+            Action::Command(CommandAction::ToggleSiblingsRounded),
+            Action::Command(CommandAction::Quit),
+            Action::Command(CommandAction::Interrupt),
+            Action::Command(CommandAction::Digit(1)),
+            Action::Insert(InsertAction::Commit),
+            Action::Insert(InsertAction::CommitAndAddChild),
+            Action::Insert(InsertAction::InsertKey(TextKey::Backspace)),
+            Action::Insert(InsertAction::InsertKey(TextKey::Left)),
+            Action::Insert(InsertAction::InsertKey(TextKey::Right)),
+            Action::Insert(InsertAction::InsertKey(TextKey::Char('a'))),
+            Action::Command(CommandAction::OpenNamePrompt),
+            Action::NamePrompt(NamePromptAction::NameAppend('a')),
+            Action::NamePrompt(NamePromptAction::NameBackspace),
+            Action::NamePrompt(NamePromptAction::NameConfirm),
+            Action::NamePrompt(NamePromptAction::NameCancel),
         ] {
             assert_eq!(
                 KEYMAP
@@ -543,13 +552,27 @@ mod tests {
     #[test]
     fn readme_keymap_table_stays_in_sync() {
         let markdown = format!("\n\n{}\n", keymap_markdown());
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir).join("README.md");
         let readme = std::fs::read_to_string(&path).unwrap();
-        let start = readme.find("<!-- keymap:start -->").unwrap();
-        let end = readme.find("<!-- keymap:end -->").unwrap();
-        assert_eq!(
-            &readme[start + "<!-- keymap:start -->".len()..end],
-            markdown
-        );
+        let start_marker = "<!-- keymap:start -->";
+        let end_marker = "<!-- keymap:end -->";
+        let start = readme
+            .find(start_marker)
+            .expect("missing <!-- keymap:start --> in README.md");
+        let end = readme
+            .find(end_marker)
+            .expect("missing <!-- keymap:end --> in README.md");
+        let start_after = start + start_marker.len();
+        let between = &readme[start_after..end];
+        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
+            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
+            std::fs::write(&path, new_readme).unwrap();
+        } else {
+            assert_eq!(
+                between, markdown,
+                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
+            );
+        }
     }
 }
