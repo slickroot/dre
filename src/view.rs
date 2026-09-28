@@ -2,10 +2,8 @@ use std::borrow::Cow;
 
 use crate::composer;
 use crate::layout::tree;
-use crate::palette;
-use crate::palette::FOREGROUND;
-use crate::render::FOOTER_FILL_OPACITY;
 use crate::state::{FooterMode, FooterModel, Mode, State};
+use crate::style::{self, FOOTER_FILL_OPACITY, FOREGROUND};
 
 pub use crate::composer::Area;
 pub type Sides = (bool, bool, bool, bool);
@@ -159,9 +157,9 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         Column {
             node: PlacementNode::Led {
                 colour: match model.mode {
-                    FooterMode::Move => palette::LIME,
-                    FooterMode::Write => palette::VIOLET,
-                    FooterMode::Naming => palette::AMBER,
+                    FooterMode::Move => style::LIME,
+                    FooterMode::Write => style::VIOLET,
+                    FooterMode::Naming => style::AMBER,
                 },
                 lit: !matches!(model.mode, FooterMode::Move),
             },
@@ -186,7 +184,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         node: PlacementNode::Label(Label {
             text: Cow::Owned(filename.to_string()),
             path: vec![],
-            colour: Some(palette::DIM),
+            colour: Some(style::DIM),
         }),
         x: filename_x,
         y: BOX_HEIGHT / 2,
@@ -214,7 +212,11 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                 fill: Some(FOREGROUND),
                 opacity: Some(FOOTER_FILL_OPACITY),
                 rounded: false,
-                sides: if model.mode == FooterMode::Naming { ALL_SIDES } else { NO_SIDES },
+                sides: if model.mode == FooterMode::Naming {
+                    ALL_SIDES
+                } else {
+                    NO_SIDES
+                },
                 border: 1,
             },
             x: 0,

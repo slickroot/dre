@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
-use crate::render::BOX_FILL_OPACITY;
+use crate::style::BOX_FILL_OPACITY;
 use crate::view::{
     self, Arrow, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
     SIDE_PADDING,

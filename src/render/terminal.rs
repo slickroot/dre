@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
 #[cfg(test)]
-use crate::palette::palette;
+use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
 use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
@@ -68,7 +68,7 @@ fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
 fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
     match (fill, quantized_alpha(opacity)) {
         (Some(colour), Some(alpha)) => {
-            let (r, g, b) = crate::palette::colour(colour).unwrap();
+            let (r, g, b) = crate::style::colour(colour).unwrap();
             let composite =
                 |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
             (composite(r), composite(g), composite(b), OPAQUE)
@@ -582,9 +582,9 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
-    use super::super::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
     use super::*;
     use crate::state::Mode;
+    use crate::style::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
     use crate::view::editor;
     use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::State;
@@ -605,8 +605,8 @@ mod tests {
 
     #[test]
     fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
-        let box_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(BOX_FILL_OPACITY));
-        let footer_fill = fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+        let box_fill = fill_colour(Some(crate::style::FOREGROUND), Some(BOX_FILL_OPACITY));
+        let footer_fill = fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         assert!(box_fill.0 > 0);
         assert_eq!(footer_fill, box_fill);
     }
@@ -1573,7 +1573,7 @@ mod tests {
             .first()
             .expect("the footer box is drawn as an image");
         let (er, eg, eb, ea) =
-            fill_colour(Some(crate::palette::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+            fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
         for pixel in image.canvas.pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }
@@ -1672,7 +1672,7 @@ mod tests {
                 0,
                 1,
                 1,
-                Some(crate::palette::LIME),
+                Some(crate::style::LIME),
             )],
         )[0]
         .canvas

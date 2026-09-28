@@ -180,7 +180,8 @@ impl GlyphSource for FakeGlyphSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::{CELL_HEIGHT, CELL_WIDTH, OPAQUE};
+    use crate::render::OPAQUE;
+    use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
     // Iosevka cut down to M, B, i and g: parsing the full font is slow in a debug build.
@@ -267,13 +268,13 @@ mod tests {
     #[test]
     fn glyph_ink_matches_the_requested_palette_colour() {
         let mut cache = test_cache();
-        let canvas = cache.glyph('M', Some(crate::palette::LIME));
+        let canvas = cache.glyph('M', Some(crate::style::LIME));
         let pixel = canvas
             .pixels
             .chunks(4)
             .find(|pixel| pixel[3] == OPAQUE)
             .expect("a fully opaque pixel must exist in a rasterized 'M'");
-        let (r, g, b) = colour(Some(crate::palette::LIME));
+        let (r, g, b) = colour(Some(crate::style::LIME));
         assert_eq!(&pixel[0..3], [r, g, b]);
     }
 
