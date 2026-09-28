@@ -35,6 +35,7 @@ pub struct State {
     new_file: bool,
     pending_count: Option<usize>,
     saved_len: usize,
+    led_flash: bool,
 }
 
 impl State {
@@ -83,6 +84,11 @@ impl State {
     #[cfg(test)]
     pub(crate) fn is_new_file(&self) -> bool {
         self.new_file
+    }
+
+    #[cfg(test)]
+    pub(crate) fn led_flash(&self) -> bool {
+        self.led_flash
     }
 
     pub(crate) fn save_to(&self) -> Option<&str> {
@@ -149,8 +155,16 @@ impl Default for State {
             new_file: false,
             pending_count: None,
             saved_len: 0,
+            led_flash: false,
         }
     }
+}
+
+#[allow(dead_code)]
+pub(crate) fn flash(state: State) -> State {
+    let mut state = state;
+    state.led_flash = true;
+    state
 }
 
 fn apply(state: State, action: Action) -> State {
@@ -177,6 +191,7 @@ pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
     } else {
         vec![]
     };
+    state.led_flash = false;
     (state, effects)
 }
 
@@ -201,6 +216,7 @@ pub(crate) fn new_state(boxes: Vec<Tree<Node>>, mode: Mode, selected: Option<Vec
         new_file: false,
         pending_count: None,
         saved_len: 0,
+        led_flash: false,
     }
 }
 
@@ -287,6 +303,22 @@ mod tests {
         let footer = state.footer();
         assert_eq!(footer.mode, FooterMode::Move);
         assert_eq!(footer.cursor, None);
+    }
+
+    #[test]
+    fn flash_sets_led_flash_to_true() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert!(!state.led_flash());
+        let flashed = flash(state);
+        assert!(flashed.led_flash());
+    }
+
+    #[test]
+    fn reduce_always_resets_led_flash_to_false() {
+        let state = flash(new_state(vec![], Mode::Command, None));
+        assert!(state.led_flash());
+        let result = crate::state::reduce(state, Some("j")).0;
+        assert!(!result.led_flash());
     }
 
     #[test]
