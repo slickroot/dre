@@ -76,7 +76,6 @@ fn place<'a>(
         x: i64,
         row: usize,
         width: i64,
-        path: &[usize],
         child_rows: &[usize],
         edit_room: i64,
         selected: bool,
@@ -116,7 +115,6 @@ fn place<'a>(
         placements.push(Placement {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(node.label()),
-                path: path.to_vec(),
                 colour: None,
             }),
             x: start,
@@ -186,7 +184,6 @@ fn place<'a>(
                 x,
                 row,
                 width,
-                &path,
                 &[],
                 edit_room(&path, editing),
                 selected_flag,
@@ -211,7 +208,6 @@ fn place<'a>(
             x,
             row,
             width,
-            &path,
             &child_rows,
             edit_room(&path, editing),
             selected_flag,
@@ -381,25 +377,6 @@ mod tests {
     }
 
     #[test]
-    fn place_recurses_into_children_building_correct_paths() {
-        let nodes = Tree::root(vec![node_with_children(
-            "parent",
-            vec![node("a"), node("b")],
-        )]);
-        let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
-
-        let paths: Vec<Vec<usize>> = placements
-            .iter()
-            .filter_map(|placement| match &placement.node {
-                PlacementNode::Label(label) => Some(label.path.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(paths, vec![vec![0], vec![0, 0], vec![0, 1],]);
-    }
-
-    #[test]
     fn place_of_a_leaf_yields_only_a_box_and_a_label_placement() {
         let nodes = Tree::root(vec![node("hi")]);
         let offsets = offsets_for(&nodes);
@@ -413,7 +390,6 @@ mod tests {
         match &placements[1].node {
             PlacementNode::Label(label) => {
                 assert_eq!(label.text, "hi");
-                assert_eq!(label.path, vec![0]);
             }
             _ => panic!("expected the second placement to be a label"),
         }
@@ -669,7 +645,7 @@ mod tests {
 
         let label_index = placements
             .iter()
-            .position(|p| matches!(&p.node, PlacementNode::Label(label) if label.path == [0, 1]))
+            .position(|p| matches!(&p.node, PlacementNode::Label(label) if label.text == "b"))
             .expect("the selected node has a label placement");
         let selected_box = &placements[label_index - 2];
         let glow = &placements[label_index - 1];
@@ -804,17 +780,6 @@ mod tests {
     }
 
     #[test]
-    fn label_constructor_defaults_path_to_empty() {
-        let label = Label {
-            text: "hi".into(),
-            path: vec![0],
-            colour: None,
-        };
-        assert_eq!(label.text, "hi");
-        assert_eq!(label.path, vec![0]);
-    }
-
-    #[test]
     fn arrow_stores_stops_and_shaft_as_plain_fields() {
         let arrow = Arrow {
             stops: vec![1, 2, 3],
@@ -853,7 +818,6 @@ mod tests {
         let label_placement = Placement {
             node: PlacementNode::Label(Label {
                 text: "a".into(),
-                path: vec![0],
                 colour: None,
             }),
             x: 0,
@@ -867,7 +831,6 @@ mod tests {
                     label,
                     Label {
                         text: "a".into(),
-                        path: vec![0],
                         colour: None,
                     }
                 )

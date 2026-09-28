@@ -22,7 +22,6 @@ pub(crate) const GLOW_MARGIN: i64 = 1;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label<'a> {
     pub text: Cow<'a, str>,
-    pub path: Vec<usize>,
     pub colour: Option<u8>,
 }
 
@@ -169,7 +168,6 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         Column {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(mode_word),
-                path: vec![],
                 colour: None,
             }),
             width: interior(mode_word),
@@ -183,7 +181,6 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     placements.push(Placement {
         node: PlacementNode::Label(Label {
             text: Cow::Owned(filename.to_string()),
-            path: vec![],
             colour: Some(style::DIM),
         }),
         x: filename_x,
@@ -196,7 +193,6 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
     placements.push(Placement {
         node: PlacementNode::Label(Label {
             text: Cow::Borrowed(FOOTER_SUFFIX),
-            path: vec![],
             colour: None,
         }),
         x: suffix_x,
@@ -233,33 +229,6 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             width: 1,
             height: 1,
         });
-    }
-    placements
-}
-
-#[allow(dead_code)]
-pub(crate) fn with_cursor<'a>(
-    placements: Vec<Placement<'a>>,
-    path: Option<Vec<usize>>,
-    cursor: Option<usize>,
-) -> Vec<Placement<'a>> {
-    let (Some(path), Some(index)) = (path, cursor) else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Cursor(Cursor),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
     }
     placements
 }

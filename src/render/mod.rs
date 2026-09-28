@@ -112,7 +112,6 @@ mod tests {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
-                path: vec![],
                 colour,
             }),
             x,

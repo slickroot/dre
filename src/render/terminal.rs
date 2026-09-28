@@ -46,7 +46,6 @@ struct LedStyle {
 
 struct LabelStyle {
     text: String,
-    path: Vec<usize>,
     colour: Option<u8>,
 }
 
@@ -364,7 +363,6 @@ impl TerminalRenderer {
                     area,
                     LabelStyle {
                         text: label.text.to_string(),
-                        path: label.path.clone(),
                         colour: label.colour,
                     },
                 ),
@@ -448,7 +446,6 @@ impl TerminalRenderer {
             let char_placement = Placement {
                 node: PlacementNode::Label(Label {
                     text: style.text.clone().into(),
-                    path: style.path.clone(),
                     colour: style.colour,
                 }),
                 x: geometry.x + offset as i64,
@@ -1215,7 +1212,6 @@ mod tests {
         crate::view::Placement {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
-                path: vec![0],
                 colour: None,
             }),
             x,
@@ -1645,7 +1641,6 @@ mod tests {
         crate::view::Placement {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
-                path: vec![0],
                 colour,
             }),
             x,

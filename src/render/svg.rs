@@ -873,7 +873,6 @@ mod tests {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
-                path: vec![0],
                 colour: None,
             }),
             x,
@@ -910,7 +909,6 @@ mod tests {
         let placements = vec![Placement {
             node: PlacementNode::Label(Label {
                 text: "hi".into(),
-                path: vec![0],
                 colour: Some(crate::style::LIME),
             }),
             x: 1,
