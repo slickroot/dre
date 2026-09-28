@@ -7,6 +7,8 @@ use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
 use crate::layout::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
+#[cfg(test)]
+use crate::palette::palette;
 use crate::tty::Window;
 use crate::view::Scene;
 

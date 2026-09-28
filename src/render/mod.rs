@@ -1,6 +1,8 @@
 use std::io::{self, Write};
 
 use crate::palette::FOREGROUND;
+#[cfg(test)]
+use crate::palette::palette;
 use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
