@@ -342,26 +342,30 @@ pub(crate) fn with_glow<'a>(
     }) else {
         return placements;
     };
-    let Some(glow) = placements.iter().find_map(|placement| match &placement.node {
-        PlacementNode::Box { colour, rounded, .. }
-            if placement.x <= label.x
+    let Some(glow) = placements
+        .iter()
+        .find_map(|placement| match &placement.node {
+            PlacementNode::Box {
+                colour, rounded, ..
+            } if placement.x <= label.x
                 && label.x < placement.x + placement.width
                 && placement.y <= label.y
                 && label.y < placement.y + placement.height =>
-        {
-            Some(Placement {
-                node: PlacementNode::Glow {
-                    colour: *colour,
-                    rounded: *rounded,
-                },
-                x: placement.x - GLOW_MARGIN,
-                y: placement.y - GLOW_MARGIN,
-                width: placement.width + 2 * GLOW_MARGIN,
-                height: placement.height + 2 * GLOW_MARGIN,
-            })
-        }
-        _ => None,
-    }) else {
+            {
+                Some(Placement {
+                    node: PlacementNode::Glow {
+                        colour: *colour,
+                        rounded: *rounded,
+                    },
+                    x: placement.x - GLOW_MARGIN,
+                    y: placement.y - GLOW_MARGIN,
+                    width: placement.width + 2 * GLOW_MARGIN,
+                    height: placement.height + 2 * GLOW_MARGIN,
+                })
+            }
+            _ => None,
+        })
+    else {
         return placements;
     };
     let mut result = Vec::with_capacity(placements.len() + 1);
