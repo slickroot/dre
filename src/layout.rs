@@ -535,7 +535,6 @@ mod tests {
                 rounded: false,
                 sides: ALL_SIDES,
                 border: 1,
-                selected: false,
             }
         );
     }
