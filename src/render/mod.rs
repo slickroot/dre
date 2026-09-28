@@ -309,7 +309,7 @@ mod tests {
 
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
         let text_width = text.chars().count() as i64;
-        let box_width = text_width + SIDE_PADDING * 2 + layout::LED_GAP;
+        let box_width = text_width + SIDE_PADDING * 2 + layout::LED_WIDTH + layout::LED_LABEL_GAP;
         (
             foot.col + foot.cols - box_width,
             foot.row + foot.rows - FOOTER_ROWS,
@@ -319,12 +319,12 @@ mod tests {
     }
 
     fn label_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - layout::LED_GAP;
-        box_x + layout::centre(inset_box_width, text) + layout::LED_GAP
+        let inset_box_width = box_width - layout::LED_WIDTH - layout::LED_LABEL_GAP;
+        box_x + layout::centre(inset_box_width, text) + layout::LED_WIDTH + layout::LED_LABEL_GAP
     }
 
     fn led_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - layout::LED_GAP;
+        let inset_box_width = box_width - layout::LED_WIDTH - layout::LED_LABEL_GAP;
         box_x + layout::centre(inset_box_width, text)
     }
 

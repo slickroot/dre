@@ -389,7 +389,9 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
     use crate::layout::with_caret;
-    use crate::layout::{centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_GAP, SIDE_PADDING};
+    use crate::layout::{
+        centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
+    };
     use crate::layout::{Arrow, Caret, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
@@ -1567,7 +1569,7 @@ mod tests {
     }
 
     fn footer_box_area(foot: Area) -> Area {
-        let width = footer_width() + SIDE_PADDING * 2 + LED_GAP;
+        let width = footer_width() + SIDE_PADDING * 2 + LED_WIDTH + LED_LABEL_GAP;
         Area {
             col: foot.col + foot.cols - width,
             row: foot.row + foot.rows - FOOTER_ROWS,
@@ -1577,12 +1579,12 @@ mod tests {
     }
 
     fn footer_led_x(area: Area) -> i64 {
-        let inset_width = area.cols - LED_GAP;
+        let inset_width = area.cols - LED_WIDTH - LED_LABEL_GAP;
         area.col + centre_label(inset_width, FOOTER_TEXT)
     }
 
     fn footer_label_x(area: Area) -> i64 {
-        footer_led_x(area) + LED_GAP
+        footer_led_x(area) + LED_WIDTH + LED_LABEL_GAP
     }
 
     fn padded_footer_label(foot: Area) -> String {

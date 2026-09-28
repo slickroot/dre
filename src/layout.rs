@@ -270,13 +270,14 @@ pub struct Placement<'a> {
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 
-pub(crate) const LED_GAP: i64 = 2;
+pub(crate) const LED_WIDTH: i64 = 2;
+pub(crate) const LED_LABEL_GAP: i64 = 1;
 
 pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
     let text = view.text.as_str();
     let text_width = text.chars().count() as i64;
     let inset_box_width = interior(text) + SIDE_PADDING * 2;
-    let box_width = inset_box_width + LED_GAP;
+    let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
     let corner_box = PlacementNode::Box {
         colour: None,
         fill: Some(FOREGROUND),
@@ -295,7 +296,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
         path: vec![],
     });
     let led_x = centre(inset_box_width, text);
-    let label_x = led_x + LED_GAP;
+    let label_x = led_x + LED_WIDTH + LED_LABEL_GAP;
     let placements = vec![
         Placement {
             node: corner_box,
@@ -308,7 +309,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
             node: led,
             x: led_x,
             y: BOX_HEIGHT / 2,
-            width: 2,
+            width: LED_WIDTH,
             height: 1,
         },
         Placement {
@@ -476,7 +477,7 @@ mod tests {
         let placements = footer(&view);
         assert_eq!(placements.len(), 3);
         let inset_box_width = interior(text) + SIDE_PADDING * 2;
-        let box_width = inset_box_width + LED_GAP;
+        let box_width = inset_box_width + LED_WIDTH + LED_LABEL_GAP;
         assert_eq!(
             placements[0].node,
             PlacementNode::Box {
@@ -514,7 +515,7 @@ mod tests {
                 placements[1].width,
                 placements[1].height,
             ),
-            (led_x, BOX_HEIGHT / 2, 2, 1)
+            (led_x, BOX_HEIGHT / 2, LED_WIDTH, 1)
         );
 
         assert_eq!(
@@ -531,8 +532,23 @@ mod tests {
                 placements[2].width,
                 placements[2].height,
             ),
-            (led_x + LED_GAP, BOX_HEIGHT / 2, text_width, 1)
+            (
+                led_x + LED_WIDTH + LED_LABEL_GAP,
+                BOX_HEIGHT / 2,
+                text_width,
+                1
+            )
         );
+    }
+
+    #[test]
+    fn label_leaves_a_blank_column_after_the_led() {
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let placements = footer(&view);
+        let led = &placements[1];
+        let label = &placements[2];
+        assert_eq!(led.width, LED_WIDTH);
+        assert_eq!(label.x, led.x + LED_WIDTH + LED_LABEL_GAP);
     }
 
     #[test]
