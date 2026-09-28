@@ -105,16 +105,19 @@ impl State {
                 mode: FooterMode::Write,
                 filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
+                flash: false,
             },
             Mode::NamePrompt { name, .. } => FooterModel {
                 mode: FooterMode::Naming,
                 filename: (!name.is_empty()).then(|| name.clone()),
                 cursor: Some(name.chars().count()),
+                flash: false,
             },
             Mode::Command => FooterModel {
                 mode: FooterMode::Move,
                 filename: self.save_to.as_deref().map(file_stem_without_dre),
                 cursor: None,
+                flash: self.led_flash,
             },
         }
     }
@@ -132,6 +135,7 @@ pub(crate) struct FooterModel {
     pub(crate) mode: FooterMode,
     pub(crate) filename: Option<String>,
     pub(crate) cursor: Option<usize>,
+    pub(crate) flash: bool,
 }
 
 fn file_stem_without_dre(path: &str) -> String {
@@ -303,6 +307,39 @@ mod tests {
         let footer = state.footer();
         assert_eq!(footer.mode, FooterMode::Move);
         assert_eq!(footer.cursor, None);
+    }
+
+    #[test]
+    fn command_mode_footer_flash_is_false_by_default() {
+        let state = new_state(vec![], Mode::Command, None);
+        assert!(!state.footer().flash);
+    }
+
+    #[test]
+    fn command_mode_footer_flash_is_true_after_flash() {
+        let state = flash(new_state(vec![], Mode::Command, None));
+        assert!(state.footer().flash);
+    }
+
+    #[test]
+    fn insert_mode_footer_flash_is_always_false() {
+        let state = flash(new_state(
+            vec![node("a")],
+            Mode::Insert { cursor: 0 },
+            Some(vec![0]),
+        ));
+        assert!(!state.footer().flash);
+    }
+
+    #[test]
+    fn name_prompt_footer_flash_is_always_false() {
+        let mut state = new_state(vec![], Mode::Command, None);
+        state.mode = Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        };
+        let state = flash(state);
+        assert!(!state.footer().flash);
     }
 
     #[test]
