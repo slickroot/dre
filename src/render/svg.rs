@@ -1825,10 +1825,11 @@ mod tests {
         let diagram = centre(diagram(state.doc().tree(), None, state.selected()), body);
         let body_svg = nested(body, &paint(&diagram));
         let foot_svg = nested(foot, &padded_footer(foot));
+        let command_status_svg = nested(foot, "");
         let body_at = svg.find(&body_svg).expect("the body is a nested svg");
         let foot_at = svg.find(&foot_svg).expect("the footer is a nested svg");
         assert!(body_at < foot_at);
-        assert!(svg.ends_with(&format!("{foot_svg}</svg>")));
+        assert!(svg.ends_with(&format!("{foot_svg}{command_status_svg}</svg>")));
     }
 
     fn a_state_of_one_box_labelled(text: &str) -> State {

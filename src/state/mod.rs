@@ -101,7 +101,6 @@ impl State {
         self.save_to = save_to;
     }
 
-    #[cfg(test)]
     pub(crate) fn command_status(&self) -> Option<CommandStatus> {
         self.command_status.clone()
     }
