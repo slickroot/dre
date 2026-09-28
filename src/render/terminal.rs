@@ -1671,23 +1671,44 @@ mod tests {
 
         let output = rendered_placements(&mut r, &placements);
 
-        assert_eq!(output.matches("a=T").count(), 1);
-        assert_eq!(output.matches("a=p").count(), 1);
-        assert!(output.contains("i=1"));
+        let shown = shown_ids(&output);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(placed_ids(&output), shown);
+        assert!(output.find("a=T").unwrap() < output.find("a=p").unwrap());
     }
 
-    fn placement_ids(output: &str) -> Vec<String> {
+    fn command_fields(output: &str, action: &str, field: &str) -> Vec<String> {
         output
             .split("\x1b_G")
-            .filter(|command| command.starts_with("a=p,"))
+            .filter(|command| command.starts_with(action))
             .map(|command| {
                 command
                     .split([',', ';'])
-                    .find_map(|key| key.strip_prefix("p="))
-                    .expect("every placement names its placement ID")
+                    .find_map(|pair| pair.strip_prefix(field))
+                    .expect("every command of this action names the field")
                     .to_string()
             })
             .collect()
+    }
+
+    fn shown_ids(output: &str) -> Vec<String> {
+        command_fields(output, "a=T,", "i=")
+    }
+
+    fn placed_ids(output: &str) -> Vec<String> {
+        command_fields(output, "a=p,", "i=")
+    }
+
+    fn deleted_ids(output: &str) -> Vec<String> {
+        command_fields(output, "a=d,d=I,", "i=")
+    }
+
+    fn placement_ids(output: &str) -> Vec<String> {
+        command_fields(output, "a=p,", "p=")
+    }
+
+    fn image_id(value: &str) -> kitty::ImageId {
+        kitty::ImageId::new(value.parse().expect("image IDs are non-zero numbers"))
     }
 
     fn all_distinct(ids: &[String]) -> bool {
@@ -1732,8 +1753,8 @@ mod tests {
         assert_eq!(first.matches("a=T").count(), 1);
         assert_eq!(second.matches("a=T").count(), 0);
         assert_eq!(second.matches("a=p").count(), 1);
-        assert!(second.starts_with(&format!("\x1b[H   {}", kitty::soft_clear())));
-        assert!(!second.contains("d=I"));
+        assert!(second.starts_with(&format!("{HOME_CURSOR}   {}", kitty::soft_clear())));
+        assert!(deleted_ids(&second).is_empty());
     }
 
     #[test]
@@ -1758,8 +1779,39 @@ mod tests {
 
         let output = rendered_placements(&mut r, &placements);
 
-        assert_eq!(output.matches("a=T").count(), 4);
-        assert_eq!(output.matches("a=p").count(), 0);
+        let shown = shown_ids(&output);
+        assert_eq!(shown.len(), placements.len());
+        assert!(all_distinct(&shown));
+        assert!(placed_ids(&output).is_empty());
+    }
+
+    #[test]
+    fn the_first_frame_hard_deletes_nothing() {
+        let placements = [
+            label_placement("a", 0, 0, 1, 1),
+            caret_placement(1, 0, 1, 1),
+        ];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        let first = rendered_placements(&mut r, &placements);
+
+        assert!(!shown_ids(&first).is_empty());
+        assert!(deleted_ids(&first).is_empty());
+    }
+
+    #[test]
+    fn a_non_glyph_image_is_retransmitted_with_a_new_id_and_its_old_id_deleted() {
+        let placements = [caret_placement(0, 0, 1, 1)];
+        let mut r = renderer_on(window(3, 1, 1, 1));
+
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        let (first_shown, second_shown) = (shown_ids(&first), shown_ids(&second));
+        assert_eq!(first_shown.len(), 1);
+        assert_eq!(second_shown.len(), 1);
+        assert_ne!(first_shown, second_shown);
+        assert_eq!(deleted_ids(&second), first_shown);
     }
 
     #[test]
@@ -1767,14 +1819,18 @@ mod tests {
         let placements = [caret_placement(0, 0, 1, 1)];
         let mut r = renderer_on(window(3, 1, 1, 1));
 
-        rendered_placements(&mut r, &placements);
+        let first = rendered_placements(&mut r, &placements);
         let second = rendered_placements(&mut r, &placements);
 
-        let soft_clear = second.find("d=a").unwrap();
-        let delete = second.find("d=I").unwrap();
+        let [first_id] = shown_ids(&first).try_into().unwrap();
+        let clear_then_delete = format!(
+            "{}{}",
+            kitty::soft_clear(),
+            kitty::delete(image_id(&first_id))
+        );
+        let clear_and_delete = second.find(&clear_then_delete).unwrap();
         let show = second.find("a=T").unwrap();
-        assert!(soft_clear < delete);
-        assert!(delete < show);
+        assert!(clear_and_delete < show);
     }
 
     #[test]
