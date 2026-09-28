@@ -13,7 +13,7 @@ pub(super) fn recorded(
     action: &Action,
     reduce: impl FnOnce(State) -> State,
 ) -> State {
-    let state = if action.spec().undoable {
+    let state = if action.undoable() {
         snapshot(state)
     } else {
         state
@@ -42,45 +42,50 @@ pub(super) fn undo(mut state: State) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::action::{CommandAction, InsertAction, NamePromptAction};
     use crate::state::text_edit::TextKey;
 
     #[test]
     fn interrupt_is_not_undoable() {
-        assert!(!Action::Interrupt.spec().undoable);
+        assert!(!Action::Command(CommandAction::Interrupt).undoable());
     }
 
     #[test]
-    fn creating_and_editing_actions_are_undoable() {
+    fn creating_and_editing_command_actions_are_undoable() {
         for action in [
-            Action::NewBox,
-            Action::NewSibling,
-            Action::Delete,
-            Action::Paste,
-            Action::EditLabel,
-            Action::RenameLabel,
-            Action::CommitAndAddChild,
+            CommandAction::NewBox,
+            CommandAction::NewSibling,
+            CommandAction::Delete,
+            CommandAction::Paste,
+            CommandAction::EditLabel,
+            CommandAction::RenameLabel,
         ] {
-            assert!(action.spec().undoable);
+            assert!(Action::Command(action).undoable());
         }
     }
 
     #[test]
+    fn commit_and_add_child_is_undoable() {
+        assert!(Action::Insert(InsertAction::CommitAndAddChild).undoable());
+    }
+
+    #[test]
     fn name_actions_are_not_undoable() {
+        assert!(!Action::Command(CommandAction::OpenNamePrompt).undoable());
         for action in [
-            Action::OpenNamePrompt,
-            Action::NameAppend('a'),
-            Action::NameBackspace,
-            Action::NameConfirm,
-            Action::NameCancel,
+            NamePromptAction::NameAppend('a'),
+            NamePromptAction::NameBackspace,
+            NamePromptAction::NameConfirm,
+            NamePromptAction::NameCancel,
         ] {
-            assert!(!action.spec().undoable);
+            assert!(!Action::NamePrompt(action).undoable());
         }
     }
 
     #[test]
     fn typing_in_insert_mode_is_not_undoable() {
-        assert!(!Action::InsertKey(TextKey::Char('a')).spec().undoable);
-        assert!(!Action::InsertKey(TextKey::Backspace).spec().undoable);
-        assert!(!Action::Commit.spec().undoable);
+        assert!(!Action::Insert(InsertAction::InsertKey(TextKey::Char('a'))).undoable());
+        assert!(!Action::Insert(InsertAction::InsertKey(TextKey::Backspace)).undoable());
+        assert!(!Action::Insert(InsertAction::Commit).undoable());
     }
 }

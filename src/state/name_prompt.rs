@@ -1,15 +1,15 @@
-use crate::state::action::Action;
+use crate::state::action::NamePromptAction;
 use crate::state::{Mode, State};
 
 const EXTENSION: &str = ".dre";
 
-pub(crate) fn reduce(mut state: State, command: Action) -> State {
+pub(crate) fn reduce(mut state: State, command: NamePromptAction) -> State {
     let Mode::NamePrompt { name, quits } = &mut state.mode else {
         return state;
     };
     let quits = *quits;
     match command {
-        Action::NameConfirm if !name.is_empty() => {
+        NamePromptAction::NameConfirm if !name.is_empty() => {
             let path = format!("{name}{EXTENSION}");
             state.set_save_to(Some(path));
             if quits {
@@ -18,18 +18,18 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
                 state.mode = Mode::Command;
             }
         }
-        Action::NameCancel => {
+        NamePromptAction::NameConfirm => {}
+        NamePromptAction::NameCancel => {
             if quits {
                 state.running = false;
             } else {
                 state.mode = Mode::Command;
             }
         }
-        Action::NameBackspace => {
+        NamePromptAction::NameBackspace => {
             name.pop();
         }
-        Action::NameAppend(c) => name.push(c),
-        _ => {}
+        NamePromptAction::NameAppend(c) => name.push(c),
     }
     state
 }

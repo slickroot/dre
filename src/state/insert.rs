@@ -1,18 +1,18 @@
-use crate::state::action::Action;
+use crate::state::action::InsertAction;
 use crate::state::text_edit::edit;
 use crate::state::{add_child_box, Mode, State};
 
-pub(crate) fn reduce(mut state: State, command: Action) -> State {
+pub(crate) fn reduce(mut state: State, command: InsertAction) -> State {
     let Some(path) = state.selected.clone() else {
         return state;
     };
     match command {
-        Action::Commit => {
+        InsertAction::Commit => {
             state.mode = Mode::Command;
             state
         }
-        Action::CommitAndAddChild => add_child_box(state, Some(path)),
-        Action::InsertKey(key) => {
+        InsertAction::CommitAndAddChild => add_child_box(state, Some(path)),
+        InsertAction::InsertKey(key) => {
             let Mode::Insert { cursor } = state.mode else {
                 return state;
             };
@@ -21,7 +21,6 @@ pub(crate) fn reduce(mut state: State, command: Action) -> State {
             state.mode = Mode::Insert { cursor };
             state
         }
-        _ => state,
     }
 }
 
