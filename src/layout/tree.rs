@@ -1,58 +1,37 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
-use crate::palette;
-use crate::palette::FOREGROUND;
-use crate::render::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
-use crate::state::{FooterMode, FooterModel};
+use crate::render::BOX_FILL_OPACITY;
+use crate::view::{
+    self, Arrow, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
+    SIDE_PADDING,
+};
 use types::Tree;
 
-const NO_NAME: &str = "[no name — press n to name it]";
-const PLACEHOLDER: &str = "type a name";
-const FOOTER_SUFFIX: &str = " • dre";
-const MOVE: &str = "MOVE";
-const WRITE: &str = "WRITE";
-const NAME: &str = "NAME";
-
-pub(crate) const BOX_HEIGHT: i64 = 3;
-#[allow(dead_code)]
-pub(crate) const GAP_HEIGHT: i64 = 3;
-pub(crate) const GAP_WIDTH: i64 = 8;
-pub(crate) const SIDE_PADDING: i64 = 2;
-pub(crate) const BORDER: i64 = 4;
+#[cfg(test)]
 const BORDER_COLUMNS: i64 = 2;
 
-pub type Sides = (bool, bool, bool, bool);
-pub const ALL_SIDES: Sides = (true, true, true, true);
-pub const NO_SIDES: Sides = (false, false, false, false);
+#[allow(dead_code)]
+pub(crate) const GAP_HEIGHT: i64 = 3;
 #[allow(dead_code)]
 pub(crate) const ROW_PITCH: i64 = BOX_HEIGHT + GAP_HEIGHT;
 pub(crate) const HALF_PITCH: i64 = BOX_HEIGHT;
 pub(crate) const LEAF_STRIDE: i64 = 2;
 
-pub(crate) fn interior(label: &str) -> i64 {
-    (label.chars().count() as i64).max(1)
-}
-
-pub(crate) fn width(node: &Node) -> i64 {
-    interior(node.label()) + SIDE_PADDING * 2
+fn width(node: &Node) -> i64 {
+    crate::view::interior(node.label()) + SIDE_PADDING * 2
 }
 
 #[allow(dead_code)]
-pub(crate) fn height(_node: &Node) -> i64 {
+fn height(_node: &Node) -> i64 {
     BOX_HEIGHT
-}
-
-pub(crate) fn centre(width: i64, label: &str) -> i64 {
-    let leftover = width - BORDER_COLUMNS - interior(label);
-    1 + leftover - leftover.div_euclid(2)
 }
 
 fn edit_room(path: &[usize], editing: Option<&[usize]>) -> i64 {
     i64::from(editing == Some(path))
 }
 
-pub(crate) fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> Vec<i64> {
+fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> Vec<i64> {
     fn widen(widths: &mut Vec<i64>, col: usize, width: i64) {
         if widths.len() <= col {
             widths.resize(col + 1, 0);
@@ -72,7 +51,7 @@ pub(crate) fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> V
 }
 
 // `offsets` has one more entry than there are columns, so `offsets[col + 1] - offsets[col]` gives column `col`'s width.
-pub(crate) fn place<'a>(
+fn place<'a>(
     tree: &'a Tree<Node>,
     offsets: &[i64],
     editing: Option<&[usize]>,
@@ -113,7 +92,7 @@ pub(crate) fn place<'a>(
             height: BOX_HEIGHT,
         }];
 
-        let start = x + centre(width - edit_room, node.label());
+        let start = x + view::label_centre(width - edit_room, node.label());
         let middle = y + BOX_HEIGHT / 2;
         placements.push(Placement {
             node: PlacementNode::Label(Label {
@@ -123,7 +102,7 @@ pub(crate) fn place<'a>(
             }),
             x: start,
             y: middle,
-            width: interior(node.label()),
+            width: view::interior(node.label()),
             height: 1,
         });
 
@@ -204,233 +183,6 @@ pub(crate) fn place<'a>(
     placements
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Label<'a> {
-    pub text: Cow<'a, str>,
-    pub path: Vec<usize>,
-    pub colour: Option<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Arrow {
-    pub stops: Vec<i64>,
-    pub shaft: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Caret;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cursor;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PlacementNode<'a> {
-    Box {
-        colour: Option<u8>,
-        fill: Option<u8>,
-        opacity: Option<f64>,
-        rounded: bool,
-        sides: Sides,
-        border: i64,
-    },
-    Label(Label<'a>),
-    Arrow(Arrow),
-    Caret(Caret),
-    Glow {
-        colour: Option<u8>,
-        rounded: bool,
-    },
-    Cursor(Cursor),
-    /// A round status light, e.g. the footer's mode LED.
-    Led {
-        colour: u8,
-        lit: bool,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Geometry {
-    pub x: i64,
-    pub y: i64,
-    pub width: i64,
-    pub height: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Placement<'a> {
-    pub node: PlacementNode<'a>,
-    pub x: i64,
-    pub y: i64,
-    pub width: i64,
-    pub height: i64,
-}
-
-struct Column<'a> {
-    node: PlacementNode<'a>,
-    width: i64,
-    padding: i64,
-}
-
-fn stack_columns(columns: Vec<Column<'static>>, y: i64) -> (Vec<Placement<'static>>, i64) {
-    let mut placements = Vec::with_capacity(columns.len());
-    let mut x = 0;
-    for column in columns {
-        x += column.padding;
-        placements.push(Placement {
-            node: column.node,
-            x,
-            y,
-            width: column.width,
-            height: 1,
-        });
-        x += column.width + column.padding;
-    }
-    (placements, x)
-}
-
-impl From<&Placement<'_>> for Geometry {
-    fn from(placement: &Placement<'_>) -> Self {
-        Geometry {
-            x: placement.x,
-            y: placement.y,
-            width: placement.width,
-            height: placement.height,
-        }
-    }
-}
-
-impl<'a> Placement<'a> {
-    pub fn geometry(&self) -> Geometry {
-        self.into()
-    }
-}
-
-pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
-
-pub(crate) const LED_WIDTH: i64 = 2;
-pub(crate) const LED_LABEL_GAP: i64 = 1;
-
-fn footer_mode_word(mode: FooterMode) -> &'static str {
-    match mode {
-        FooterMode::Move => MOVE,
-        FooterMode::Write => WRITE,
-        FooterMode::Naming => NAME,
-    }
-}
-
-fn footer_led(mode: FooterMode) -> PlacementNode<'static> {
-    match mode {
-        FooterMode::Move => PlacementNode::Led {
-            colour: palette::LIME,
-            lit: false,
-        },
-        FooterMode::Write => PlacementNode::Led {
-            colour: palette::VIOLET,
-            lit: true,
-        },
-        FooterMode::Naming => PlacementNode::Led {
-            colour: palette::AMBER,
-            lit: true,
-        },
-    }
-}
-
-fn footer_filename(model: &FooterModel) -> &str {
-    let placeholder = match model.mode {
-        FooterMode::Naming => PLACEHOLDER,
-        FooterMode::Move | FooterMode::Write => NO_NAME,
-    };
-    model.filename.as_deref().unwrap_or(placeholder)
-}
-
-const MODE_WORD_PADDING: i64 = LED_LABEL_GAP - SIDE_PADDING;
-
-pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
-    let mode_word = footer_mode_word(model.mode);
-
-    let columns = vec![
-        Column {
-            node: footer_led(model.mode),
-            width: LED_WIDTH,
-            padding: SIDE_PADDING,
-        },
-        Column {
-            node: PlacementNode::Label(Label {
-                text: Cow::Borrowed(mode_word),
-                path: vec![],
-                colour: None,
-            }),
-            width: interior(mode_word),
-            padding: MODE_WORD_PADDING,
-        },
-    ];
-
-    let (mut placements, word_end) = stack_columns(columns, BOX_HEIGHT / 2);
-
-    let filename_text = footer_filename(model);
-    let filename_x = word_end + SIDE_PADDING;
-    let filename_width = interior(filename_text);
-    placements.push(Placement {
-        node: PlacementNode::Label(Label {
-            text: Cow::Owned(filename_text.to_string()),
-            path: vec![],
-            colour: Some(palette::DIM),
-        }),
-        x: filename_x,
-        y: BOX_HEIGHT / 2,
-        width: filename_width,
-        height: 1,
-    });
-
-    let suffix_x = filename_x + filename_width;
-    let suffix_width = interior(FOOTER_SUFFIX);
-    placements.push(Placement {
-        node: PlacementNode::Label(Label {
-            text: Cow::Borrowed(FOOTER_SUFFIX),
-            path: vec![],
-            colour: None,
-        }),
-        x: suffix_x,
-        y: BOX_HEIGHT / 2,
-        width: suffix_width,
-        height: 1,
-    });
-
-    let total_width = suffix_x + suffix_width + SIDE_PADDING;
-
-    let corner_box = Placement {
-        node: PlacementNode::Box {
-            colour: None,
-            fill: Some(FOREGROUND),
-            opacity: Some(FOOTER_FILL_OPACITY),
-            rounded: false,
-            sides: if model.mode == FooterMode::Naming {
-                ALL_SIDES
-            } else {
-                NO_SIDES
-            },
-            border: 1,
-        },
-        x: 0,
-        y: 0,
-        width: total_width,
-        height: BOX_HEIGHT,
-    };
-    placements.insert(0, corner_box);
-
-    if let Some(offset) = model.cursor {
-        placements.push(Placement {
-            node: PlacementNode::Cursor(Cursor),
-            x: filename_x + offset as i64,
-            y: BOX_HEIGHT / 2,
-            width: 1,
-            height: 1,
-        });
-    }
-
-    placements
-}
-
 pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
     if !tree.contains(&[0]) {
         return Vec::new();
@@ -461,295 +213,14 @@ pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Ve
     boxes_first
 }
 
-pub(crate) const GLOW_MARGIN: i64 = 1;
-
-pub(crate) fn with_glow<'a>(
-    placements: Vec<Placement<'a>>,
-    selected: Option<&[usize]>,
-) -> Vec<Placement<'a>> {
-    let Some(selected) = selected else {
-        return placements;
-    };
-    let Some(label) = placements.iter().find(|placement| {
-        matches!(&placement.node, PlacementNode::Label(label) if label.path == selected)
-    }) else {
-        return placements;
-    };
-    let Some(glow) = placements
-        .iter()
-        .find_map(|placement| match &placement.node {
-            PlacementNode::Box {
-                colour, rounded, ..
-            } if placement.x <= label.x
-                && label.x < placement.x + placement.width
-                && placement.y <= label.y
-                && label.y < placement.y + placement.height =>
-            {
-                Some(Placement {
-                    node: PlacementNode::Glow {
-                        colour: *colour,
-                        rounded: *rounded,
-                    },
-                    x: placement.x - GLOW_MARGIN,
-                    y: placement.y - GLOW_MARGIN,
-                    width: placement.width + 2 * GLOW_MARGIN,
-                    height: placement.height + 2 * GLOW_MARGIN,
-                })
-            }
-            _ => None,
-        })
-    else {
-        return placements;
-    };
-    let mut result = Vec::with_capacity(placements.len() + 1);
-    result.push(glow);
-    result.extend(placements);
-    result
-}
-
-#[allow(dead_code)]
-pub(crate) fn with_cursor<'a>(
-    placements: Vec<Placement<'a>>,
-    path: Option<Vec<usize>>,
-    cursor: Option<usize>,
-) -> Vec<Placement<'a>> {
-    let (Some(path), Some(index)) = (path, cursor) else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Cursor(Cursor),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
-    }
-    placements
-}
-
-pub(crate) fn with_caret<'a>(
-    placements: Vec<Placement<'a>>,
-    editing: Option<(Vec<usize>, usize)>,
-) -> Vec<Placement<'a>> {
-    let Some((path, index)) = editing else {
-        return placements;
-    };
-    for placement in &placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            if label.path == path {
-                let mut result = placements.clone();
-                result.push(Placement {
-                    node: PlacementNode::Caret(Caret),
-                    x: placement.x + index as i64,
-                    y: placement.y,
-                    width: 1,
-                    height: 1,
-                });
-                return result;
-            }
-        }
-    }
-    placements
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::diagram::{labelled, node, node_with_children};
-    use crate::palette;
-
-    fn footer_model(
-        mode: FooterMode,
-        filename: Option<&str>,
-        cursor: Option<usize>,
-    ) -> FooterModel {
-        FooterModel {
-            mode,
-            filename: filename.map(str::to_string),
-            cursor,
-        }
-    }
-
-    fn filename_label<'a>(placements: &'a [Placement<'static>]) -> &'a Label<'static> {
-        match &placements[3].node {
-            PlacementNode::Label(label) => label,
-            _ => panic!("expected the fourth placement to be the filename label"),
-        }
-    }
-
-    fn suffix_label<'a>(placements: &'a [Placement<'static>]) -> &'a Label<'static> {
-        match &placements[4].node {
-            PlacementNode::Label(label) => label,
-            _ => panic!("expected the fifth placement to be the suffix label"),
-        }
-    }
-
-    #[test]
-    fn footer_box_is_borderless_and_tinted_with_the_foreground_colour_outside_naming() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        assert_eq!(
-            placements[0].node,
-            PlacementNode::Box {
-                colour: None,
-                fill: Some(FOREGROUND),
-                opacity: Some(FOOTER_FILL_OPACITY),
-                rounded: false,
-                sides: NO_SIDES,
-                border: 1,
-            }
-        );
-        assert_eq!((placements[0].x, placements[0].y), (0, 0));
-        assert_eq!(placements[0].height, BOX_HEIGHT);
-    }
-
-    #[test]
-    fn footer_box_is_bordered_in_naming_mode() {
-        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
-        assert_eq!(
-            placements[0].node,
-            PlacementNode::Box {
-                colour: None,
-                fill: Some(FOREGROUND),
-                opacity: Some(FOOTER_FILL_OPACITY),
-                rounded: false,
-                sides: ALL_SIDES,
-                border: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn bordered_box_width_matches_the_stack_total_width_exactly() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        let suffix = suffix_label(&placements);
-        let suffix_end = placements[4].x + interior(&suffix.text) + SIDE_PADDING;
-        assert_eq!(placements[0].width, suffix_end);
-    }
-
-    #[test]
-    fn led_leaves_a_blank_column_before_the_mode_word() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        let led = &placements[1];
-        let mode_word = &placements[2];
-        assert_eq!(led.width, LED_WIDTH);
-        assert_eq!(mode_word.x, led.x + LED_WIDTH + LED_LABEL_GAP);
-    }
-
-    #[test]
-    fn command_mode_led_is_a_dim_lime() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        assert_eq!(
-            placements[1].node,
-            PlacementNode::Led {
-                colour: palette::LIME,
-                lit: false,
-            }
-        );
-    }
-
-    #[test]
-    fn insert_mode_led_is_a_lit_violet() {
-        let placements = footer(&footer_model(FooterMode::Write, Some("plans"), None));
-        assert_eq!(
-            placements[1].node,
-            PlacementNode::Led {
-                colour: palette::VIOLET,
-                lit: true,
-            }
-        );
-    }
-
-    #[test]
-    fn naming_mode_led_is_a_lit_amber() {
-        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
-        assert_eq!(
-            placements[1].node,
-            PlacementNode::Led {
-                colour: palette::AMBER,
-                lit: true,
-            }
-        );
-    }
-
-    #[test]
-    fn mode_word_matches_the_mode_and_renders_in_the_default_colour() {
-        for (mode, word) in [
-            (FooterMode::Move, "MOVE"),
-            (FooterMode::Write, "WRITE"),
-            (FooterMode::Naming, "NAME"),
-        ] {
-            let placements = footer(&footer_model(mode, Some("plans"), None));
-            assert_eq!(
-                placements[2].node,
-                PlacementNode::Label(Label {
-                    text: word.into(),
-                    path: vec![],
-                    colour: None,
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn filename_column_carries_a_dim_foreground_colour_and_the_models_filename() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        let label = filename_label(&placements);
-        assert_eq!(label.text, "plans");
-        assert_eq!(label.colour, Some(palette::DIM));
-    }
-
-    #[test]
-    fn suffix_column_follows_the_filename_in_the_plain_default_colour() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        let filename = filename_label(&placements);
-        let suffix = suffix_label(&placements);
-        assert_eq!(suffix.text, FOOTER_SUFFIX);
-        assert_eq!(suffix.colour, None);
-        assert_eq!(placements[4].x, placements[3].x + interior(&filename.text));
-    }
-
-    #[test]
-    fn filename_column_shows_the_no_name_placeholder_outside_naming() {
-        for mode in [FooterMode::Move, FooterMode::Write] {
-            let placements = footer(&footer_model(mode, None, None));
-            let label = filename_label(&placements);
-            assert_eq!(label.text, NO_NAME);
-        }
-    }
-
-    #[test]
-    fn filename_column_shows_the_typing_placeholder_in_naming_mode() {
-        let placements = footer(&footer_model(FooterMode::Naming, None, Some(0)));
-        let label = filename_label(&placements);
-        assert_eq!(label.text, PLACEHOLDER);
-    }
-
-    #[test]
-    fn footer_with_no_cursor_has_no_cursor_placement() {
-        let placements = footer(&footer_model(FooterMode::Move, Some("plans"), None));
-        assert!(placements
-            .iter()
-            .all(|p| !matches!(p.node, PlacementNode::Cursor(_))));
-    }
-
-    #[test]
-    fn footer_with_a_cursor_places_it_at_the_filename_columns_x_plus_the_offset() {
-        let placements = footer(&footer_model(FooterMode::Naming, Some("ab"), Some(2)));
-        let filename = &placements[3];
-        let cursor = placements
-            .iter()
-            .find(|p| matches!(p.node, PlacementNode::Cursor(_)))
-            .expect("a cursor is present when model.cursor is Some");
-        assert_eq!(cursor.x, filename.x + 2);
-        assert_eq!(cursor.y, filename.y);
-    }
+    use crate::view::{
+        interior, label_centre as centre, with_caret, with_glow, Arrow, Caret, Label,
+        PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GLOW_MARGIN, SIDE_PADDING,
+    };
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
         let widths = measure_columns(nodes, None);
@@ -1405,86 +876,5 @@ mod tests {
             height: 1,
         };
         assert!(matches!(caret_placement.node, PlacementNode::Caret(_)));
-    }
-
-    #[test]
-    fn stack_columns_total_width_sums_widths_and_padding() {
-        let (first_width, first_padding) = (5, 2);
-        let (second_width, second_padding) = (3, 1);
-        let columns = vec![
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: first_width,
-                padding: first_padding,
-            },
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: second_width,
-                padding: second_padding,
-            },
-        ];
-
-        let (_, total_width) = stack_columns(columns, 0);
-
-        assert_eq!(
-            total_width,
-            first_padding
-                + first_width
-                + first_padding
-                + second_padding
-                + second_width
-                + second_padding
-        );
-    }
-
-    #[test]
-    fn stack_columns_padding_is_additive_between_columns_and_at_outer_edges() {
-        let (first_width, first_padding) = (5, 2);
-        let (second_width, second_padding) = (3, 2);
-        let columns = vec![
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: first_width,
-                padding: first_padding,
-            },
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: second_width,
-                padding: second_padding,
-            },
-        ];
-
-        let (placements, total_width) = stack_columns(columns, 0);
-
-        assert_eq!(placements[0].x, first_padding);
-        let second_x = first_padding + first_width + first_padding + second_padding;
-        assert_eq!(placements[1].x, second_x);
-        assert_eq!(total_width, second_x + second_width + second_padding);
-    }
-
-    #[test]
-    fn stack_columns_places_columns_left_to_right_at_given_y() {
-        let y = 7;
-        let columns = vec![
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: 4,
-                padding: 1,
-            },
-            Column {
-                node: PlacementNode::Cursor(Cursor),
-                width: 6,
-                padding: 1,
-            },
-        ];
-
-        let (placements, _) = stack_columns(columns, y);
-
-        assert_eq!(placements.len(), 2);
-        assert!(placements[0].x < placements[1].x);
-        for placement in &placements {
-            assert_eq!(placement.y, y);
-            assert_eq!(placement.height, 1);
-        }
     }
 }

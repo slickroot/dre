@@ -1,7 +1,7 @@
 use super::terminal::{centered_span, python_round};
 use super::{arrowhead_depth, arrowhead_slope, LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA};
 use crate::canvas::{Rgba, Shape};
-use crate::layout::{Sides, ALL_SIDES};
+use crate::view::{Sides, ALL_SIDES};
 
 pub(super) struct BoxShape {
     pub(super) width: i64,
@@ -232,8 +232,8 @@ impl Shape for LedShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::BORDER;
     use crate::render::OPAQUE;
+    use crate::view::BORDER;
 
     const EDGE: Rgba = [10, 20, 30, OPAQUE];
     const FILL: Rgba = [1, 2, 3, OPAQUE];
