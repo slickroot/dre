@@ -33,6 +33,10 @@ pub(crate) const CELL_HEIGHT: i64 = 16;
 
 const ROUNDED_RADIUS: i64 = 20;
 
+const LED_DOT_RATIO: f64 = 0.28;
+const LED_HALO_ALPHA: f64 = 0.45;
+const LED_DIM_ALPHA: f64 = 0.3;
+
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
@@ -305,7 +309,7 @@ mod tests {
 
     fn box_at_bottom_right(foot: Area, text: &str) -> (i64, i64, i64, i64) {
         let text_width = text.chars().count() as i64;
-        let box_width = text_width + SIDE_PADDING * 2 + layout::LED_GAP;
+        let box_width = text_width + SIDE_PADDING * 2 + layout::LED_WIDTH + layout::LED_LABEL_GAP;
         (
             foot.col + foot.cols - box_width,
             foot.row + foot.rows - FOOTER_ROWS,
@@ -315,12 +319,12 @@ mod tests {
     }
 
     fn label_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - layout::LED_GAP;
-        box_x + layout::centre(inset_box_width, text) + layout::LED_GAP
+        let inset_box_width = box_width - layout::LED_WIDTH - layout::LED_LABEL_GAP;
+        box_x + layout::centre(inset_box_width, text) + layout::LED_WIDTH + layout::LED_LABEL_GAP
     }
 
     fn led_x(box_x: i64, box_width: i64, text: &str) -> i64 {
-        let inset_box_width = box_width - layout::LED_GAP;
+        let inset_box_width = box_width - layout::LED_WIDTH - layout::LED_LABEL_GAP;
         box_x + layout::centre(inset_box_width, text)
     }
 

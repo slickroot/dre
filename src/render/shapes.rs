@@ -1,5 +1,5 @@
 use super::terminal::{centered_span, python_round};
-use super::{arrowhead_depth, arrowhead_slope};
+use super::{arrowhead_depth, arrowhead_slope, LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA};
 use crate::canvas::{Rgba, Shape};
 use crate::layout::{Sides, ALL_SIDES};
 
@@ -202,22 +202,14 @@ pub(super) struct LedShape {
     pub(super) lit: bool,
 }
 
-pub(super) const LED_DOT_RATIO: f64 = 0.28;
-pub(super) const LED_HALO_ALPHA: f64 = 0.45;
-pub(super) const LED_DIM_ALPHA: f64 = 0.3;
-
-impl LedShape {
-    fn short_side(&self) -> f64 {
-        self.width.min(self.height) as f64
-    }
-}
-
 impl Shape for LedShape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
         let dx = x as f64 + 0.5 - self.width as f64 / 2.0;
         let dy = y as f64 + 0.5 - self.height as f64 / 2.0;
-        let dot_radius = self.short_side() * LED_DOT_RATIO;
-        let reach = self.short_side() / 2.0 - dot_radius;
+        // Sized to the row height, not the narrower of width/height, so the dot
+        // and halo always touch the cell's top and bottom edges.
+        let dot_radius = self.height as f64 * LED_DOT_RATIO;
+        let reach = self.height as f64 / 2.0 - dot_radius;
         let distance = dx.hypot(dy) - dot_radius;
         let dot = (0.5 - distance).clamp(0.0, 1.0);
         let (dot_alpha, halo) = if self.lit {
@@ -327,8 +319,8 @@ mod tests {
 
     fn led(lit: bool) -> LedShape {
         LedShape {
-            width: 20,
-            height: 40,
+            width: 40,
+            height: 20,
             colour: (1, 2, 3),
             lit,
         }
@@ -336,18 +328,18 @@ mod tests {
 
     #[test]
     fn a_lit_led_is_a_solid_dot_in_its_colour() {
-        assert_eq!(led(true).colour_at(10, 20), Some([1, 2, 3, 255]));
+        assert_eq!(led(true).colour_at(20, 10), Some([1, 2, 3, 255]));
     }
 
     #[test]
     fn an_unlit_led_is_the_same_dot_dimmed() {
-        let alpha = led(false).colour_at(10, 20).unwrap()[3];
+        let alpha = led(false).colour_at(20, 10).unwrap()[3];
         assert_eq!(alpha, python_round(LED_DIM_ALPHA * 255.0) as u8);
     }
 
     #[test]
     fn only_a_lit_led_has_a_halo() {
-        let just_outside = (10, 20 + 7);
+        let just_outside = (20, 10 + 7);
         assert!(led(true)
             .colour_at(just_outside.0, just_outside.1)
             .is_some());
@@ -355,9 +347,24 @@ mod tests {
     }
 
     #[test]
-    fn an_led_stays_round_in_a_tall_cell() {
-        assert_eq!(led(true).colour_at(10, 2), None);
-        assert_eq!(led(true).colour_at(0, 0), None);
+    fn a_lit_led_reaches_the_top_and_bottom_rows_of_its_cell() {
+        let shape = led(true);
+        assert!(shape.colour_at(shape.width / 2, 0).is_some());
+        assert!(shape.colour_at(shape.width / 2, shape.height - 1).is_some());
+        assert_eq!(shape.colour_at(shape.width / 2, -1), None);
+        assert_eq!(shape.colour_at(shape.width / 2, shape.height), None);
+    }
+
+    #[test]
+    fn a_lit_led_still_reaches_the_row_edges_when_its_cell_is_narrower_than_it_is_tall() {
+        let shape = LedShape {
+            width: 10,
+            height: 20,
+            colour: (1, 2, 3),
+            lit: true,
+        };
+        assert!(shape.colour_at(shape.width / 2, 0).is_some());
+        assert!(shape.colour_at(shape.width / 2, shape.height - 1).is_some());
     }
 
     #[test]
