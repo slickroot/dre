@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Area {
+pub struct Area {
     pub col: i64,
     pub row: i64,
     pub cols: i64,

@@ -20,6 +20,7 @@ mod state;
 mod test_support;
 #[cfg(not(target_arch = "wasm32"))]
 mod tty;
+pub mod view;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;

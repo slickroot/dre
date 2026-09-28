@@ -2,14 +2,14 @@ use std::io::{self, Write};
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
-use super::{colour, editor, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
 use crate::layout::{Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
 use crate::palette::{palette, FOREGROUND};
-use crate::state::State;
 use crate::tty::Window;
+use crate::view::Scene;
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -266,8 +266,8 @@ pub(crate) struct TerminalRenderer {
 }
 
 impl Renderer for TerminalRenderer {
-    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let frame = self.frame(state);
+    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
+        let frame = self.frame(scene);
         out.write_all(&frame.into_bytes())
     }
 }
@@ -291,10 +291,14 @@ impl TerminalRenderer {
         self.window.rows = window.rows;
     }
 
-    fn frame(&mut self, state: &State) -> Frame {
+    pub(crate) fn area(&self) -> Area {
+        whole(self.window)
+    }
+
+    fn frame(&mut self, scene: &Scene<'_>) -> Frame {
         let mut frame = Frame::new(self.window);
-        for (area, placements) in editor(state, whole(self.window)) {
-            self.paint(&mut frame, &placements, area);
+        for (area, placements) in scene {
+            self.paint(&mut frame, placements, *area);
         }
         frame
     }
@@ -537,6 +541,8 @@ mod tests {
     use super::*;
     use crate::layout::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::state::Mode;
+    use crate::view::editor;
+    use crate::State;
 
     #[test]
     fn fill_colour_of_plain_is_transparent() {
@@ -1393,10 +1399,10 @@ mod tests {
         let state = one_leaf();
         let leaf = leaf_box(&state);
         let mut r = renderer_on(window(20, 10, 1, 1));
-        r.frame(&state);
+        framed(&mut r, &state);
         let (cols, rows) = (40, 20);
         r.on_resize(window(cols, rows, 1, 1));
-        let frame = r.frame(&state);
+        let frame = framed(&mut r, &state);
         assert_eq!(
             (frame.images[0].col, frame.images[0].row),
             (
@@ -1430,8 +1436,13 @@ mod tests {
 
     fn rendered(r: &mut TerminalRenderer, state: &State) -> String {
         let mut out = Vec::new();
-        r.render(state, &mut out).unwrap();
+        r.render(&editor(state, whole(r.window)), &mut out).unwrap();
         String::from_utf8(out).unwrap()
+    }
+
+    fn framed(r: &mut TerminalRenderer, state: &State) -> Frame {
+        let scene = editor(state, whole(r.window));
+        r.frame(&scene)
     }
 
     fn empty_state() -> State {
@@ -1504,7 +1515,7 @@ mod tests {
     fn an_empty_drawing_draws_only_in_the_footer_row() {
         let window = window(40, 10, 1, 1);
         let mut r = renderer_on(window);
-        let frame = r.frame(&empty_state());
+        let frame = framed(&mut r, &empty_state());
         assert!(frame
             .images
             .iter()
@@ -1515,7 +1526,7 @@ mod tests {
     fn the_footer_box_is_filled_with_the_foreground_colour_and_has_no_border() {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
-        let frame = r.frame(&empty_state());
+        let frame = framed(&mut r, &empty_state());
         let image = frame
             .images
             .first()
@@ -2175,7 +2186,7 @@ mod tests {
         let mut r = renderer_on(window(cols, rows, 1, 1));
         let state = one_leaf();
         let leaf = leaf_box(&state);
-        let frame = r.frame(&state);
+        let frame = framed(&mut r, &state);
         let drawn = &frame.images[0];
         assert_eq!(
             (drawn.col, drawn.row),
@@ -2193,7 +2204,7 @@ mod tests {
         let body_rows = leaf.height - 1;
         let window = window(20, body_rows + FOOTER_ROWS, 1, 1);
         let mut r = renderer_on(window);
-        let frame = r.frame(&state);
+        let frame = framed(&mut r, &state);
         let body_images: Vec<&Placed> = frame
             .images
             .iter()

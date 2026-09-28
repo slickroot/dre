@@ -8,6 +8,7 @@ use crate::dre_format;
 use crate::filesystem;
 use crate::render::{Renderer, SvgRenderer};
 use crate::state::State;
+use crate::view;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Command {
@@ -42,7 +43,16 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     let doc = dre_format::read(&text).ok_or_else(|| filesystem::invalid(&input))?;
     let doc = diagram::to_document(doc);
     let state = State::open(doc, None);
-    SvgRenderer::default().render(&state, &mut File::create(output_path(&input))?)?;
+    let window = view::Area {
+        col: 0,
+        row: 0,
+        cols: crate::render::FULL_HD_WIDTH / crate::render::CELL_WIDTH,
+        rows: crate::render::FULL_HD_HEIGHT / crate::render::CELL_HEIGHT,
+    };
+    SvgRenderer::default().render(
+        &view::body(&state, window),
+        &mut File::create(output_path(&input))?,
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 

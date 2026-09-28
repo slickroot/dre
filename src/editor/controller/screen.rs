@@ -3,6 +3,7 @@ use std::io::{self, Stdout, Write};
 use crate::render::{Renderer, TerminalRenderer};
 use crate::state::State;
 use crate::tty;
+use crate::view;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Screen {
@@ -17,7 +18,8 @@ pub(crate) struct TerminalScreen {
 
 impl Screen for TerminalScreen {
     fn render(&mut self, state: &State) -> io::Result<()> {
-        self.renderer.render(state, &mut self.out)?;
+        self.renderer
+            .render(&view::editor(state, self.renderer.area()), &mut self.out)?;
         self.out.flush()
     }
 
