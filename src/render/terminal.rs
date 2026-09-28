@@ -228,8 +228,8 @@ impl Frame {
     }
 
     // Clipping happens by cropping: kitty::show cannot position at a negative
-    // column, so an overhang would shift into view or scroll the screen instead
-    // of being cut off.
+    // column, and sends a=T without C=1, so an overhang would shift into view
+    // or scroll the screen instead of being cut off.
     fn crop<G: Into<Geometry>>(&self, geometry: G, area: Area) -> Option<Crop> {
         let geometry = geometry.into();
         let (left, top) = (geometry.x, geometry.y);
@@ -1715,7 +1715,7 @@ mod tests {
         assert_eq!(first.matches("a=T").count(), 1);
         assert_eq!(second.matches("a=T").count(), 0);
         assert_eq!(second.matches("a=p").count(), 1);
-        assert!(second.starts_with("\x1b[H   \x1b_Ga=d,d=a,q=1;\x1b\\"));
+        assert!(second.starts_with(&format!("\x1b[H   {}", kitty::soft_clear())));
         assert!(!second.contains("d=I"));
     }
 

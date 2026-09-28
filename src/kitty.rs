@@ -46,11 +46,11 @@ impl PlacementId {
 }
 
 pub(crate) fn soft_clear() -> Command {
-    Command("\x1b_Ga=d,d=a,q=1;\x1b\\".to_string())
+    Command("\x1b_Ga=d,d=a,q=2;\x1b\\".to_string())
 }
 
 pub(crate) fn delete(id: ImageId) -> Command {
-    Command(format!("\x1b_Ga=d,d=I,i={},q=1;\x1b\\", id.value()))
+    Command(format!("\x1b_Ga=d,d=I,i={},q=2;\x1b\\", id.value()))
 }
 
 pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> Command {
@@ -64,7 +64,7 @@ pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> 
 
 pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
-        "\x1b[{};{}H\x1b_Ga=p,i={},p={},c=1,r=1,q=1,C=1,z={};\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={},p={},q=2,z={};\x1b\\",
         row + 1,
         col + 1,
         id.value(),
@@ -166,7 +166,7 @@ fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> 
     let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
-        "a=T,f=32,s={width},v={height},o=z,q=1,C=1,i={},z={z},m={}",
+        "a=T,f=32,s={width},v={height},o=z,q=2,i={},z={z},m={}",
         id.value(),
         more(&chunk_list, 0)
     );
@@ -255,10 +255,10 @@ mod tests {
         let result = transmission(&pixels, 2, 1, image_id(1), -1);
 
         let expected_payload = encode(&pixels);
-        let expected_header = "a=T,f=32,s=2,v=1,o=z,q=1,C=1,i=1,z=-1,m=0".to_string();
+        let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,i=1,z=-1,m=0".to_string();
         let expected = escape(&expected_header, &expected_payload);
         assert_eq!(result, expected);
-        assert!(result.starts_with("\x1b_Ga=T,f=32,s=2,v=1,o=z,q=1,C=1,i=1,z=-1,m=0;"));
+        assert!(result.starts_with("\x1b_Ga=T,f=32,s=2,v=1,o=z,q=2,i=1,z=-1,m=0;"));
         assert!(result.ends_with("\x1b\\"));
     }
 
@@ -281,7 +281,7 @@ mod tests {
         );
 
         let header = format!(
-            "a=T,f=32,s=100,v=100,o=z,q=1,C=1,i=1,z=-1,m={}",
+            "a=T,f=32,s=100,v=100,o=z,q=2,i=1,z=-1,m={}",
             more(&chunk_list, 0)
         );
         let mut expected = escape(&header, &chunk_list[0]);
@@ -298,14 +298,14 @@ mod tests {
 
     #[test]
     fn soft_clear_removes_placements_but_keeps_image_data() {
-        assert_eq!(soft_clear().to_string(), "\x1b_Ga=d,d=a,q=1;\x1b\\");
+        assert_eq!(soft_clear().to_string(), "\x1b_Ga=d,d=a,q=2;\x1b\\");
     }
 
     #[test]
     fn delete_frees_a_named_image() {
         assert_eq!(
             delete(image_id(7)).to_string(),
-            "\x1b_Ga=d,d=I,i=7,q=1;\x1b\\"
+            "\x1b_Ga=d,d=I,i=7,q=2;\x1b\\"
         );
     }
 
@@ -326,10 +326,10 @@ mod tests {
     }
 
     #[test]
-    fn place_reuses_a_named_image_without_payload_or_cursor_movement() {
+    fn place_positions_the_cursor_and_names_the_image_without_payload() {
         assert_eq!(
             place(image_id(7), placement_id(2), 3, 5, -1).to_string(),
-            "\x1b[6;4H\x1b_Ga=p,i=7,p=2,c=1,r=1,q=1,C=1,z=-1;\x1b\\"
+            "\x1b[6;4H\x1b_Ga=p,i=7,p=2,q=2,z=-1;\x1b\\"
         );
     }
 
