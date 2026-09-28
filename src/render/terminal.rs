@@ -56,6 +56,25 @@ struct ArrowStyle {
     shaft: i64,
 }
 
+#[derive(Clone, Copy)]
+struct Geometry {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+}
+
+impl From<&Placement<'_>> for Geometry {
+    fn from(placement: &Placement<'_>) -> Self {
+        Geometry {
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+        }
+    }
+}
+
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
@@ -209,14 +228,15 @@ impl Frame {
     // Clipping happens by cropping: kitty::show cannot position at a negative
     // column, and sends a=T without C=1, so an overhang would shift into view
     // or scroll the screen instead of being cut off.
-    fn crop(&self, placement: &Placement, area: Area) -> Option<Crop> {
-        let (left, top) = (placement.x, placement.y);
+    fn crop<G: Into<Geometry>>(&self, geometry: G, area: Area) -> Option<Crop> {
+        let geometry = geometry.into();
+        let (left, top) = (geometry.x, geometry.y);
         let col = left.max(area.col).max(0);
         let row = top.max(area.row).max(0);
-        let right = (left + placement.width)
+        let right = (left + geometry.width)
             .min(area.col + area.cols)
             .min(self.window.cols);
-        let bottom = (top + placement.height)
+        let bottom = (top + geometry.height)
             .min(area.row + area.rows)
             .min(self.window.rows);
         if col >= right || row >= bottom {
@@ -232,12 +252,12 @@ impl Frame {
         })
     }
 
-    fn shows(&self, placement: &Placement, area: Area) -> bool {
-        self.crop(placement, area).is_some()
+    fn shows<G: Into<Geometry>>(&self, geometry: G, area: Area) -> bool {
+        self.crop(geometry, area).is_some()
     }
 
-    fn place(&mut self, canvas: &Canvas, placement: &Placement, area: Area, z: i32) {
-        let Some(crop) = self.crop(placement, area) else {
+    fn place<G: Into<Geometry>>(&mut self, canvas: &Canvas, geometry: G, area: Area, z: i32) {
+        let Some(crop) = self.crop(geometry, area) else {
             return;
         };
         self.images.push(Placed {
@@ -325,6 +345,7 @@ impl TerminalRenderer {
 
     fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
         for placement in placements {
+            let geometry = Geometry::from(placement);
             match &placement.node {
                 PlacementNode::Box {
                     colour,
@@ -336,7 +357,7 @@ impl TerminalRenderer {
                     selected,
                 } => self.draw_box(
                     frame,
-                    placement,
+                    geometry,
                     area,
                     BoxStyle {
                         colour: *colour,
@@ -349,11 +370,11 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Glow { colour, rounded } => {
-                    self.draw_glow(frame, placement, area, *colour, *rounded)
+                    self.draw_glow(frame, geometry, area, *colour, *rounded)
                 }
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
                     frame,
-                    placement,
+                    geometry,
                     area,
                     ArrowStyle {
                         stops: arrow.stops.clone(),
@@ -362,18 +383,18 @@ impl TerminalRenderer {
                 ),
                 PlacementNode::Label(label) => self.draw_label(
                     frame,
-                    placement,
+                    geometry,
                     area,
                     LabelStyle {
                         text: label.text.to_string(),
                         path: label.path.clone(),
                     },
                 ),
-                PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
-                PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
+                PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
+                PlacementNode::Cursor(_) => self.draw_cursor(frame, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
-                    frame,
-                    placement,
+                        frame,
+                        geometry,
                     area,
                     LedStyle {
                         colour: *colour,
@@ -384,9 +405,9 @@ impl TerminalRenderer {
         }
     }
 
-    fn place(frame: &mut Frame, canvas: &Canvas, placement: &Placement, area: Area, z: i32) {
-        if frame.shows(placement, area) {
-            frame.place(canvas, placement, area, z);
+    fn place(frame: &mut Frame, canvas: &Canvas, geometry: Geometry, area: Area, z: i32) {
+        if frame.shows(geometry, area) {
+            frame.place(canvas, geometry, area, z);
         }
     }
 
@@ -394,66 +415,66 @@ impl TerminalRenderer {
         &mut self,
         frame: &mut Frame,
         key: SpriteKey,
-        placement: &Placement,
+        geometry: Geometry,
         area: Area,
         z: i32,
         build: impl FnOnce(&Self) -> Canvas,
     ) {
-        if !frame.shows(placement, area) {
+        if !frame.shows(geometry, area) {
             return;
         }
         if !self.cache.contains_key(&key) {
             let drawn = build(self);
             self.remember(key.clone(), drawn);
         }
-        Self::place(frame, &self.cache[&key], placement, area, z);
+        Self::place(frame, &self.cache[&key], geometry, area, z);
     }
 
-    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement, area: Area, style: BoxStyle) {
-        let key = box_key(placement.width, placement.height, style);
-        self.place_cached(frame, key, placement, area, BOX_Z, |renderer| {
-            renderer.box_canvas(placement.width, placement.height, style)
+    fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
+        let key = box_key(geometry.width, geometry.height, style);
+        self.place_cached(frame, key, geometry, area, BOX_Z, |renderer| {
+            renderer.box_canvas(geometry.width, geometry.height, style)
         });
     }
 
     fn draw_glow(
         &mut self,
         frame: &mut Frame,
-        placement: &Placement,
+        geometry: Geometry,
         area: Area,
         colour: Option<u8>,
         rounded: bool,
     ) {
-        let key = glow_key(placement.width, placement.height, colour, rounded);
-        self.place_cached(frame, key, placement, area, GLOW_Z, |renderer| {
-            renderer.glow_canvas(placement.width, placement.height, colour, rounded)
+        let key = glow_key(geometry.width, geometry.height, colour, rounded);
+        self.place_cached(frame, key, geometry, area, GLOW_Z, |renderer| {
+            renderer.glow_canvas(geometry.width, geometry.height, colour, rounded)
         });
     }
 
-    fn draw_led(&mut self, frame: &mut Frame, placement: &Placement, area: Area, style: LedStyle) {
-        let key = led_key(placement.width, placement.height, style);
-        self.place_cached(frame, key, placement, area, INK_Z, |renderer| {
-            renderer.led_canvas(placement.width, placement.height, style)
+    fn draw_led(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LedStyle) {
+        let key = led_key(geometry.width, geometry.height, style);
+        self.place_cached(frame, key, geometry, area, INK_Z, |renderer| {
+            renderer.led_canvas(geometry.width, geometry.height, style)
         });
     }
 
     fn draw_arrow(
         &mut self,
         frame: &mut Frame,
-        placement: &Placement,
+        geometry: Geometry,
         area: Area,
         style: ArrowStyle,
     ) {
-        let key = arrow_key(placement.width, placement.height, &style);
-        self.place_cached(frame, key, placement, area, CONTENT_Z, |renderer| {
-            renderer.arrow_canvas(placement.width, placement.height, &style)
+        let key = arrow_key(geometry.width, geometry.height, &style);
+        self.place_cached(frame, key, geometry, area, CONTENT_Z, |renderer| {
+            renderer.arrow_canvas(geometry.width, geometry.height, &style)
         });
     }
 
     fn draw_label(
         &mut self,
         frame: &mut Frame,
-        placement: &Placement,
+        geometry: Geometry,
         area: Area,
         style: LabelStyle,
     ) {
@@ -463,19 +484,19 @@ impl TerminalRenderer {
                     text: style.text.clone().into(),
                     path: style.path.clone(),
                 }),
-                x: placement.x + offset as i64,
-                y: placement.y,
+                x: geometry.x + offset as i64,
+                y: geometry.y,
                 width: 1,
                 height: 1,
             };
             let glyph = self.glyph_source.glyph(character);
-            Self::place(frame, glyph, &char_placement, area, CONTENT_Z);
+            Self::place(frame, glyph, Geometry::from(&char_placement), area, CONTENT_Z);
         }
     }
 
-    fn draw_caret(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        let width = self.cells_to_pixels_x(placement.width);
-        let height = self.cells_to_pixels_y(placement.height);
+    fn draw_caret(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
+        let width = self.cells_to_pixels_x(geometry.width);
+        let height = self.cells_to_pixels_y(geometry.height);
         let (r, g, b) = colour(None);
         let canvas = Canvas::fill(
             width,
@@ -484,11 +505,11 @@ impl TerminalRenderer {
                 colour: [r, g, b, OPAQUE],
             },
         );
-        Self::place(frame, &canvas, placement, area, CONTENT_Z);
+        Self::place(frame, &canvas, geometry, area, CONTENT_Z);
     }
 
-    fn draw_cursor(&mut self, frame: &mut Frame, placement: &Placement, area: Area) {
-        self.draw_caret(frame, placement, area);
+    fn draw_cursor(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
+        self.draw_caret(frame, geometry, area);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
