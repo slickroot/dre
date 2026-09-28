@@ -44,10 +44,6 @@ fn edit_room(path: &[usize], editing: Option<&[usize]>) -> i64 {
     i64::from(editing == Some(path))
 }
 
-fn is_selected(path: &[usize], selected: Option<&[usize]>) -> bool {
-    selected == Some(path)
-}
-
 pub(crate) fn measure_columns(tree: &Tree<Node>, editing: Option<&[usize]>) -> Vec<i64> {
     fn widen(widths: &mut Vec<i64>, col: usize, width: i64) {
         if widths.len() <= col {
@@ -72,7 +68,6 @@ pub(crate) fn place<'a>(
     tree: &'a Tree<Node>,
     offsets: &[i64],
     editing: Option<&[usize]>,
-    selected: Option<&[usize]>,
 ) -> Vec<Placement<'a>> {
     fn median(rows: &[usize]) -> usize {
         let middle = rows.len() / 2;
@@ -92,7 +87,6 @@ pub(crate) fn place<'a>(
         path: &[usize],
         child_rows: &[usize],
         edit_room: i64,
-        selected: bool,
     ) -> Vec<Placement<'a>> {
         let y = row as i64 * HALF_PITCH;
         let fill = node.filled().then_some(node.colour()).flatten();
@@ -104,7 +98,6 @@ pub(crate) fn place<'a>(
                 rounded: node.rounded(),
                 sides: ALL_SIDES,
                 border: BORDER,
-                selected,
             },
             x,
             y,
@@ -157,7 +150,6 @@ pub(crate) fn place<'a>(
         path: Vec<usize>,
         offsets: &[i64],
         editing: Option<&[usize]>,
-        selected: Option<&[usize]>,
         free: &mut usize,
     ) -> (Vec<Placement<'a>>, usize) {
         let node = tree.value(&path);
@@ -168,16 +160,7 @@ pub(crate) fn place<'a>(
         if child_paths.is_empty() {
             let row = *free;
             *free += LEAF_STRIDE as usize;
-            let placements = emit(
-                node,
-                x,
-                row,
-                width,
-                &path,
-                &[],
-                edit_room(&path, editing),
-                is_selected(&path, selected),
-            );
+            let placements = emit(node, x, row, width, &path, &[], edit_room(&path, editing));
             return (placements, row);
         }
 
@@ -185,9 +168,7 @@ pub(crate) fn place<'a>(
         let mut child_placements = Vec::new();
         let mut child_rows = Vec::new();
         for child_path in child_paths {
-            let (placements, row) = visit(
-                tree, child_col, child_path, offsets, editing, selected, free,
-            );
+            let (placements, row) = visit(tree, child_col, child_path, offsets, editing, free);
             child_placements.extend(placements);
             child_rows.push(row);
         }
@@ -200,7 +181,6 @@ pub(crate) fn place<'a>(
             &path,
             &child_rows,
             edit_room(&path, editing),
-            is_selected(&path, selected),
         );
         placements.extend(child_placements);
         (placements, row)
@@ -209,7 +189,7 @@ pub(crate) fn place<'a>(
     let mut placements = Vec::new();
     let mut free = 0usize;
     for path in children(tree, &[]) {
-        let (node_placements, _) = visit(tree, 0, path, offsets, editing, selected, &mut free);
+        let (node_placements, _) = visit(tree, 0, path, offsets, editing, &mut free);
         placements.extend(node_placements);
     }
     placements
@@ -242,7 +222,6 @@ pub enum PlacementNode<'a> {
         rounded: bool,
         sides: Sides,
         border: i64,
-        selected: bool,
     },
     Label(Label<'a>),
     Arrow(Arrow),
@@ -259,6 +238,14 @@ pub enum PlacementNode<'a> {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement<'a> {
     pub node: PlacementNode<'a>,
@@ -266,6 +253,23 @@ pub struct Placement<'a> {
     pub y: i64,
     pub width: i64,
     pub height: i64,
+}
+
+impl From<&Placement<'_>> for Geometry {
+    fn from(placement: &Placement<'_>) -> Self {
+        Geometry {
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+        }
+    }
+}
+
+impl<'a> Placement<'a> {
+    pub fn geometry(&self) -> Geometry {
+        self.into()
+    }
 }
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
@@ -283,9 +287,8 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
         fill: Some(FOREGROUND),
         opacity: Some(FOOTER_FILL_OPACITY),
         rounded: false,
-        sides: NO_SIDES,
+        sides: if view.bordered { ALL_SIDES } else { NO_SIDES },
         border: 1,
-        selected: false,
     };
     let led = PlacementNode::Led {
         colour: view.led_colour,
@@ -323,11 +326,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
     with_cursor(placements, view.cursor.map(|_| Vec::new()), view.cursor)
 }
 
-pub(crate) fn diagram<'a>(
-    tree: &'a Tree<Node>,
-    editing: Option<&[usize]>,
-    selected: Option<&[usize]>,
-) -> Vec<Placement<'a>> {
+pub(crate) fn diagram<'a>(tree: &'a Tree<Node>, editing: Option<&[usize]>) -> Vec<Placement<'a>> {
     if !tree.contains(&[0]) {
         return Vec::new();
     }
@@ -342,7 +341,7 @@ pub(crate) fn diagram<'a>(
     }
     offsets.push(offset);
 
-    let placements = place(tree, &offsets, editing, selected);
+    let placements = place(tree, &offsets, editing);
 
     let mut boxes_first: Vec<Placement<'a>> = placements
         .iter()
@@ -460,12 +459,19 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
     use crate::palette;
 
-    fn footer_view(text: &str, led_colour: u8, lit: bool, cursor: Option<usize>) -> FooterView {
+    fn footer_view(
+        text: &str,
+        led_colour: u8,
+        lit: bool,
+        cursor: Option<usize>,
+        bordered: bool,
+    ) -> FooterView {
         FooterView {
             led_colour,
             lit,
             text: text.to_string(),
             cursor,
+            bordered,
         }
     }
 
@@ -473,7 +479,7 @@ mod tests {
     fn footer_box_is_borderless_and_tinted_with_the_foreground_colour() {
         let text = "MOVE plans \u{2022} dre";
         let text_width = text.chars().count() as i64;
-        let view = footer_view(text, palette::LIME, false, None);
+        let view = footer_view(text, palette::LIME, false, None, false);
         let placements = footer(&view);
         assert_eq!(placements.len(), 3);
         let inset_box_width = interior(text) + SIDE_PADDING * 2;
@@ -487,7 +493,6 @@ mod tests {
                 rounded: false,
                 sides: NO_SIDES,
                 border: 1,
-                selected: false,
             }
         );
         assert_eq!(
@@ -542,8 +547,26 @@ mod tests {
     }
 
     #[test]
+    fn footer_box_is_bordered_when_the_view_is_bordered() {
+        let text = "MOVE type a name \u{2022} dre";
+        let view = footer_view(text, palette::LIME, false, None, true);
+        let placements = footer(&view);
+        assert_eq!(
+            placements[0].node,
+            PlacementNode::Box {
+                colour: None,
+                fill: Some(FOREGROUND),
+                opacity: Some(FOOTER_FILL_OPACITY),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: 1,
+            }
+        );
+    }
+
+    #[test]
     fn label_leaves_a_blank_column_after_the_led() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
         let placements = footer(&view);
         let led = &placements[1];
         let label = &placements[2];
@@ -553,7 +576,13 @@ mod tests {
 
     #[test]
     fn a_lit_led_is_marked_lit() {
-        let view = footer_view("WRITE plans \u{2022} dre", palette::VIOLET, true, None);
+        let view = footer_view(
+            "WRITE plans \u{2022} dre",
+            palette::VIOLET,
+            true,
+            None,
+            false,
+        );
         let placements = footer(&view);
         match &placements[1].node {
             PlacementNode::Led { colour, lit } => {
@@ -566,7 +595,7 @@ mod tests {
 
     #[test]
     fn footer_with_no_cursor_has_no_cursor_placement() {
-        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None);
+        let view = footer_view("MOVE plans \u{2022} dre", palette::LIME, false, None, false);
         let placements = footer(&view);
         assert!(placements
             .iter()
@@ -576,7 +605,7 @@ mod tests {
     #[test]
     fn footer_with_a_cursor_places_it_at_the_edit_index_on_the_label() {
         let text = "MOVE type a name \u{2022} dre";
-        let view = footer_view(text, palette::LIME, false, Some(3));
+        let view = footer_view(text, palette::LIME, false, Some(3), false);
         let placements = footer(&view);
         let label = placements
             .iter()
@@ -696,7 +725,7 @@ mod tests {
     fn place_places_a_node_using_its_offset_and_row() {
         let nodes = Tree::root(vec![node("hi")]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         let box_placement = &placements[0];
         match &box_placement.node {
@@ -716,7 +745,7 @@ mod tests {
             vec![node("a"), node("b")],
         )]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         let paths: Vec<Vec<usize>> = placements
             .iter()
@@ -732,7 +761,7 @@ mod tests {
     fn place_of_a_leaf_yields_only_a_box_and_a_label_placement() {
         let nodes = Tree::root(vec![node("hi")]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         assert_eq!(placements.len(), 2);
         match &placements[0].node {
@@ -755,7 +784,7 @@ mod tests {
             vec![node("a"), node("b")],
         )]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         assert_eq!(placements.len(), 7);
 
@@ -795,7 +824,7 @@ mod tests {
     fn place_centres_a_label_on_its_boxs_midline() {
         let nodes = Tree::root(vec![node("hi"), node("a wider label")]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         let box_placement = box_labelled(&placements, "hi");
         let label = placements
@@ -816,7 +845,7 @@ mod tests {
             vec![node("a"), node("b"), node("c")],
         )]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         let parent_box = box_labelled(&placements, "parent");
         assert_eq!(parent_box.y, LEAF_STRIDE * HALF_PITCH);
@@ -829,7 +858,7 @@ mod tests {
             vec![node("a"), node("b")],
         )]);
         let offsets = offsets_for(&nodes);
-        let placements = place(&nodes, &offsets, None, None);
+        let placements = place(&nodes, &offsets, None);
 
         let parent_box = box_labelled(&placements, "parent");
         assert_eq!(parent_box.y, HALF_PITCH);
@@ -842,7 +871,7 @@ mod tests {
                 .with_fill(filled)
                 .with_rounded(rounded),
         )]);
-        match diagram(&nodes, None, None)[0].node {
+        match diagram(&nodes, None)[0].node {
             PlacementNode::Box {
                 colour,
                 fill,
@@ -850,7 +879,6 @@ mod tests {
                 rounded,
                 sides,
                 border,
-                selected,
             } => PlacementNode::Box {
                 colour,
                 fill,
@@ -858,7 +886,6 @@ mod tests {
                 rounded,
                 sides,
                 border,
-                selected,
             },
             _ => panic!("the first placement is the box"),
         }
@@ -882,7 +909,6 @@ mod tests {
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,
-                selected: false,
             }
         );
     }
@@ -903,7 +929,7 @@ mod tests {
     #[test]
     fn diagram_boxes_have_all_sides_and_the_border_width() {
         let nodes = Tree::root(vec![Tree::leaf(labelled("hi"))]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         let boxes: Vec<_> = placements
             .iter()
             .filter_map(|placement| match placement.node {
@@ -941,13 +967,13 @@ mod tests {
 
     #[test]
     fn layout_of_no_boxes_is_empty() {
-        assert_eq!(diagram(&Tree::root(vec![]), None, None), vec![]);
+        assert_eq!(diagram(&Tree::root(vec![]), None), vec![]);
     }
 
     #[test]
     fn layout_of_a_single_leaf_box_starts_at_the_origin() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         let box_placement = placements[0].clone();
         assert!(matches!(box_placement.node, PlacementNode::Box { .. }));
         assert_eq!(box_placement.x, 0);
@@ -957,7 +983,7 @@ mod tests {
     #[test]
     fn layout_of_a_single_leaf_box_has_no_arrow_placements() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         assert!(placements
             .iter()
             .all(|p| !matches!(p.node, PlacementNode::Arrow(_))));
@@ -972,7 +998,7 @@ mod tests {
     #[test]
     fn layout_of_a_parent_and_child_has_an_arrow_placement() {
         let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
-        let placements = diagram(&boxes, None, None);
+        let placements = diagram(&boxes, None);
         assert!(placements
             .iter()
             .any(|p| matches!(p.node, PlacementNode::Arrow(_))));
@@ -981,7 +1007,7 @@ mod tests {
     #[test]
     fn layout_draws_boxes_before_labels_and_arrows() {
         let boxes = Tree::root(vec![node_with_children("parent", vec![node("child")])]);
-        let placements = diagram(&boxes, None, None);
+        let placements = diagram(&boxes, None);
 
         let first_non_box = placements
             .iter()
@@ -992,66 +1018,76 @@ mod tests {
             .all(|p| matches!(p.node, PlacementNode::Box { .. })));
     }
 
-    fn box_for_path<'a>(placements: &'a [Placement<'a>], path: &[usize]) -> &'a Placement<'a> {
-        let label_index = placements
-            .iter()
-            .filter(|placement| matches!(&placement.node, PlacementNode::Label(_)))
-            .position(|placement| matches!(&placement.node, PlacementNode::Label(label) if label.path == path))
-            .expect("a label placement exists for the given path");
-        placements
-            .iter()
-            .filter(|placement| matches!(&placement.node, PlacementNode::Box { .. }))
-            .nth(label_index)
-            .expect("a box placement exists at the matching position")
-    }
-
-    fn selected_of(node: &PlacementNode) -> bool {
-        match node {
-            PlacementNode::Box { selected, .. } => *selected,
-            _ => panic!("expected a Box"),
-        }
-    }
-
     #[test]
-    fn the_box_whose_path_matches_selected_is_flagged_selected() {
+    fn diagram_never_emits_a_selection_state() {
         let nodes = Tree::root(vec![node_with_children(
             "parent",
             vec![node("a"), node("b")],
         )]);
-        let placements = diagram(&nodes, None, Some(&[0, 1]));
-
-        assert!(selected_of(&box_for_path(&placements, &[0, 1]).node));
-    }
-
-    #[test]
-    fn boxes_whose_path_does_not_match_selected_are_not_flagged_selected() {
-        let nodes = Tree::root(vec![node_with_children(
-            "parent",
-            vec![node("a"), node("b")],
-        )]);
-        let placements = diagram(&nodes, None, Some(&[0, 1]));
-
-        assert!(!selected_of(&box_for_path(&placements, &[0]).node));
-        assert!(!selected_of(&box_for_path(&placements, &[0, 0]).node));
-    }
-
-    #[test]
-    fn no_box_is_flagged_selected_when_nothing_is_selected() {
-        let nodes = Tree::root(vec![node_with_children(
-            "parent",
-            vec![node("a"), node("b")],
-        )]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
 
         assert!(placements
             .iter()
-            .all(|p| !matches!(&p.node, PlacementNode::Box { selected, .. } if *selected)));
+            .all(|p| !matches!(&p.node, PlacementNode::Glow { .. })));
+    }
+
+    #[test]
+    fn with_glow_adds_one_glow_for_the_selected_box() {
+        let nodes = Tree::root(vec![node_with_children(
+            "parent",
+            vec![node("a"), node("b")],
+        )]);
+        let placements = diagram(&nodes, None);
+        let selected_label = placements
+            .iter()
+            .find(|placement| {
+                matches!(&placement.node, PlacementNode::Label(label) if label.path == [0, 1])
+            })
+            .unwrap();
+        let selected_box = placements
+            .iter()
+            .find(|placement| {
+                matches!(placement.node, PlacementNode::Box { .. })
+                    && placement.x <= selected_label.x
+                    && selected_label.x < placement.x + placement.width
+                    && placement.y <= selected_label.y
+                    && selected_label.y < placement.y + placement.height
+            })
+            .unwrap();
+        let result = with_glow(placements.clone(), Some(&[0, 1]));
+        let glows: Vec<_> = result
+            .iter()
+            .filter_map(|placement| match placement.node {
+                PlacementNode::Glow { colour, rounded } => Some((placement, colour, rounded)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(glows.len(), 1);
+        let (colour, rounded) = match selected_box.node {
+            PlacementNode::Box {
+                colour, rounded, ..
+            } => (colour, rounded),
+            _ => unreachable!(),
+        };
+        assert_eq!(glows[0].1, colour);
+        assert_eq!(glows[0].2, rounded);
+        assert_eq!(glows[0].0.x, selected_box.x - GLOW_MARGIN);
+        assert_eq!(glows[0].0.y, selected_box.y - GLOW_MARGIN);
+        assert_eq!(glows[0].0.width, selected_box.width + 2 * GLOW_MARGIN);
+        assert_eq!(glows[0].0.height, selected_box.height + 2 * GLOW_MARGIN);
+    }
+
+    #[test]
+    fn with_glow_adds_no_glow_without_a_selection() {
+        let nodes = Tree::root(vec![node("hi")]);
+        let placements = diagram(&nodes, None);
+        assert_eq!(with_glow(placements.clone(), None), placements);
     }
 
     #[test]
     fn with_caret_appends_a_caret_when_editing_matches_a_labels_path() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         let label = placements
             .iter()
             .find(|p| matches!(p.node, PlacementNode::Label(_)))
@@ -1079,8 +1115,8 @@ mod tests {
     #[test]
     fn the_edited_label_is_one_cell_wider_than_its_text() {
         let nodes = Tree::root(vec![node("hi")]);
-        let editing = diagram(&nodes, Some(&[0]), None);
-        let plain = diagram(&nodes, None, None);
+        let editing = diagram(&nodes, Some(&[0]));
+        let plain = diagram(&nodes, None);
         let (edited_box, _) = box_and_label(&editing);
         let (plain_box, _) = box_and_label(&plain);
         assert_eq!(edited_box.width, plain_box.width + 1);
@@ -1089,8 +1125,8 @@ mod tests {
     #[test]
     fn a_label_that_is_not_edited_is_not_widened() {
         let nodes = Tree::root(vec![node_with_children("hi", vec![node("yo")])]);
-        let editing = diagram(&nodes, Some(&[0, 0]), None);
-        let plain = diagram(&nodes, None, None);
+        let editing = diagram(&nodes, Some(&[0, 0]));
+        let plain = diagram(&nodes, None);
         assert_eq!(editing[0].width, plain[0].width);
     }
 
@@ -1099,7 +1135,7 @@ mod tests {
         let nodes = Tree::root(vec![node("hi")]);
         let widths: Vec<i64> = (0..=2)
             .map(|index| {
-                let placements = diagram(&nodes, Some(&[0]), None);
+                let placements = diagram(&nodes, Some(&[0]));
                 let placements = with_caret(placements, Some((vec![0], index)));
                 box_and_label(&placements).0.width
             })
@@ -1110,7 +1146,7 @@ mod tests {
     #[test]
     fn in_insert_mode_the_caret_lands_at_the_edit_index() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, Some(&[0]), None);
+        let placements = diagram(&nodes, Some(&[0]));
         let (edited_box, label) = box_and_label(&placements);
         for index in 0..=2 {
             let result = with_caret(placements.clone(), Some((vec![0], index)));
@@ -1124,14 +1160,14 @@ mod tests {
     #[test]
     fn with_caret_adds_nothing_without_editing() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         assert_eq!(with_caret(placements.clone(), None), placements);
     }
 
     #[test]
     fn with_caret_leaves_placements_unchanged_when_nothing_matches() {
         let nodes = Tree::root(vec![node("hi")]);
-        let placements = diagram(&nodes, None, None);
+        let placements = diagram(&nodes, None);
         let result = with_caret(placements.clone(), Some((vec![99], 0)));
         assert_eq!(result, placements);
     }
@@ -1166,7 +1202,6 @@ mod tests {
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,
-                selected: false,
             },
             x: 0,
             y: 0,

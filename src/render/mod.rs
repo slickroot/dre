@@ -82,7 +82,6 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
-            selected: false,
         }
     }
 
@@ -242,7 +241,7 @@ mod tests {
         let body = body_of(WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(layout::diagram(state.doc().tree(), None, None), body)
+            centre(layout::diagram(state.doc().tree(), None), body)
         );
     }
 
@@ -275,7 +274,7 @@ mod tests {
             with_glow(
                 centre(
                     with_caret(
-                        layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
+                        layout::diagram(state.doc().tree(), Some(&[0])),
                         Some((vec![0], 1)),
                     ),
                     body_of(WINDOW)
@@ -331,20 +330,21 @@ mod tests {
     fn prompt_cursor_x(name: &str, text: &str) -> i64 {
         let foot = foot_of(WINDOW);
         let (box_x, _, box_width, _) = box_at_bottom_right(foot, text);
-        label_x(box_x, box_width, text) + name.chars().count() as i64
+        let name_prefix_len = "NAME ".chars().count() as i64;
+        label_x(box_x, box_width, text) + name_prefix_len + name.chars().count() as i64
     }
 
     #[test]
     fn the_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "n");
-        let text = "MOVE type a name \u{2022} dre";
+        let text = "NAME type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
     }
 
     #[test]
     fn the_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "n"), "a"), "b");
-        let text = "MOVE ab \u{2022} dre";
+        let text = "NAME ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
     }
 
@@ -357,14 +357,14 @@ mod tests {
     #[test]
     fn the_quit_prompt_shows_a_placeholder_with_the_cursor_on_its_first_character() {
         let state = handle_key(state(None), "q");
-        let text = "MOVE type a name \u{2022} dre";
+        let text = "NAME type a name \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("", text));
     }
 
     #[test]
     fn the_quit_prompt_shows_the_typed_name_with_the_cursor_after_its_last_character() {
         let state = handle_key(handle_key(handle_key(state(None), "q"), "a"), "b");
-        let text = "MOVE ab \u{2022} dre";
+        let text = "NAME ab \u{2022} dre";
         assert_footer_is_bottom_right_with_cursor(&state, text, prompt_cursor_x("ab", text));
     }
 

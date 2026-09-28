@@ -12,6 +12,7 @@ pub(crate) const FOREGROUND: u8 = 5;
 pub(crate) const BACKGROUND: u8 = 6;
 pub(crate) const LIME: u8 = 0;
 pub(crate) const VIOLET: u8 = 2;
+pub(crate) const AMBER: u8 = 4;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
