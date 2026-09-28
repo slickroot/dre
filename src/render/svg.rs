@@ -343,12 +343,18 @@ fn rect(
 fn label_text(placement: &crate::view::Placement, label: &crate::view::Label) -> String {
     let chars = label.text.chars().count() as i64;
     let (r, g, b) = colour(label.colour);
+    let font_weight = if label.bold {
+        " font-weight=\"bold\""
+    } else {
+        ""
+    };
     format!(
-        "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
+        "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\"{}>{}</text>",
         label_font_size(),
         placement.x * CELL_WIDTH,
         placement.y * CELL_HEIGHT + CELL_HEIGHT / 2,
         chars * CELL_WIDTH,
+        font_weight,
         escape(&label.text),
     )
 }
@@ -935,6 +941,34 @@ mod tests {
     }
 
     #[test]
+    fn a_bold_label_renders_with_font_weight_bold() {
+        let placements = vec![Placement {
+            node: PlacementNode::Label(Label {
+                text: "hi".into(),
+                colour: None,
+                bold: true,
+            }),
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 1,
+        }];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains("font-weight=\"bold\""));
+    }
+
+    #[test]
+    fn a_non_bold_label_has_no_font_weight_attribute() {
+        let placements = vec![label_placement("hi", 1, 1)];
+
+        let svg = draw(&placements);
+
+        assert!(!svg.contains("font-weight"));
+    }
+
+    #[test]
     fn label_with_trailing_space_preserves_whitespace_and_covers_it() {
         let label_x = 3;
         let label_y = 2;
@@ -1272,6 +1306,18 @@ mod tests {
 
     fn label_at(x: i64, y: i64, text: &str) -> String {
         label_at_with_colour(x, y, text, None)
+    }
+
+    fn bold_label_at(x: i64, y: i64, text: &str) -> String {
+        let chars = text.chars().count() as i64;
+        format!(
+            "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"{}\" font-weight=\"bold\">{text}</text>",
+            label_font_size(),
+            x * CELL_WIDTH,
+            y * CELL_HEIGHT + CELL_HEIGHT / 2,
+            chars * CELL_WIDTH,
+            rgb(colour(None)),
+        )
     }
 
     fn label_at_with_colour(x: i64, y: i64, text: &str, label_colour: Option<u8>) -> String {
@@ -1643,7 +1689,7 @@ mod tests {
         let area = footer_box_area(foot);
         format!(
             "{}{}{}",
-            label_at(
+            bold_label_at(
                 footer_mode_word_x(area),
                 area.row + BOX_HEIGHT / 2,
                 MODE_WORD
@@ -1654,7 +1700,7 @@ mod tests {
                 &padded_name(),
                 Some(crate::style::DIM),
             ),
-            label_at(
+            bold_label_at(
                 footer_suffix_x(area),
                 area.row + BOX_HEIGHT / 2,
                 SUFFIX_TEXT,
