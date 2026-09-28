@@ -86,7 +86,7 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
     if areas.iter().any(|(_, placements)| {
         placements
             .iter()
-            .any(|placement| matches!(placement.node, PlacementNode::Box { selected: true, .. }))
+            .any(|placement| matches!(placement.node, PlacementNode::Glow { .. }))
     }) {
         svg.push_str(&glow_filter_defs());
     }
@@ -104,57 +104,30 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
 fn paint(placements: &[Placement]) -> String {
     let mut svg = String::new();
     for placement in placements {
-        if let PlacementNode::Arrow(arrow) = &placement.node {
-            svg.push_str(&arrow_paths(placement, arrow));
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Box {
-            colour,
-            fill,
-            opacity,
-            rounded,
-            sides,
-            ..
-        } = &placement.node
-        {
-            if *sides != ALL_SIDES && fill.is_none() {
-                continue;
+        match &placement.node {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                rounded,
+                sides,
+                ..
+            } => {
+                if *sides == ALL_SIDES || fill.is_some() {
+                    svg.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
+                }
             }
-            svg.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Box {
-            colour,
-            rounded,
-            selected,
-            ..
-        } = &placement.node
-        {
-            if *selected {
-                svg.push_str(&glow_rect(placement, *colour, *rounded));
+            PlacementNode::Label(label) => svg.push_str(&label_text(placement, label)),
+            PlacementNode::Arrow(arrow) => svg.push_str(&arrow_paths(placement, arrow)),
+            PlacementNode::Caret(_) | PlacementNode::Cursor(_) => {
+                svg.push_str(&caret_rect(placement))
             }
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Label(label) = &placement.node {
-            svg.push_str(&label_text(placement, label));
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Caret(_) = &placement.node {
-            svg.push_str(&caret_rect(placement));
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Cursor(_) = &placement.node {
-            svg.push_str(&caret_rect(placement));
-        }
-    }
-    for placement in placements {
-        if let PlacementNode::Led { colour, lit } = &placement.node {
-            svg.push_str(&led_circle(placement, *colour, *lit));
+            PlacementNode::Glow { colour, rounded } => {
+                svg.push_str(&glow_rect(placement, *colour, *rounded))
+            }
+            PlacementNode::Led { colour, lit } => {
+                svg.push_str(&led_circle(placement, *colour, *lit))
+            }
         }
     }
     svg
@@ -392,7 +365,7 @@ mod tests {
     use crate::layout::{
         centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
     };
-    use crate::layout::{Arrow, Caret, Label, Placement, BORDER};
+    use crate::layout::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
     use crate::view::{self, centre};
@@ -415,7 +388,6 @@ mod tests {
                 rounded,
                 sides: ALL_SIDES,
                 border: BORDER,
-                selected: false,
             },
             x,
             y,
@@ -433,7 +405,6 @@ mod tests {
                 rounded: false,
                 sides: NO_SIDES,
                 border: BORDER,
-                selected: false,
             },
             x,
             y,
@@ -446,11 +417,17 @@ mod tests {
         box_placement(x, y, width, height, None, None, false)
     }
 
-    fn selected(mut placement: Placement<'static>) -> Placement<'static> {
-        if let PlacementNode::Box { selected, .. } = &mut placement.node {
-            *selected = true;
+    fn selected(placement: Placement<'static>) -> Placement<'static> {
+        let PlacementNode::Box { colour, rounded, .. } = placement.node else {
+            unreachable!();
+        };
+        Placement {
+            node: PlacementNode::Glow { colour, rounded },
+            x: placement.x - GLOW_MARGIN,
+            y: placement.y - GLOW_MARGIN,
+            width: placement.width + 2 * GLOW_MARGIN,
+            height: placement.height + 2 * GLOW_MARGIN,
         }
-        placement
     }
 
     fn arrow_placement(
@@ -834,6 +811,7 @@ mod tests {
     #[test]
     fn a_filled_selected_box_paints_its_fill_then_glow_then_label() {
         let placements = vec![
+            box_placement(0, 0, 4, 3, Some(2), Some(2), false),
             selected(box_placement(0, 0, 4, 3, Some(2), Some(2), false)),
             label_placement("hi", 1, 1),
         ];
@@ -853,13 +831,16 @@ mod tests {
 
     #[test]
     fn an_unselected_box_renders_no_glow_rect() {
-        let selected_svg = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
+        let selected_svg = draw(&[
+            box_placement(0, 0, 4, 3, Some(2), None, false),
+            selected(box_placement(0, 0, 4, 3, Some(2), None, false)),
+        ]);
         let plain_svg = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
 
         assert!(!plain_svg.contains("filter=\"url(#"));
         assert_eq!(
             plain_svg.matches("<rect").count(),
-            selected_svg.matches("<rect").count() - 1,
+            selected_svg.matches("<rect").count(),
             "selection adds exactly one extra rect: the glow"
         );
     }
@@ -1707,7 +1688,7 @@ mod tests {
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
         let diagram = centre(
-            with_caret(diagram(state.doc().tree(), None, state.selected()), None),
+            with_caret(diagram(state.doc().tree(), None), None),
             body,
         );
         let body_svg = nested(body, &paint(&diagram));

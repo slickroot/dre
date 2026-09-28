@@ -82,7 +82,6 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
-            selected: false,
         }
     }
 
@@ -242,7 +241,7 @@ mod tests {
         let body = body_of(WINDOW);
         assert_eq!(
             screen[0].1,
-            centre(layout::diagram(state.doc().tree(), None, None), body)
+            centre(layout::diagram(state.doc().tree(), None), body)
         );
     }
 
@@ -275,7 +274,7 @@ mod tests {
             with_glow(
                 centre(
                     with_caret(
-                        layout::diagram(state.doc().tree(), Some(&[0]), state.selected()),
+                        layout::diagram(state.doc().tree(), Some(&[0])),
                         Some((vec![0], 1)),
                     ),
                     body_of(WINDOW)
