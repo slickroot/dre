@@ -1,5 +1,5 @@
 use super::terminal::{centered_span, python_round};
-use super::{arrowhead_depth, arrowhead_slope};
+use super::{arrowhead_depth, arrowhead_slope, LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA};
 use crate::canvas::{Rgba, Shape};
 use crate::layout::{Sides, ALL_SIDES};
 
@@ -201,10 +201,6 @@ pub(super) struct LedShape {
     pub(super) colour: (u8, u8, u8),
     pub(super) lit: bool,
 }
-
-pub(super) const LED_DOT_RATIO: f64 = 0.28;
-pub(super) const LED_HALO_ALPHA: f64 = 0.45;
-pub(super) const LED_DIM_ALPHA: f64 = 0.3;
 
 impl Shape for LedShape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {

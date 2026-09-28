@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use super::{
     arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, CELL_HEIGHT, CELL_WIDTH,
+    LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA,
 };
 use crate::composer::Area;
 use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
@@ -159,16 +160,45 @@ fn paint(placements: &[Placement]) -> String {
     svg
 }
 
+const LED_GLOW_GRADIENT_ID: &str = "led-glow";
+
 fn led_circle(placement: &Placement, tint: u8, lit: bool) -> String {
     let (r, g, b) = colour(Some(tint));
     let width = placement.width * CELL_WIDTH;
     let height = placement.height * CELL_HEIGHT;
     let cx = placement.x * CELL_WIDTH + width / 2;
     let cy = placement.y * CELL_HEIGHT + height / 2;
-    let radius = width.min(height) as f64 * 0.28;
-    let opacity = if lit { 1.0 } else { 0.3 };
+    if lit {
+        led_glow_circle(cx, cy, height as f64, (r, g, b))
+    } else {
+        let radius = height as f64 * LED_DOT_RATIO;
+        format!(
+            "<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{radius}\" fill=\"rgb({r},{g},{b})\" opacity=\"{LED_DIM_ALPHA}\"/>"
+        )
+    }
+}
+
+// Stops approximate the raster halo's quadratic falloff (see LedShape):
+// solid out to the dot's edge, then a few samples of (1 - d/reach)^2 * LED_HALO_ALPHA
+// fading to zero at the outer edge.
+fn led_glow_circle(cx: i64, cy: i64, height: f64, (r, g, b): (u8, u8, u8)) -> String {
+    let outer_radius = height / 2.0;
+    let dot_offset = (LED_DOT_RATIO / 0.5 * 100.0).round() / 100.0;
+    let colour = format!("rgb({r},{g},{b})");
     format!(
-        "<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{radius}\" fill=\"rgb({r},{g},{b})\" opacity=\"{opacity}\"/>"
+        "<defs><radialGradient id=\"{LED_GLOW_GRADIENT_ID}\">\
+<stop offset=\"0%\" stop-color=\"{colour}\" stop-opacity=\"1\"/>\
+<stop offset=\"{dot_offset}%\" stop-color=\"{colour}\" stop-opacity=\"1\"/>\
+<stop offset=\"{dot_offset}%\" stop-color=\"{colour}\" stop-opacity=\"{halo_at_dot}\"/>\
+<stop offset=\"{mid_offset}%\" stop-color=\"{colour}\" stop-opacity=\"{halo_at_mid}\"/>\
+<stop offset=\"{late_offset}%\" stop-color=\"{colour}\" stop-opacity=\"{halo_at_late}\"/>\
+<stop offset=\"100%\" stop-color=\"{colour}\" stop-opacity=\"0\"/>\
+</radialGradient></defs><circle cx=\"{cx}\" cy=\"{cy}\" r=\"{outer_radius}\" fill=\"url(#{LED_GLOW_GRADIENT_ID})\"/>",
+        halo_at_dot = LED_HALO_ALPHA,
+        mid_offset = dot_offset + (100.0 - dot_offset) * 0.33,
+        halo_at_mid = (1.0 - 0.33_f64).powi(2) * LED_HALO_ALPHA,
+        late_offset = dot_offset + (100.0 - dot_offset) * 0.66,
+        halo_at_late = (1.0 - 0.66_f64).powi(2) * LED_HALO_ALPHA,
     )
 }
 
@@ -1588,6 +1618,55 @@ mod tests {
             crate::palette::LIME,
             false,
         )
+    }
+
+    fn lit_footer_led_circle(foot: Area) -> String {
+        let area = footer_box_area(foot);
+        led_circle(
+            &Placement {
+                node: PlacementNode::Led {
+                    colour: crate::palette::LIME,
+                    lit: true,
+                },
+                x: footer_led_x(area),
+                y: area.row + BOX_HEIGHT / 2,
+                width: 2,
+                height: 1,
+            },
+            crate::palette::LIME,
+            true,
+        )
+    }
+
+    #[test]
+    fn a_lit_footer_led_reaches_the_top_and_bottom_of_its_cell() {
+        let svg = lit_footer_led_circle(body_and_foot(CANVAS).1);
+
+        let outer_radius = CELL_HEIGHT as f64 / 2.0;
+        assert!(
+            svg.contains(&format!("r=\"{outer_radius}\"")),
+            "the lit LED's outer circle should span the full row height: {svg}"
+        );
+    }
+
+    #[test]
+    fn a_lit_footer_led_has_a_soft_halo() {
+        let svg = lit_footer_led_circle(body_and_foot(CANVAS).1);
+
+        assert!(
+            svg.contains("radialGradient"),
+            "a lit LED should render its halo as a gradient rather than a hard-edged circle: {svg}"
+        );
+    }
+
+    #[test]
+    fn an_unlit_footer_led_is_a_plain_dimmed_dot_with_no_halo() {
+        let svg = footer_led_circle(body_and_foot(CANVAS).1);
+
+        let dot_radius = CELL_HEIGHT as f64 * LED_DOT_RATIO;
+        assert!(!svg.contains("radialGradient"), "unlit LEDs have no halo");
+        assert!(svg.contains(&format!("r=\"{dot_radius}\"")));
+        assert!(svg.contains(&format!("opacity=\"{LED_DIM_ALPHA}\"")));
     }
 
     fn padded_footer(foot: Area) -> String {

@@ -33,6 +33,10 @@ pub(crate) const CELL_HEIGHT: i64 = 16;
 
 const ROUNDED_RADIUS: i64 = 20;
 
+const LED_DOT_RATIO: f64 = 0.28;
+const LED_HALO_ALPHA: f64 = 0.45;
+const LED_DIM_ALPHA: f64 = 0.3;
+
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
