@@ -28,6 +28,34 @@ const GLOW_OPACITY: f64 = 0.7;
 const SELECTED_BORDER_FOREGROUND_MIX: f64 = 0.35;
 const INK_Z: i32 = CONTENT_Z;
 
+#[derive(Clone, Copy)]
+struct BoxStyle {
+    colour: Option<u8>,
+    fill: Option<u8>,
+    opacity: Option<f64>,
+    rounded: bool,
+    sides: Sides,
+    border: i64,
+    selected: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LedStyle {
+    colour: u8,
+    lit: bool,
+}
+
+struct LabelStyle {
+    text: String,
+    path: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct ArrowStyle {
+    stops: Vec<i64>,
+    shaft: i64,
+}
+
 pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     let start = c - (width - 1).div_euclid(2);
     start..(start + width)
@@ -115,37 +143,26 @@ enum SpriteKey {
     },
 }
 
-#[allow(clippy::too_many_arguments)]
-fn box_key(
-    width: i64,
-    height: i64,
-    colour: Option<u8>,
-    fill: Option<u8>,
-    opacity: Option<f64>,
-    rounded: bool,
-    sides: Sides,
-    border: i64,
-    selected: bool,
-) -> SpriteKey {
+fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
     SpriteKey::Box {
         width,
         height,
-        colour,
-        fill,
-        fill_alpha: quantized_alpha(opacity),
-        rounded,
-        sides,
-        border,
-        selected,
+        colour: style.colour,
+        fill: style.fill,
+        fill_alpha: quantized_alpha(style.opacity),
+        rounded: style.rounded,
+        sides: style.sides,
+        border: style.border,
+        selected: style.selected,
     }
 }
 
-fn arrow_key(width: i64, height: i64, stops: &[i64], shaft: i64) -> SpriteKey {
+fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
     SpriteKey::Arrow {
         width,
         height,
-        stops: stops.to_vec(),
-        shaft,
+        stops: style.stops.clone(),
+        shaft: style.shaft,
     }
 }
 
@@ -158,12 +175,12 @@ fn glow_key(width: i64, height: i64, colour: Option<u8>, rounded: bool) -> Sprit
     }
 }
 
-fn led_key(width: i64, height: i64, colour: u8, lit: bool) -> SpriteKey {
+fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
     SpriteKey::Led {
         width,
         height,
-        colour,
-        lit,
+        colour: style.colour,
+        lit: style.lit,
     }
 }
 
@@ -318,19 +335,51 @@ impl TerminalRenderer {
                     border,
                     selected,
                 } => self.draw_box(
-                    frame, placement, area, *colour, *fill, *opacity, *rounded, *sides, *border,
-                    *selected,
+                    frame,
+                    placement,
+                    area,
+                    BoxStyle {
+                        colour: *colour,
+                        fill: *fill,
+                        opacity: *opacity,
+                        rounded: *rounded,
+                        sides: *sides,
+                        border: *border,
+                        selected: *selected,
+                    },
                 ),
                 PlacementNode::Glow { colour, rounded } => {
                     self.draw_glow(frame, placement, area, *colour, *rounded)
                 }
-                PlacementNode::Arrow(arrow) => self.draw_arrow(frame, placement, area, arrow),
-                PlacementNode::Label(label) => self.draw_label(frame, placement, label, area),
+                PlacementNode::Arrow(arrow) => self.draw_arrow(
+                    frame,
+                    placement,
+                    area,
+                    ArrowStyle {
+                        stops: arrow.stops.clone(),
+                        shaft: arrow.shaft,
+                    },
+                ),
+                PlacementNode::Label(label) => self.draw_label(
+                    frame,
+                    placement,
+                    area,
+                    LabelStyle {
+                        text: label.text.to_string(),
+                        path: label.path.clone(),
+                    },
+                ),
                 PlacementNode::Caret(_) => self.draw_caret(frame, placement, area),
                 PlacementNode::Cursor(_) => self.draw_cursor(frame, placement, area),
-                PlacementNode::Led { colour, lit } => {
-                    self.draw_led(frame, placement, area, *colour, *lit)
-                }
+                PlacementNode::Led { colour, lit } => self.draw_led(
+                    frame,
+                    placement,
+                    area,
+                    LedStyle {
+                        colour: *colour,
+                        lit: *lit,
+                    },
+                ),
             }
         }
     }
@@ -360,43 +409,10 @@ impl TerminalRenderer {
         Self::place(frame, &self.cache[&key], placement, area, z);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn draw_box(
-        &mut self,
-        frame: &mut Frame,
-        placement: &Placement,
-        area: Area,
-        colour: Option<u8>,
-        fill: Option<u8>,
-        opacity: Option<f64>,
-        rounded: bool,
-        sides: Sides,
-        border: i64,
-        selected: bool,
-    ) {
-        let key = box_key(
-            placement.width,
-            placement.height,
-            colour,
-            fill,
-            opacity,
-            rounded,
-            sides,
-            border,
-            selected,
-        );
+    fn draw_box(&mut self, frame: &mut Frame, placement: &Placement, area: Area, style: BoxStyle) {
+        let key = box_key(placement.width, placement.height, style);
         self.place_cached(frame, key, placement, area, BOX_Z, |renderer| {
-            renderer.box_canvas(
-                placement.width,
-                placement.height,
-                colour,
-                fill,
-                opacity,
-                rounded,
-                sides,
-                border,
-                selected,
-            )
+            renderer.box_canvas(placement.width, placement.height, style)
         });
     }
 
@@ -414,17 +430,10 @@ impl TerminalRenderer {
         });
     }
 
-    fn draw_led(
-        &mut self,
-        frame: &mut Frame,
-        placement: &Placement,
-        area: Area,
-        colour: u8,
-        lit: bool,
-    ) {
-        let key = led_key(placement.width, placement.height, colour, lit);
+    fn draw_led(&mut self, frame: &mut Frame, placement: &Placement, area: Area, style: LedStyle) {
+        let key = led_key(placement.width, placement.height, style);
         self.place_cached(frame, key, placement, area, INK_Z, |renderer| {
-            renderer.led_canvas(placement.width, placement.height, colour, lit)
+            renderer.led_canvas(placement.width, placement.height, style)
         });
     }
 
@@ -433,18 +442,27 @@ impl TerminalRenderer {
         frame: &mut Frame,
         placement: &Placement,
         area: Area,
-        arrow: &crate::layout::Arrow,
+        style: ArrowStyle,
     ) {
-        let key = arrow_key(placement.width, placement.height, &arrow.stops, arrow.shaft);
+        let key = arrow_key(placement.width, placement.height, &style);
         self.place_cached(frame, key, placement, area, CONTENT_Z, |renderer| {
-            renderer.arrow_canvas(placement.width, placement.height, &arrow.stops, arrow.shaft)
+            renderer.arrow_canvas(placement.width, placement.height, &style)
         });
     }
 
-    fn draw_label(&mut self, frame: &mut Frame, placement: &Placement, label: &Label, area: Area) {
-        for (offset, character) in label.text.chars().enumerate() {
+    fn draw_label(
+        &mut self,
+        frame: &mut Frame,
+        placement: &Placement,
+        area: Area,
+        style: LabelStyle,
+    ) {
+        for (offset, character) in style.text.chars().enumerate() {
             let char_placement = Placement {
-                node: PlacementNode::Label(label.clone()),
+                node: PlacementNode::Label(Label {
+                    text: style.text.clone().into(),
+                    path: style.path.clone(),
+                }),
                 x: placement.x + offset as i64,
                 y: placement.y,
                 width: 1,
@@ -488,29 +506,17 @@ impl TerminalRenderer {
         cells * self.window.cell_height
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn box_canvas(
-        &self,
-        cell_width: i64,
-        cell_height: i64,
-        edge: Option<u8>,
-        fill: Option<u8>,
-        opacity: Option<f64>,
-        rounded: bool,
-        sides: Sides,
-        border: i64,
-        selected: bool,
-    ) -> Canvas {
+    fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let (r, g, b) = selected_edge_colour(edge, selected);
-        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(fill, opacity);
+        let (r, g, b) = selected_edge_colour(style.colour, style.selected);
+        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.opacity);
         let shape = BoxShape {
             width,
             height,
-            border,
-            radius: if rounded { ROUNDED_RADIUS } else { 0 },
-            sides,
+            border: style.border,
+            radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+            sides: style.sides,
             edge: [r, g, b, OPAQUE],
             fill: [fill_r, fill_g, fill_b, fill_a],
         };
@@ -538,22 +544,23 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &shape)
     }
 
-    fn led_canvas(&self, cell_width: i64, cell_height: i64, tint: u8, lit: bool) -> Canvas {
+    fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
         let shape = LedShape {
             width,
             height,
-            colour: colour(Some(tint)),
-            lit,
+            colour: colour(Some(style.colour)),
+            lit: style.lit,
         };
         Canvas::fill(width, height, &shape)
     }
 
-    fn arrow_canvas(&self, cell_width: i64, cell_height: i64, stops: &[i64], shaft: i64) -> Canvas {
+    fn arrow_canvas(&self, cell_width: i64, cell_height: i64, style: &ArrowStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let stop_rows: Vec<i64> = stops
+        let stop_rows: Vec<i64> = style
+            .stops
             .iter()
             .map(|stop| self.cells_to_pixels_y(*stop) + self.window.cell_height / 2)
             .collect();
@@ -571,7 +578,7 @@ impl TerminalRenderer {
         let shape = ArrowShape {
             width,
             stop_rows,
-            shaft_row: self.cells_to_pixels_y(shaft) + self.window.cell_height / 2,
+            shaft_row: self.cells_to_pixels_y(style.shaft) + self.window.cell_height / 2,
             trunk,
             stroke: ARROW_STROKE,
             arrowhead_edge_length: ARROWHEAD_EDGE_LENGTH,
@@ -975,20 +982,32 @@ mod tests {
             } => box_key(
                 placement.width,
                 placement.height,
-                *colour,
-                *fill,
-                *opacity,
-                *rounded,
-                *sides,
-                *border,
-                *selected,
+                BoxStyle {
+                    colour: *colour,
+                    fill: *fill,
+                    opacity: *opacity,
+                    rounded: *rounded,
+                    sides: *sides,
+                    border: *border,
+                    selected: *selected,
+                },
             ),
-            PlacementNode::Arrow(arrow) => {
-                arrow_key(placement.width, placement.height, &arrow.stops, arrow.shaft)
-            }
-            PlacementNode::Led { colour, lit } => {
-                led_key(placement.width, placement.height, *colour, *lit)
-            }
+            PlacementNode::Arrow(arrow) => arrow_key(
+                placement.width,
+                placement.height,
+                &ArrowStyle {
+                    stops: arrow.stops.clone(),
+                    shaft: arrow.shaft,
+                },
+            ),
+            PlacementNode::Led { colour, lit } => led_key(
+                placement.width,
+                placement.height,
+                LedStyle {
+                    colour: *colour,
+                    lit: *lit,
+                },
+            ),
             PlacementNode::Glow { colour, rounded } => {
                 glow_key(placement.width, placement.height, *colour, *rounded)
             }
@@ -2069,7 +2088,17 @@ mod tests {
             panic!("expected a Box")
         };
         r.box_canvas(
-            width, height, *colour, *fill, *opacity, *rounded, *sides, *border, *selected,
+            width,
+            height,
+            BoxStyle {
+                colour: *colour,
+                fill: *fill,
+                opacity: *opacity,
+                rounded: *rounded,
+                sides: *sides,
+                border: *border,
+                selected: *selected,
+            },
         )
     }
 
@@ -2149,7 +2178,7 @@ mod tests {
         width: i64,
         height: i64,
     ) -> Canvas {
-        r.arrow_canvas(width, height, &stops, shaft)
+        r.arrow_canvas(width, height, &ArrowStyle { stops, shaft })
     }
 
     #[test]
