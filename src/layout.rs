@@ -111,6 +111,7 @@ pub(crate) fn place<'a>(
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(node.label()),
                 path: path.to_vec(),
+                colour: None,
             }),
             x: start,
             y: middle,
@@ -199,6 +200,7 @@ pub(crate) fn place<'a>(
 pub struct Label<'a> {
     pub text: Cow<'a, str>,
     pub path: Vec<usize>,
+    pub colour: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +274,7 @@ pub(crate) fn footer(view: &FooterView) -> Vec<Placement<'static>> {
     let label = PlacementNode::Label(Label {
         text: Cow::Owned(text.to_string()),
         path: vec![],
+        colour: None,
     });
     let led_x = centre(inset_box_width, text);
     let label_x = led_x + LED_WIDTH + LED_LABEL_GAP;
@@ -502,7 +505,8 @@ mod tests {
             placements[2].node,
             PlacementNode::Label(Label {
                 text: text.into(),
-                path: vec![]
+                path: vec![],
+                colour: None,
             })
         );
         assert_eq!(
@@ -1152,6 +1156,7 @@ mod tests {
         let label = Label {
             text: "hi".into(),
             path: vec![0],
+            colour: None,
         };
         assert_eq!(label.text, "hi");
         assert_eq!(label.path, vec![0]);
@@ -1197,6 +1202,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: "a".into(),
                 path: vec![0],
+                colour: None,
             }),
             x: 0,
             y: 0,
@@ -1210,6 +1216,7 @@ mod tests {
                     Label {
                         text: "a".into(),
                         path: vec![0],
+                        colour: None,
                     }
                 )
             }

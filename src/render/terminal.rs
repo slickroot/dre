@@ -374,7 +374,7 @@ impl TerminalRenderer {
             if !frame.shows(&char_placement, area) {
                 continue;
             }
-            let glyph = self.glyph_source.glyph(character);
+            let glyph = self.glyph_source.glyph(character, label.colour);
             frame.place(glyph, &char_placement, area, CONTENT_Z);
         }
     }
@@ -1103,6 +1103,7 @@ mod tests {
             node: crate::layout::PlacementNode::Label(crate::layout::Label {
                 text: text.into(),
                 path: vec![0],
+                colour: None,
             }),
             x,
             y,
@@ -1523,6 +1524,65 @@ mod tests {
             .map(|image| image.col)
             .collect();
         assert_eq!(label_cols, vec![1, 2]);
+    }
+
+    fn coloured_label_placement(
+        text: &str,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        colour: Option<u8>,
+    ) -> crate::layout::Placement<'_> {
+        crate::layout::Placement {
+            node: crate::layout::PlacementNode::Label(crate::layout::Label {
+                text: text.into(),
+                path: vec![0],
+                colour,
+            }),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn a_label_with_a_colour_renders_a_different_glyph_colour_than_the_default() {
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let default_pixels = sprites(&mut r, &[coloured_label_placement("h", 0, 0, 1, 1, None)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let coloured_pixels = sprites(
+            &mut r,
+            &[coloured_label_placement(
+                "h",
+                0,
+                0,
+                1,
+                1,
+                Some(crate::palette::LIME),
+            )],
+        )[0]
+        .canvas
+        .pixels
+        .clone();
+
+        assert_ne!(default_pixels, coloured_pixels);
+    }
+
+    #[test]
+    fn a_label_without_a_colour_matches_todays_default_foreground_rendering() {
+        let mut r = renderer_on(window(2, 1, 1, 1));
+        let pixels = sprites(&mut r, &[label_placement("h", 0, 0, 1, 1)])[0]
+            .canvas
+            .pixels
+            .clone();
+
+        assert!(pixels.iter().all(|&byte| byte == 0));
     }
 
     #[test]

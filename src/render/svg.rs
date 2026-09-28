@@ -341,7 +341,7 @@ fn rect(
 
 fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label) -> String {
     let chars = label.text.chars().count() as i64;
-    let (r, g, b) = colour(None);
+    let (r, g, b) = colour(label.colour);
     format!(
         "<text xml:space=\"preserve\" font-family=\"Iosevka, monospace\" font-size=\"{}\" text-anchor=\"start\" dominant-baseline=\"central\" x=\"{}\" y=\"{}\" textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\" fill=\"rgb({r},{g},{b})\">{}</text>",
         label_font_size(),
@@ -874,6 +874,7 @@ mod tests {
             node: PlacementNode::Label(Label {
                 text: text.into(),
                 path: vec![0],
+                colour: None,
             }),
             x,
             y,
@@ -902,6 +903,38 @@ mod tests {
             rgb(colour(None)),
         )));
         assert!(svg.contains(">hi</text>"));
+    }
+
+    #[test]
+    fn a_label_with_a_colour_renders_in_that_palette_colour() {
+        let placements = vec![Placement {
+            node: PlacementNode::Label(Label {
+                text: "hi".into(),
+                path: vec![0],
+                colour: Some(crate::palette::LIME),
+            }),
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 1,
+        }];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains(&format!(
+            "fill=\"{}\"",
+            rgb(colour(Some(crate::palette::LIME)))
+        )));
+        assert!(!svg.contains(&format!("fill=\"{}\">hi</text>", rgb(colour(None)))));
+    }
+
+    #[test]
+    fn a_label_without_a_colour_still_renders_in_the_default_foreground() {
+        let placements = vec![label_placement("hi", 1, 1)];
+
+        let svg = draw(&placements);
+
+        assert!(svg.contains(&format!("fill=\"{}\">hi</text>", rgb(colour(None)))));
     }
 
     #[test]
