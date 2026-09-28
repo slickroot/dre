@@ -1,9 +1,7 @@
 use std::io::{self, Write};
 
-use crate::composer::{self, Area};
-use crate::layout::{self, with_caret, with_glow, Placement, FOOTER_ROWS};
 use crate::palette::{palette, FOREGROUND};
-use crate::state::{Mode, State};
+use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod font;
@@ -14,80 +12,12 @@ mod svg;
 mod terminal;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use font::GlyphCache;
-pub use svg::SvgRenderer;
+pub use svg::{SvgRenderer, FULL_HD_HEIGHT, FULL_HD_WIDTH};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use terminal::{TerminalRenderer, CACHE_LIMIT};
 
 pub trait Renderer {
-    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()>;
-}
-
-pub(crate) fn editor(state: &State, window: Area) -> Vec<(Area, Vec<Placement<'_>>)> {
-    let [body, foot] = composer::stack([None, Some(FOOTER_ROWS)], window);
-    let footer = align_right(layout::footer(&state.footer()), foot);
-    vec![(body, self::body(state, body)), (foot, footer)]
-}
-
-pub(crate) fn body(state: &State, area: Area) -> Vec<Placement<'_>> {
-    let editing_caret: Option<(Vec<usize>, usize)> = match state.mode() {
-        Mode::Insert { cursor } => state.selected().map(|path| (path.to_vec(), *cursor)),
-        _ => None,
-    };
-    let editing = editing_caret.as_ref().map(|(path, _)| path.as_slice());
-    with_glow(
-        centre(
-            with_caret(
-                layout::diagram(state.doc().tree(), editing, state.selected()),
-                editing_caret,
-            ),
-            area,
-        ),
-        state.selected(),
-    )
-}
-
-fn shift(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    offset(placements, area.col, area.row)
-}
-
-fn offset(placements: Vec<Placement<'_>>, dx: i64, dy: i64) -> Vec<Placement<'_>> {
-    placements
-        .into_iter()
-        .map(|placement| Placement {
-            x: placement.x + dx,
-            y: placement.y + dy,
-            ..placement
-        })
-        .collect()
-}
-
-fn centre(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    let Some(min_x) = placements.iter().map(|placement| placement.x).min() else {
-        return placements;
-    };
-    let span = placements
-        .iter()
-        .map(|placement| placement.x + placement.width)
-        .max()
-        .unwrap()
-        - min_x;
-    let height = placements
-        .iter()
-        .map(|placement| placement.y + placement.height)
-        .max()
-        .unwrap();
-    let horizontal = (area.cols - span).div_euclid(2);
-    let vertical = (area.rows - height).div_euclid(2);
-    shift(offset(placements, horizontal, vertical), area)
-}
-
-fn align_right(placements: Vec<Placement<'_>>, area: Area) -> Vec<Placement<'_>> {
-    let Some(bounds) = placements.first() else {
-        return placements;
-    };
-    let dx = area.col + area.cols - bounds.width;
-    let dy = area.row + area.rows - bounds.height;
-    offset(placements, dx, dy)
+    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()>;
 }
 
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;
@@ -98,8 +28,8 @@ fn arrowhead_slope(_edge_length: f64) -> f64 {
     ARROWHEAD_ANGLE_DEG.to_radians().tan()
 }
 
-const CELL_WIDTH: i64 = 8;
-const CELL_HEIGHT: i64 = 16;
+pub(crate) const CELL_WIDTH: i64 = 8;
+pub(crate) const CELL_HEIGHT: i64 = 16;
 
 const ROUNDED_RADIUS: i64 = 20;
 
@@ -117,9 +47,14 @@ fn colour(colour: Option<u8>) -> (u8, u8, u8) {
 mod tests {
     use super::*;
     use crate::diagram::{node, node_with_children};
-    use crate::layout::{Label, PlacementNode, ALL_SIDES, BORDER, SIDE_PADDING};
+    use crate::layout;
+    use crate::layout::{
+        with_caret, with_glow, Label, PlacementNode, ALL_SIDES, BORDER, FOOTER_ROWS, SIDE_PADDING,
+    };
     use crate::state::{new_state, Mode};
     use crate::test_support::handle_key;
+    use crate::view::{align_right, body, centre, editor, shift, Area, Placement};
+    use crate::State;
 
     const AREA: Area = Area {
         col: 3,
@@ -310,7 +245,10 @@ mod tests {
     #[test]
     fn body_is_the_body_half_of_the_editor() {
         let state = state(Some(vec![0]));
-        assert_eq!(body(&state, body_of(WINDOW)), editor(&state, WINDOW)[0].1);
+        assert_eq!(
+            body(&state, body_of(WINDOW))[0].1,
+            editor(&state, WINDOW)[0].1
+        );
     }
 
     #[test]

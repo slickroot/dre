@@ -216,25 +216,25 @@ pub(crate) fn place<'a>(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Label<'a> {
-    pub(crate) text: Cow<'a, str>,
-    pub(crate) path: Vec<usize>,
+pub struct Label<'a> {
+    pub text: Cow<'a, str>,
+    pub path: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Arrow {
-    pub(crate) stops: Vec<i64>,
-    pub(crate) shaft: i64,
+pub struct Arrow {
+    pub stops: Vec<i64>,
+    pub shaft: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Caret;
+pub struct Caret;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Cursor;
+pub struct Cursor;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PlacementNode<'a> {
+pub enum PlacementNode<'a> {
     Box {
         colour: Option<u8>,
         fill: Option<u8>,
@@ -260,12 +260,12 @@ pub(crate) enum PlacementNode<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Placement<'a> {
-    pub(crate) node: PlacementNode<'a>,
-    pub(crate) x: i64,
-    pub(crate) y: i64,
-    pub(crate) width: i64,
-    pub(crate) height: i64,
+pub struct Placement<'a> {
+    pub node: PlacementNode<'a>,
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
 }
 
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;

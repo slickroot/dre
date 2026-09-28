@@ -1,4 +1,4 @@
-use dre::Renderer;
+use dre::{view, Renderer};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -79,8 +79,16 @@ impl WebSession {
     pub fn svg(&self, cols: i32, rows: i32) -> String {
         let mut out = Vec::new();
         let mut renderer = dre::SvgRenderer::with_canvas(i64::from(cols), i64::from(rows));
+        let window = view::Area {
+            col: 0,
+            row: 0,
+            cols: i64::from(cols),
+            rows: i64::from(rows),
+        };
+        let session = self.session.borrow();
+        let scene = view::editor(session.state(), window);
         renderer
-            .render(self.session.borrow().state(), &mut out)
+            .render(&scene, &mut out)
             .expect("rendering SVG to an in-memory buffer succeeds");
         String::from_utf8(out).expect("SvgRenderer writes UTF-8")
     }

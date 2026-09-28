@@ -1,12 +1,11 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, body, colour, editor, Renderer, ARROW_OPACITY, CELL_HEIGHT,
-    CELL_WIDTH,
+    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, CELL_HEIGHT, CELL_WIDTH,
 };
 use crate::composer::Area;
 use crate::layout::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
-use crate::state::State;
+use crate::view::Scene;
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -23,56 +22,23 @@ fn label_font_size() -> f64 {
 pub const FULL_HD_WIDTH: i64 = 1920;
 pub const FULL_HD_HEIGHT: i64 = 1080;
 
-#[derive(Clone, Copy)]
-enum Mode {
-    Export,
-    Editor,
-}
-
+#[derive(Default)]
 pub struct SvgRenderer {
-    canvas: (i64, i64),
-    mode: Mode,
-}
-
-impl Default for SvgRenderer {
-    fn default() -> Self {
-        SvgRenderer {
-            canvas: (FULL_HD_WIDTH, FULL_HD_HEIGHT),
-            mode: Mode::Export,
-        }
-    }
+    canvas: Option<(i64, i64)>,
 }
 
 impl SvgRenderer {
     pub fn with_canvas(columns: i64, rows: i64) -> Self {
         SvgRenderer {
-            canvas: (columns * CELL_WIDTH, rows * CELL_HEIGHT),
-            mode: Mode::Editor,
+            canvas: Some((columns * CELL_WIDTH, rows * CELL_HEIGHT)),
         }
     }
 }
 
 impl Renderer for SvgRenderer {
-    fn render(&mut self, state: &State, out: &mut impl Write) -> io::Result<()> {
-        let window = Area {
-            col: 0,
-            row: 0,
-            cols: self.canvas.0 / CELL_WIDTH,
-            rows: self.canvas.1 / CELL_HEIGHT,
-        };
-        let areas = match self.mode {
-            Mode::Editor => editor(state, window),
-            Mode::Export => vec![(window, without_caret(body(state, window)))],
-        };
-        out.write_all(document(self.canvas, self.mode, &areas).as_bytes())
+    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
+        out.write_all(document(self.canvas, scene).as_bytes())
     }
-}
-
-fn without_caret(placements: Vec<Placement<'_>>) -> Vec<Placement<'_>> {
-    placements
-        .into_iter()
-        .filter(|placement| !matches!(placement.node, PlacementNode::Caret(_)))
-        .collect()
 }
 
 fn pixels(area: Area) -> (i64, i64, i64, i64) {
@@ -84,16 +50,16 @@ fn pixels(area: Area) -> (i64, i64, i64, i64) {
     )
 }
 
-fn document(canvas: (i64, i64), mode: Mode, areas: &[(Area, Vec<Placement>)]) -> String {
-    let (width, height) = canvas;
+fn document(canvas: Option<(i64, i64)>, areas: &[(Area, Vec<Placement<'_>>)]) -> String {
+    let (width, height) = canvas.unwrap_or((FULL_HD_WIDTH, FULL_HD_HEIGHT));
     let content = canvas_content(areas);
-    match mode {
-        Mode::Editor => format!(
+    match canvas {
+        Some(_) => format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{}{}{content}</svg>",
             font_face_defs(),
             background_rect(0, 0, &width.to_string(), &height.to_string())
         ),
-        Mode::Export => format!(
+        None => format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">{}{}<svg x=\"50%\" y=\"50%\" width=\"{width}\" height=\"{height}\" viewBox=\"{} {} {width} {height}\" overflow=\"visible\">{content}</svg></svg>",
             font_face_defs(),
             background_rect(0, 0, "100%", "100%"),
@@ -382,7 +348,6 @@ fn label_text(placement: &crate::layout::Placement, label: &crate::layout::Label
 mod tests {
     use super::super::arrowhead_depth;
     use super::super::arrowhead_slope;
-    use super::super::centre;
     use super::super::colour;
     use super::super::BOX_FILL_OPACITY;
     use super::super::CELL_HEIGHT;
@@ -398,6 +363,8 @@ mod tests {
     use crate::layout::{Arrow, Caret, Label, Placement, BORDER};
     use crate::palette::{palette, BACKGROUND, FOREGROUND};
     use crate::state::Mode;
+    use crate::view::{self, centre};
+    use crate::State;
 
     fn box_placement(
         x: i64,
@@ -511,8 +478,7 @@ mod tests {
             rows,
         };
         document(
-            (cols * CELL_WIDTH, rows * CELL_HEIGHT),
-            super::Mode::Editor,
+            Some((cols * CELL_WIDTH, rows * CELL_HEIGHT)),
             &[(window, placements.to_vec())],
         )
     }
@@ -1323,8 +1289,7 @@ mod tests {
         let footer = vec![label_placement(FOOTER_TEXT, footer_x, foot.row)];
 
         let svg = document(
-            (window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT),
-            super::Mode::Editor,
+            Some((window.cols * CELL_WIDTH, window.rows * CELL_HEIGHT)),
             &[(body, placements), (foot, footer)],
         );
 
@@ -1368,7 +1333,7 @@ mod tests {
         let state = crate::state::new_state(boxes, mode, selected);
         let mut out = Vec::new();
         SvgRenderer::with_canvas(100, 40)
-            .render(&state, &mut out)
+            .render(&view::editor(&state, CANVAS), &mut out)
             .unwrap();
         String::from_utf8(out).unwrap()
     }
@@ -1425,9 +1390,12 @@ mod tests {
 
     #[test]
     fn the_export_without_a_canvas_omits_the_caret() {
-        let selected = example_state().selected().map(<[usize]>::to_vec);
-        assert!(selected.is_some());
-        let svg = render_to_string(SvgRenderer::default(), &example_insert_state());
+        let state = crate::state::new_state(
+            vec![node_with_children("root", vec![node("A"), node("B")])],
+            Mode::Insert { cursor: 0 },
+            None,
+        );
+        let svg = render_to_string(SvgRenderer::default(), &state);
 
         assert!(caret_rects(&svg).is_empty());
     }
@@ -1495,7 +1463,19 @@ mod tests {
 
     fn render_to_string(mut renderer: SvgRenderer, state: &State) -> String {
         let mut out = Vec::new();
-        renderer.render(state, &mut out).unwrap();
+        let canvas = renderer.canvas;
+        let (width, height) = canvas.unwrap_or((FULL_HD_WIDTH, FULL_HD_HEIGHT));
+        let window = Area {
+            col: 0,
+            row: 0,
+            cols: width / CELL_WIDTH,
+            rows: height / CELL_HEIGHT,
+        };
+        let scene = match canvas {
+            Some(_) => view::editor(state, window),
+            None => view::body(state, window),
+        };
+        renderer.render(&scene, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
