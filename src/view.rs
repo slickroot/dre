@@ -71,6 +71,31 @@ pub struct Placement<'a> {
     pub height: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
+impl From<&Placement<'_>> for Geometry {
+    fn from(placement: &Placement<'_>) -> Self {
+        Geometry {
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
+        }
+    }
+}
+
+impl Placement<'_> {
+    pub fn geometry(&self) -> Geometry {
+        self.into()
+    }
+}
+
 pub(crate) fn interior(label: &str) -> i64 {
     (label.chars().count() as i64).max(1)
 }
