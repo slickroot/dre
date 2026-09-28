@@ -3068,4 +3068,41 @@ mod tests {
         assert!(placed_ids(&second).is_empty());
         assert_eq!(deleted_ids(&second), shown_ids(&first));
     }
+
+    #[test]
+    fn resizing_the_cell_size_produces_new_tile_keys_and_fresh_transmissions() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (old_cell_width, old_cell_height) = (r.window.cell_width, r.window.cell_height);
+        let (old_width, old_height) = smallest_tiled_selected_box(&r, colour);
+        r.window.cell_width = 2 * old_cell_width;
+        r.window.cell_height = 2 * old_cell_height;
+        let (new_width, new_height) = smallest_tiled_selected_box(&r, colour);
+        r.window.cell_width = old_cell_width;
+        r.window.cell_height = old_cell_height;
+        let placements = selected_box(
+            colour,
+            GLOW_MARGIN,
+            GLOW_MARGIN,
+            old_width.max(new_width),
+            old_height.max(new_height),
+        );
+
+        let before = rendered_placements(&mut r, &placements);
+        let keys_before = r.tile_images.len();
+        r.window.cell_width = 2 * old_cell_width;
+        r.window.cell_height = 2 * old_cell_height;
+        let after = rendered_placements(&mut r, &placements);
+
+        let shown_after: std::collections::HashSet<String> =
+            shown_ids(&after).into_iter().collect();
+        assert!(!shown_after.is_empty());
+        assert!(placed_ids(&after).iter().all(|id| shown_after.contains(id)));
+        assert!(image_ids(&before).is_disjoint(&image_ids(&after)));
+        assert!(r.tile_images.len() > keys_before);
+        assert!(r
+            .tile_images
+            .keys()
+            .any(|key| key.shape.cell == r.cell_size()));
+    }
 }
