@@ -164,7 +164,6 @@ impl Default for State {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn flash(state: State) -> State {
     let mut state = state;
     state.led_flash = true;
