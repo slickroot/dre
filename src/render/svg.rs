@@ -102,7 +102,12 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
 }
 
 fn paint(placements: &[Placement]) -> String {
-    let mut svg = String::new();
+    let mut arrows = String::new();
+    let mut boxes = String::new();
+    let mut glows = String::new();
+    let mut labels = String::new();
+    let mut cursors = String::new();
+    let mut leds = String::new();
     for placement in placements {
         match &placement.node {
             PlacementNode::Box {
@@ -114,23 +119,23 @@ fn paint(placements: &[Placement]) -> String {
                 ..
             } => {
                 if *sides == ALL_SIDES || fill.is_some() {
-                    svg.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
+                    boxes.push_str(&rect(placement, *colour, *fill, *opacity, *rounded, *sides));
                 }
             }
-            PlacementNode::Label(label) => svg.push_str(&label_text(placement, label)),
-            PlacementNode::Arrow(arrow) => svg.push_str(&arrow_paths(placement, arrow)),
+            PlacementNode::Label(label) => labels.push_str(&label_text(placement, label)),
+            PlacementNode::Arrow(arrow) => arrows.push_str(&arrow_paths(placement, arrow)),
             PlacementNode::Caret(_) | PlacementNode::Cursor(_) => {
-                svg.push_str(&caret_rect(placement))
+                cursors.push_str(&caret_rect(placement))
             }
             PlacementNode::Glow { colour, rounded } => {
-                svg.push_str(&glow_rect(placement, *colour, *rounded))
+                glows.push_str(&glow_rect(placement, *colour, *rounded))
             }
             PlacementNode::Led { colour, lit } => {
-                svg.push_str(&led_circle(placement, *colour, *lit))
+                leds.push_str(&led_circle(placement, *colour, *lit))
             }
         }
     }
-    svg
+    [arrows, boxes, glows, labels, cursors, leds].concat()
 }
 
 const LED_GLOW_GRADIENT_ID: &str = "led-glow";
@@ -361,7 +366,7 @@ mod tests {
     use crate::composer::Area;
     use crate::diagram::{node, node_with_children};
     use crate::layout::diagram;
-    use crate::layout::with_caret;
+    use crate::layout::{with_caret, with_glow};
     use crate::layout::{
         centre as centre_label, BOX_HEIGHT, FOOTER_ROWS, LED_LABEL_GAP, LED_WIDTH, SIDE_PADDING,
     };
@@ -781,10 +786,10 @@ mod tests {
             .split('<')
             .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
             .expect("the selected box renders a glow rect");
-        assert!(glow.contains(&format!("x=\"{}\"", x * CELL_WIDTH)));
-        assert!(glow.contains(&format!("y=\"{}\"", y * CELL_HEIGHT)));
-        assert!(glow.contains(&format!("width=\"{}\"", width * CELL_WIDTH)));
-        assert!(glow.contains(&format!("height=\"{}\"", height * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("x=\"{}\"", (x - GLOW_MARGIN) * CELL_WIDTH)));
+        assert!(glow.contains(&format!("y=\"{}\"", (y - GLOW_MARGIN) * CELL_HEIGHT)));
+        assert!(glow.contains(&format!("width=\"{}\"", (width + 2 * GLOW_MARGIN) * CELL_WIDTH)));
+        assert!(glow.contains(&format!("height=\"{}\"", (height + 2 * GLOW_MARGIN) * CELL_HEIGHT)));
         assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
         assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
         assert!(glow.contains("fill=\"none\""));
@@ -840,7 +845,7 @@ mod tests {
         assert!(!plain_svg.contains("filter=\"url(#"));
         assert_eq!(
             plain_svg.matches("<rect").count(),
-            selected_svg.matches("<rect").count(),
+            selected_svg.matches("<rect").count() - 1,
             "selection adds exactly one extra rect: the glow"
         );
     }
@@ -1687,9 +1692,9 @@ mod tests {
 
         let svg = render_to_string(SvgRenderer::with_canvas(CANVAS.cols, CANVAS.rows), &state);
 
-        let diagram = centre(
-            with_caret(diagram(state.doc().tree(), None), None),
-            body,
+        let diagram = with_glow(
+            centre(with_caret(diagram(state.doc().tree(), None), None), body),
+            state.selected(),
         );
         let body_svg = nested(body, &paint(&diagram));
         let foot_svg = nested(foot, &padded_footer(foot));
