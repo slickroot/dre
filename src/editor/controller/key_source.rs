@@ -1,11 +1,11 @@
 use std::io;
 use std::os::fd::RawFd;
 
-use crate::{tty, IDLE_TIMEOUT_MS};
+use crate::tty;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait KeySource {
-    fn next_key(&mut self) -> io::Result<Option<String>>;
+    fn next_key(&mut self) -> io::Result<String>;
 }
 
 pub(crate) struct TtyKeySource {
@@ -14,7 +14,7 @@ pub(crate) struct TtyKeySource {
 }
 
 impl KeySource for TtyKeySource {
-    fn next_key(&mut self) -> io::Result<Option<String>> {
-        tty::poll_read(self.fd, self.resize_fd, IDLE_TIMEOUT_MS)
+    fn next_key(&mut self) -> io::Result<String> {
+        tty::read_key(self.fd, self.resize_fd)
     }
 }

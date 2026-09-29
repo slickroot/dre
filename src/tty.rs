@@ -121,28 +121,21 @@ pub(crate) fn install_resize_pipe() -> io::Result<RawFd> {
     Ok(read_raw_fd)
 }
 
-pub(crate) fn poll_read(
-    fd: RawFd,
-    resize_fd: RawFd,
-    timeout_ms: u16,
-) -> io::Result<Option<String>> {
+pub(crate) fn read_key(fd: RawFd, resize_fd: RawFd) -> io::Result<String> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
     let resize_borrowed = unsafe { BorrowedFd::borrow_raw(resize_fd) };
     let mut fds = [
         PollFd::new(borrowed, PollFlags::POLLIN),
         PollFd::new(resize_borrowed, PollFlags::POLLIN),
     ];
-    let ready = retry_on_eintr(|| poll(&mut fds, PollTimeout::from(timeout_ms)))?;
-    if ready == 0 {
-        return Ok(None);
-    }
+    retry_on_eintr(|| poll(&mut fds, PollTimeout::NONE))?;
     if fds[1]
         .revents()
         .is_some_and(|events| events.contains(PollFlags::POLLIN))
     {
         let mut byte = [0u8; 1];
         retry_on_eintr(|| read(resize_borrowed, &mut byte))?;
-        return Ok(Some(RESIZE.to_string()));
+        return Ok(RESIZE.to_string());
     }
     let mut byte = [0u8; 1];
     let n = retry_on_eintr(|| read(borrowed, &mut byte))?;
@@ -153,7 +146,7 @@ pub(crate) fn poll_read(
     if byte[0] == ESC {
         read_escape_sequence(borrowed, &mut key)?;
     }
-    Ok(Some(key))
+    Ok(key)
 }
 
 fn read_escape_sequence(fd: BorrowedFd, key: &mut String) -> io::Result<()> {
@@ -220,16 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn poll_read_returns_none_when_no_byte_arrives_within_the_timeout() {
-        use std::os::fd::AsRawFd;
-        let (read, _write) = nix::unistd::pipe().unwrap();
-        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1);
-        assert!(matches!(result, Ok(None)));
-    }
-
-    #[test]
-    fn poll_read_survives_a_signal_interrupting_the_poll() {
+    fn read_key_survives_a_signal_interrupting_the_poll() {
         use std::os::fd::AsRawFd;
         use std::time::Duration;
 
@@ -249,43 +233,43 @@ mod tests {
             nix::sys::signal::kill(pid, Signal::SIGWINCH).unwrap();
             nix::unistd::write(&write, b"x").unwrap();
         });
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
         interrupter.join().unwrap();
-        assert_eq!(result.unwrap(), Some("x".to_string()));
+        assert_eq!(result.unwrap(), "x");
     }
 
     #[test]
-    fn poll_read_returns_the_byte_that_is_ready() {
+    fn read_key_returns_the_byte_that_is_ready() {
         use std::os::fd::AsRawFd;
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"x").unwrap();
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
-        assert_eq!(result.unwrap(), Some("x".to_string()));
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        assert_eq!(result.unwrap(), "x");
     }
 
-    fn poll_read_key(read: &std::os::fd::OwnedFd) -> Option<String> {
+    fn read_key_from(read: &std::os::fd::OwnedFd) -> String {
         use std::os::fd::AsRawFd;
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000).unwrap()
+        read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap()
     }
 
     #[test]
-    fn poll_read_returns_a_whole_escape_sequence_written_at_once() {
+    fn read_key_returns_a_whole_escape_sequence_written_at_once() {
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"\x1b[D").unwrap();
-        assert_eq!(poll_read_key(&read), Some("\x1b[D".to_string()));
+        assert_eq!(read_key_from(&read), "\x1b[D");
     }
 
     #[test]
-    fn poll_read_returns_a_lone_escape_after_the_timeout() {
+    fn read_key_returns_a_lone_escape_after_the_timeout() {
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"\x1b").unwrap();
-        assert_eq!(poll_read_key(&read), Some("\x1b".to_string()));
+        assert_eq!(read_key_from(&read), "\x1b");
     }
 
     #[test]
-    fn poll_read_joins_an_escape_sequence_delivered_in_two_steps() {
+    fn read_key_joins_an_escape_sequence_delivered_in_two_steps() {
         use std::time::Duration;
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"\x1b").unwrap();
@@ -293,49 +277,50 @@ mod tests {
             std::thread::sleep(Duration::from_millis(ESCAPE_TIMEOUT_MS as u64 / 5));
             nix::unistd::write(&write, b"[D").unwrap();
         });
-        let key = poll_read_key(&read);
+        let key = read_key_from(&read);
         writer.join().unwrap();
-        assert_eq!(key, Some("\x1b[D".to_string()));
+        assert_eq!(key, "\x1b[D");
     }
 
     #[test]
-    fn poll_read_returns_an_escape_sequence_with_parameters_whole() {
+    fn read_key_returns_an_escape_sequence_with_parameters_whole() {
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"\x1b[1;5C").unwrap();
-        assert_eq!(poll_read_key(&read), Some("\x1b[1;5C".to_string()));
+        assert_eq!(read_key_from(&read), "\x1b[1;5C");
     }
 
     #[test]
-    fn poll_read_error_when_the_input_is_closed() {
+    fn read_key_error_when_the_input_is_closed() {
         use std::os::fd::AsRawFd;
         let (read, write) = nix::unistd::pipe().unwrap();
         drop(write);
         let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
         assert!(result.is_err());
         assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
-    fn poll_read_returns_resize_when_the_resize_fd_becomes_readable() {
+    fn read_key_returns_resize_when_the_resize_fd_becomes_readable() {
         use std::os::fd::AsRawFd;
         let (read, _write) = nix::unistd::pipe().unwrap();
         let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&resize_write, b"\0").unwrap();
-        let result = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
-        assert_eq!(result.unwrap(), Some(RESIZE.to_string()));
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        assert_eq!(result.unwrap(), RESIZE);
     }
 
     #[test]
-    fn poll_read_drains_the_resize_byte_so_it_is_not_reported_twice() {
+    fn read_key_drains_the_resize_byte_so_it_is_not_reported_twice() {
         use std::os::fd::AsRawFd;
-        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (read, write) = nix::unistd::pipe().unwrap();
         let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&resize_write, b"\0").unwrap();
-        let first = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1000);
-        assert_eq!(first.unwrap(), Some(RESIZE.to_string()));
+        let first = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
+        assert_eq!(first, RESIZE);
 
-        let second = poll_read(read.as_raw_fd(), resize_read.as_raw_fd(), 1);
-        assert!(matches!(second, Ok(None)));
+        nix::unistd::write(&write, b"x").unwrap();
+        let second = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
+        assert_eq!(second, "x");
     }
 }
