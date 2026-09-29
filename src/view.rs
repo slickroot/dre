@@ -187,8 +187,8 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                     FooterMode::Naming => style::AMBER,
                 },
                 lit: match model.mode {
-                    FooterMode::Move => model.flash,
-                    FooterMode::Write | FooterMode::Naming => true,
+                    FooterMode::Move | FooterMode::Write => model.flash,
+                    FooterMode::Naming => true,
                 },
             },
             width: LED_WIDTH,
@@ -535,8 +535,14 @@ mod tests {
     }
 
     #[test]
-    fn footer_led_is_lit_in_write_mode_regardless_of_flash() {
+    fn footer_led_is_unlit_in_write_mode_when_not_flashing() {
         let model = footer_model(FooterMode::Write, false);
+        assert!(!led_lit(&model));
+    }
+
+    #[test]
+    fn footer_led_is_lit_in_write_mode_when_flashing() {
+        let model = footer_model(FooterMode::Write, true);
         assert!(led_lit(&model));
     }
 
