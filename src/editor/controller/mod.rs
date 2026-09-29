@@ -59,7 +59,7 @@ impl Controller for DreController {
                 }
                 let label = state::command_label(&state, &key);
                 let start = label.is_some().then(Instant::now);
-                let (next, effects) = self.reducer.reduce(state, Some(&key));
+                let (next, effects) = self.reducer.reduce(state, &key);
                 self.executor.execute(effects, &next)?;
                 state = match (label, start) {
                     (Some((label_key, name)), Some(start)) => {
@@ -136,7 +136,7 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(move |_, k| *k == Some(key))
+            .withf(move |_, k| k == key)
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
         reducer
@@ -214,12 +214,12 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("a"))
+            .withf(|_, key| key == "a")
             .times(1)
             .returning(|_, _| (marked(2), vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
@@ -340,7 +340,7 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("s"))
+            .withf(|_, key| key == "s")
             .times(1)
             .returning(|_, _| (stopped(marked(4)), vec![Effect::Save]));
         let mut executor = MockEffectExecutor::new();
@@ -414,12 +414,12 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("a"))
+            .withf(|_, key| key == "a")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
@@ -531,12 +531,12 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("b"))
+            .withf(|_, key| key == "b")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
@@ -584,12 +584,12 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("7"))
+            .withf(|_, key| key == "7")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 

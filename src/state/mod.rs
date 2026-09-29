@@ -208,8 +208,8 @@ fn apply(state: State, action: Action) -> State {
     })
 }
 
-pub fn reduce(state: State, key: Option<&str>) -> (State, Vec<Effect>) {
-    let action = key.and_then(|key| input::parse(&state, key));
+pub fn reduce(state: State, key: &str) -> (State, Vec<Effect>) {
+    let action = input::parse(&state, key);
     let mut state = match action {
         Some(action) => apply(state, action),
         None => state,
@@ -383,7 +383,7 @@ mod tests {
     fn reduce_always_resets_led_flash_to_false() {
         let state = flash(new_state(vec![], Mode::Command, None));
         assert!(state.led_flash());
-        let result = crate::state::reduce(state, Some("j")).0;
+        let result = crate::state::reduce(state, "j").0;
         assert!(!result.led_flash());
     }
 
@@ -419,7 +419,7 @@ mod tests {
             "Rename",
             std::time::Duration::from_millis(42),
         );
-        let result = crate::state::reduce(state.clone(), Some("j")).0;
+        let result = crate::state::reduce(state.clone(), "j").0;
         assert_eq!(result.command_status(), state.command_status());
     }
 
@@ -555,15 +555,6 @@ mod tests {
         assert_eq!(result.selected, state.selected);
         assert_eq!(result.mode, state.mode);
         assert_eq!(result.running, state.running);
-    }
-
-    #[test]
-    fn missing_input_is_a_no_op() {
-        let state = new_state(vec![node("a")], Mode::Command, Some(vec![0])).with_pending_count(4);
-        let result = crate::state::reduce(state, None).0;
-        assert_eq!(result.selected, Some(vec![0]));
-        assert_eq!(result.pending_count, Some(4));
-        assert_eq!(result.mode, Mode::Command);
     }
 
     #[test]
@@ -717,61 +708,61 @@ mod tests {
         #[test]
         fn a_change_that_grows_history_returns_a_save_effect_when_save_to_is_set() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (_, effects) = crate::state::reduce(state, Some("r"));
+            let (_, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![Effect::Save]);
         }
 
         #[test]
         fn a_selection_move_returns_no_effects() {
             let state = saved_state(vec![node("a"), node("b")], Some(vec![0]));
-            let (_, effects) = crate::state::reduce(state, Some("j"));
+            let (_, effects) = crate::state::reduce(state, "j");
             assert_eq!(effects, vec![]);
         }
 
         #[test]
         fn keys_typed_in_insert_mode_return_no_effects_until_escape_exits_it() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("i"));
+            let (state, effects) = crate::state::reduce(state, "i");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("b"));
+            let (state, effects) = crate::state::reduce(state, "b");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("c"));
+            let (state, effects) = crate::state::reduce(state, "c");
             assert_eq!(effects, vec![]);
-            let (_, effects) = crate::state::reduce(state, Some("\x1b"));
+            let (_, effects) = crate::state::reduce(state, "\x1b");
             assert_eq!(effects, vec![Effect::Save]);
         }
 
         #[test]
         fn commit_and_add_child_stays_in_insert_and_only_the_following_escape_saves_once() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("i"));
+            let (state, effects) = crate::state::reduce(state, "i");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("b"));
+            let (state, effects) = crate::state::reduce(state, "b");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("\r"));
+            let (state, effects) = crate::state::reduce(state, "\r");
             assert_eq!(effects, vec![]);
             assert!(matches!(state.mode(), Mode::Insert { .. }));
-            let (state, effects) = crate::state::reduce(state, Some("c"));
+            let (state, effects) = crate::state::reduce(state, "c");
             assert_eq!(effects, vec![]);
-            let (_, effects) = crate::state::reduce(state, Some("\x1b"));
+            let (_, effects) = crate::state::reduce(state, "\x1b");
             assert_eq!(effects, vec![Effect::Save]);
         }
 
         #[test]
         fn undo_returns_a_save_effect() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("r"));
+            let (state, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![Effect::Save]);
-            let (_, effects) = crate::state::reduce(state, Some("u"));
+            let (_, effects) = crate::state::reduce(state, "u");
             assert_eq!(effects, vec![Effect::Save]);
         }
 
         #[test]
         fn a_no_op_edit_still_leaves_a_snapshot_and_returns_a_save_effect() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("i"));
+            let (state, effects) = crate::state::reduce(state, "i");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("\x1b"));
+            let (state, effects) = crate::state::reduce(state, "\x1b");
             assert_eq!(effects, vec![Effect::Save]);
             assert_eq!(state.history.len(), 1);
         }
@@ -779,9 +770,9 @@ mod tests {
         #[test]
         fn a_second_change_after_a_save_returns_a_save_effect_again() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("r"));
+            let (state, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![Effect::Save]);
-            let (_, effects) = crate::state::reduce(state, Some("r"));
+            let (_, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![Effect::Save]);
         }
 
@@ -789,22 +780,22 @@ mod tests {
         fn with_no_save_path_no_effects_are_ever_returned() {
             let state = new_state(vec![node("a")], Mode::Command, Some(vec![0]));
             assert_eq!(state.save_to(), None);
-            let (state, effects) = crate::state::reduce(state, Some("r"));
+            let (state, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("i"));
+            let (state, effects) = crate::state::reduce(state, "i");
             assert_eq!(effects, vec![]);
-            let (state, effects) = crate::state::reduce(state, Some("\x1b"));
+            let (state, effects) = crate::state::reduce(state, "\x1b");
             assert_eq!(effects, vec![]);
-            let (_, effects) = crate::state::reduce(state, Some("u"));
+            let (_, effects) = crate::state::reduce(state, "u");
             assert_eq!(effects, vec![]);
         }
 
         #[test]
         fn an_interrupt_after_a_change_returns_no_effects() {
             let state = saved_state(vec![node("a")], Some(vec![0]));
-            let (state, effects) = crate::state::reduce(state, Some("r"));
+            let (state, effects) = crate::state::reduce(state, "r");
             assert_eq!(effects, vec![Effect::Save]);
-            let (_, effects) = crate::state::reduce(state, Some(INTERRUPT));
+            let (_, effects) = crate::state::reduce(state, INTERRUPT);
             assert_eq!(effects, vec![]);
         }
     }
