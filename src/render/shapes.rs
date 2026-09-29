@@ -110,51 +110,38 @@ impl Shape for BoxShape {
     }
 }
 
-fn rounded_rect_distance(px: f64, py: f64, width: f64, height: f64, radius: f64) -> f64 {
-    let half_x = width / 2.0;
-    let half_y = height / 2.0;
-    let qx = (px - half_x).abs() - (half_x - radius);
-    let qy = (py - half_y).abs() - (half_y - radius);
-    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
-}
-
-pub(super) struct GlowShape {
+pub(super) struct BracketsShape {
     pub(super) width: i64,
     pub(super) height: i64,
     pub(super) margin_x: i64,
     pub(super) margin_y: i64,
-    pub(super) radius: i64,
+    pub(super) offset: i64,
+    pub(super) arm: i64,
+    pub(super) thickness: i64,
     pub(super) colour: Rgba,
 }
 
-impl GlowShape {
-    fn reach(&self) -> f64 {
-        (self.margin_x.min(self.margin_y) - 1).max(1) as f64
-    }
-
+impl BracketsShape {
     pub(super) fn edge_extents(&self) -> (i64, i64) {
-        (self.margin_x + self.radius, self.margin_y + self.radius)
+        (
+            self.margin_x + self.arm - self.offset,
+            self.margin_y + self.arm - self.offset,
+        )
     }
 }
 
-impl Shape for GlowShape {
+impl Shape for BracketsShape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
-        let box_width = self.width - 2 * self.margin_x;
-        let box_height = self.height - 2 * self.margin_y;
-        let radius = self.radius.min(box_width / 2).min(box_height / 2) as f64;
-        let distance = rounded_rect_distance(
-            x as f64 + 0.5 - self.margin_x as f64,
-            y as f64 + 0.5 - self.margin_y as f64,
-            box_width as f64,
-            box_height as f64,
-            radius,
-        );
-        if distance <= 0.0 || distance >= self.reach() {
+        let from_corner_x = (x - (self.margin_x - self.offset))
+            .min(self.width - 1 - (self.margin_x - self.offset) - x);
+        let from_corner_y = (y - (self.margin_y - self.offset))
+            .min(self.height - 1 - (self.margin_y - self.offset) - y);
+        if from_corner_x < 0 || from_corner_y < 0 {
             return None;
         }
-        let falloff = (1.0 - distance / self.reach()).powf(1.6);
-        let alpha = python_round(self.colour[3] as f64 * falloff) as u8;
-        (alpha > 0).then_some([self.colour[0], self.colour[1], self.colour[2], alpha])
+        let in_horizontal_arm = from_corner_x < self.arm && from_corner_y < self.thickness;
+        let in_vertical_arm = from_corner_y < self.arm && from_corner_x < self.thickness;
+        (in_horizontal_arm || in_vertical_arm).then_some(self.colour)
     }
 }
 
@@ -255,7 +242,7 @@ impl Shape for LedShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::OPAQUE;
+    use crate::render::{BRACKET_ARM, BRACKET_OFFSET, OPAQUE};
     use crate::view::BORDER;
 
     const EDGE: Rgba = [10, 20, 30, OPAQUE];
@@ -399,74 +386,119 @@ mod tests {
         assert_eq!(shape.colour_at(0, 15), Some(FILL));
     }
 
-    const GLOW_COLOUR: [u8; 3] = [40, 50, 60];
+    const BRACKETS_COLOUR: Rgba = [40, 50, 60, OPAQUE];
+    const BRACKETS_THICKNESS: i64 = 2;
+    const BRACKETS_MARGIN: i64 = 12;
+    const BRACKETS_BOX: i64 = 40;
 
-    fn glow_shape(width: i64, height: i64, padding_x: i64, padding_y: i64) -> GlowShape {
-        GlowShape {
-            width: width + 2 * padding_x,
-            height: height + 2 * padding_y,
-            margin_x: padding_x,
-            margin_y: padding_y,
-            radius: 0,
-            colour: [GLOW_COLOUR[0], GLOW_COLOUR[1], GLOW_COLOUR[2], OPAQUE],
+    fn brackets_shape() -> BracketsShape {
+        BracketsShape {
+            width: BRACKETS_BOX + 2 * BRACKETS_MARGIN,
+            height: BRACKETS_BOX + 2 * BRACKETS_MARGIN,
+            margin_x: BRACKETS_MARGIN,
+            margin_y: BRACKETS_MARGIN,
+            offset: BRACKET_OFFSET,
+            arm: BRACKET_ARM,
+            thickness: BRACKETS_THICKNESS,
+            colour: BRACKETS_COLOUR,
+        }
+    }
+
+    fn corner(shape: &BracketsShape) -> i64 {
+        shape.margin_x - shape.offset
+    }
+
+    fn painted_rows(shape: &BracketsShape, x: i64) -> Vec<i64> {
+        (0..shape.height)
+            .filter(|&y| shape.colour_at(x, y).is_some())
+            .collect()
+    }
+
+    #[test]
+    fn a_bracket_is_an_l_of_two_arms_meeting_at_the_outer_corner() {
+        let shape = brackets_shape();
+        let start = corner(&shape);
+        let arm_end = start + shape.arm - 1;
+        assert_eq!(shape.colour_at(start, start), Some(BRACKETS_COLOUR));
+        assert_eq!(shape.colour_at(arm_end, start), Some(BRACKETS_COLOUR));
+        assert_eq!(shape.colour_at(start, arm_end), Some(BRACKETS_COLOUR));
+        assert_eq!(shape.colour_at(arm_end + 1, start), None);
+        assert_eq!(shape.colour_at(start, arm_end + 1), None);
+    }
+
+    #[test]
+    fn an_arm_is_as_thick_as_the_border() {
+        let shape = brackets_shape();
+        let start = corner(&shape);
+        let arm_middle = start + shape.arm - 1;
+        assert_eq!(
+            shape.colour_at(arm_middle, start + shape.thickness - 1),
+            Some(BRACKETS_COLOUR)
+        );
+        assert_eq!(shape.colour_at(arm_middle, start + shape.thickness), None);
+        assert_eq!(
+            shape.colour_at(start + shape.thickness - 1, arm_middle),
+            Some(BRACKETS_COLOUR)
+        );
+        assert_eq!(shape.colour_at(start + shape.thickness, arm_middle), None);
+    }
+
+    #[test]
+    fn the_four_brackets_mirror_each_other() {
+        let shape = brackets_shape();
+        for x in 0..shape.width {
+            for y in 0..shape.height {
+                assert_eq!(
+                    shape.colour_at(x, y),
+                    shape.colour_at(shape.width - 1 - x, y)
+                );
+                assert_eq!(
+                    shape.colour_at(x, y),
+                    shape.colour_at(x, shape.height - 1 - y)
+                );
+            }
         }
     }
 
     #[test]
-    fn a_glow_fades_inward_from_the_box_edge() {
-        let shape = glow_shape(10, 10, 4, 4);
-        let edge = shape.colour_at(3, 7).unwrap()[3];
-        let farther = shape.colour_at(2, 7).unwrap()[3];
-        assert!(edge > farther, "expected {edge} > {farther}");
-    }
-
-    #[test]
-    fn the_deep_interior_of_a_glow_is_fully_transparent() {
-        let shape = glow_shape(10, 10, 4, 4);
-        assert_eq!(shape.colour_at(8, 8), None);
-    }
-
-    #[test]
-    fn just_outside_the_box_edge_the_glow_is_near_peak_opacity() {
-        let shape = glow_shape(10, 10, 4, 4);
-        let alpha = shape.colour_at(3, 7).unwrap()[3];
-        assert!(
-            alpha > shape.colour[3] / 2,
-            "expected near-peak alpha just outside the edge, got {alpha}"
+    fn a_bracket_sits_offset_out_from_the_box_edge() {
+        let shape = brackets_shape();
+        let box_edge = shape.margin_x;
+        assert_eq!(corner(&shape), box_edge - BRACKET_OFFSET);
+        assert_eq!(shape.colour_at(corner(&shape) - 1, corner(&shape)), None);
+        assert_eq!(
+            painted_rows(&shape, corner(&shape)).first(),
+            Some(&corner(&shape))
         );
     }
 
     #[test]
-    fn a_glow_fades_out_with_distance_from_the_box() {
-        let shape = glow_shape(10, 10, 4, 4);
-        let near = shape.colour_at(2, 7).unwrap()[3];
-        let far = shape.colour_at(1, 7).unwrap()[3];
-        assert!(near > far, "expected {near} > {far}");
+    fn the_box_interior_and_the_edges_between_brackets_are_transparent() {
+        let shape = brackets_shape();
+        let middle = shape.width / 2;
+        assert_eq!(shape.colour_at(middle, middle), None);
+        assert_eq!(shape.colour_at(middle, corner(&shape)), None);
+        assert_eq!(shape.colour_at(corner(&shape), middle), None);
     }
 
     #[test]
-    fn a_glow_has_the_same_pixel_thickness_on_each_axis() {
-        let shape = glow_shape(20, 20, 8, 12);
-        for distance in 0..shape.margin_x {
-            let left = shape.colour_at(shape.margin_x - 1 - distance, shape.margin_y + 10);
-            let top = shape.colour_at(shape.margin_x + 10, shape.margin_y - 1 - distance);
-            assert_eq!(left, top);
+    fn brackets_are_solid_with_no_antialiasing() {
+        let shape = brackets_shape();
+        for x in 0..shape.width {
+            for y in 0..shape.height {
+                if let Some(pixel) = shape.colour_at(x, y) {
+                    assert_eq!(pixel, BRACKETS_COLOUR);
+                }
+            }
         }
     }
 
     #[test]
-    fn a_glow_is_fully_transparent_past_its_margin() {
-        let shape = glow_shape(10, 10, 4, 4);
-        assert_eq!(shape.colour_at(0, 0), None);
-    }
-
-    #[test]
-    fn a_glow_uses_the_box_edge_colour() {
-        let shape = glow_shape(10, 10, 4, 4);
-        let (r, g, b, _) = {
-            let pixel = shape.colour_at(2, 7).unwrap();
-            (pixel[0], pixel[1], pixel[2], pixel[3])
-        };
-        assert_eq!((r, g, b), (GLOW_COLOUR[0], GLOW_COLOUR[1], GLOW_COLOUR[2]));
+    fn the_edge_extents_hold_a_whole_bracket_in_the_corner_tiles() {
+        let shape = brackets_shape();
+        let (extent_x, extent_y) = shape.edge_extents();
+        assert_eq!(extent_x, shape.margin_x + shape.arm - shape.offset);
+        assert_eq!(extent_y, shape.margin_y + shape.arm - shape.offset);
+        assert!(extent_x >= corner(&shape) + shape.arm);
     }
 }

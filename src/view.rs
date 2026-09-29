@@ -15,6 +15,7 @@ pub(crate) const BORDER: i64 = 4;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 pub(crate) const LED_WIDTH: i64 = 2;
+#[cfg(test)]
 pub(crate) const GLOW_MARGIN: i64 = 1;
 pub(crate) const BRACKET_MARGIN: i64 = 1;
 
