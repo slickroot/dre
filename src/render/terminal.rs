@@ -16,6 +16,8 @@ use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN}
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
+const BEGIN_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026h";
+const END_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026l";
 
 pub(super) const ARROW_STROKE: i64 = 3;
 const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
@@ -388,7 +390,8 @@ impl Frame {
             .into_iter()
             .map(|row| row.into_iter().collect())
             .collect();
-        let mut bytes = HOME_CURSOR.as_bytes().to_vec();
+        let mut bytes = BEGIN_SYNCHRONIZED_UPDATE.as_bytes().to_vec();
+        bytes.extend_from_slice(HOME_CURSOR.as_bytes());
         bytes.extend_from_slice(rows.join("\r\n").as_bytes());
         bytes.extend_from_slice(kitty::soft_clear().to_string().as_bytes());
         for id in &self.previous_transient_images {
@@ -397,6 +400,7 @@ impl Frame {
         for (placement, image) in Self::placement_ids().zip(&self.images) {
             bytes.extend_from_slice(image.command(placement).to_string().as_bytes());
         }
+        bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
         bytes
     }
 
@@ -1476,8 +1480,16 @@ mod tests {
         drawn_frame(r, placements).images
     }
 
-    fn lines_of(frame: &str) -> Vec<&str> {
+    fn unwrapped(frame: &str) -> &str {
         frame
+            .strip_prefix(BEGIN_SYNCHRONIZED_UPDATE)
+            .unwrap()
+            .strip_suffix(END_SYNCHRONIZED_UPDATE)
+            .unwrap()
+    }
+
+    fn lines_of(frame: &str) -> Vec<&str> {
+        unwrapped(frame)
             .strip_prefix(HOME_CURSOR)
             .unwrap()
             .split("\r\n")
@@ -1704,7 +1716,7 @@ mod tests {
             .map(|command| command.to_string())
             .collect();
         let bytes = String::from_utf8(frame.into_bytes()).unwrap();
-        assert!(bytes.ends_with(&expected));
+        assert!(unwrapped(&bytes).ends_with(&expected));
     }
 
     fn a_labelled_box(width: i64, height: i64) -> [Placement<'static>; 2] {
@@ -1800,9 +1812,90 @@ mod tests {
             cell_height: 1,
         });
         assert_eq!(
-            String::from_utf8(frame.into_bytes()).unwrap(),
+            unwrapped(&String::from_utf8(frame.into_bytes()).unwrap()),
             format!("{HOME_CURSOR}  \r\n  {}", kitty::soft_clear())
         );
+    }
+
+    #[test]
+    fn a_frame_begins_a_synchronized_update_before_homing_the_cursor_and_ends_it_last() {
+        let mut r = renderer_on(window(3, 3, 2, 4));
+        let output = rendered(&mut r, &empty_state());
+        assert!(output.starts_with(&format!("{BEGIN_SYNCHRONIZED_UPDATE}{HOME_CURSOR}")));
+        assert!(output.ends_with(END_SYNCHRONIZED_UPDATE));
+    }
+
+    fn a_frame_after_one_with_a_transient_image(r: &mut TerminalRenderer) -> Frame {
+        let first = [
+            label_placement("aa", 0, 0, 2, 1),
+            caret_placement(2, 0, 1, 1),
+        ];
+        let second = [
+            label_placement("ab", 0, 0, 2, 1),
+            caret_placement(2, 0, 1, 1),
+        ];
+        rendered_placements(r, &first);
+        r.frame(&vec![(whole(r.window), second.to_vec())])
+    }
+
+    fn assert_one_synchronized_update_ending_after_the_images(frame: Frame) {
+        let last_image = Frame::placement_ids()
+            .zip(&frame.images)
+            .last()
+            .map(|(placement, image)| image.command(placement).to_string());
+        let output = String::from_utf8(frame.into_bytes()).unwrap();
+        assert_eq!(output.matches(BEGIN_SYNCHRONIZED_UPDATE).count(), 1);
+        assert_eq!(output.matches(END_SYNCHRONIZED_UPDATE).count(), 1);
+        let end = output.find(END_SYNCHRONIZED_UPDATE).unwrap();
+        if let Some(last_image) = last_image {
+            assert!(output.rfind(&last_image).unwrap() + last_image.len() <= end);
+        }
+    }
+
+    #[test]
+    fn an_empty_frame_holds_one_synchronized_update() {
+        assert_one_synchronized_update_ending_after_the_images(Frame::new(window(3, 2, 2, 4)));
+    }
+
+    #[test]
+    fn a_frame_of_fresh_cached_and_transient_images_holds_one_synchronized_update_ending_after_them(
+    ) {
+        let mut r = renderer_on(window(3, 1, 1, 1));
+        let frame = a_frame_after_one_with_a_transient_image(&mut r);
+        assert!(!frame.previous_transient_images.is_empty());
+        assert_one_synchronized_update_ending_after_the_images(frame);
+    }
+
+    #[test]
+    fn inside_the_synchronized_update_come_rows_soft_clear_deletes_then_images_in_scene_order() {
+        let mut r = renderer_on(window(3, 1, 1, 1));
+        let frame = a_frame_after_one_with_a_transient_image(&mut r);
+        assert!(frame
+            .images
+            .iter()
+            .any(|image| matches!(image.image, Image::Fresh { .. })));
+        assert!(frame
+            .images
+            .iter()
+            .any(|image| matches!(image.image, Image::Cached { .. })));
+        assert!(!frame.previous_transient_images.is_empty());
+        let expected: String = [HOME_CURSOR.to_string(), rows(&frame).join("\r\n")]
+            .into_iter()
+            .chain(std::iter::once(kitty::soft_clear().to_string()))
+            .chain(
+                frame
+                    .previous_transient_images
+                    .iter()
+                    .map(|id| kitty::delete(*id).to_string()),
+            )
+            .chain(
+                Frame::placement_ids()
+                    .zip(&frame.images)
+                    .map(|(placement, image)| image.command(placement).to_string()),
+            )
+            .collect();
+        let output = String::from_utf8(frame.into_bytes()).unwrap();
+        assert_eq!(unwrapped(&output), expected);
     }
 
     #[test]
@@ -1905,7 +1998,7 @@ mod tests {
         assert_eq!(first.matches("a=T").count(), 1);
         assert_eq!(second.matches("a=T").count(), 0);
         assert_eq!(second.matches("a=p").count(), 1);
-        assert!(second.starts_with(&format!("{HOME_CURSOR}   {}", kitty::soft_clear())));
+        assert!(unwrapped(&second).starts_with(&format!("{HOME_CURSOR}   {}", kitty::soft_clear())));
         assert!(deleted_ids(&second).is_empty());
     }
 
@@ -1995,7 +2088,7 @@ mod tests {
             cell_height: 1,
         });
         let output = String::from_utf8(frame.into_bytes()).unwrap();
-        let body = output
+        let body = unwrapped(&output)
             .strip_prefix(HOME_CURSOR)
             .unwrap()
             .strip_suffix(&kitty::soft_clear().to_string())
