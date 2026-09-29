@@ -3,6 +3,7 @@ use std::num::NonZeroU32;
 
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
+use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -29,14 +30,20 @@ const CONTENT_Z: i32 = -1;
 const GLOW_OPACITY: f64 = 0.7;
 const INK_Z: i32 = CONTENT_Z;
 
-#[derive(Clone, Copy)]
-struct BoxStyle {
-    colour: Option<u8>,
-    fill: Option<u8>,
-    opacity: Option<f64>,
-    rounded: bool,
-    sides: Sides,
-    border: i64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct BoxStyle {
+    pub(super) colour: Option<u8>,
+    pub(super) fill: Option<u8>,
+    pub(super) fill_alpha: Option<u8>,
+    pub(super) rounded: bool,
+    pub(super) sides: Sides,
+    pub(super) border: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct GlowStyle {
+    pub(super) colour: Option<u8>,
+    pub(super) rounded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -69,12 +76,12 @@ pub(super) fn centered_span(c: i64, width: i64) -> std::ops::Range<i64> {
     start..(start + width)
 }
 
-fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
+pub(super) fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
     opacity.map(|value| (value * OPAQUE as f64).round() as u8)
 }
 
-fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
-    match (fill, quantized_alpha(opacity)) {
+fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
+    match (fill, alpha) {
         (Some(colour), Some(alpha)) => {
             let (r, g, b) = crate::style::colour(colour).unwrap();
             let composite =
@@ -82,6 +89,32 @@ fn fill_colour(fill: Option<u8>, opacity: Option<f64>) -> (u8, u8, u8, u8) {
             (composite(r), composite(g), composite(b), OPAQUE)
         }
         _ => TRANSPARENT,
+    }
+}
+
+pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
+    let (r, g, b) = colour(style.colour);
+    let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.fill_alpha);
+    BoxShape {
+        width,
+        height,
+        border: style.border,
+        radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+        sides: style.sides,
+        edge: [r, g, b, OPAQUE],
+        fill: [fill_r, fill_g, fill_b, fill_a],
+    }
+}
+
+pub(super) fn glow_shape(width: i64, height: i64, cell: CellSize, style: GlowStyle) -> GlowShape {
+    let (r, g, b) = colour(style.colour);
+    GlowShape {
+        width,
+        height,
+        margin_x: GLOW_MARGIN * cell.width,
+        margin_y: GLOW_MARGIN * cell.height,
+        radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
+        colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
     }
 }
 
@@ -156,7 +189,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         height,
         colour: style.colour,
         fill: style.fill,
-        fill_alpha: quantized_alpha(style.opacity),
+        fill_alpha: style.fill_alpha,
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
@@ -392,6 +425,8 @@ pub(crate) struct TerminalRenderer {
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
+    tile_canvases: std::collections::HashMap<TileKey, Canvas>,
+    tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
     image_ids: ImageIds,
 }
 
@@ -414,6 +449,8 @@ impl TerminalRenderer {
             cache_limit,
             glyph_source,
             glyph_images: std::collections::HashMap::new(),
+            tile_canvases: std::collections::HashMap::new(),
+            tile_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
         }
     }
@@ -453,7 +490,7 @@ impl TerminalRenderer {
                     BoxStyle {
                         colour: *colour,
                         fill: *fill,
-                        opacity: *opacity,
+                        fill_alpha: quantized_alpha(*opacity),
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
@@ -515,7 +552,50 @@ impl TerminalRenderer {
         frame.place_transient(&mut self.image_ids, &self.cache[&key], geometry, area, z);
     }
 
+    fn place_tiles(
+        &mut self,
+        frame: &mut Frame,
+        style: TileStyle,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+    ) -> bool {
+        let shape = TileShape {
+            style,
+            cell: self.cell_size(),
+        };
+        let Some(tiles) = shape.tiles(geometry.width, geometry.height) else {
+            return false;
+        };
+        for (col, row, key) in tiles {
+            let cell = Geometry {
+                x: geometry.x + col,
+                y: geometry.y + row,
+                width: 1,
+                height: 1,
+            };
+            if !frame.shows(cell, area) {
+                continue;
+            }
+            if let Some(id) = self.tile_images.get(&key).copied() {
+                frame.place_cached(id, cell, area, z);
+            } else {
+                let id = self.image_ids.allocate();
+                self.tile_images.insert(key, id);
+                let tile = self
+                    .tile_canvases
+                    .entry(key)
+                    .or_insert_with(|| key.canvas());
+                frame.place_fresh(id, tile, cell, area, z);
+            }
+        }
+        true
+    }
+
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
+        if self.place_tiles(frame, TileStyle::Box(style), geometry, area, BOX_Z) {
+            return;
+        }
         let key = box_key(geometry.width, geometry.height, style);
         self.place_cached(frame, key, geometry, area, BOX_Z, |renderer| {
             renderer.box_canvas(geometry.width, geometry.height, style)
@@ -530,6 +610,10 @@ impl TerminalRenderer {
         colour: Option<u8>,
         rounded: bool,
     ) {
+        let style = GlowStyle { colour, rounded };
+        if self.place_tiles(frame, TileStyle::Glow(style), geometry, area, GLOW_Z) {
+            return;
+        }
         let key = glow_key(geometry.width, geometry.height, colour, rounded);
         self.place_cached(frame, key, geometry, area, GLOW_Z, |renderer| {
             renderer.glow_canvas(geometry.width, geometry.height, colour, rounded)
@@ -607,6 +691,13 @@ impl TerminalRenderer {
         self.cache.insert(key, drawn);
     }
 
+    fn cell_size(&self) -> CellSize {
+        CellSize {
+            width: self.window.cell_width,
+            height: self.window.cell_height,
+        }
+    }
+
     fn cells_to_pixels_x(&self, cells: i64) -> i64 {
         cells * self.window.cell_width
     }
@@ -618,18 +709,7 @@ impl TerminalRenderer {
     fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let (r, g, b) = colour(style.colour);
-        let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.opacity);
-        let shape = BoxShape {
-            width,
-            height,
-            border: style.border,
-            radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
-            sides: style.sides,
-            edge: [r, g, b, OPAQUE],
-            fill: [fill_r, fill_g, fill_b, fill_a],
-        };
-        Canvas::fill(width, height, &shape)
+        Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
     fn glow_canvas(
@@ -641,15 +721,11 @@ impl TerminalRenderer {
     ) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let (r, g, b) = colour(edge);
-        let shape = GlowShape {
-            width,
-            height,
-            margin_x: self.cells_to_pixels_x(GLOW_MARGIN),
-            margin_y: self.cells_to_pixels_y(GLOW_MARGIN),
-            radius: if rounded { ROUNDED_RADIUS } else { 0 },
-            colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
+        let style = GlowStyle {
+            colour: edge,
+            rounded,
         };
+        let shape = glow_shape(width, height, self.cell_size(), style);
         Canvas::fill(width, height, &shape)
     }
 
@@ -700,9 +776,10 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
+    use super::super::tiles::{cells_with_middle, TileShape, TileStyle};
     use super::*;
     use crate::state::Mode;
-    use crate::style::{BOX_FILL_OPACITY, FOOTER_FILL_OPACITY};
+    use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
     use crate::view::editor;
     use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
     use crate::State;
@@ -718,13 +795,22 @@ mod tests {
         let alpha = (BOX_FILL_OPACITY * OPAQUE as f64).round() as u8;
         let round = |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
         let expected = (round(r), round(g), round(b), OPAQUE);
-        assert_eq!(fill_colour(Some(2), Some(BOX_FILL_OPACITY)), expected);
+        assert_eq!(
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY))),
+            expected
+        );
     }
 
     #[test]
     fn fill_colour_of_the_footer_opacity_matches_a_regular_box_fill() {
-        let box_fill = fill_colour(Some(crate::style::FOREGROUND), Some(BOX_FILL_OPACITY));
-        let footer_fill = fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
+        let box_fill = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(BOX_FILL_OPACITY)),
+        );
+        let footer_fill = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(FOOTER_FILL_OPACITY)),
+        );
         assert!(box_fill.0 > 0);
         assert_eq!(footer_fill, box_fill);
     }
@@ -776,11 +862,11 @@ mod tests {
     fn a_fill_colour_is_composited_over_black_and_made_opaque() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(None);
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(
             pixel_at(&pixels, size, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
@@ -788,12 +874,12 @@ mod tests {
     fn border_pixels_are_unaffected_by_fill() {
         let size = 2 * BORDER + 3;
         let edge = edge_rgba(Some(3));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         assert_eq!(pixel_at(&pixels, size, 0, 0), edge_rgba(Some(3)));
         assert_eq!(
             pixel_at(&pixels, size, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
@@ -801,7 +887,7 @@ mod tests {
     fn a_border_is_bold_at_every_edge() {
         let size = 3 * 4;
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(size, size, 0, edge, fill);
         for offset in 0..BORDER {
             assert_eq!(pixel_at(&pixels, size, 5, offset), edge);
@@ -822,7 +908,7 @@ mod tests {
     #[test]
     fn a_square_box_is_built_from_flat_edge_and_body_rows() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
 
         let edge_px = [edge.0, edge.1, edge.2, edge.3];
@@ -843,7 +929,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_its_extreme_corners() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let (last_x, last_y) = (CORNER_SIZE - 1, CORNER_SIZE - 1);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 0, 0), TRANSPARENT);
@@ -855,7 +941,7 @@ mod tests {
     #[test]
     fn straight_edges_stay_as_crisp_as_a_square_box() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let middle_y = CORNER_SIZE / 2;
@@ -904,7 +990,7 @@ mod tests {
     #[test]
     fn border_coverage_is_composed_over_the_opaque_fill() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixel_at(&pixels, CORNER_SIZE, 20, 4), (33, 91, 76, OPAQUE));
     }
@@ -912,7 +998,7 @@ mod tests {
     #[test]
     fn a_rounded_box_cuts_away_more_than_a_square_one() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let square = box_pixels(CORNER_SIZE, CORNER_SIZE, 0, edge, fill);
         let rounded = box_pixels(CORNER_SIZE, CORNER_SIZE, ROUNDED_RADIUS, edge, fill);
         let alpha_total = |pixels: &[u8]| {
@@ -950,7 +1036,7 @@ mod tests {
     #[test]
     fn the_sprite_holds_exactly_one_pixel_per_cell_of_its_area() {
         let edge = edge_rgba(Some(1));
-        let fill = fill_colour(Some(2), Some(BOX_FILL_OPACITY));
+        let fill = fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)));
         let pixels = box_pixels(SMALL_SIZE, SMALL_SIZE, ROUNDED_RADIUS, edge, fill);
         assert_eq!(pixels.len() as i64, SMALL_SIZE * SMALL_SIZE * 4);
     }
@@ -1063,7 +1149,7 @@ mod tests {
                 BoxStyle {
                     colour: *colour,
                     fill: *fill,
-                    opacity: *opacity,
+                    fill_alpha: quantized_alpha(*opacity),
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
@@ -1208,15 +1294,19 @@ mod tests {
                 label_placement("x", 5, 5, 1, 1),
             ],
         );
-        assert_eq!(images.len(), 3);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
-        let boxed = images.iter().find(|image| image.z == BOX_Z).unwrap();
+        let layers: std::collections::BTreeSet<i32> = images.iter().map(|image| image.z).collect();
+        let glow = composed(&images, GLOW_Z, r.window);
+        let boxed = composed(&images, BOX_Z, r.window);
         let content = images
             .iter()
-            .find(|image| image.col == 5 && image.row == 5)
+            .find(|image| (image.col, image.row) == (5, 5) && ![BOX_Z, GLOW_Z].contains(&image.z))
             .unwrap();
-        assert!(boxed.z < glow.z);
-        assert!(glow.z < content.z);
+        assert_eq!((boxed.col, boxed.row), (4, 4));
+        assert_eq!((glow.col, glow.row), (3, 3));
+        assert_eq!(
+            layers.into_iter().collect::<Vec<_>>(),
+            vec![BOX_Z, GLOW_Z, content.z]
+        );
     }
 
     #[test]
@@ -1224,15 +1314,15 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         assert_eq!(glow.col, 8 - GLOW_MARGIN);
         assert_eq!(glow.row, 8 - GLOW_MARGIN);
         assert_eq!(
-            glow.canvas().width,
+            glow.canvas.width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas().height,
+            glow.canvas.height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1242,18 +1332,18 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 5, 9));
         let node = selected_box_node(Some(1));
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         assert_eq!(glow.col, 4 - GLOW_MARGIN);
         assert_eq!(glow.row, 4 - GLOW_MARGIN);
         let padding_px_x = GLOW_MARGIN * r.window.cell_width;
         let padding_px_y = GLOW_MARGIN * r.window.cell_height;
         assert_ne!(padding_px_x, padding_px_y);
         assert_eq!(
-            glow.canvas().width,
+            glow.canvas.width,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas().height,
+            glow.canvas.height,
             (4 + 2 * GLOW_MARGIN) * r.window.cell_height
         );
     }
@@ -1263,10 +1353,10 @@ mod tests {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node(Some(3));
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = images.iter().find(|image| image.z == GLOW_Z).unwrap();
+        let glow = composed(&images, GLOW_Z, r.window);
         let (edge_r, edge_g, edge_b) = colour(Some(3));
         let has_edge_colour = glow
-            .canvas()
+            .canvas
             .pixels
             .chunks(4)
             .filter(|pixel| pixel[3] > 0)
@@ -1280,6 +1370,68 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
             }
+        }
+    }
+
+    struct Sprite {
+        col: i64,
+        row: i64,
+        canvas: Canvas,
+    }
+
+    fn composed<'a>(images: &'a [Placed], z: i32, window: Window) -> Sprite {
+        let layer: Vec<&'a Placed> = images.iter().filter(|image| image.z == z).collect();
+        let fresh: std::collections::HashMap<kitty::ImageId, &'a Canvas> = layer
+            .iter()
+            .filter_map(|image| match &image.image {
+                Image::Fresh { id, canvas } => Some((*id, canvas)),
+                Image::Cached { .. } => None,
+            })
+            .collect();
+        let canvas_of = |image: &'a Placed| -> &'a Canvas {
+            match &image.image {
+                Image::Fresh { canvas, .. } => canvas,
+                Image::Cached { id } => fresh[id],
+            }
+        };
+        let col = layer.iter().map(|image| image.col).min().expect("a layer");
+        let row = layer.iter().map(|image| image.row).min().expect("a layer");
+        let origin = |image: &Placed| {
+            (
+                (image.col - col) * window.cell_width,
+                (image.row - row) * window.cell_height,
+            )
+        };
+        let width = layer
+            .iter()
+            .map(|image| origin(image).0 + canvas_of(image).width)
+            .max()
+            .expect("a layer");
+        let height = layer
+            .iter()
+            .map(|image| origin(image).1 + canvas_of(image).height)
+            .max()
+            .expect("a layer");
+        let channels = 4;
+        let mut pixels = vec![0u8; (width * height * channels) as usize];
+        for image in &layer {
+            let (x, y) = origin(image);
+            let canvas = canvas_of(image);
+            let span = (canvas.width * channels) as usize;
+            for line in 0..canvas.height {
+                let from = (line * canvas.width * channels) as usize;
+                let to = (((y + line) * width + x) * channels) as usize;
+                pixels[to..to + span].copy_from_slice(&canvas.pixels[from..from + span]);
+            }
+        }
+        Sprite {
+            col,
+            row,
+            canvas: Canvas {
+                pixels,
+                width,
+                height,
+            },
         }
     }
 
@@ -1886,13 +2038,12 @@ mod tests {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = framed(&mut r, &empty_state());
-        let image = frame
-            .images
-            .first()
-            .expect("the footer box is drawn as an image");
-        let (er, eg, eb, ea) =
-            fill_colour(Some(crate::style::FOREGROUND), Some(FOOTER_FILL_OPACITY));
-        for pixel in image.canvas().pixels.chunks(4) {
+        let footer = composed(&frame.images, BOX_Z, r.window);
+        let (er, eg, eb, ea) = fill_colour(
+            Some(crate::style::FOREGROUND),
+            quantized_alpha(Some(FOOTER_FILL_OPACITY)),
+        );
+        for pixel in footer.canvas.pixels.chunks(4) {
             assert_eq!(pixel, [er, eg, eb, ea]);
         }
     }
@@ -2204,11 +2355,9 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, 2, 4, 3)],
         );
-        assert_eq!((images[0].col, images[0].row), (1, 2));
-        assert_eq!(
-            (images[0].canvas().width, images[0].canvas().height),
-            (24, 36)
-        );
+        let boxed = composed(&images, BOX_Z, r.window);
+        assert_eq!((boxed.col, boxed.row), (1, 2));
+        assert_eq!((boxed.canvas.width, boxed.canvas.height), (24, 36));
     }
 
     #[test]
@@ -2414,7 +2563,7 @@ mod tests {
             BoxStyle {
                 colour: *colour,
                 fill: *fill,
-                opacity: *opacity,
+                fill_alpha: quantized_alpha(*opacity),
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
@@ -2461,7 +2610,7 @@ mod tests {
         let sprite = box_outline(&r, &box_node(Some(2), Some(2), false), size, size);
         assert_eq!(
             pixel_of(&sprite, BORDER + 1, BORDER + 1),
-            fill_colour(Some(2), Some(BOX_FILL_OPACITY))
+            fill_colour(Some(2), quantized_alpha(Some(BOX_FILL_OPACITY)))
         );
     }
 
@@ -2675,5 +2824,285 @@ mod tests {
         for image in body_images {
             assert!(image.row + image.canvas().height / window.cell_height <= body_rows);
         }
+    }
+
+    const EXTRA_CELLS: i64 = 3;
+
+    fn tiled_window() -> Window {
+        window(60, 30, CELL_WIDTH, CELL_HEIGHT)
+    }
+
+    fn tile_shape(r: &TerminalRenderer, node: &PlacementNode<'static>) -> TileShape {
+        let style = match node {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                rounded,
+                sides,
+                border,
+            } => TileStyle::Box(BoxStyle {
+                colour: *colour,
+                fill: *fill,
+                fill_alpha: quantized_alpha(*opacity),
+                rounded: *rounded,
+                sides: *sides,
+                border: *border,
+            }),
+            PlacementNode::Glow { colour, rounded } => TileStyle::Glow(GlowStyle {
+                colour: *colour,
+                rounded: *rounded,
+            }),
+            _ => panic!("expected a box or a glow"),
+        };
+        TileShape {
+            style,
+            cell: r.cell_size(),
+        }
+    }
+
+    fn smallest_tiled(r: &TerminalRenderer, node: &PlacementNode<'static>) -> (i64, i64) {
+        let (column_band, row_band) = tile_shape(r, node).bands();
+        (cells_with_middle(column_band), cells_with_middle(row_band))
+    }
+
+    fn glow_node(colour: Option<u8>) -> PlacementNode<'static> {
+        PlacementNode::Glow {
+            colour,
+            rounded: true,
+        }
+    }
+
+    fn outlined_node(colour: Option<u8>) -> PlacementNode<'static> {
+        box_node(colour, colour, true)
+    }
+
+    fn smallest_tiled_selected_box(r: &TerminalRenderer, colour: Option<u8>) -> (i64, i64) {
+        let (box_cols, box_rows) = smallest_tiled(r, &outlined_node(colour));
+        let (glow_cols, glow_rows) = smallest_tiled(r, &glow_node(colour));
+        (
+            box_cols.max(glow_cols - 2 * GLOW_MARGIN),
+            box_rows.max(glow_rows - 2 * GLOW_MARGIN),
+        )
+    }
+
+    fn selected_box(
+        colour: Option<u8>,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+    ) -> [Placement<'static>; 2] {
+        [
+            box_placement(&outlined_node(colour), x, y, width, height),
+            box_placement(
+                &glow_node(colour),
+                x - GLOW_MARGIN,
+                y - GLOW_MARGIN,
+                width + 2 * GLOW_MARGIN,
+                height + 2 * GLOW_MARGIN,
+            ),
+        ]
+    }
+
+    fn image_ids(output: &str) -> std::collections::HashSet<String> {
+        shown_ids(output)
+            .into_iter()
+            .chain(placed_ids(output))
+            .collect()
+    }
+
+    fn cells_of(placement: &Placement) -> Vec<(i64, i64)> {
+        let geometry = Geometry::from(placement);
+        (geometry.y..geometry.y + geometry.height)
+            .flat_map(|row| (geometry.x..geometry.x + geometry.width).map(move |col| (col, row)))
+            .collect()
+    }
+
+    #[test]
+    fn widening_a_tiled_box_transmits_no_tile_and_places_one_more_per_tiled_row() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+        let narrow = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
+        let wide = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width + 1, height);
+
+        let first = rendered_placements(&mut r, &narrow);
+        let second = rendered_placements(&mut r, &wide);
+
+        let tiled_rows: i64 = narrow.iter().map(|placement| placement.height).sum();
+        let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
+        assert!(shown_ids(&second).is_empty());
+        assert!(deleted_ids(&second).is_empty());
+        assert_eq!(
+            placed_ids(&second).len(),
+            first_placements + tiled_rows as usize
+        );
+    }
+
+    #[test]
+    fn tiled_boxes_of_one_style_and_different_sizes_share_every_tile_image() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+
+        let small = rendered_placements(
+            &mut r,
+            &selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+        let large = rendered_placements(
+            &mut r,
+            &selected_box(
+                colour,
+                GLOW_MARGIN,
+                GLOW_MARGIN,
+                width + EXTRA_CELLS,
+                height + 1,
+            ),
+        );
+
+        assert_eq!(image_ids(&small), image_ids(&large));
+    }
+
+    #[test]
+    fn tiled_boxes_of_different_styles_share_no_tile_image() {
+        let mut r = renderer_on(tiled_window());
+        let (width, height) = smallest_tiled_selected_box(&r, Some(1));
+
+        let one = rendered_placements(
+            &mut r,
+            &selected_box(Some(1), GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+        let other = rendered_placements(
+            &mut r,
+            &selected_box(Some(2), GLOW_MARGIN, GLOW_MARGIN, width, height),
+        );
+
+        assert!(image_ids(&one).is_disjoint(&image_ids(&other)));
+    }
+
+    #[test]
+    fn a_partly_clipped_tiled_box_shows_only_its_whole_tiles_inside_the_area() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let area = Area {
+            col: 2,
+            row: 2,
+            cols: width,
+            rows: height,
+        };
+        let placement = box_placement(&node, area.col - 1, area.row + 1, width, height);
+        let mut frame = Frame::new(r.window);
+
+        r.paint(&mut frame, std::slice::from_ref(&placement), area);
+
+        let inside = |&(col, row): &(i64, i64)| {
+            (area.col..area.col + area.cols).contains(&col)
+                && (area.row..area.row + area.rows).contains(&row)
+        };
+        let expected: Vec<(i64, i64)> = cells_of(&placement).into_iter().filter(inside).collect();
+        let positions: Vec<(i64, i64)> = frame
+            .images
+            .iter()
+            .map(|image| (image.col, image.row))
+            .collect();
+        assert_eq!(positions, expected);
+        for image in &frame.images {
+            if let Image::Fresh { canvas, .. } = &image.image {
+                assert_eq!(
+                    (canvas.width, canvas.height),
+                    (r.window.cell_width, r.window.cell_height)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tiles_keep_their_sprites_z_and_are_queued_row_major_in_scene_order() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+        let [boxed, glow] = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
+
+        let images = sprites(&mut r, &[boxed.clone(), glow.clone()]);
+
+        let queued: Vec<(i64, i64, i32)> = images
+            .iter()
+            .map(|image| (image.col, image.row, image.z))
+            .collect();
+        let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
+            .into_iter()
+            .map(|(col, row)| (col, row, BOX_Z))
+            .chain(
+                cells_of(&glow)
+                    .into_iter()
+                    .map(|(col, row)| (col, row, GLOW_Z)),
+            )
+            .collect();
+        assert_eq!(queued, expected);
+    }
+
+    #[test]
+    fn a_box_too_small_to_tile_is_one_transient_whole_sprite() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let placements = [box_placement(&node, 0, 0, width - 1, height)];
+
+        let images = sprites(&mut r, &placements);
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        let [image] = images.as_slice() else {
+            panic!("expected a single whole sprite");
+        };
+        assert_eq!(
+            (image.canvas().width, image.canvas().height),
+            (
+                (width - 1) * r.window.cell_width,
+                height * r.window.cell_height
+            )
+        );
+        assert_eq!(shown_ids(&first).len(), 1);
+        assert!(placed_ids(&second).is_empty());
+        assert_eq!(deleted_ids(&second), shown_ids(&first));
+    }
+
+    #[test]
+    fn resizing_the_cell_size_produces_new_tile_keys_and_fresh_transmissions() {
+        let mut r = renderer_on(tiled_window());
+        let colour = Some(1);
+        let (old_cell_width, old_cell_height) = (r.window.cell_width, r.window.cell_height);
+        let (old_width, old_height) = smallest_tiled_selected_box(&r, colour);
+        r.window.cell_width = 2 * old_cell_width;
+        r.window.cell_height = 2 * old_cell_height;
+        let (new_width, new_height) = smallest_tiled_selected_box(&r, colour);
+        r.window.cell_width = old_cell_width;
+        r.window.cell_height = old_cell_height;
+        let placements = selected_box(
+            colour,
+            GLOW_MARGIN,
+            GLOW_MARGIN,
+            old_width.max(new_width),
+            old_height.max(new_height),
+        );
+
+        let before = rendered_placements(&mut r, &placements);
+        let keys_before = r.tile_images.len();
+        r.window.cell_width = 2 * old_cell_width;
+        r.window.cell_height = 2 * old_cell_height;
+        let after = rendered_placements(&mut r, &placements);
+
+        let shown_after: std::collections::HashSet<String> =
+            shown_ids(&after).into_iter().collect();
+        assert!(!shown_after.is_empty());
+        assert!(placed_ids(&after).iter().all(|id| shown_after.contains(id)));
+        assert!(image_ids(&before).is_disjoint(&image_ids(&after)));
+        assert!(r.tile_images.len() > keys_before);
+        assert!(r
+            .tile_images
+            .keys()
+            .any(|key| key.shape.cell == r.cell_size()));
     }
 }

@@ -34,13 +34,34 @@ impl BoxShape {
         }
     }
 
-    fn outer(&self) -> i64 {
+    fn corner_reach(&self) -> i64 {
         if self.corner_radius() == 0 {
             return 0;
         }
-        (self.corner_radius() + self.border)
-            .min(self.width / 2)
-            .min(self.height / 2)
+        self.corner_radius() + self.border
+    }
+
+    fn outer(&self) -> i64 {
+        self.corner_reach().min(self.width / 2).min(self.height / 2)
+    }
+
+    fn insets(&self) -> (i64, i64, i64, i64) {
+        let (top, right, bottom, left) = self.sides;
+        (
+            self.inset(top),
+            self.inset(right),
+            self.inset(bottom),
+            self.inset(left),
+        )
+    }
+
+    pub(super) fn edge_extents(&self) -> (i64, i64) {
+        let (top, right, bottom, left) = self.insets();
+        if self.corner_reach() == 0 {
+            (left.max(right), top.max(bottom))
+        } else {
+            (self.corner_reach(), self.corner_reach())
+        }
     }
 
     fn coverage(px: f64, py: f64, width: f64, height: f64, radius: f64) -> f64 {
@@ -64,9 +85,7 @@ impl Shape for BoxShape {
             self.height as f64,
             self.outer() as f64,
         );
-        let (top, right, bottom, left) = self.sides;
-        let (inset_top, inset_right) = (self.inset(top), self.inset(right));
-        let (inset_bottom, inset_left) = (self.inset(bottom), self.inset(left));
+        let (inset_top, inset_right, inset_bottom, inset_left) = self.insets();
         let inner_coverage = Self::coverage(
             px - inset_left as f64,
             py - inset_top as f64,
@@ -111,6 +130,10 @@ pub(super) struct GlowShape {
 impl GlowShape {
     fn reach(&self) -> f64 {
         (self.margin_x.min(self.margin_y) - 1).max(1) as f64
+    }
+
+    pub(super) fn edge_extents(&self) -> (i64, i64) {
+        (self.margin_x + self.radius, self.margin_y + self.radius)
     }
 }
 
