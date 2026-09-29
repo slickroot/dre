@@ -1,4 +1,8 @@
 mod host_key;
+#[allow(dead_code)]
+mod session;
+#[allow(dead_code)]
+mod visitor;
 
 use host_key::HostKey;
 
