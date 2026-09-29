@@ -6,24 +6,20 @@ pub(crate) trait Closer: Send + Sync {
     fn close(&self);
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Token(u64);
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
 struct Registry {
     next_token: u64,
     live: HashMap<String, (Token, Arc<dyn Closer>)>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Default)]
 pub(crate) struct Sessions {
     registry: Arc<Mutex<Registry>>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Sessions {
     pub(crate) fn take_over(&self, fingerprint: &str) {
         let previous = self.registry.lock().unwrap().live.remove(fingerprint);

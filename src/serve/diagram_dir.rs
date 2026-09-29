@@ -4,12 +4,11 @@ use std::path::Path;
 
 const DIAGRAM_FILE: &str = "diagram.dre";
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone)]
 pub(crate) struct DiagramDir {
     pub(crate) root: String,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl DiagramDir {
     pub(crate) fn for_key(&self, fingerprint: &str) -> io::Result<String> {
         let directory = Path::new(&self.root).join(fingerprint);
