@@ -33,7 +33,7 @@ fn arrowhead_slope(_edge_length: f64) -> f64 {
 }
 
 const ROUNDED_RADIUS: i64 = 20;
-const BRACKET_OFFSET: i64 = 6;
+const BRACKET_OFFSET: i64 = 8;
 const BRACKET_ARM: i64 = 14;
 
 const LED_DOT_RATIO: f64 = 0.28;
