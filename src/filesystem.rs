@@ -1,5 +1,6 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
 
 pub(crate) fn read(path: &str) -> io::Result<String> {
     fs::read_to_string(path)
@@ -7,6 +8,16 @@ pub(crate) fn read(path: &str) -> io::Result<String> {
 
 pub(crate) fn write(path: &str, contents: &str) -> io::Result<()> {
     fs::write(path, contents)
+}
+
+pub(crate) fn write_private(path: &str, contents: &str) -> io::Result<()> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(contents.as_bytes())
 }
 
 pub(crate) fn missing(path: &str) -> io::Error {
@@ -38,6 +49,18 @@ mod tests {
         let text = read(&path);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(text.unwrap(), "<dre/>");
+    }
+
+    #[test]
+    fn a_private_write_is_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_path("private.key");
+        write_private(&path, "secret").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        let text = read(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(text.unwrap(), "secret");
     }
 
     #[test]

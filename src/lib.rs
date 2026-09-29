@@ -14,6 +14,8 @@ mod filesystem;
 mod kitty;
 mod layout;
 mod render;
+#[cfg(not(target_arch = "wasm32"))]
+mod serve;
 mod state;
 mod style;
 #[cfg(test)]
@@ -69,6 +71,7 @@ pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
         cli::Command::Edit(file) => editor::bootstrap::run(file),
         cli::Command::Export { input } => cli::export(input),
+        cli::Command::Serve { listen, host_key } => serve::run(listen, host_key),
     };
     match result {
         Ok(code) => code,
