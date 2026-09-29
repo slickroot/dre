@@ -16,6 +16,7 @@ pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 pub(crate) const LED_WIDTH: i64 = 2;
 pub(crate) const GLOW_MARGIN: i64 = 1;
+pub(crate) const BRACKET_MARGIN: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label<'a> {
@@ -53,6 +54,9 @@ pub enum PlacementNode<'a> {
         colour: Option<u8>,
         rounded: bool,
     },
+    Brackets {
+        border: i64,
+    },
     Cursor(Cursor),
     Led {
         colour: u8,
@@ -63,7 +67,9 @@ pub enum PlacementNode<'a> {
 impl<'a> PlacementNode<'a> {
     pub(crate) fn is_decoration(&self) -> bool {
         match self {
-            PlacementNode::Glow { .. } | PlacementNode::Caret(_) => true,
+            PlacementNode::Glow { .. }
+            | PlacementNode::Brackets { .. }
+            | PlacementNode::Caret(_) => true,
             PlacementNode::Box { .. }
             | PlacementNode::Label(_)
             | PlacementNode::Arrow(_)
@@ -424,6 +430,36 @@ mod tests {
             .1
             .iter()
             .any(|placement| matches!(placement.node, PlacementNode::Caret(_))));
+    }
+
+    fn assert_selected_box_is_bracketed(mode: Mode) {
+        let state = new_state(
+            vec![node_with_children("root", vec![node("A"), node("B")])],
+            mode,
+            Some(vec![0]),
+        );
+        assert!(body(&state, WINDOW)[0]
+            .1
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::Brackets { .. })));
+    }
+
+    #[test]
+    fn command_mode_selection_is_bracketed() {
+        assert_selected_box_is_bracketed(Mode::Command);
+    }
+
+    #[test]
+    fn insert_mode_selection_is_bracketed() {
+        assert_selected_box_is_bracketed(Mode::Insert { cursor: 1 });
+    }
+
+    #[test]
+    fn name_prompt_mode_selection_is_bracketed() {
+        assert_selected_box_is_bracketed(Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        });
     }
 
     fn led_column(padding: u8, cursor: Option<i64>) -> Column {

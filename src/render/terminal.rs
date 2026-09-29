@@ -503,6 +503,7 @@ impl TerminalRenderer {
                 PlacementNode::Glow { colour, rounded } => {
                     self.draw_glow(frame, geometry, area, *colour, *rounded)
                 }
+                PlacementNode::Brackets { .. } => {}
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
                     frame,
                     geometry,

@@ -131,6 +131,7 @@ fn paint(placements: &[Placement]) -> String {
             PlacementNode::Glow { colour, rounded } => {
                 glows.push_str(&glow_rect(placement, *colour, *rounded))
             }
+            PlacementNode::Brackets { .. } => {}
             PlacementNode::Led { colour, lit } => {
                 leds.push_str(&led_circle(placement, *colour, *lit))
             }
