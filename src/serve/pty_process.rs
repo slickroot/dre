@@ -30,8 +30,8 @@ impl PtyProcess {
 }
 
 impl Spawner for PtyProcess {
-    fn spawn(&self, window: Window) -> io::Result<Box<dyn Session>> {
-        Ok(Box::new(PtyChild::start(&self.program, window)?))
+    fn spawn(&self, window: Window, path: &str) -> io::Result<Box<dyn Session>> {
+        Ok(Box::new(PtyChild::start(&self.program, window, path)?))
     }
 }
 
@@ -41,11 +41,12 @@ struct PtyChild {
 }
 
 impl PtyChild {
-    fn start(program: &str, window: Window) -> io::Result<Self> {
+    fn start(program: &str, window: Window, path: &str) -> io::Result<Self> {
         let pty = openpty(&winsize(window), None).map_err(io::Error::from)?;
         fcntl(&pty.master, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)).map_err(io::Error::from)?;
         let mut command = Command::new(program);
         command
+            .arg(path)
             .stdin(Stdio::from(pty.slave.try_clone()?))
             .stdout(Stdio::from(pty.slave.try_clone()?))
             .stderr(Stdio::from(pty.slave));
@@ -146,7 +147,7 @@ mod tests {
     const DEADLINE: Duration = Duration::from_secs(5);
 
     fn spawn_child(window: Window) -> PtyChild {
-        PtyChild::start("cat", window).unwrap()
+        PtyChild::start("cat", window, "-").unwrap()
     }
 
     fn read_until(session: &PtyChild, expected: &str) -> String {
@@ -172,6 +173,12 @@ mod tests {
         let session = spawn_child(WINDOW);
         session.write(b"hello\n");
         assert!(read_until(&session, "hello").contains("hello"));
+    }
+
+    #[test]
+    fn the_child_receives_the_path_as_its_argument() {
+        let session = PtyChild::start("echo", WINDOW, "/tmp/some diagram.dre").unwrap();
+        assert!(read_until(&session, "/tmp/some diagram.dre").contains("/tmp/some diagram.dre"));
     }
 
     #[test]

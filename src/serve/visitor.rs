@@ -5,6 +5,8 @@ use russh::{Channel, ChannelId};
 use std::future::Future;
 use std::sync::{Arc, Weak};
 
+const TEMPORARY_DIAGRAM_PATH: &str = "";
+
 pub(crate) trait Outlet: Clone + Send + 'static {
     fn send(&self, bytes: Vec<u8>) -> impl Future<Output = ()> + Send;
     fn close(&self) -> impl Future<Output = ()> + Send;
@@ -66,8 +68,8 @@ impl VisitorHandler {
         self.fingerprint = Some(key.fingerprint(HashAlg::Sha256).to_string());
     }
 
-    fn start_shell(&mut self, outlet: impl Outlet) -> std::io::Result<()> {
-        let session: Arc<dyn Session> = Arc::from(self.spawner.spawn(self.window)?);
+    fn start_shell(&mut self, outlet: impl Outlet, path: &str) -> std::io::Result<()> {
+        let session: Arc<dyn Session> = Arc::from(self.spawner.spawn(self.window, path)?);
         tokio::spawn(relay(Arc::downgrade(&session), outlet));
         self.session = Some(session);
         Ok(())
@@ -148,7 +150,7 @@ impl Handler for VisitorHandler {
             handle: session.handle(),
             channel,
         };
-        self.start_shell(outlet)?;
+        self.start_shell(outlet, TEMPORARY_DIAGRAM_PATH)?;
         session.channel_success(channel)
     }
 
@@ -227,7 +229,7 @@ mod tests {
     fn spawner_of(session: MockSession) -> Arc<dyn Spawner + Send + Sync> {
         let session = Mutex::new(Some(session));
         let mut spawner = MockSpawner::new();
-        spawner.expect_spawn().returning(move |_| {
+        spawner.expect_spawn().returning(move |_, _| {
             Ok(Box::new(session.lock().unwrap().take().unwrap()) as Box<dyn Session>)
         });
         Arc::new(spawner)
@@ -235,7 +237,7 @@ mod tests {
 
     fn started_handler(session: MockSession) -> VisitorHandler {
         let mut handler = VisitorHandler::new(spawner_of(session));
-        handler.start_shell(fake_outlet().0).unwrap();
+        handler.start_shell(fake_outlet().0, "diagram.dre").unwrap();
         handler
     }
 
@@ -256,12 +258,26 @@ mod tests {
         let mut spawner = MockSpawner::new();
         spawner
             .expect_spawn()
-            .withf(|window| *window == SIZE)
+            .withf(|window, _| *window == SIZE)
             .times(1)
-            .returning(|_| Ok(Box::new(silent_session())));
+            .returning(|_, _| Ok(Box::new(silent_session())));
         let mut handler = VisitorHandler::new(Arc::new(spawner));
         handler.window = SIZE;
-        handler.start_shell(fake_outlet().0).unwrap();
+        handler.start_shell(fake_outlet().0, "diagram.dre").unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_shell_spawns_with_the_given_path() {
+        let mut spawner = MockSpawner::new();
+        spawner
+            .expect_spawn()
+            .withf(|_, path| path == "some/diagram.dre")
+            .times(1)
+            .returning(|_, _| Ok(Box::new(silent_session())));
+        let mut handler = VisitorHandler::new(Arc::new(spawner));
+        handler
+            .start_shell(fake_outlet().0, "some/diagram.dre")
+            .unwrap();
     }
 
     #[tokio::test]
@@ -285,7 +301,7 @@ mod tests {
             .returning(move || outputs.pop().unwrap());
         let mut handler = VisitorHandler::new(spawner_of(session));
         let (outlet, mut received) = fake_outlet();
-        handler.start_shell(outlet).unwrap();
+        handler.start_shell(outlet, "diagram.dre").unwrap();
         assert_eq!(received.recv().await, Some(Some(b"drawn".to_vec())));
     }
 
@@ -305,14 +321,14 @@ mod tests {
     async fn end_of_session_output_closes_the_channel() {
         let mut handler = VisitorHandler::new(spawner_of(silent_session()));
         let (outlet, mut received) = fake_outlet();
-        handler.start_shell(outlet).unwrap();
+        handler.start_shell(outlet, "diagram.dre").unwrap();
         assert_eq!(received.recv().await, Some(None));
     }
 
     #[tokio::test]
     async fn two_connections_get_two_separate_sessions() {
         let mut spawner = MockSpawner::new();
-        spawner.expect_spawn().times(2).returning(|_| {
+        spawner.expect_spawn().times(2).returning(|_, _| {
             let mut session = silent_session();
             session.expect_write().times(1).return_const(());
             Ok(Box::new(session))
@@ -320,8 +336,8 @@ mod tests {
         let mut server = SshServer::new(Arc::new(spawner));
         let mut first = server.new_client(None);
         let mut second = server.new_client(None);
-        first.start_shell(fake_outlet().0).unwrap();
-        second.start_shell(fake_outlet().0).unwrap();
+        first.start_shell(fake_outlet().0, "diagram.dre").unwrap();
+        second.start_shell(fake_outlet().0, "diagram.dre").unwrap();
         first.write(b"a");
         second.write(b"b");
     }
@@ -350,10 +366,10 @@ mod tests {
         let mut spawner = MockSpawner::new();
         spawner
             .expect_spawn()
-            .returning(move |_| Ok(Box::new(probe.lock().unwrap().take().unwrap())));
+            .returning(move |_, _| Ok(Box::new(probe.lock().unwrap().take().unwrap())));
         let mut handler = VisitorHandler::new(Arc::new(spawner));
         let (outlet, mut received) = fake_outlet();
-        handler.start_shell(outlet).unwrap();
+        handler.start_shell(outlet, "diagram.dre").unwrap();
         received.recv().await;
         drop(handler);
         assert!(dropped.load(Ordering::SeqCst));
