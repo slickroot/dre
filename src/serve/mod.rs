@@ -1,6 +1,11 @@
+mod host_key;
+
+use host_key::HostKey;
+
 use std::io;
 use std::process::ExitCode;
 
-pub(crate) fn run(_listen: String, _host_key: String) -> io::Result<ExitCode> {
+pub(crate) fn run(_listen: String, host_key: String) -> io::Result<ExitCode> {
+    HostKey::load_or_generate(&host_key)?.into_key();
     Ok(ExitCode::SUCCESS)
 }
