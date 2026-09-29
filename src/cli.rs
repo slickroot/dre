@@ -14,6 +14,28 @@ use crate::view;
 pub(crate) enum Command {
     Edit(Option<String>),
     Export { input: String },
+    Serve { listen: String, host_key: String },
+}
+
+const DEFAULT_LISTEN: &str = "0.0.0.0:2222";
+const DEFAULT_HOST_KEY_UNDER_HOME: &str = ".local/share/dre/host_key";
+
+fn default_host_key() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    format!("{home}/{DEFAULT_HOST_KEY_UNDER_HOME}")
+}
+
+fn parse_serve<I: Iterator<Item = String>>(mut args: I) -> Command {
+    let mut listen = DEFAULT_LISTEN.to_string();
+    let mut host_key = default_host_key();
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--listen" => listen = args.next().unwrap_or(listen),
+            "--host-key" => host_key = args.next().unwrap_or(host_key),
+            _ => {}
+        }
+    }
+    Command::Serve { listen, host_key }
 }
 
 pub(crate) fn parse_args() -> Command {
@@ -25,6 +47,7 @@ fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Command {
         Some(arg) if arg == "--svg" => Command::Export {
             input: args.next().unwrap_or_default(),
         },
+        Some(arg) if arg == "serve" => parse_serve(args),
         Some(arg) => Command::Edit(Some(arg)),
         None => Command::Edit(None),
     }
@@ -82,6 +105,55 @@ mod tests {
             parse(&["--svg", "diagram.dre"]),
             Command::Export {
                 input: "diagram.dre".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn serve_without_flags_applies_the_defaults() {
+        assert_eq!(
+            parse(&["serve"]),
+            Command::Serve {
+                listen: DEFAULT_LISTEN.to_string(),
+                host_key: default_host_key()
+            }
+        );
+    }
+
+    #[test]
+    fn the_default_host_key_lives_under_home() {
+        assert!(default_host_key().ends_with(DEFAULT_HOST_KEY_UNDER_HOME));
+    }
+
+    #[test]
+    fn serve_with_listen_overrides_only_the_address() {
+        assert_eq!(
+            parse(&["serve", "--listen", "127.0.0.1:9000"]),
+            Command::Serve {
+                listen: "127.0.0.1:9000".to_string(),
+                host_key: default_host_key()
+            }
+        );
+    }
+
+    #[test]
+    fn serve_with_host_key_overrides_only_the_key_path() {
+        assert_eq!(
+            parse(&["serve", "--host-key", "./tmp/host_key"]),
+            Command::Serve {
+                listen: DEFAULT_LISTEN.to_string(),
+                host_key: "./tmp/host_key".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn serve_accepts_both_flags_in_either_order() {
+        assert_eq!(
+            parse(&["serve", "--host-key", "k", "--listen", "l"]),
+            Command::Serve {
+                listen: "l".to_string(),
+                host_key: "k".to_string()
             }
         );
     }
