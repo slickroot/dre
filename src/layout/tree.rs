@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use crate::diagram::{children, Node};
 use crate::style::BOX_FILL_OPACITY;
 use crate::view::{
-    self, Arrow, Caret, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT, GAP_WIDTH,
-    GLOW_MARGIN,
+    self, Arrow, Caret, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT,
+    BRACKET_MARGIN, GAP_WIDTH,
 };
 use types::Tree;
 
@@ -105,11 +105,11 @@ fn place<'a>(
 
         if selected {
             placements.push(Placement {
-                node: PlacementNode::Glow { colour, rounded },
-                x: x - GLOW_MARGIN,
-                y: y - GLOW_MARGIN,
-                width: width + 2 * GLOW_MARGIN,
-                height: BOX_HEIGHT + 2 * GLOW_MARGIN,
+                node: PlacementNode::Brackets { border: BORDER },
+                x: x - BRACKET_MARGIN,
+                y: y - BRACKET_MARGIN,
+                width: width + 2 * BRACKET_MARGIN,
+                height: BOX_HEIGHT + 2 * BRACKET_MARGIN,
             });
         }
 
@@ -258,7 +258,7 @@ mod tests {
     use crate::diagram::{labelled, node, node_with_children};
     use crate::view::{
         interior, label_centre as centre, Arrow, Caret, Label, PlacementNode, ALL_SIDES, BORDER,
-        BOX_HEIGHT, GLOW_MARGIN,
+        BOX_HEIGHT, BRACKET_MARGIN,
     };
 
     fn offsets_for(nodes: &Tree<Node>) -> Vec<i64> {
@@ -636,11 +636,11 @@ mod tests {
 
         assert!(placements
             .iter()
-            .all(|p| !matches!(&p.node, PlacementNode::Glow { .. })));
+            .all(|p| !matches!(&p.node, PlacementNode::Brackets { .. })));
     }
 
     #[test]
-    fn diagram_emits_a_glow_immediately_after_the_selected_box() {
+    fn diagram_emits_brackets_immediately_after_the_selected_box() {
         let nodes = Tree::root(vec![node_with_children(
             "parent",
             vec![node("a"), node("b")],
@@ -652,46 +652,34 @@ mod tests {
             .position(|p| matches!(&p.node, PlacementNode::Label(label) if label.text == "b"))
             .expect("the selected node has a label placement");
         let selected_box = &placements[label_index - 2];
-        let glow = &placements[label_index - 1];
+        let brackets = &placements[label_index - 1];
 
         assert!(matches!(selected_box.node, PlacementNode::Box { .. }));
-        let (colour, rounded) = match selected_box.node {
-            PlacementNode::Box {
-                colour, rounded, ..
-            } => (colour, rounded),
-            _ => unreachable!(),
-        };
-        match glow.node {
-            PlacementNode::Glow {
-                colour: glow_colour,
-                rounded: glow_rounded,
-            } => {
-                assert_eq!(glow_colour, colour);
-                assert_eq!(glow_rounded, rounded);
-            }
-            _ => panic!("expected a glow placement right after the selected box"),
+        match brackets.node {
+            PlacementNode::Brackets { border } => assert_eq!(border, BORDER),
+            _ => panic!("expected brackets right after the selected box"),
         }
-        assert_eq!(glow.x, selected_box.x - GLOW_MARGIN);
-        assert_eq!(glow.y, selected_box.y - GLOW_MARGIN);
-        assert_eq!(glow.width, selected_box.width + 2 * GLOW_MARGIN);
-        assert_eq!(glow.height, selected_box.height + 2 * GLOW_MARGIN);
+        assert_eq!(brackets.x, selected_box.x - BRACKET_MARGIN);
+        assert_eq!(brackets.y, selected_box.y - BRACKET_MARGIN);
+        assert_eq!(brackets.width, selected_box.width + 2 * BRACKET_MARGIN);
+        assert_eq!(brackets.height, selected_box.height + 2 * BRACKET_MARGIN);
 
         assert_eq!(
             placements
                 .iter()
-                .filter(|p| matches!(p.node, PlacementNode::Glow { .. }))
+                .filter(|p| matches!(p.node, PlacementNode::Brackets { .. }))
                 .count(),
             1
         );
     }
 
     #[test]
-    fn diagram_emits_no_glow_when_the_selection_matches_no_node() {
+    fn diagram_emits_no_brackets_when_the_selection_matches_no_node() {
         let nodes = Tree::root(vec![node("hi")]);
         let placements = diagram(&nodes, None, Some(&[99]));
         assert!(placements
             .iter()
-            .all(|p| !matches!(&p.node, PlacementNode::Glow { .. })));
+            .all(|p| !matches!(&p.node, PlacementNode::Brackets { .. })));
     }
 
     fn box_and_label<'a>(placements: &[Placement<'a>]) -> (Placement<'a>, Placement<'a>) {

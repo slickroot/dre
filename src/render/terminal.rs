@@ -2,9 +2,9 @@ use std::io::{self, Write};
 use std::num::NonZeroU32;
 
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape, GlowShape, LedShape};
+use super::shapes::{ArrowShape, BoxShape, BracketsShape, LedShape};
 use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
-use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, Renderer, ARROW_OPACITY, BRACKET_ARM, BRACKET_OFFSET, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
@@ -12,7 +12,7 @@ use crate::kitty;
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
-use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, GLOW_MARGIN};
+use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, BRACKET_MARGIN};
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -27,9 +27,8 @@ pub(crate) const CACHE_LIMIT: usize = 512;
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
 const BOX_Z: i32 = -3;
-const GLOW_Z: i32 = -2;
+const BRACKETS_Z: i32 = -2;
 const CONTENT_Z: i32 = -1;
-const GLOW_OPACITY: f64 = 0.7;
 const INK_Z: i32 = CONTENT_Z;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,9 +42,8 @@ pub(super) struct BoxStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct GlowStyle {
-    pub(super) colour: Option<u8>,
-    pub(super) rounded: bool,
+pub(super) struct BracketStyle {
+    pub(super) border: i64,
 }
 
 #[derive(Clone, Copy)]
@@ -108,15 +106,22 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
-pub(super) fn glow_shape(width: i64, height: i64, cell: CellSize, style: GlowStyle) -> GlowShape {
-    let (r, g, b) = colour(style.colour);
-    GlowShape {
+pub(super) fn brackets_shape(
+    width: i64,
+    height: i64,
+    cell: CellSize,
+    style: BracketStyle,
+) -> BracketsShape {
+    let (r, g, b) = colour(None);
+    BracketsShape {
         width,
         height,
-        margin_x: GLOW_MARGIN * cell.width,
-        margin_y: GLOW_MARGIN * cell.height,
-        radius: if style.rounded { ROUNDED_RADIUS } else { 0 },
-        colour: [r, g, b, (GLOW_OPACITY * OPAQUE as f64).round() as u8],
+        margin_x: BRACKET_MARGIN * cell.width,
+        margin_y: BRACKET_MARGIN * cell.height,
+        offset: BRACKET_OFFSET,
+        arm: BRACKET_ARM,
+        thickness: style.border,
+        colour: [r, g, b, OPAQUE],
     }
 }
 
@@ -171,11 +176,10 @@ enum SpriteKey {
         stops: Vec<i64>,
         shaft: i64,
     },
-    Glow {
+    Brackets {
         width: i64,
         height: i64,
-        colour: Option<u8>,
-        rounded: bool,
+        border: i64,
     },
     Led {
         width: i64,
@@ -207,12 +211,11 @@ fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
     }
 }
 
-fn glow_key(width: i64, height: i64, colour: Option<u8>, rounded: bool) -> SpriteKey {
-    SpriteKey::Glow {
+fn brackets_key(width: i64, height: i64, style: BracketStyle) -> SpriteKey {
+    SpriteKey::Brackets {
         width,
         height,
-        colour,
-        rounded,
+        border: style.border,
     }
 }
 
@@ -500,8 +503,8 @@ impl TerminalRenderer {
                         border: *border,
                     },
                 ),
-                PlacementNode::Glow { colour, rounded } => {
-                    self.draw_glow(frame, geometry, area, *colour, *rounded)
+                PlacementNode::Brackets { border } => {
+                    self.draw_brackets(frame, geometry, area, BracketStyle { border: *border })
                 }
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
                     frame,
@@ -606,21 +609,25 @@ impl TerminalRenderer {
         });
     }
 
-    fn draw_glow(
+    fn draw_brackets(
         &mut self,
         frame: &mut Frame,
         geometry: Geometry,
         area: Area,
-        colour: Option<u8>,
-        rounded: bool,
+        style: BracketStyle,
     ) {
-        let style = GlowStyle { colour, rounded };
-        if self.place_tiles(frame, TileStyle::Glow(style), geometry, area, GLOW_Z) {
+        if self.place_tiles(
+            frame,
+            TileStyle::Brackets(style),
+            geometry,
+            area,
+            BRACKETS_Z,
+        ) {
             return;
         }
-        let key = glow_key(geometry.width, geometry.height, colour, rounded);
-        self.place_cached(frame, key, geometry, area, GLOW_Z, |renderer| {
-            renderer.glow_canvas(geometry.width, geometry.height, colour, rounded)
+        let key = brackets_key(geometry.width, geometry.height, style);
+        self.place_cached(frame, key, geometry, area, BRACKETS_Z, |renderer| {
+            renderer.brackets_canvas(geometry.width, geometry.height, style)
         });
     }
 
@@ -716,20 +723,10 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
-    fn glow_canvas(
-        &self,
-        cell_width: i64,
-        cell_height: i64,
-        edge: Option<u8>,
-        rounded: bool,
-    ) -> Canvas {
+    fn brackets_canvas(&self, cell_width: i64, cell_height: i64, style: BracketStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        let style = GlowStyle {
-            colour: edge,
-            rounded,
-        };
-        let shape = glow_shape(width, height, self.cell_size(), style);
+        let shape = brackets_shape(width, height, self.cell_size(), style);
         Canvas::fill(width, height, &shape)
     }
 
@@ -1098,11 +1095,8 @@ mod tests {
         }
     }
 
-    fn selected_box_node(colour: Option<u8>) -> PlacementNode<'static> {
-        PlacementNode::Glow {
-            colour,
-            rounded: false,
-        }
+    fn selected_box_node() -> PlacementNode<'static> {
+        PlacementNode::Brackets { border: BORDER }
     }
 
     fn box_placement(
@@ -1175,9 +1169,11 @@ mod tests {
                     lit: *lit,
                 },
             ),
-            PlacementNode::Glow { colour, rounded } => {
-                glow_key(placement.width, placement.height, *colour, *rounded)
-            }
+            PlacementNode::Brackets { border } => brackets_key(
+                placement.width,
+                placement.height,
+                BracketStyle { border: *border },
+            ),
             _ => panic!("expected a cached placement"),
         }
     }
@@ -1279,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unselected_box_places_no_glow() {
+    fn an_unselected_box_places_no_brackets() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = box_node(Some(1), None, false);
         let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
@@ -1287,9 +1283,9 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_box_places_its_glow_above_the_fill_and_below_content() {
+    fn a_selected_box_places_its_brackets_above_the_fill_and_below_content() {
         let mut r = renderer_on(window(20, 20, 2, 2));
-        let node = selected_box_node(Some(1));
+        let node = selected_box_node();
         let images = sprites(
             &mut r,
             &[
@@ -1299,73 +1295,79 @@ mod tests {
             ],
         );
         let layers: std::collections::BTreeSet<i32> = images.iter().map(|image| image.z).collect();
-        let glow = composed(&images, GLOW_Z, r.window);
+        let brackets = composed(&images, BRACKETS_Z, r.window);
         let boxed = composed(&images, BOX_Z, r.window);
         let content = images
             .iter()
-            .find(|image| (image.col, image.row) == (5, 5) && ![BOX_Z, GLOW_Z].contains(&image.z))
+            .find(|image| {
+                (image.col, image.row) == (5, 5) && ![BOX_Z, BRACKETS_Z].contains(&image.z)
+            })
             .unwrap();
         assert_eq!((boxed.col, boxed.row), (4, 4));
-        assert_eq!((glow.col, glow.row), (3, 3));
+        assert_eq!((brackets.col, brackets.row), (3, 3));
         assert_eq!(
             layers.into_iter().collect::<Vec<_>>(),
-            vec![BOX_Z, GLOW_Z, content.z]
+            vec![BOX_Z, BRACKETS_Z, content.z]
         );
     }
 
     #[test]
-    fn the_glow_is_centred_on_the_box_and_extends_beyond_it() {
+    fn the_brackets_is_centred_on_the_box_and_extends_beyond_it() {
         let mut r = renderer_on(window(20, 20, 2, 2));
-        let node = selected_box_node(Some(1));
+        let node = selected_box_node();
         let images = sprites(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
-        let glow = composed(&images, GLOW_Z, r.window);
-        assert_eq!(glow.col, 8 - GLOW_MARGIN);
-        assert_eq!(glow.row, 8 - GLOW_MARGIN);
+        let brackets = composed(&images, BRACKETS_Z, r.window);
+        assert_eq!(brackets.col, 8 - BRACKET_MARGIN);
+        assert_eq!(brackets.row, 8 - BRACKET_MARGIN);
         assert_eq!(
-            glow.canvas.width,
-            (4 + 2 * GLOW_MARGIN) * r.window.cell_width
+            brackets.canvas.width,
+            (4 + 2 * BRACKET_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas.height,
-            (4 + 2 * GLOW_MARGIN) * r.window.cell_height
+            brackets.canvas.height,
+            (4 + 2 * BRACKET_MARGIN) * r.window.cell_height
         );
     }
 
     #[test]
-    fn transparent_sprite_padding_is_cell_aligned_independently_of_glow_thickness() {
+    fn transparent_sprite_padding_is_cell_aligned_independently_of_bracket_thickness() {
         let mut r = renderer_on(window(20, 20, 5, 9));
-        let node = selected_box_node(Some(1));
+        let node = selected_box_node();
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = composed(&images, GLOW_Z, r.window);
-        assert_eq!(glow.col, 4 - GLOW_MARGIN);
-        assert_eq!(glow.row, 4 - GLOW_MARGIN);
-        let padding_px_x = GLOW_MARGIN * r.window.cell_width;
-        let padding_px_y = GLOW_MARGIN * r.window.cell_height;
+        let brackets = composed(&images, BRACKETS_Z, r.window);
+        assert_eq!(brackets.col, 4 - BRACKET_MARGIN);
+        assert_eq!(brackets.row, 4 - BRACKET_MARGIN);
+        let padding_px_x = BRACKET_MARGIN * r.window.cell_width;
+        let padding_px_y = BRACKET_MARGIN * r.window.cell_height;
         assert_ne!(padding_px_x, padding_px_y);
         assert_eq!(
-            glow.canvas.width,
-            (4 + 2 * GLOW_MARGIN) * r.window.cell_width
+            brackets.canvas.width,
+            (4 + 2 * BRACKET_MARGIN) * r.window.cell_width
         );
         assert_eq!(
-            glow.canvas.height,
-            (4 + 2 * GLOW_MARGIN) * r.window.cell_height
+            brackets.canvas.height,
+            (4 + 2 * BRACKET_MARGIN) * r.window.cell_height
         );
     }
 
     #[test]
-    fn the_glow_uses_the_boxs_own_edge_colour() {
-        let mut r = renderer_on(window(20, 20, 2, 2));
-        let node = selected_box_node(Some(3));
+    fn the_brackets_are_drawn_in_the_foreground_colour() {
+        let mut r = renderer_on(window(20, 20, CELL_WIDTH, CELL_HEIGHT));
+        let node = selected_box_node();
         let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let glow = composed(&images, GLOW_Z, r.window);
-        let (edge_r, edge_g, edge_b) = colour(Some(3));
-        let has_edge_colour = glow
+        let brackets = composed(&images, BRACKETS_Z, r.window);
+        let (foreground_r, foreground_g, foreground_b) = colour(None);
+        let painted: Vec<&[u8]> = brackets
             .canvas
             .pixels
             .chunks(4)
             .filter(|pixel| pixel[3] > 0)
-            .any(|pixel| pixel[0] == edge_r && pixel[1] == edge_g && pixel[2] == edge_b);
-        assert!(has_edge_colour);
+            .collect();
+        assert!(!painted.is_empty());
+        assert!(painted.iter().all(|pixel| {
+            (pixel[0], pixel[1], pixel[2], pixel[3])
+                == (foreground_r, foreground_g, foreground_b, OPAQUE)
+        }));
     }
 
     impl Placed {
@@ -2942,11 +2944,10 @@ mod tests {
                 sides: *sides,
                 border: *border,
             }),
-            PlacementNode::Glow { colour, rounded } => TileStyle::Glow(GlowStyle {
-                colour: *colour,
-                rounded: *rounded,
-            }),
-            _ => panic!("expected a box or a glow"),
+            PlacementNode::Brackets { border } => {
+                TileStyle::Brackets(BracketStyle { border: *border })
+            }
+            _ => panic!("expected a box or brackets"),
         };
         TileShape {
             style,
@@ -2959,11 +2960,8 @@ mod tests {
         (cells_with_middle(column_band), cells_with_middle(row_band))
     }
 
-    fn glow_node(colour: Option<u8>) -> PlacementNode<'static> {
-        PlacementNode::Glow {
-            colour,
-            rounded: true,
-        }
+    fn brackets_node() -> PlacementNode<'static> {
+        PlacementNode::Brackets { border: BORDER }
     }
 
     fn outlined_node(colour: Option<u8>) -> PlacementNode<'static> {
@@ -2972,10 +2970,10 @@ mod tests {
 
     fn smallest_tiled_selected_box(r: &TerminalRenderer, colour: Option<u8>) -> (i64, i64) {
         let (box_cols, box_rows) = smallest_tiled(r, &outlined_node(colour));
-        let (glow_cols, glow_rows) = smallest_tiled(r, &glow_node(colour));
+        let (brackets_cols, brackets_rows) = smallest_tiled(r, &brackets_node());
         (
-            box_cols.max(glow_cols - 2 * GLOW_MARGIN),
-            box_rows.max(glow_rows - 2 * GLOW_MARGIN),
+            box_cols.max(brackets_cols - 2 * BRACKET_MARGIN),
+            box_rows.max(brackets_rows - 2 * BRACKET_MARGIN),
         )
     }
 
@@ -2989,11 +2987,11 @@ mod tests {
         [
             box_placement(&outlined_node(colour), x, y, width, height),
             box_placement(
-                &glow_node(colour),
-                x - GLOW_MARGIN,
-                y - GLOW_MARGIN,
-                width + 2 * GLOW_MARGIN,
-                height + 2 * GLOW_MARGIN,
+                &brackets_node(),
+                x - BRACKET_MARGIN,
+                y - BRACKET_MARGIN,
+                width + 2 * BRACKET_MARGIN,
+                height + 2 * BRACKET_MARGIN,
             ),
         ]
     }
@@ -3017,8 +3015,8 @@ mod tests {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
-        let narrow = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
-        let wide = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width + 1, height);
+        let narrow = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height);
+        let wide = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width + 1, height);
 
         let first = rendered_placements(&mut r, &narrow);
         let second = rendered_placements(&mut r, &wide);
@@ -3041,14 +3039,14 @@ mod tests {
 
         let small = rendered_placements(
             &mut r,
-            &selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height),
+            &selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height),
         );
         let large = rendered_placements(
             &mut r,
             &selected_box(
                 colour,
-                GLOW_MARGIN,
-                GLOW_MARGIN,
+                BRACKET_MARGIN,
+                BRACKET_MARGIN,
                 width + EXTRA_CELLS,
                 height + 1,
             ),
@@ -3064,11 +3062,11 @@ mod tests {
 
         let one = rendered_placements(
             &mut r,
-            &selected_box(Some(1), GLOW_MARGIN, GLOW_MARGIN, width, height),
+            &selected_box(Some(1), BRACKET_MARGIN, BRACKET_MARGIN, width, height)[..1],
         );
         let other = rendered_placements(
             &mut r,
-            &selected_box(Some(2), GLOW_MARGIN, GLOW_MARGIN, width, height),
+            &selected_box(Some(2), BRACKET_MARGIN, BRACKET_MARGIN, width, height)[..1],
         );
 
         assert!(image_ids(&one).is_disjoint(&image_ids(&other)));
@@ -3116,9 +3114,9 @@ mod tests {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
-        let [boxed, glow] = selected_box(colour, GLOW_MARGIN, GLOW_MARGIN, width, height);
+        let [boxed, brackets] = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height);
 
-        let images = sprites(&mut r, &[boxed.clone(), glow.clone()]);
+        let images = sprites(&mut r, &[boxed.clone(), brackets.clone()]);
 
         let queued: Vec<(i64, i64, i32)> = images
             .iter()
@@ -3128,9 +3126,9 @@ mod tests {
             .into_iter()
             .map(|(col, row)| (col, row, BOX_Z))
             .chain(
-                cells_of(&glow)
+                cells_of(&brackets)
                     .into_iter()
-                    .map(|(col, row)| (col, row, GLOW_Z)),
+                    .map(|(col, row)| (col, row, BRACKETS_Z)),
             )
             .collect();
         assert_eq!(queued, expected);
@@ -3175,8 +3173,8 @@ mod tests {
         r.window.cell_height = old_cell_height;
         let placements = selected_box(
             colour,
-            GLOW_MARGIN,
-            GLOW_MARGIN,
+            BRACKET_MARGIN,
+            BRACKET_MARGIN,
             old_width.max(new_width),
             old_height.max(new_height),
         );

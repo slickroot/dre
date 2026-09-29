@@ -33,6 +33,8 @@ fn arrowhead_slope(_edge_length: f64) -> f64 {
 }
 
 const ROUNDED_RADIUS: i64 = 20;
+const BRACKET_OFFSET: i64 = 8;
+const BRACKET_ARM: i64 = 14;
 
 const LED_DOT_RATIO: f64 = 0.28;
 const LED_HALO_ALPHA: f64 = 0.45;
@@ -212,12 +214,9 @@ mod tests {
         assert_eq!(cut_on_left, cut_on_right + 1);
     }
 
-    fn glow_at(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
+    fn brackets_at(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
         Placement {
-            node: PlacementNode::Glow {
-                colour: None,
-                rounded: false,
-            },
+            node: PlacementNode::Brackets { border: 1 },
             x,
             y,
             width,
@@ -236,13 +235,13 @@ mod tests {
     }
 
     #[test]
-    fn centre_ignores_glow_and_caret_when_computing_the_bounding_box() {
+    fn centre_ignores_brackets_and_caret_when_computing_the_bounding_box() {
         let (width, height) = (6, 4);
         let content_only = centre(vec![box_at(0, 0, width, height)], AREA);
         let with_decorations = centre(
             vec![
                 box_at(0, 0, width, height),
-                glow_at(-1, -1, width + 2, height + 2),
+                brackets_at(-1, -1, width + 2, height + 2),
                 caret_at(width + 5, height + 5),
             ],
             AREA,
