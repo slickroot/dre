@@ -49,26 +49,26 @@ impl Controller for DreController {
         let mut state = state;
         while state.is_running() {
             self.screen.render(&state)?;
-            match self.keys.next_key()? {
-                Some(key) if key == tty::RESIZE => self.screen.resize()?,
-                key => {
-                    if key.is_some() && *state.mode() == Mode::Command {
-                        self.screen.render(&state::flash(state.clone()))?;
-                        thread::sleep(Duration::from_millis(self.flash_time));
-                    }
-                    let label = key.as_deref().and_then(|k| state::command_label(&state, k));
-                    let start = label.is_some().then(Instant::now);
-                    let (next, effects) = self.reducer.reduce(state, key.as_deref());
-                    self.executor.execute(effects, &next)?;
-                    state = match (label, start) {
-                        (Some((label_key, name)), Some(start)) => {
-                            self.screen.render(&next)?;
-                            let elapsed = start.elapsed();
-                            state::set_command_status(next, label_key, name, elapsed)
-                        }
-                        _ => next,
-                    };
+            let key = self.keys.next_key()?;
+            if key == tty::RESIZE {
+                self.screen.resize()?;
+            } else {
+                if *state.mode() == Mode::Command {
+                    self.screen.render(&state::flash(state.clone()))?;
+                    thread::sleep(Duration::from_millis(self.flash_time));
                 }
+                let label = state::command_label(&state, &key);
+                let start = label.is_some().then(Instant::now);
+                let (next, effects) = self.reducer.reduce(state, &key);
+                self.executor.execute(effects, &next)?;
+                state = match (label, start) {
+                    (Some((label_key, name)), Some(start)) => {
+                        self.screen.render(&next)?;
+                        let elapsed = start.elapsed();
+                        state::set_command_status(next, label_key, name, elapsed)
+                    }
+                    _ => next,
+                };
             }
         }
         Ok(state)
@@ -108,11 +108,11 @@ mod tests {
         executor
     }
 
-    fn keys_reading(keys: Vec<Option<&str>>) -> MockKeySource {
+    fn keys_reading(keys: Vec<&str>) -> MockKeySource {
         let mut source = MockKeySource::new();
         let mut seq = Sequence::new();
         for key in keys {
-            let key = key.map(str::to_string);
+            let key = key.to_string();
             source
                 .expect_next_key()
                 .times(1)
@@ -136,7 +136,7 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(move |_, k| *k == Some(key))
+            .withf(move |_, k| k == key)
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
         reducer
@@ -159,7 +159,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|| Ok(Some("x".to_string())));
+            .returning(|| Ok("x".to_string()));
         screen
             .expect_render()
             .times(1)
@@ -174,28 +174,9 @@ mod tests {
     #[test]
     fn a_key_read_from_the_key_source_is_passed_to_reduce() {
         controller(
-            keys_reading(vec![Some("x")]),
+            keys_reading(vec!["x"]),
             any_screen(),
             reducer_stopping_on("x"),
-            any_executor(),
-        )
-        .run(State::default())
-        .unwrap();
-    }
-
-    #[test]
-    fn an_idle_none_is_passed_to_reduce_as_none() {
-        let mut reducer = MockReducer::new();
-        reducer
-            .expect_reduce()
-            .withf(|_, key| key.is_none())
-            .times(1)
-            .returning(|state, _| (stopped(state), vec![]));
-
-        controller(
-            keys_reading(vec![None]),
-            any_screen(),
-            reducer,
             any_executor(),
         )
         .run(State::default())
@@ -233,17 +214,17 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("a"))
+            .withf(|_, key| key == "a")
             .times(1)
             .returning(|_, _| (marked(2), vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         controller(
-            keys_reading(vec![Some("a"), Some("x")]),
+            keys_reading(vec!["a", "x"]),
             screen,
             reducer,
             any_executor(),
@@ -262,14 +243,9 @@ mod tests {
         let mut screen = MockScreen::new();
         screen.expect_render().times(2).returning(|_| Ok(()));
 
-        let state = controller(
-            keys_reading(vec![Some("x")]),
-            screen,
-            reducer,
-            any_executor(),
-        )
-        .run(State::default())
-        .unwrap();
+        let state = controller(keys_reading(vec!["x"]), screen, reducer, any_executor())
+            .run(State::default())
+            .unwrap();
 
         assert!(!state.is_running());
         assert_eq!(state.pending_count(), Some(9));
@@ -281,7 +257,7 @@ mod tests {
         screen.expect_resize().times(1).returning(|| Ok(()));
 
         controller(
-            keys_reading(vec![Some(RESIZE), Some("q")]),
+            keys_reading(vec![RESIZE, "q"]),
             screen,
             reducer_stopping_on("q"),
             any_executor(),
@@ -300,15 +276,10 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer.expect_reduce().never();
 
-        let error = controller(
-            keys_reading(vec![Some(RESIZE)]),
-            screen,
-            reducer,
-            any_executor(),
-        )
-        .run(State::default())
-        .err()
-        .unwrap();
+        let error = controller(keys_reading(vec![RESIZE]), screen, reducer, any_executor())
+            .run(State::default())
+            .err()
+            .unwrap();
 
         assert_eq!(error.to_string(), "resize failed");
     }
@@ -369,7 +340,7 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("s"))
+            .withf(|_, key| key == "s")
             .times(1)
             .returning(|_, _| (stopped(marked(4)), vec![Effect::Save]));
         let mut executor = MockEffectExecutor::new();
@@ -381,14 +352,9 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        controller(
-            keys_reading(vec![Some("s")]),
-            any_screen(),
-            reducer,
-            executor,
-        )
-        .run(State::default())
-        .unwrap();
+        controller(keys_reading(vec!["s"]), any_screen(), reducer, executor)
+            .run(State::default())
+            .unwrap();
     }
 
     #[test]
@@ -406,7 +372,7 @@ mod tests {
         let mut keys = MockKeySource::new();
         keys.expect_next_key()
             .times(1)
-            .returning(|| Ok(Some("s".to_string())));
+            .returning(|| Ok("s".to_string()));
 
         let error = controller(keys, any_screen(), reducer, executor)
             .run(State::default())
@@ -448,62 +414,17 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("a"))
+            .withf(|_, key| key == "a")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         controller(
-            keys_reading(vec![Some("a"), Some("x")]),
-            screen,
-            reducer,
-            any_executor(),
-        )
-        .run(State::default())
-        .unwrap();
-    }
-
-    #[test]
-    fn an_idle_none_poll_in_command_mode_does_not_flash() {
-        let mut seq = Sequence::new();
-        let mut screen = MockScreen::new();
-        screen
-            .expect_render()
-            .withf(|state| !state.led_flash())
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
-        screen
-            .expect_render()
-            .withf(|state| !state.led_flash())
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
-        screen
-            .expect_render()
-            .withf(|state| state.led_flash())
-            .times(1)
-            .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
-
-        let mut reducer = MockReducer::new();
-        reducer
-            .expect_reduce()
-            .withf(|_, key| key.is_none())
-            .times(1)
-            .returning(|state, _| (state, vec![]));
-        reducer
-            .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
-            .times(1)
-            .returning(|state, _| (stopped(state), vec![]));
-
-        controller(
-            keys_reading(vec![None, Some("x")]),
+            keys_reading(vec!["a", "x"]),
             screen,
             reducer,
             any_executor(),
@@ -537,7 +458,7 @@ mod tests {
             .returning(|_| Ok(()));
 
         controller(
-            keys_reading(vec![Some(RESIZE), Some("x")]),
+            keys_reading(vec![RESIZE, "x"]),
             screen,
             reducer_stopping_on("x"),
             any_executor(),
@@ -556,7 +477,7 @@ mod tests {
             .returning(|_| Ok(()));
 
         controller(
-            keys_reading(vec![Some("\x01")]),
+            keys_reading(vec!["\x01"]),
             screen,
             reducer_stopping_on("\x01"),
             any_executor(),
@@ -610,17 +531,17 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("b"))
+            .withf(|_, key| key == "b")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         let state = controller(
-            keys_reading(vec![Some("b"), Some("x")]),
+            keys_reading(vec!["b", "x"]),
             screen,
             reducer,
             any_executor(),
@@ -663,17 +584,17 @@ mod tests {
         let mut reducer = MockReducer::new();
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("7"))
+            .withf(|_, key| key == "7")
             .times(1)
             .returning(|state, _| (state, vec![]));
         reducer
             .expect_reduce()
-            .withf(|_, key| *key == Some("x"))
+            .withf(|_, key| key == "x")
             .times(1)
             .returning(|state, _| (stopped(state), vec![]));
 
         let state = controller(
-            keys_reading(vec![Some("7"), Some("x")]),
+            keys_reading(vec!["7", "x"]),
             screen,
             reducer,
             any_executor(),
@@ -690,7 +611,7 @@ mod tests {
         screen.expect_resize().times(1).returning(|| Ok(()));
 
         let state = controller(
-            keys_reading(vec![Some(RESIZE), Some("x")]),
+            keys_reading(vec![RESIZE, "x"]),
             screen,
             reducer_stopping_on("x"),
             any_executor(),

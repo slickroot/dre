@@ -1,79 +1,22 @@
 use dre::{view, Renderer};
-use std::cell::RefCell;
-use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-
-struct IdleTimer {
-    handle: i32,
-    _closure: Closure<dyn FnMut()>,
-}
 
 #[wasm_bindgen]
 pub struct WebSession {
-    session: Rc<RefCell<dre::Session>>,
-    idle_timer: Option<IdleTimer>,
-    on_change: js_sys::Function,
+    session: dre::Session,
 }
-
-#[cfg(target_arch = "wasm32")]
-fn schedule_idle(
-    session: &Rc<RefCell<dre::Session>>,
-    on_change: &js_sys::Function,
-) -> Option<IdleTimer> {
-    let session = Rc::clone(session);
-    let on_change = on_change.clone();
-    let closure = Closure::new(move || {
-        session.borrow_mut().go_idle();
-        let _ = on_change.call0(&JsValue::NULL);
-    });
-    let handle = web_sys::window()
-        .expect("a browser window exists")
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            closure.as_ref().unchecked_ref(),
-            dre::IDLE_TIMEOUT_MS as i32,
-        )
-        .expect("setTimeout succeeds");
-    Some(IdleTimer {
-        handle,
-        _closure: closure,
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn clear_timeout(handle: i32) {
-    if let Some(window) = web_sys::window() {
-        window.clear_timeout_with_handle(handle);
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn schedule_idle(
-    _session: &Rc<RefCell<dre::Session>>,
-    _on_change: &js_sys::Function,
-) -> Option<IdleTimer> {
-    None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn clear_timeout(_handle: i32) {}
 
 #[wasm_bindgen]
 impl WebSession {
     #[wasm_bindgen(constructor)]
-    pub fn new(on_change: js_sys::Function) -> WebSession {
+    pub fn new() -> WebSession {
         WebSession {
-            session: Rc::new(RefCell::new(dre::Session::new())),
-            idle_timer: None,
-            on_change,
+            session: dre::Session::new(),
         }
     }
 
     pub fn press_key(&mut self, key: &str) {
-        if let Some(timer) = self.idle_timer.take() {
-            clear_timeout(timer.handle);
-        }
-        self.session.borrow_mut().press_key(key);
-        self.idle_timer = schedule_idle(&self.session, &self.on_change);
+        self.session.press_key(key);
     }
 
     pub fn svg(&self, cols: i32, rows: i32) -> String {
@@ -85,8 +28,7 @@ impl WebSession {
             cols: i64::from(cols),
             rows: i64::from(rows),
         };
-        let session = self.session.borrow();
-        let scene = view::editor(session.state(), window);
+        let scene = view::editor(self.session.state(), window);
         renderer
             .render(&scene, &mut out)
             .expect("rendering SVG to an in-memory buffer succeeds");
@@ -94,18 +36,19 @@ impl WebSession {
     }
 }
 
+impl Default for WebSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::WebSession;
-    use wasm_bindgen::{JsCast, JsValue};
-
-    fn session() -> WebSession {
-        WebSession::new(JsValue::UNDEFINED.unchecked_into())
-    }
 
     #[test]
     fn renders_svg_after_key_presses() {
-        let mut session = session();
+        let mut session = WebSession::new();
 
         session.press_key("b");
 

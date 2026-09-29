@@ -29,8 +29,6 @@ pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
 pub use state::State;
 
-pub const IDLE_TIMEOUT_MS: u16 = 1000;
-
 pub struct Session {
     state: state::State,
 }
@@ -43,12 +41,7 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = state::reduce(std::mem::take(&mut self.state), Some(key)).0;
-    }
-
-    #[doc(hidden)]
-    pub fn go_idle(&mut self) {
-        self.state = state::reduce(std::mem::take(&mut self.state), None).0;
+        self.state = state::reduce(std::mem::take(&mut self.state), key).0;
     }
 
     pub fn is_running(&self) -> bool {
