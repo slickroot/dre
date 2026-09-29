@@ -503,7 +503,6 @@ impl TerminalRenderer {
                         border: *border,
                     },
                 ),
-                PlacementNode::Glow { .. } => {}
                 PlacementNode::Brackets { border } => {
                     self.draw_brackets(frame, geometry, area, BracketStyle { border: *border })
                 }

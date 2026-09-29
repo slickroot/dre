@@ -1,21 +1,18 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, LED_DIM_ALPHA,
-    LED_DOT_RATIO, LED_HALO_ALPHA,
+    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, BRACKET_ARM, BRACKET_OFFSET,
+    LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA,
 };
 use crate::composer::Area;
 use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 use crate::view::Scene;
-use crate::view::{Placement, PlacementNode, Sides, ALL_SIDES, NO_SIDES};
+use crate::view::{Placement, PlacementNode, Sides, ALL_SIDES, BRACKET_MARGIN, NO_SIDES};
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 10.0;
 const MONOSPACE_ADVANCE_RATIO: f64 = 0.6;
-const GLOW_STROKE_WIDTH: i64 = 16;
-const GLOW_BLUR_STD_DEVIATION: f64 = 16.0;
-const GLOW_FILTER_ID: &str = "glow";
 
 fn label_font_size() -> f64 {
     (CELL_WIDTH as f64 / MONOSPACE_ADVANCE_RATIO * 100.0).round() / 100.0
@@ -84,13 +81,6 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
     }) {
         svg.push_str(&marker_defs());
     }
-    if areas.iter().any(|(_, placements)| {
-        placements
-            .iter()
-            .any(|placement| matches!(placement.node, PlacementNode::Glow { .. }))
-    }) {
-        svg.push_str(&glow_filter_defs());
-    }
     for (area, placements) in areas {
         let (x, y, width, height) = pixels(*area);
         svg.push_str(&format!(
@@ -105,7 +95,7 @@ fn canvas_content(areas: &[(Area, Vec<Placement>)]) -> String {
 fn paint(placements: &[Placement]) -> String {
     let mut arrows = String::new();
     let mut boxes = String::new();
-    let mut glows = String::new();
+    let mut brackets = String::new();
     let mut labels = String::new();
     let mut cursors = String::new();
     let mut leds = String::new();
@@ -128,16 +118,15 @@ fn paint(placements: &[Placement]) -> String {
             PlacementNode::Caret(_) | PlacementNode::Cursor(_) => {
                 cursors.push_str(&caret_rect(placement))
             }
-            PlacementNode::Glow { colour, rounded } => {
-                glows.push_str(&glow_rect(placement, *colour, *rounded))
+            PlacementNode::Brackets { border } => {
+                brackets.push_str(&brackets_path(placement, *border))
             }
-            PlacementNode::Brackets { .. } => {}
             PlacementNode::Led { colour, lit } => {
                 leds.push_str(&led_circle(placement, *colour, *lit))
             }
         }
     }
-    [arrows, boxes, glows, labels, cursors, leds].concat()
+    [arrows, boxes, brackets, labels, cursors, leds].concat()
 }
 
 const LED_GLOW_GRADIENT_ID: &str = "led-glow";
@@ -270,29 +259,32 @@ fn arrow_paths(placement: &crate::view::Placement, arrow: &crate::view::Arrow) -
     paths
 }
 
-fn glow_filter_defs() -> String {
-    format!(
-        "<defs><filter id=\"{GLOW_FILTER_ID}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"/></filter></defs>"
-    )
-}
-
-fn glow_rect(placement: &crate::view::Placement, edge: Option<u8>, rounded: bool) -> String {
-    use super::ROUNDED_RADIUS;
-    use std::fmt::Write as _;
-
-    let (r, g, b) = colour(edge);
-    let mut rect = format!(
-        "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke=\"rgb({r},{g},{b})\" stroke-width=\"{GLOW_STROKE_WIDTH}\" fill=\"none\" filter=\"url(#{GLOW_FILTER_ID})\"",
-        placement.x * CELL_WIDTH,
-        placement.y * CELL_HEIGHT,
-        placement.width * CELL_WIDTH,
-        placement.height * CELL_HEIGHT,
-    );
-    if rounded {
-        write!(rect, " rx=\"{ROUNDED_RADIUS}\"").unwrap();
-    }
-    rect.push_str("/>");
-    rect
+fn brackets_path(placement: &Placement, border: i64) -> String {
+    let (r, g, b) = colour(None);
+    let left = (placement.x + BRACKET_MARGIN) * CELL_WIDTH - BRACKET_OFFSET;
+    let right = (placement.x + placement.width - BRACKET_MARGIN) * CELL_WIDTH + BRACKET_OFFSET;
+    let top = (placement.y + BRACKET_MARGIN) * CELL_HEIGHT - BRACKET_OFFSET;
+    let bottom = (placement.y + placement.height - BRACKET_MARGIN) * CELL_HEIGHT + BRACKET_OFFSET;
+    let inner_arm = BRACKET_ARM - border;
+    let shapes: String = [
+        (left, top, 1, 1),
+        (right, top, -1, 1),
+        (left, bottom, 1, -1),
+        (right, bottom, -1, -1),
+    ]
+    .iter()
+    .map(|&(x, y, toward_x, toward_y)| {
+        format!(
+            "M{x} {y}h{}v{}h{}v{}h{}z",
+            toward_x * BRACKET_ARM,
+            toward_y * border,
+            -toward_x * inner_arm,
+            toward_y * inner_arm,
+            -toward_x * border,
+        )
+    })
+    .collect();
+    format!("<path d=\"{shapes}\" fill=\"rgb({r},{g},{b})\"/>")
 }
 
 fn rect(
@@ -376,7 +368,7 @@ mod tests {
         FOREGROUND,
     };
     use crate::view::{self, centre};
-    use crate::view::{Arrow, Caret, Label, Placement, BORDER, GLOW_MARGIN};
+    use crate::view::{Arrow, Caret, Label, Placement, BORDER, BRACKET_MARGIN};
     use crate::view::{BOX_HEIGHT, FOOTER_ROWS, LED_WIDTH};
     use crate::State;
 
@@ -427,18 +419,13 @@ mod tests {
     }
 
     fn selected(placement: Placement<'static>) -> Placement<'static> {
-        let PlacementNode::Box {
-            colour, rounded, ..
-        } = placement.node
-        else {
-            unreachable!();
-        };
+        assert!(matches!(placement.node, PlacementNode::Box { .. }));
         Placement {
-            node: PlacementNode::Glow { colour, rounded },
-            x: placement.x - GLOW_MARGIN,
-            y: placement.y - GLOW_MARGIN,
-            width: placement.width + 2 * GLOW_MARGIN,
-            height: placement.height + 2 * GLOW_MARGIN,
+            node: PlacementNode::Brackets { border: BORDER },
+            x: placement.x - BRACKET_MARGIN,
+            y: placement.y - BRACKET_MARGIN,
+            width: placement.width + 2 * BRACKET_MARGIN,
+            height: placement.height + 2 * BRACKET_MARGIN,
         }
     }
 
@@ -775,59 +762,61 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_box_glows_along_its_exact_border_in_its_edge_colour() {
+    fn a_selected_box_is_framed_by_one_foreground_filled_path() {
+        let svg = draw(&[
+            box_placement(2, 3, 4, 3, Some(2), None, false),
+            selected(box_placement(2, 3, 4, 3, Some(2), None, false)),
+        ]);
+
+        let brackets = bracket_paths(&svg);
+
+        assert_eq!(brackets.len(), 1);
+        assert!(brackets[0].contains(&format!("fill=\"{}\"", rgb(colour(None)))));
+    }
+
+    #[test]
+    fn the_brackets_sit_at_the_offset_from_the_box_corners_with_the_arm_and_border() {
         let (x, y, width, height) = (2, 3, 4, 3);
-        let placements = vec![selected(box_placement(
-            x,
-            y,
-            width,
-            height,
-            Some(2),
-            None,
-            false,
-        ))];
+        let svg = draw(&[selected(box_placement(
+            x, y, width, height, None, None, false,
+        ))]);
 
-        let svg = draw(&placements);
+        let path = bracket_paths(&svg).remove(0);
 
-        let glow = svg
-            .split('<')
-            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
-            .expect("the selected box renders a glow rect");
-        assert!(glow.contains(&format!("x=\"{}\"", (x - GLOW_MARGIN) * CELL_WIDTH)));
-        assert!(glow.contains(&format!("y=\"{}\"", (y - GLOW_MARGIN) * CELL_HEIGHT)));
-        assert!(glow.contains(&format!(
-            "width=\"{}\"",
-            (width + 2 * GLOW_MARGIN) * CELL_WIDTH
-        )));
-        assert!(glow.contains(&format!(
-            "height=\"{}\"",
-            (height + 2 * GLOW_MARGIN) * CELL_HEIGHT
-        )));
-        assert!(glow.contains(&format!("stroke=\"{}\"", rgb(colour(Some(2))))));
-        assert!(glow.contains(&format!("stroke-width=\"{GLOW_STROKE_WIDTH}\"")));
-        assert!(glow.contains("fill=\"none\""));
-        let blur = svg
-            .split('<')
-            .find(|element| element.starts_with("feGaussianBlur "))
-            .expect("the selected box renders a glow blur");
-        assert!(blur.contains(&format!("stdDeviation=\"{GLOW_BLUR_STD_DEVIATION}\"")));
+        let left = x * CELL_WIDTH - BRACKET_OFFSET;
+        let right = (x + width) * CELL_WIDTH + BRACKET_OFFSET;
+        let top = y * CELL_HEIGHT - BRACKET_OFFSET;
+        let bottom = (y + height) * CELL_HEIGHT + BRACKET_OFFSET;
+        let inner_arm = BRACKET_ARM - BORDER;
+        for (corner_x, corner_y, toward_x, toward_y) in [
+            (left, top, 1, 1),
+            (right, top, -1, 1),
+            (left, bottom, 1, -1),
+            (right, bottom, -1, -1),
+        ] {
+            let l_shape = format!(
+                "M{corner_x} {corner_y}h{}v{}h{}v{}h{}z",
+                toward_x * BRACKET_ARM,
+                toward_y * BORDER,
+                -toward_x * inner_arm,
+                toward_y * inner_arm,
+                -toward_x * BORDER,
+            );
+            assert!(path.contains(&l_shape), "{path} lacks {l_shape}");
+        }
     }
 
     #[test]
-    fn a_rounded_selected_box_uses_the_same_rounding_for_its_glow() {
-        let placements = vec![selected(box_placement(0, 0, 4, 3, Some(2), None, true))];
+    fn the_brackets_stay_square_when_the_box_is_rounded() {
+        let square = draw(&[selected(box_placement(0, 0, 4, 3, None, None, false))]);
+        let rounded = draw(&[selected(box_placement(0, 0, 4, 3, None, None, true))]);
 
-        let svg = draw(&placements);
-
-        let glow = svg
-            .split('<')
-            .find(|element| element.starts_with("rect ") && element.contains("filter=\"url(#"))
-            .expect("the selected box renders a glow rect");
-        assert!(glow.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
+        assert_eq!(bracket_paths(&square), bracket_paths(&rounded));
+        assert!(!rounded.contains(&format!("rx=\"{ROUNDED_RADIUS}\"")));
     }
 
     #[test]
-    fn a_filled_selected_box_paints_its_fill_then_glow_then_label() {
+    fn a_filled_selected_box_paints_its_fill_then_brackets_then_label() {
         let placements = vec![
             box_placement(0, 0, 4, 3, Some(2), Some(2), false),
             selected(box_placement(0, 0, 4, 3, Some(2), Some(2), false)),
@@ -839,38 +828,31 @@ mod tests {
         let box_rect = svg
             .find(&format!("fill=\"{}\"", rgb(palette(2).unwrap())))
             .expect("the selected box renders its fill");
-        let glow = svg
-            .find("filter=\"url(#")
-            .expect("the selected box renders a glow");
+        let brackets = svg
+            .find("<path")
+            .expect("the selected box renders brackets");
         let label = svg.find("<text").expect("the box renders its label");
-        assert!(box_rect < glow, "the fill is emitted before the glow");
-        assert!(glow < label, "the glow is emitted before the label");
-    }
-
-    #[test]
-    fn an_unselected_box_renders_no_glow_rect() {
-        let selected_svg = draw(&[
-            box_placement(0, 0, 4, 3, Some(2), None, false),
-            selected(box_placement(0, 0, 4, 3, Some(2), None, false)),
-        ]);
-        let plain_svg = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
-
-        assert!(!plain_svg.contains("filter=\"url(#"));
-        assert_eq!(
-            plain_svg.matches("<rect").count(),
-            selected_svg.matches("<rect").count() - 1,
-            "selection adds exactly one extra rect: the glow"
+        assert!(
+            box_rect < brackets,
+            "the fill is emitted before the brackets"
+        );
+        assert!(
+            brackets < label,
+            "the brackets are emitted before the label"
         );
     }
 
     #[test]
-    fn the_blur_filter_defs_are_only_emitted_when_something_is_selected() {
-        let with_selection = draw(&[selected(box_placement(0, 0, 4, 3, Some(2), None, false))]);
-        let without_selection = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
+    fn an_unselected_box_renders_no_brackets() {
+        let svg = draw(&[box_placement(0, 0, 4, 3, Some(2), None, false)]);
 
-        assert!(with_selection.contains("feGaussianBlur"));
-        assert!(!without_selection.contains("feGaussianBlur"));
-        assert!(!without_selection.contains("<filter"));
+        assert!(bracket_paths(&svg).is_empty());
+    }
+
+    fn bracket_paths(svg: &str) -> Vec<&str> {
+        svg.split('<')
+            .filter(|element| element.starts_with("path ") && !element.contains("fill=\"none\""))
+            .collect()
     }
 
     fn label_placement(text: &str, x: i64, y: i64) -> Placement<'_> {

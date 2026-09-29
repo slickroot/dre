@@ -15,8 +15,6 @@ pub(crate) const BORDER: i64 = 4;
 pub(crate) const GAP_WIDTH: i64 = 8;
 pub(crate) const FOOTER_ROWS: i64 = BOX_HEIGHT;
 pub(crate) const LED_WIDTH: i64 = 2;
-#[cfg(test)]
-pub(crate) const GLOW_MARGIN: i64 = 1;
 pub(crate) const BRACKET_MARGIN: i64 = 1;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,10 +49,6 @@ pub enum PlacementNode<'a> {
     Label(Label<'a>),
     Arrow(Arrow),
     Caret(Caret),
-    Glow {
-        colour: Option<u8>,
-        rounded: bool,
-    },
     Brackets {
         border: i64,
     },
@@ -68,9 +62,7 @@ pub enum PlacementNode<'a> {
 impl<'a> PlacementNode<'a> {
     pub(crate) fn is_decoration(&self) -> bool {
         match self {
-            PlacementNode::Glow { .. }
-            | PlacementNode::Brackets { .. }
-            | PlacementNode::Caret(_) => true,
+            PlacementNode::Brackets { .. } | PlacementNode::Caret(_) => true,
             PlacementNode::Box { .. }
             | PlacementNode::Label(_)
             | PlacementNode::Arrow(_)
