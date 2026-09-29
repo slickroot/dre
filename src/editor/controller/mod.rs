@@ -7,7 +7,7 @@ use std::io;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::state::{self, Mode, State};
+use crate::state::{self, State};
 use crate::tty;
 use effects::EffectExecutor;
 use key_source::KeySource;
@@ -53,10 +53,8 @@ impl Controller for DreController {
             if key == tty::RESIZE {
                 self.screen.resize()?;
             } else {
-                if *state.mode() == Mode::Command {
-                    self.screen.render(&state::flash(state.clone()))?;
-                    thread::sleep(Duration::from_millis(self.flash_time));
-                }
+                self.screen.render(&state::flash(state.clone()))?;
+                thread::sleep(Duration::from_millis(self.flash_time));
                 let label = state::command_label(&state, &key);
                 let start = label.is_some().then(Instant::now);
                 let (next, effects) = self.reducer.reduce(state, &key);
@@ -82,7 +80,7 @@ mod tests {
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
-    use crate::state::{new_state, CommandStatus, Effect};
+    use crate::state::{new_state, CommandStatus, Effect, Mode};
     use crate::tty::RESIZE;
     use mockall::Sequence;
 
@@ -467,23 +465,50 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
-    fn a_keystroke_outside_command_mode_does_not_flash() {
+    fn assert_keystroke_flashes_before_reducing(mode: Mode) {
+        let mut seq = Sequence::new();
         let mut screen = MockScreen::new();
         screen
             .expect_render()
             .withf(|state| !state.led_flash())
             .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        let mut reducer = MockReducer::new();
+        reducer
+            .expect_reduce()
+            .withf(|state, key| key == "a" && !state.led_flash())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|state, _| (stopped(state), vec![]));
+        screen
+            .expect_render()
+            .withf(|state| !state.led_flash())
+            .in_sequence(&mut seq)
             .returning(|_| Ok(()));
 
-        controller(
-            keys_reading(vec!["\x01"]),
-            screen,
-            reducer_stopping_on("\x01"),
-            any_executor(),
-        )
-        .run(new_state(vec![], Mode::Insert { cursor: 0 }, None))
-        .unwrap();
+        controller(keys_reading(vec!["a"]), screen, reducer, any_executor())
+            .run(new_state(vec![], mode, None))
+            .unwrap();
+    }
+
+    #[test]
+    fn an_insert_mode_keystroke_flashes_the_led_before_reducing() {
+        assert_keystroke_flashes_before_reducing(Mode::Insert { cursor: 0 });
+    }
+
+    #[test]
+    fn a_name_prompt_keystroke_flashes_the_led_before_reducing() {
+        assert_keystroke_flashes_before_reducing(Mode::NamePrompt {
+            name: String::new(),
+            quits: false,
+        });
     }
 
     fn has_command_status(state: &State, key: &str, name: &str) -> bool {
