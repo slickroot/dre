@@ -71,7 +71,11 @@ pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
         cli::Command::Edit(file) => editor::bootstrap::run(file),
         cli::Command::Export { input } => cli::export(input),
-        cli::Command::Serve { listen, host_key } => serve::run(listen, host_key),
+        cli::Command::Serve {
+            listen,
+            host_key,
+            data_dir,
+        } => serve::run(listen, host_key, data_dir),
     };
     match result {
         Ok(code) => code,

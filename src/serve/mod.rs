@@ -21,7 +21,8 @@ fn config(host_key: HostKey) -> Config {
     }
 }
 
-pub(crate) fn run(listen: String, host_key: String) -> io::Result<ExitCode> {
+pub(crate) fn run(listen: String, host_key: String, data_dir: String) -> io::Result<ExitCode> {
+    let _ = data_dir;
     let config = Arc::new(config(HostKey::load_or_generate(&host_key)?));
     let mut server = SshServer::new(Arc::new(PtyProcess::dre()?));
     tokio::runtime::Builder::new_current_thread()
