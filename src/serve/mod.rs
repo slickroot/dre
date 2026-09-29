@@ -1,5 +1,7 @@
 mod host_key;
 #[allow(dead_code)]
+mod pty_process;
+#[allow(dead_code)]
 mod session;
 #[allow(dead_code)]
 mod visitor;
