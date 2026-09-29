@@ -1,3 +1,4 @@
+mod diagram_dir;
 mod host_key;
 mod pty_process;
 mod session;
