@@ -18,5 +18,6 @@ pub(crate) trait Session: Send + Sync {
     fn write(&self, bytes: &[u8]);
     fn read(&self) -> Option<Vec<u8>>;
     fn resize(&self, window: Window);
+    #[allow(dead_code)]
     fn wait(&self);
 }
