@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
 use super::{
-    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, BRACKET_ARM, BRACKET_OFFSET,
-    LED_DIM_ALPHA, LED_DOT_RATIO, LED_HALO_ALPHA,
+    arrowhead_depth, arrowhead_slope, colour, Renderer, ARROW_OPACITY, BRACKET_ARM, LED_DIM_ALPHA,
+    LED_DOT_RATIO, LED_HALO_ALPHA,
 };
 use crate::composer::Area;
 use crate::style::{CELL_HEIGHT, CELL_WIDTH};
@@ -261,11 +261,13 @@ fn arrow_paths(placement: &crate::view::Placement, arrow: &crate::view::Arrow) -
 
 fn brackets_path(placement: &Placement, border: i64) -> String {
     let (r, g, b) = colour(None);
-    let left = (placement.x + BRACKET_MARGIN) * CELL_WIDTH - BRACKET_OFFSET;
-    let right = (placement.x + placement.width - BRACKET_MARGIN) * CELL_WIDTH + BRACKET_OFFSET;
-    let top = (placement.y + BRACKET_MARGIN) * CELL_HEIGHT - BRACKET_OFFSET;
-    let bottom = (placement.y + placement.height - BRACKET_MARGIN) * CELL_HEIGHT + BRACKET_OFFSET;
-    let inner_arm = BRACKET_ARM - border;
+    let stroke = border / 2;
+    let distance = stroke / 2 + 2 * stroke;
+    let left = (placement.x + BRACKET_MARGIN) * CELL_WIDTH - distance;
+    let right = (placement.x + placement.width - BRACKET_MARGIN) * CELL_WIDTH + distance;
+    let top = (placement.y + BRACKET_MARGIN) * CELL_HEIGHT - distance;
+    let bottom = (placement.y + placement.height - BRACKET_MARGIN) * CELL_HEIGHT + distance;
+    let inner_arm = BRACKET_ARM - stroke;
     let shapes: String = [
         (left, top, 1, 1),
         (right, top, -1, 1),
@@ -277,10 +279,10 @@ fn brackets_path(placement: &Placement, border: i64) -> String {
         format!(
             "M{x} {y}h{}v{}h{}v{}h{}z",
             toward_x * BRACKET_ARM,
-            toward_y * border,
+            toward_y * stroke,
             -toward_x * inner_arm,
             toward_y * inner_arm,
-            -toward_x * border,
+            -toward_x * stroke,
         )
     })
     .collect();
@@ -775,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn the_brackets_sit_at_the_offset_from_the_box_corners_with_the_arm_and_border() {
+    fn the_brackets_sit_outside_the_box_border_with_the_arm_and_stroke_thickness() {
         let (x, y, width, height) = (2, 3, 4, 3);
         let svg = draw(&[selected(box_placement(
             x, y, width, height, None, None, false,
@@ -783,11 +785,13 @@ mod tests {
 
         let path = bracket_paths(&svg).remove(0);
 
-        let left = x * CELL_WIDTH - BRACKET_OFFSET;
-        let right = (x + width) * CELL_WIDTH + BRACKET_OFFSET;
-        let top = y * CELL_HEIGHT - BRACKET_OFFSET;
-        let bottom = (y + height) * CELL_HEIGHT + BRACKET_OFFSET;
-        let inner_arm = BRACKET_ARM - BORDER;
+        let stroke = BORDER / 2;
+        let distance = stroke / 2 + 2 * stroke;
+        let left = x * CELL_WIDTH - distance;
+        let right = (x + width) * CELL_WIDTH + distance;
+        let top = y * CELL_HEIGHT - distance;
+        let bottom = (y + height) * CELL_HEIGHT + distance;
+        let inner_arm = BRACKET_ARM - stroke;
         for (corner_x, corner_y, toward_x, toward_y) in [
             (left, top, 1, 1),
             (right, top, -1, 1),
@@ -797,13 +801,46 @@ mod tests {
             let l_shape = format!(
                 "M{corner_x} {corner_y}h{}v{}h{}v{}h{}z",
                 toward_x * BRACKET_ARM,
-                toward_y * BORDER,
+                toward_y * stroke,
                 -toward_x * inner_arm,
                 toward_y * inner_arm,
-                -toward_x * BORDER,
+                -toward_x * stroke,
             );
             assert!(path.contains(&l_shape), "{path} lacks {l_shape}");
         }
+    }
+
+    #[test]
+    fn the_gap_between_the_border_and_the_brackets_equals_the_bracket_thickness() {
+        let (x, y, width, height) = (2, 3, 4, 3);
+        let boxed = box_placement(x, y, width, height, None, None, false);
+        let svg = draw(&[boxed.clone(), selected(boxed)]);
+
+        let path = bracket_paths(&svg).remove(0);
+
+        let thickness: i64 = path
+            .split('v')
+            .nth(1)
+            .and_then(|rest| rest.split('h').next())
+            .and_then(|value| value.parse().ok())
+            .expect("the bracket path has a vertical thickness");
+        let box_stroke: i64 = svg
+            .split("stroke-width=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .and_then(|value| value.parse().ok())
+            .expect("the box rect has a stroke width");
+        let outer_corner_x: i64 = path
+            .split('M')
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|value| value.parse().ok())
+            .expect("the bracket path starts at an outer corner");
+        let bracket_inner_edge = outer_corner_x + thickness;
+        let border_outer_edge = x * CELL_WIDTH - box_stroke / 2;
+
+        assert_eq!(thickness, box_stroke);
+        assert_eq!(border_outer_edge - bracket_inner_edge, thickness);
     }
 
     #[test]
