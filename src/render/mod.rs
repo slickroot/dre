@@ -44,7 +44,7 @@ const LED_DIM_ALPHA: f64 = 0.3;
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
-    crate::style::colour(colour.unwrap_or(FOREGROUND)).unwrap()
+    crate::style::palette(colour.unwrap_or(FOREGROUND)).unwrap()
 }
 
 #[cfg(test)]
@@ -539,5 +539,13 @@ mod tests {
     #[test]
     fn colour_of_a_palette_index_is_the_palette_entry() {
         assert_eq!(colour(Some(2)), palette(2).unwrap());
+    }
+
+    #[test]
+    fn colour_of_dim_is_the_dim_palette_entry() {
+        assert_eq!(
+            colour(Some(crate::style::DIM)),
+            palette(crate::style::DIM).unwrap()
+        );
     }
 }
