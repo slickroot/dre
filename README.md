@@ -53,10 +53,22 @@ curl -fsSL https://raw.githubusercontent.com/slickroot/dre/main/install.sh | bas
 Run `dre` to open an empty canvas. `dre plans.dre` opens `plans.dre`, or
 starts a new diagram under that name if the file doesn't exist.
 
+<p align="center">
+  <img src="docs/assets/first-box.png" alt="A first box on an empty dre canvas" width="720">
+</p>
+
 `dre` has three modes: command mode (the default), insert mode, and a save
 prompt. In command mode, every key runs a command (see the table below);
 `i` edits the selected box's label and `I` renames it, which enters insert
 mode.
+
+<p align="center">
+  <img src="docs/assets/selection.png" alt="Selecting boxes in command mode" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/assets/styling.png" alt="A diagram with coloured and filled boxes" width="720">
+</p>
 
 To quit, press `q`. With a filename, `q` saves to that file and quits. Without
 a filename, `q` asks for one, and `Enter` saves and quits, `Esc` quits
