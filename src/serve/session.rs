@@ -10,7 +10,7 @@ pub(crate) struct Window {
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Spawner {
-    fn spawn(&self, window: Window) -> io::Result<Box<dyn Session>>;
+    fn spawn(&self, window: Window, path: &str) -> io::Result<Box<dyn Session>>;
 }
 
 #[cfg_attr(test, mockall::automock)]

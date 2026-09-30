@@ -13,29 +13,47 @@ use crate::view;
 #[derive(Debug, PartialEq)]
 pub(crate) enum Command {
     Edit(Option<String>),
-    Export { input: String },
-    Serve { listen: String, host_key: String },
+    Export {
+        input: String,
+    },
+    Serve {
+        listen: String,
+        host_key: String,
+        data_dir: String,
+    },
 }
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:2222";
 const DEFAULT_HOST_KEY_UNDER_HOME: &str = ".local/share/dre/host_key";
+const DEFAULT_DATA_DIR_UNDER_HOME: &str = ".local/share/dre/diagrams";
 
 fn default_host_key() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     format!("{home}/{DEFAULT_HOST_KEY_UNDER_HOME}")
 }
 
+fn default_data_dir() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    format!("{home}/{DEFAULT_DATA_DIR_UNDER_HOME}")
+}
+
 fn parse_serve<I: Iterator<Item = String>>(mut args: I) -> Command {
     let mut listen = DEFAULT_LISTEN.to_string();
     let mut host_key = default_host_key();
+    let mut data_dir = default_data_dir();
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--listen" => listen = args.next().unwrap_or(listen),
             "--host-key" => host_key = args.next().unwrap_or(host_key),
+            "--data-dir" => data_dir = args.next().unwrap_or(data_dir),
             _ => {}
         }
     }
-    Command::Serve { listen, host_key }
+    Command::Serve {
+        listen,
+        host_key,
+        data_dir,
+    }
 }
 
 pub(crate) fn parse_args() -> Command {
@@ -115,7 +133,8 @@ mod tests {
             parse(&["serve"]),
             Command::Serve {
                 listen: DEFAULT_LISTEN.to_string(),
-                host_key: default_host_key()
+                host_key: default_host_key(),
+                data_dir: default_data_dir()
             }
         );
     }
@@ -126,12 +145,30 @@ mod tests {
     }
 
     #[test]
+    fn the_default_data_dir_lives_under_home() {
+        assert!(default_data_dir().ends_with(DEFAULT_DATA_DIR_UNDER_HOME));
+    }
+
+    #[test]
+    fn serve_with_data_dir_overrides_only_the_diagrams_directory() {
+        assert_eq!(
+            parse(&["serve", "--data-dir", "./tmp/diagrams"]),
+            Command::Serve {
+                listen: DEFAULT_LISTEN.to_string(),
+                host_key: default_host_key(),
+                data_dir: "./tmp/diagrams".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn serve_with_listen_overrides_only_the_address() {
         assert_eq!(
             parse(&["serve", "--listen", "127.0.0.1:9000"]),
             Command::Serve {
                 listen: "127.0.0.1:9000".to_string(),
-                host_key: default_host_key()
+                host_key: default_host_key(),
+                data_dir: default_data_dir()
             }
         );
     }
@@ -142,7 +179,8 @@ mod tests {
             parse(&["serve", "--host-key", "./tmp/host_key"]),
             Command::Serve {
                 listen: DEFAULT_LISTEN.to_string(),
-                host_key: "./tmp/host_key".to_string()
+                host_key: "./tmp/host_key".to_string(),
+                data_dir: default_data_dir()
             }
         );
     }
@@ -153,7 +191,8 @@ mod tests {
             parse(&["serve", "--host-key", "k", "--listen", "l"]),
             Command::Serve {
                 listen: "l".to_string(),
-                host_key: "k".to_string()
+                host_key: "k".to_string(),
+                data_dir: default_data_dir()
             }
         );
     }
