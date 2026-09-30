@@ -43,10 +43,27 @@ impl Justify {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Direction {
+    #[default]
+    Row,
+    Column,
+}
+
+impl Direction {
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Direction::Row => Direction::Column,
+            Direction::Column => Direction::Row,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FlexBox {
     pub(crate) width: FlexWidth,
     pub(crate) justify: Justify,
+    pub(crate) direction: Direction,
     pub(crate) filled: bool,
 }
 
@@ -188,6 +205,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         "g" => {
             let selected = state.selected_box();
             selected.justify = selected.justify.toggle();
+        }
+        "d" => {
+            let selected = state.selected_box();
+            selected.direction = selected.direction.toggle();
         }
         "f" => {
             let selected = state.selected_box();
@@ -632,6 +653,61 @@ mod tests {
         assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
     }
 
+    #[test]
+    fn starts_with_a_row_direction() {
+        assert_eq!(
+            selected_box(&FlexState::default()).direction,
+            Direction::Row
+        );
+    }
+
+    #[test]
+    fn toggling_the_direction_flips_between_row_and_column() {
+        assert_eq!(Direction::Row.toggle(), Direction::Column);
+        assert_eq!(Direction::Column.toggle(), Direction::Row);
+    }
+
+    #[test]
+    fn d_in_move_mode_turns_the_box_into_a_column_and_keeps_the_rest() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "d");
+        assert_eq!(selected_box(&state).direction, Direction::Column);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn d_twice_in_move_mode_toggles_the_direction_back_to_row() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "d");
+        let (state, effect) = reduce(state, "d");
+        assert_eq!(state, hello_in(FlexMode::Move));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn d_in_write_mode_is_typed_into_the_box_and_leaves_the_direction_alone() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "d");
+        assert_eq!(state.texts_of(&state.selected), ["Hellod"]);
+        assert_eq!(selected_box(&state).direction, Direction::Row);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn d_only_changes_the_direction_of_the_selected_box() {
+        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "d");
+        assert_eq!(box_at(&state, &[0]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Column);
+    }
+
+    #[test]
+    fn new_outer_and_inner_boxes_start_as_rows() {
+        let state = moved(hello_in(FlexMode::Move), &["d", "a", "A", "A"]);
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[1, 1]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[1, 2]).direction, Direction::Row);
+    }
+
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
         keys.iter().fold(state, |state, key| reduce(state, key).0)
     }
@@ -727,6 +803,14 @@ mod tests {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "g");
         assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
+        only_the_middle_box_changed(&before, &state);
+    }
+
+    #[test]
+    fn d_only_changes_a_selected_box_above_the_bottom() {
+        let before = middle_selected();
+        let (state, _) = reduce(before.clone(), "d");
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Column);
         only_the_middle_box_changed(&before, &state);
     }
 

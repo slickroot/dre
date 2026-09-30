@@ -4,7 +4,7 @@ use types::Tree;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES};
 
-use super::state::{FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
+use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
@@ -19,45 +19,80 @@ struct Size {
     height: i64,
 }
 
+impl Size {
+    fn main(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.width,
+            Direction::Column => self.height,
+        }
+    }
+
+    fn cross(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.height,
+            Direction::Column => self.width,
+        }
+    }
+
+    fn along(direction: Direction, main: i64, cross: i64) -> Size {
+        match direction {
+            Direction::Row => Size {
+                width: main,
+                height: cross,
+            },
+            Direction::Column => Size {
+                width: cross,
+                height: main,
+            },
+        }
+    }
+}
+
 fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
     match tree.value(path) {
         FlexNode::Text(text) => Size {
             width: view::interior(text),
             height: 1,
         },
-        FlexNode::Box(_) => {
+        FlexNode::Box(flex_box) => {
+            let direction = flex_box.direction;
             let children: Vec<Size> = tree
                 .children(path)
                 .iter()
                 .map(|child| measure(tree, child))
                 .collect();
             let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
-            let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
-            let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
-            Size {
-                width: content_width + 2 * FLEX_BORDER,
-                height: content_height + 2 * FLEX_BORDER,
-            }
+            let main = children
+                .iter()
+                .map(|child| child.main(direction))
+                .sum::<i64>()
+                + gaps;
+            let cross = children
+                .iter()
+                .map(|child| child.cross(direction))
+                .max()
+                .unwrap_or(0);
+            Size::along(direction, main + 2 * FLEX_BORDER, cross + 2 * FLEX_BORDER)
         }
     }
 }
 
-fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
-    let gaps = widths.len().saturating_sub(1) as i64;
+fn distribute(lengths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
+    let gaps = lengths.len().saturating_sub(1) as i64;
     let (gap, widened_from) = match justify {
         Justify::SpaceBetween if gaps > 0 => {
-            let free = room - widths.iter().sum::<i64>();
+            let free = room - lengths.iter().sum::<i64>();
             (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
         }
         _ => (FLEX_GAP, gaps),
     };
-    let mut x = 0;
-    widths
+    let mut cursor = 0;
+    lengths
         .iter()
         .enumerate()
-        .map(|(index, width)| {
-            let offset = x;
-            x += width + gap + i64::from(index as i64 >= widened_from);
+        .map(|(index, length)| {
+            let offset = cursor;
+            cursor += length + gap + i64::from(index as i64 >= widened_from);
             offset
         })
         .collect()
@@ -71,23 +106,70 @@ struct Rect {
     height: i64,
 }
 
+impl Rect {
+    fn inner(self) -> Rect {
+        Rect {
+            x: self.x + FLEX_BORDER,
+            y: self.y + FLEX_BORDER,
+            width: self.width - 2 * FLEX_BORDER,
+            height: self.height - 2 * FLEX_BORDER,
+        }
+    }
+
+    fn size(self) -> Size {
+        Size {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    fn main_start(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.x,
+            Direction::Column => self.y,
+        }
+    }
+
+    fn cross_start(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.y,
+            Direction::Column => self.x,
+        }
+    }
+
+    fn along(direction: Direction, main_start: i64, cross_start: i64, size: Size) -> Rect {
+        let (x, y) = match direction {
+            Direction::Row => (main_start, cross_start),
+            Direction::Column => (cross_start, main_start),
+        };
+        Rect {
+            x,
+            y,
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
 fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec<usize>, Rect)>) {
     out.push((path.to_vec(), rect));
     let FlexNode::Box(flex_box) = tree.value(path) else {
         return;
     };
+    let direction = flex_box.direction;
     let children = tree.children(path);
     let sizes: Vec<Size> = children.iter().map(|child| measure(tree, child)).collect();
-    let widths: Vec<i64> = sizes.iter().map(|size| size.width).collect();
-    let offsets = distribute(&widths, rect.width - 2 * FLEX_BORDER, flex_box.justify);
-    let inner_height = rect.height - 2 * FLEX_BORDER;
+    let mains: Vec<i64> = sizes.iter().map(|size| size.main(direction)).collect();
+    let inner = rect.inner();
+    let inner_cross = inner.size().cross(direction);
+    let offsets = distribute(&mains, inner.size().main(direction), flex_box.justify);
     for ((child, size), offset) in children.iter().zip(sizes).zip(offsets) {
-        let child_rect = Rect {
-            x: rect.x + FLEX_BORDER + offset,
-            y: rect.y + FLEX_BORDER + (inner_height - size.height) / 2,
-            width: size.width,
-            height: size.height,
-        };
+        let child_rect = Rect::along(
+            direction,
+            inner.main_start(direction) + offset,
+            inner.cross_start(direction) + (inner_cross - size.cross(direction)) / 2,
+            size,
+        );
         arrange(tree, child, child_rect, out);
     }
 }
@@ -959,6 +1041,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_column_measures_its_children_stacked_with_gaps() {
+        let mut state = hello_box_world();
+        if let FlexNode::Box(the_box) = state.boxes.value_mut(&[0]) {
+            the_box.direction = Direction::Column;
+        }
+        let children: Vec<Size> = state
+            .boxes
+            .children(&[0])
+            .iter()
+            .map(|child| measure(&state.boxes, child))
+            .collect();
+        let widest = children.iter().map(|child| child.width).max().unwrap();
+        let heights = children.iter().map(|child| child.height).sum::<i64>();
+        assert_eq!(
+            measure(&state.boxes, &[0]),
+            Size {
+                width: widest + 2 * FLEX_BORDER,
+                height: heights + FLEX_GAP * (children.len() as i64 - 1) + 2 * FLEX_BORDER,
+            }
+        );
+    }
+
     fn label_showing<'a>(placements: &'a [Placement<'a>], shown: &str) -> &'a Placement<'a> {
         placements
             .iter()
@@ -1116,5 +1221,69 @@ mod tests {
             inner.x - (hello.x + hello.width),
             world.x - (inner.x + inner.width)
         );
+    }
+
+    fn in_column(mut state: FlexState) -> FlexState {
+        outer_box_mut(&mut state, 0).direction = Direction::Column;
+        state
+    }
+
+    fn geometry(siblings: &[&Placement<'_>]) -> Vec<(i64, i64, i64, i64)> {
+        siblings
+            .iter()
+            .map(|sibling| (sibling.x, sibling.y, sibling.width, sibling.height))
+            .collect()
+    }
+
+    fn assert_centred_across(outer: &Placement<'_>, siblings: &[&Placement<'_>]) {
+        let inner_left = outer.x + FLEX_BORDER;
+        let inner_width = outer.width - 2 * FLEX_BORDER;
+        for sibling in siblings {
+            assert_eq!(sibling.x - inner_left, (inner_width - sibling.width) / 2);
+        }
+    }
+
+    #[test]
+    fn in_column_siblings_stack_top_to_bottom_in_order_one_gap_apart() {
+        let state = in_column(hello_box_world());
+        let placements = placements(&state);
+        let outer = &placements[0];
+        let hello = label_showing(&placements, "Hello");
+        let inner = all_boxes(&placements)[1];
+        let world = label_showing(&placements, "World");
+        assert_eq!(hello.y, outer.y + FLEX_BORDER);
+        assert_eq!(inner.y, hello.y + hello.height + FLEX_GAP);
+        assert_eq!(world.y, inner.y + inner.height + FLEX_GAP);
+        assert_eq!(world.y + world.height, outer.y + outer.height - FLEX_BORDER);
+    }
+
+    #[test]
+    fn in_column_siblings_are_centred_horizontally_in_the_box() {
+        let state = in_column(hello_box_world());
+        let placements = placements(&state);
+        let column = row_of(&placements, &state);
+        assert_centred_across(&placements[0], &column);
+    }
+
+    #[test]
+    fn a_space_between_column_places_its_siblings_as_a_start_column_does() {
+        let spread_column = in_column(spread(vec![text("Hello"), new_box(), text("World")]));
+        let mut start_column = spread_column.clone();
+        outer_box_mut(&mut start_column, 0).justify = Justify::Start;
+        let spread_placements = placements(&spread_column);
+        let start_placements = placements(&start_column);
+        assert_eq!(
+            geometry(&row_of(&spread_placements, &spread_column)),
+            geometry(&row_of(&start_placements, &start_column))
+        );
+    }
+
+    #[test]
+    fn a_full_column_centres_its_siblings_across_the_window() {
+        let state = in_column(spread(vec![text("Hello"), new_box(), text("World")]));
+        let placements = placements(&state);
+        let outer = &placements[0];
+        assert_eq!((outer.x, outer.width), (WINDOW.col, WINDOW.cols));
+        assert_centred_across(outer, &row_of(&placements, &state));
     }
 }
