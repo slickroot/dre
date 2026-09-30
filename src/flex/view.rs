@@ -6,20 +6,33 @@ use super::state::{FlexState, FlexWidth};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
+const TEXT_GAP: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
+fn text_offsets(texts: &[String]) -> Vec<i64> {
+    let mut next = 0;
+    texts
+        .iter()
+        .map(|text| {
+            let offset = next;
+            next += view::interior(text) + TEXT_GAP;
+            offset
+        })
+        .collect()
+}
+
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let mut placements = Vec::with_capacity(state.boxes.len() * 2);
     for (i, flex_box) in (0..).zip(&state.boxes) {
-        let text = flex_box.text.as_str();
-        let (width, label_offset) = match flex_box.width {
+        let offsets = text_offsets(&flex_box.texts);
+        let width = match flex_box.width {
             FlexWidth::Fit => {
-                let width = view::interior(text) + 2;
-                (width, view::label_centre(width, text))
+                let interiors: i64 = flex_box.texts.iter().map(|text| view::interior(text)).sum();
+                interiors + TEXT_GAP * (flex_box.texts.len() as i64 - 1) + 2
             }
-            FlexWidth::Full => (window.cols, 1),
+            FlexWidth::Full => window.cols,
         };
         let x = -width.div_euclid(2);
         let y = i * (BOX_HEIGHT + FLEX_GAP);
@@ -38,17 +51,19 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
             width,
             height: BOX_HEIGHT,
         });
-        placements.push(Placement {
-            node: PlacementNode::Label(Label {
-                text: Cow::Borrowed(text),
-                colour: FLEX_TEXT_COLOUR,
-                bold: false,
-            }),
-            x: x + label_offset,
-            y: y + BOX_HEIGHT / 2,
-            width: view::interior(text),
-            height: 1,
-        });
+        for (text, offset) in flex_box.texts.iter().zip(offsets) {
+            placements.push(Placement {
+                node: PlacementNode::Label(Label {
+                    text: Cow::Borrowed(text.as_str()),
+                    colour: FLEX_TEXT_COLOUR,
+                    bold: false,
+                }),
+                x: x + 1 + offset,
+                y: y + BOX_HEIGHT / 2,
+                width: view::interior(text),
+                height: 1,
+            });
+        }
     }
     // view::centre assumes content starts at x = 0.
     let left = placements
@@ -83,7 +98,7 @@ mod tests {
 
     fn a_box(text: &str) -> FlexBox {
         FlexBox {
-            text: text.to_string(),
+            texts: vec![text.to_string()],
             ..FlexBox::default()
         }
     }
@@ -164,7 +179,7 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, &state.boxes.last().unwrap().text);
+        assert_eq!(text, &state.boxes.last().unwrap().texts[0]);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }
@@ -388,5 +403,99 @@ mod tests {
         });
         let placements = placements(&state);
         assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
+    }
+
+    fn beside(texts: &[&str]) -> FlexState {
+        holding(FlexBox {
+            texts: texts.iter().map(|text| text.to_string()).collect(),
+            ..FlexBox::default()
+        })
+    }
+
+    fn margins(placements: &[Placement<'_>]) -> (i64, i64) {
+        let the_box = the_box(placements);
+        (
+            the_box.x - WINDOW.col,
+            WINDOW.col + WINDOW.cols - (the_box.x + the_box.width),
+        )
+    }
+
+    fn owned(texts: &[&str]) -> Vec<String> {
+        texts.iter().map(|text| text.to_string()).collect()
+    }
+
+    #[test]
+    fn each_text_starts_after_the_previous_one_and_a_gap() {
+        let texts = owned(&["Hello", "World", ""]);
+        let first = view::interior("Hello") + TEXT_GAP;
+        let second = first + view::interior("World") + TEXT_GAP;
+        assert_eq!(text_offsets(&texts), vec![0, first, second]);
+    }
+
+    #[test]
+    fn a_fit_box_is_as_wide_as_its_texts_and_gaps() {
+        for texts in [&["Hello", ""][..], &["Hello", "World"][..]] {
+            let state = beside(texts);
+            let placements = placements(&state);
+            let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
+            let gaps = TEXT_GAP * (texts.len() as i64 - 1);
+            assert_eq!(the_box(&placements).width, interiors + gaps + 2);
+        }
+    }
+
+    #[test]
+    fn a_box_with_two_texts_places_one_box_and_two_labels() {
+        let state = beside(&["Hello", "World"]);
+        let placements = placements(&state);
+        assert_eq!(
+            (all_boxes(&placements).len(), all_labels(&placements).len()),
+            (1, 2)
+        );
+        let the_box = the_box(&placements);
+        for label in all_labels(&placements) {
+            assert!(label.x > the_box.x);
+            assert!(label.x + label.width < the_box.x + the_box.width);
+            assert_eq!(label.y, the_box.y + BOX_HEIGHT / 2);
+        }
+    }
+
+    #[test]
+    fn the_second_label_is_one_gap_after_the_first() {
+        let state = beside(&["Hello", "World"]);
+        let placements = placements(&state);
+        let labels = all_labels(&placements);
+        assert_eq!(
+            labels[1].x,
+            labels[0].x + view::interior("Hello") + TEXT_GAP
+        );
+    }
+
+    #[test]
+    fn a_box_with_two_texts_stays_centred() {
+        let state = beside(&["Hello", "World"]);
+        let (left, right) = margins(&placements(&state));
+        assert!((left - right).abs() <= 1);
+    }
+
+    #[test]
+    fn the_box_is_centred_again_after_a_text_is_added() {
+        let (grown, _) = reduce(with_text("Hello"), "s");
+        let (left, right) = margins(&placements(&grown));
+        assert!((left - right).abs() <= 1);
+    }
+
+    #[test]
+    fn a_full_box_with_two_texts_spans_the_window() {
+        let state = holding(FlexBox {
+            width: FlexWidth::Full,
+            ..FlexBox {
+                texts: owned(&["Hello", "World"]),
+                ..FlexBox::default()
+            }
+        });
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.width, WINDOW.cols);
+        assert_eq!(all_labels(&placements)[0].x, the_box.x + 1);
     }
 }
