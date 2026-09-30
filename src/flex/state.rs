@@ -129,7 +129,6 @@ impl FlexState {
             })
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn texts_of(&self, path: &[usize]) -> Vec<&str> {
         self.children_of(path)
             .filter_map(|(_, node)| match node {
@@ -185,7 +184,14 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
 
 fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
-        "i" => state.mode = FlexMode::Write,
+        "i" => {
+            if state.texts_of(&state.selected).is_empty() {
+                state
+                    .boxes
+                    .push(&state.selected, Tree::leaf(FlexNode::Text(String::new())));
+            }
+            state.mode = FlexMode::Write;
+        }
         "a" => state.selected = state.boxes.push(&[], new_box()),
         "A" => {
             state.boxes.push(&state.selected, new_box());
@@ -458,6 +464,28 @@ mod tests {
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(effect, None);
+    }
+
+    fn empty_box_in_move() -> FlexState {
+        FlexState {
+            boxes: Tree::root(vec![Tree::new(FlexNode::Box(FlexBox::default()), vec![])]),
+            mode: FlexMode::Move,
+            ..FlexState::default()
+        }
+    }
+
+    #[test]
+    fn i_on_a_box_with_no_text_adds_one_empty_text_and_switches_to_write() {
+        let (state, effect) = reduce(empty_box_in_move(), "i");
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(state.texts_of(&state.selected), [""]);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn typing_after_i_on_a_box_with_no_text_goes_into_the_new_text() {
+        let state = moved(empty_box_in_move(), &["i", "H", "i"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hi"]);
     }
 
     #[test]
