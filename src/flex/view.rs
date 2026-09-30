@@ -32,29 +32,27 @@ fn child_sizes(
         .collect()
 }
 
-fn measure(tree: &Tree<FlexNode>) -> HashMap<Vec<usize>, Size> {
-    let mut sizes = HashMap::new();
-    let nodes: Vec<_> = tree.walk().collect();
-    for (path, node) in nodes.into_iter().rev() {
-        let size = match node {
-            FlexNode::Text(text) => Size {
-                width: view::interior(text),
-                height: 1,
-            },
-            FlexNode::Box(_) => {
-                let children = child_sizes(tree, &sizes, &path);
-                let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
-                let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
-                let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
-                Size {
-                    width: content_width + 2 * FLEX_BORDER,
-                    height: content_height + 2 * FLEX_BORDER,
-                }
+fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
+    match tree.value(path) {
+        FlexNode::Text(text) => Size {
+            width: view::interior(text),
+            height: 1,
+        },
+        FlexNode::Box(_) => {
+            let children: Vec<Size> = tree
+                .children(path)
+                .iter()
+                .map(|child| measure(tree, child))
+                .collect();
+            let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
+            let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
+            let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
+            Size {
+                width: content_width + 2 * FLEX_BORDER,
+                height: content_height + 2 * FLEX_BORDER,
             }
-        };
-        sizes.insert(path, size);
+        }
     }
-    sizes
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -126,7 +124,14 @@ impl Frame {
 }
 
 fn place<'a>(state: &'a FlexState, window: Area) -> Vec<Placement<'a>> {
-    let sizes = measure(&state.boxes);
+    let sizes: HashMap<Vec<usize>, Size> = state
+        .boxes
+        .walk()
+        .map(|(path, _)| {
+            let size = measure(&state.boxes, &path);
+            (path, size)
+        })
+        .collect();
     let mut frames: HashMap<Vec<usize>, Frame> = HashMap::new();
     let mut placements = Vec::with_capacity(sizes.len());
     let mut next_outer_y = 0;
@@ -900,11 +905,8 @@ mod tests {
         assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 
-    fn sizes_of(children: Vec<Tree<FlexNode>>) -> HashMap<Vec<usize>, Size> {
-        measure(&Tree::root(vec![Tree::new(
-            FlexNode::Box(FlexBox::default()),
-            children,
-        )]))
+    fn box_of(children: Vec<Tree<FlexNode>>) -> Tree<FlexNode> {
+        Tree::root(vec![Tree::new(FlexNode::Box(FlexBox::default()), children)])
     }
 
     fn text(text: &str) -> Tree<FlexNode> {
@@ -913,9 +915,9 @@ mod tests {
 
     #[test]
     fn a_text_measures_its_interior_by_one_row() {
-        let sizes = sizes_of(vec![text("Hello")]);
+        let tree = box_of(vec![text("Hello")]);
         assert_eq!(
-            sizes[&vec![0, 0]],
+            measure(&tree, &[0, 0]),
             Size {
                 width: view::interior("Hello"),
                 height: 1,
@@ -925,9 +927,8 @@ mod tests {
 
     #[test]
     fn a_new_box_measures_around_its_empty_text() {
-        let sizes = measure(&Tree::root(vec![new_box()]));
         assert_eq!(
-            sizes[&vec![0]],
+            measure(&Tree::root(vec![new_box()]), &[0]),
             Size {
                 width: view::interior("") + 2 * FLEX_BORDER,
                 height: 1 + 2 * FLEX_BORDER,
@@ -937,10 +938,10 @@ mod tests {
 
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
-        let sizes = sizes_of(vec![text("Hello"), new_box(), text("World")]);
-        let empty_box = measure(&Tree::root(vec![new_box()]))[&vec![0]];
+        let tree = box_of(vec![text("Hello"), new_box(), text("World")]);
+        let empty_box = measure(&Tree::root(vec![new_box()]), &[0]);
         assert_eq!(
-            sizes[&vec![0]],
+            measure(&tree, &[0]),
             Size {
                 width: view::interior("Hello")
                     + FLEX_GAP
@@ -1046,7 +1047,7 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let outer = all_boxes(&placements)[0];
-        let measured = measure(&state.boxes)[&vec![0]];
+        let measured = measure(&state.boxes, &[0]);
         assert_eq!(
             (outer.width, outer.height),
             (measured.width, measured.height)
