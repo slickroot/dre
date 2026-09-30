@@ -109,10 +109,11 @@ removes a character from the name.
 
 `Ctrl-C` quits without saving.
 
-## Example
+## Files and export
 
-`docs/example.dre` shows off rounded corners, border colours, translucent
-fills, and arrows:
+A diagram is saved as a `.dre` file, plain XML that nests boxes the way the
+diagram does. `docs/example.dre` shows off rounded corners, border colours,
+translucent fills, and arrows:
 
 ```xml
 <dre>
@@ -132,15 +133,10 @@ fills, and arrows:
 Each colour names a layer — pink the edge, orange the services, blue the
 data — and the rounded corners mark the single entry point.
 
-`dre --svg docs/example.dre` renders it as `docs/example.svg`:
+`dre --svg docs/example.dre` writes `docs/example.svg` next to it and exits — a
+crisp, vector copy with no cursor or selection:
 
 ![The example diagram rendered by dre](docs/example.svg)
-
-## Export to SVG
-
-`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
-exits — a crisp, vector copy with the same boxes, labels, colours, fills,
-rounded corners, and arrows, but no cursor or selection.
 
 ## How dre is built
 
