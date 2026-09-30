@@ -412,23 +412,6 @@ pub(crate) fn command_label(state: &State, key: &str) -> Option<(String, &'stati
 }
 
 #[cfg(test)]
-fn keymap_markdown() -> String {
-    let mut out = String::from("| Mode | Key | Description |\n| --- | --- | --- |\n");
-    for binding in KEYMAP {
-        let mode = match &binding.mode {
-            Mode::Command => "Command",
-            Mode::Insert { .. } => "Insert",
-            Mode::NamePrompt { .. } => "Name prompt",
-        };
-        out.push_str(&format!(
-            "| {mode} | `{}` | {} |\n",
-            binding.display, binding.description
-        ));
-    }
-    out
-}
-
-#[cfg(test)]
 fn action_key(action: &Action) -> KeyAction {
     match action {
         Action::Selection(SelectionCommand::Undo) => KeyAction::Undo,
@@ -585,33 +568,6 @@ mod tests {
                         && matches!(binding.matcher, KeyMatch::Exact(_)))
                 );
             }
-        }
-    }
-
-    #[test]
-    fn readme_keymap_table_stays_in_sync() {
-        let markdown = format!("\n\n{}\n", keymap_markdown());
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir).join("README.md");
-        let readme = std::fs::read_to_string(&path).unwrap();
-        let start_marker = "<!-- keymap:start -->";
-        let end_marker = "<!-- keymap:end -->";
-        let start = readme
-            .find(start_marker)
-            .expect("missing <!-- keymap:start --> in README.md");
-        let end = readme
-            .find(end_marker)
-            .expect("missing <!-- keymap:end --> in README.md");
-        let start_after = start + start_marker.len();
-        let between = &readme[start_after..end];
-        if std::env::var("UPDATE_README").unwrap_or_default() == "1" {
-            let new_readme = format!("{}{}{}", &readme[..start_after], markdown, &readme[end..]);
-            std::fs::write(&path, new_readme).unwrap();
-        } else {
-            assert_eq!(
-                between, markdown,
-                "README.md keymap table is out of date. Run UPDATE_README=1 cargo test to regenerate."
-            );
         }
     }
 

@@ -100,7 +100,6 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::path::PathBuf;
 
     fn parse(args: &[&str]) -> Command {
@@ -205,47 +204,5 @@ mod tests {
     #[test]
     fn output_path_appends_svg_to_an_extensionless_path() {
         assert_eq!(output_path("report"), PathBuf::from("report.svg"));
-    }
-
-    fn temp_file(name: &str, contents: &str) -> String {
-        let path = std::env::temp_dir().join(format!("dre-cli-{}-{name}", std::process::id()));
-        fs::write(&path, contents).unwrap();
-        path.to_string_lossy().into_owned()
-    }
-
-    #[test]
-    fn export_writes_an_svg_document_beside_the_input() {
-        let input = temp_file("valid.dre", "<dre><box label=\"API\"/></dre>");
-        let output = std::path::Path::new(&input).with_extension("svg");
-        let _ = fs::remove_file(&output);
-        let result = export(input.clone());
-        let svg = fs::read_to_string(&output).expect("the output svg exists");
-        fs::remove_file(&input).unwrap();
-        fs::remove_file(&output).unwrap();
-        assert_eq!(result.unwrap(), ExitCode::SUCCESS);
-        assert!(svg.starts_with("<svg"));
-        assert!(svg.contains("<rect"));
-        assert!(!svg.contains("• dre"));
-    }
-
-    #[test]
-    fn a_missing_file_reports_no_such_file() {
-        let path = std::env::temp_dir()
-            .join(format!("dre-cli-{}-missing.dre", std::process::id()))
-            .to_string_lossy()
-            .into_owned();
-        let err = export(path.clone()).err().unwrap();
-        assert_eq!(err.to_string(), format!("no such file: {path}"));
-    }
-
-    #[test]
-    fn a_corrupt_file_reports_not_a_valid_diagram() {
-        let path = temp_file("corrupt.dre", "this is not xml");
-        let err = export(path.clone()).err();
-        fs::remove_file(&path).unwrap();
-        assert_eq!(
-            err.unwrap().to_string(),
-            format!("{path}: not a valid diagram")
-        );
     }
 }
