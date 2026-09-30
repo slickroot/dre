@@ -10,8 +10,12 @@ const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let text = state.text.as_str();
-    let (width, label_x) = match state.width {
+    let newest = state
+        .boxes
+        .last()
+        .expect("a flex state always holds at least one box");
+    let text = newest.text.as_str();
+    let (width, label_x) = match newest.width {
         FlexWidth::Fit => {
             let width = view::interior(text) + 2;
             (width, view::label_centre(width, text))
@@ -24,7 +28,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
                 colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
-                solid_fill: state.filled.then_some(FLEX_FILL_COLOUR),
+                solid_fill: newest.filled.then_some(FLEX_FILL_COLOUR),
                 rounded: false,
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
@@ -52,7 +56,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flex::state::reduce;
+    use crate::flex::state::{reduce, FlexBox};
 
     const WINDOW: Area = Area {
         col: 0,
@@ -61,11 +65,22 @@ mod tests {
         rows: 24,
     };
 
-    fn with_text(text: &str) -> FlexState {
+    fn holding(the_box: FlexBox) -> FlexState {
         FlexState {
-            text: text.to_string(),
+            boxes: vec![the_box],
             ..FlexState::default()
         }
+    }
+
+    fn a_box(text: &str) -> FlexBox {
+        FlexBox {
+            text: text.to_string(),
+            ..FlexBox::default()
+        }
+    }
+
+    fn with_text(text: &str) -> FlexState {
+        holding(a_box(text))
     }
 
     fn placements(state: &FlexState) -> Vec<Placement<'_>> {
@@ -140,7 +155,7 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, &state.text);
+        assert_eq!(text, &state.boxes.last().unwrap().text);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }
@@ -220,10 +235,10 @@ mod tests {
     }
 
     fn full(text: &str) -> FlexState {
-        FlexState {
+        holding(FlexBox {
             width: FlexWidth::Full,
-            ..with_text(text)
-        }
+            ..a_box(text)
+        })
     }
 
     #[test]
@@ -266,10 +281,10 @@ mod tests {
 
     #[test]
     fn a_filled_box_is_solid_with_the_flex_fill_colour() {
-        let state = FlexState {
+        let state = holding(FlexBox {
             filled: true,
-            ..with_text("Hello")
-        };
+            ..a_box("Hello")
+        });
         let placements = placements(&state);
         assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
     }
