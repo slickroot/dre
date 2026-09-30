@@ -42,6 +42,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flex::state::reduce;
 
     const WINDOW: Area = Area {
         col: 0,
@@ -132,5 +133,15 @@ mod tests {
         assert_eq!(text, &state.text);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
+    }
+
+    #[test]
+    fn the_box_shrinks_after_backspace() {
+        let before = with_text("Hellp");
+        let after = reduce(before.clone(), "\x7f");
+        let before_width = the_box(&placements(&before)).width;
+        let after_width = the_box(&placements(&after)).width;
+        assert!(after_width < before_width);
+        assert_eq!(after_width, the_box(&placements(&with_text("Hell"))).width);
     }
 }

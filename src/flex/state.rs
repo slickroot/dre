@@ -26,6 +26,11 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> FlexState {
             running: false,
             ..state
         },
+        "\x7f" => {
+            let mut text = state.text;
+            text.pop();
+            FlexState { text, ..state }
+        }
         _ => match printable_char(key) {
             Some(c) => {
                 let mut text = state.text;
@@ -87,6 +92,22 @@ mod tests {
     #[test]
     fn typing_a_multibyte_character_appends_it() {
         assert_eq!(typed(&["c", "a", "f", "é"]).text, "café");
+    }
+
+    #[test]
+    fn backspace_removes_the_last_character() {
+        assert_eq!(typed(&["H", "e", "l", "l", "p", "\x7f"]).text, "Hell");
+    }
+
+    #[test]
+    fn backspace_removes_a_whole_multibyte_character() {
+        assert_eq!(typed(&["c", "a", "f", "é", "\x7f"]).text, "caf");
+    }
+
+    #[test]
+    fn backspace_on_an_empty_box_leaves_the_state_unchanged() {
+        let before = FlexState::default();
+        assert_eq!(reduce(before.clone(), "\x7f"), before);
     }
 
     #[test]
