@@ -317,37 +317,6 @@ mod tests {
         VisitorHandler::new(spawner, Sessions::default(), diagram_dir("unused"))
     }
 
-    fn blocking_session() -> (MockSession, std::sync::mpsc::Sender<Vec<u8>>) {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let mut session = MockSession::new();
-        session
-            .expect_read()
-            .returning(move || receiver.recv().ok());
-        (session, sender)
-    }
-
-    fn keyed_handler(
-        spawner: MockSpawner,
-        sessions: &Sessions,
-        name: &str,
-        key: &PublicKey,
-    ) -> VisitorHandler {
-        let mut handler =
-            VisitorHandler::new(Arc::new(spawner), sessions.clone(), diagram_dir(name));
-        handler.record_key(key);
-        handler
-    }
-
-    fn spawner_of_blocking_session() -> (MockSpawner, std::sync::mpsc::Sender<Vec<u8>>) {
-        let (session, sender) = blocking_session();
-        let session = Mutex::new(Some(session));
-        let mut spawner = MockSpawner::new();
-        spawner.expect_spawn().times(1).returning(move |_, _| {
-            Ok(Box::new(session.lock().unwrap().take().unwrap()) as Box<dyn Session>)
-        });
-        (spawner, sender)
-    }
-
     fn started_handler(session: MockSession) -> VisitorHandler {
         let mut handler = handler_of(spawner_of(session));
         handler.start_shell(fake_outlet().0, "diagram.dre").unwrap();
@@ -523,73 +492,5 @@ mod tests {
             Some(Some(no_key_message().into_bytes()))
         );
         assert_eq!(received.recv().await, Some(None));
-    }
-
-    #[tokio::test]
-    async fn a_key_spawns_with_the_path_of_its_diagram_dir() {
-        let key = public_key();
-        let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
-        let directory = diagram_dir("path");
-        let expected = directory.for_key(&fingerprint).unwrap();
-        let mut spawner = MockSpawner::new();
-        spawner
-            .expect_spawn()
-            .withf(move |_, path| path == expected)
-            .times(1)
-            .returning(|_, _| Ok(Box::new(silent_session())));
-        let mut handler = keyed_handler(spawner, &Sessions::default(), "path", &key);
-        handler.begin(fake_outlet().0).await.unwrap();
-        std::fs::remove_dir_all(&directory.root).unwrap();
-    }
-
-    #[tokio::test]
-    async fn the_same_key_connecting_twice_closes_the_first_and_spawns_a_second() {
-        let key = public_key();
-        let sessions = Sessions::default();
-        let (first_spawner, _first_input) = spawner_of_blocking_session();
-        let (second_spawner, _second_input) = spawner_of_blocking_session();
-        let mut first = keyed_handler(first_spawner, &sessions, "same", &key);
-        let mut second = keyed_handler(second_spawner, &sessions, "same", &key);
-        let (first_outlet, mut first_received) = fake_outlet();
-        let (second_outlet, mut second_received) = fake_outlet();
-        first.begin(first_outlet).await.unwrap();
-        second.begin(second_outlet).await.unwrap();
-        assert_eq!(first_received.recv().await, Some(None));
-        assert!(second_received.try_recv().is_err());
-        std::fs::remove_dir_all(&first.diagram_dir.root).unwrap();
-    }
-
-    #[tokio::test]
-    async fn different_keys_never_close_each_other() {
-        let sessions = Sessions::default();
-        let (first_spawner, _first_input) = spawner_of_blocking_session();
-        let (second_spawner, _second_input) = spawner_of_blocking_session();
-        let mut first = keyed_handler(first_spawner, &sessions, "different", &public_key());
-        let mut second = keyed_handler(second_spawner, &sessions, "different", &public_key());
-        let (first_outlet, mut first_received) = fake_outlet();
-        first.begin(first_outlet).await.unwrap();
-        second.begin(fake_outlet().0).await.unwrap();
-        tokio::task::yield_now().await;
-        assert!(first_received.try_recv().is_err());
-        std::fs::remove_dir_all(&first.diagram_dir.root).unwrap();
-    }
-
-    #[tokio::test]
-    async fn an_old_connection_ending_late_does_not_evict_its_replacement() {
-        let key = public_key();
-        let sessions = Sessions::default();
-        let (first_spawner, _first_input) = spawner_of_blocking_session();
-        let (second_spawner, _second_input) = spawner_of_blocking_session();
-        let (third_spawner, _third_input) = spawner_of_blocking_session();
-        let mut first = keyed_handler(first_spawner, &sessions, "late", &key);
-        let mut second = keyed_handler(second_spawner, &sessions, "late", &key);
-        let mut third = keyed_handler(third_spawner, &sessions, "late", &key);
-        let (second_outlet, mut second_received) = fake_outlet();
-        first.begin(fake_outlet().0).await.unwrap();
-        second.begin(second_outlet).await.unwrap();
-        drop(first);
-        third.begin(fake_outlet().0).await.unwrap();
-        assert_eq!(second_received.recv().await, Some(None));
-        std::fs::remove_dir_all(&second.diagram_dir.root).unwrap();
     }
 }

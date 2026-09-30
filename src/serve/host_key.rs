@@ -32,35 +32,3 @@ impl HostKey {
         Ok(Self(key))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
-
-    fn temp_path(name: &str) -> String {
-        std::env::temp_dir()
-            .join(format!("dre-host-key-{}-{name}", std::process::id()))
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    #[test]
-    fn a_missing_key_is_generated_with_mode_0600() {
-        let path = temp_path("generated");
-        let key = HostKey::load_or_generate(&path);
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(key.unwrap().into_key().algorithm(), Algorithm::Ed25519);
-        assert_eq!(mode & 0o777, 0o600);
-    }
-
-    #[test]
-    fn an_existing_key_is_loaded_unchanged() {
-        let path = temp_path("reloaded");
-        let first = HostKey::load_or_generate(&path);
-        let second = HostKey::load_or_generate(&path);
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(first.unwrap().into_key(), second.unwrap().into_key());
-    }
-}

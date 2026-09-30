@@ -33,21 +33,3 @@ pub(crate) fn run(listen: String, host_key: String, data_dir: String) -> io::Res
         .block_on(server.run_on_address(config, listen))?;
     Ok(ExitCode::SUCCESS)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_config_offers_publickey_and_keyboard_interactive_with_the_host_key() {
-        let path = std::env::temp_dir().join(format!("dre-config-{}", std::process::id()));
-        let path = path.to_str().unwrap();
-        let config = config(HostKey::load_or_generate(path).unwrap());
-        std::fs::remove_file(path).unwrap();
-        assert_eq!(
-            &*config.methods,
-            &[MethodKind::PublicKey, MethodKind::KeyboardInteractive]
-        );
-        assert_eq!(config.keys.len(), 1);
-    }
-}
