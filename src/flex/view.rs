@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
-use super::state::{FlexMode, FlexState, FlexWidth, Justify};
+use super::state::{FlexBox, FlexMode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
@@ -35,52 +35,117 @@ fn text_offsets(texts: &[String], justify: Justify, inner_width: i64) -> Vec<i64
         .collect()
 }
 
-pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let mut placements = Vec::with_capacity(state.boxes.len() * 2);
-    for (i, flex_box) in (0..).zip(&state.boxes) {
-        let width = match flex_box.width {
-            FlexWidth::Fit => {
-                let interiors: i64 = flex_box.texts.iter().map(|text| view::interior(text)).sum();
-                interiors + TEXT_GAP * (flex_box.texts.len() as i64 - 1) + 2
-            }
-            FlexWidth::Full => window.cols,
-        };
-        let offsets = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
-        let x = -width.div_euclid(2);
-        let y = i * (BOX_HEIGHT + FLEX_GAP);
-        let colour = if state.mode == FlexMode::Move && i == state.selected as i64 {
-            FLEX_SELECTED_COLOUR
-        } else {
-            FLEX_BORDER_COLOUR
-        };
+fn inner_box_width() -> i64 {
+    view::interior("") + 2
+}
+
+fn texts_width_end(texts: &[String], offsets: &[i64]) -> i64 {
+    let last = texts.len() - 1;
+    offsets[last] + view::interior(&texts[last])
+}
+
+fn place_outer_box<'a>(
+    state: &FlexState,
+    index: usize,
+    flex_box: &'a FlexBox,
+    y: i64,
+    window: Area,
+    placements: &mut Vec<Placement<'a>>,
+) -> i64 {
+    let inner_boxes = (0..)
+        .take_while(|&inner| state.boxes.contains(&[index, inner]))
+        .count() as i64;
+    let height = BOX_HEIGHT + inner_boxes * (FLEX_GAP + BOX_HEIGHT);
+    let texts_width: i64 = flex_box
+        .texts
+        .iter()
+        .map(|text| view::interior(text))
+        .sum::<i64>()
+        + TEXT_GAP * (flex_box.texts.len() as i64 - 1);
+    let width = match flex_box.width {
+        FlexWidth::Fit => {
+            let content = if inner_boxes > 0 {
+                texts_width.max(inner_box_width())
+            } else {
+                texts_width
+            };
+            content + 2
+        }
+        FlexWidth::Full => window.cols,
+    };
+    let packed = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
+    let centring_shift = match flex_box.width {
+        FlexWidth::Fit => (width - 2 - texts_width_end(&flex_box.texts, &packed)).div_euclid(2),
+        FlexWidth::Full => 0,
+    };
+    let offsets: Vec<i64> = packed
+        .iter()
+        .map(|offset| offset + centring_shift)
+        .collect();
+    let x = -width.div_euclid(2);
+    let colour = if state.mode == FlexMode::Move && state.selected == [index] {
+        FLEX_SELECTED_COLOUR
+    } else {
+        FLEX_BORDER_COLOUR
+    };
+    placements.push(Placement {
+        node: PlacementNode::Box {
+            colour,
+            fill: None,
+            opacity: None,
+            solid_fill: flex_box.filled.then_some(FLEX_FILL_COLOUR),
+            rounded: false,
+            sides: ALL_SIDES,
+            border: FLEX_BORDER,
+        },
+        x,
+        y,
+        width,
+        height,
+    });
+    for (text, offset) in flex_box.texts.iter().zip(&offsets) {
+        placements.push(Placement {
+            node: PlacementNode::Label(Label {
+                text: Cow::Borrowed(text.as_str()),
+                colour: FLEX_TEXT_COLOUR,
+                bold: false,
+            }),
+            x: x + 1 + offset,
+            y: y + BOX_HEIGHT / 2,
+            width: view::interior(text),
+            height: 1,
+        });
+    }
+    let text_row = y + BOX_HEIGHT / 2;
+    let texts_start = x + 1 + offsets[0];
+    let texts_end = x + 1 + texts_width_end(&flex_box.texts, &offsets);
+    let centred_x = texts_start + (texts_end - texts_start - inner_box_width()).div_euclid(2);
+    let inner_x = centred_x.min(x + width - 1 - inner_box_width()).max(x + 1);
+    for inner in 0..inner_boxes {
         placements.push(Placement {
             node: PlacementNode::Box {
-                colour,
+                colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
-                solid_fill: flex_box.filled.then_some(FLEX_FILL_COLOUR),
+                solid_fill: None,
                 rounded: false,
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
             },
-            x,
-            y,
-            width,
+            x: inner_x,
+            y: text_row + 1 + FLEX_GAP + inner * (FLEX_GAP + BOX_HEIGHT),
+            width: inner_box_width(),
             height: BOX_HEIGHT,
         });
-        for (text, offset) in flex_box.texts.iter().zip(offsets) {
-            placements.push(Placement {
-                node: PlacementNode::Label(Label {
-                    text: Cow::Borrowed(text.as_str()),
-                    colour: FLEX_TEXT_COLOUR,
-                    bold: false,
-                }),
-                x: x + 1 + offset,
-                y: y + BOX_HEIGHT / 2,
-                width: view::interior(text),
-                height: 1,
-            });
-        }
+    }
+    height
+}
+
+pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
+    let mut placements = Vec::with_capacity(state.outer_boxes().count() * 2);
+    let mut y = 0;
+    for (index, flex_box) in state.outer_boxes().enumerate() {
+        y += place_outer_box(state, index, flex_box, y, window, &mut placements) + FLEX_GAP;
     }
     // view::centre assumes content starts at x = 0.
     let left = placements
@@ -98,6 +163,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
 mod tests {
     use super::*;
     use crate::flex::state::{reduce, FlexBox, Justify};
+    use types::Tree;
 
     const WINDOW: Area = Area {
         col: 0,
@@ -108,7 +174,7 @@ mod tests {
 
     fn holding(the_box: FlexBox) -> FlexState {
         FlexState {
-            boxes: vec![the_box],
+            boxes: Tree::root(vec![Tree::leaf(the_box)]),
             ..FlexState::default()
         }
     }
@@ -196,7 +262,7 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, &state.boxes.last().unwrap().texts[0]);
+        assert_eq!(text, &state.outer_boxes().last().unwrap().texts[0]);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }
@@ -308,7 +374,7 @@ mod tests {
 
     fn stacked(texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: texts.iter().map(|text| a_box(text)).collect(),
+            boxes: Tree::root(texts.iter().map(|text| Tree::leaf(a_box(text))).collect()),
             ..FlexState::default()
         }
     }
@@ -597,7 +663,7 @@ mod tests {
         let start = beside(texts);
         let spread = holding(FlexBox {
             justify: Justify::SpaceBetween,
-            ..start.boxes[0].clone()
+            ..start.outer_boxes().next().unwrap().clone()
         });
         assert_eq!(placements(&spread), placements(&start));
     }
@@ -627,7 +693,7 @@ mod tests {
     fn selecting(mode: FlexMode, selected: usize) -> FlexState {
         FlexState {
             mode,
-            selected,
+            selected: vec![selected],
             ..stacked(&["Hello", "Hi", ""])
         }
     }
@@ -645,5 +711,246 @@ mod tests {
     fn in_write_no_box_has_the_selected_border() {
         let state = selecting(FlexMode::Write, 1);
         assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
+    }
+
+    fn with_inner_boxes(text: &str, count: usize) -> FlexState {
+        FlexState {
+            boxes: Tree::root(vec![Tree::new(
+                a_box(text),
+                (0..count).map(|_| Tree::leaf(FlexBox::default())).collect(),
+            )]),
+            ..FlexState::default()
+        }
+    }
+
+    fn outer_boxes_with_inner_counts(counts: &[usize]) -> FlexState {
+        FlexState {
+            boxes: Tree::root(
+                counts
+                    .iter()
+                    .map(|&count| {
+                        Tree::new(
+                            a_box("Hello"),
+                            (0..count).map(|_| Tree::leaf(FlexBox::default())).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+            ..FlexState::default()
+        }
+    }
+
+    #[test]
+    fn an_inner_box_sits_one_gap_below_the_text_row() {
+        let state = with_inner_boxes("Hello", 1);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes.len(), 2);
+        let text_row = the_label(&placements).y;
+        assert_eq!(boxes[1].y, text_row + 1 + FLEX_GAP);
+    }
+
+    #[test]
+    fn an_inner_box_is_as_wide_as_an_empty_box() {
+        let state = with_inner_boxes("Hello", 1);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes[1].width, inner_box_width());
+        assert_eq!(boxes[1].height, BOX_HEIGHT);
+    }
+
+    #[test]
+    fn an_inner_box_is_centred_under_the_text() {
+        let state = with_inner_boxes("Hello", 1);
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let inner = all_boxes(&placements)[1];
+        assert_eq!(2 * inner.x + inner.width, 2 * label.x + label.width);
+    }
+
+    #[test]
+    fn an_inner_box_looks_like_an_empty_box() {
+        let state = with_inner_boxes("Hello", 1);
+        let placements = placements(&state);
+        let inner = all_boxes(&placements)[1];
+        let PlacementNode::Box {
+            colour,
+            fill,
+            opacity,
+            solid_fill,
+            rounded,
+            sides,
+            border,
+        } = inner.node
+        else {
+            unreachable!()
+        };
+        assert_eq!(colour, FLEX_BORDER_COLOUR);
+        assert_eq!((fill, opacity, solid_fill), (None, None, None));
+        assert!(!rounded);
+        assert_eq!((sides, border), (ALL_SIDES, FLEX_BORDER));
+    }
+
+    #[test]
+    fn an_inner_box_never_wears_the_fill_of_its_outer_box() {
+        let mut state = with_inner_boxes("Hello", 1);
+        state.boxes.value_mut(&[0]).filled = true;
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(solid_fill(boxes[0]), Some(FLEX_FILL_COLOUR));
+        assert_eq!(solid_fill(boxes[1]), None);
+    }
+
+    #[test]
+    fn two_inner_boxes_are_stacked_one_gap_apart() {
+        let state = with_inner_boxes("Hello", 2);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes.len(), 3);
+        assert_eq!(boxes[2].y, boxes[1].y + BOX_HEIGHT + FLEX_GAP);
+        assert_eq!(boxes[2].x, boxes[1].x);
+    }
+
+    #[test]
+    fn the_outer_height_grows_with_each_inner_box() {
+        for count in 0..4 {
+            let state = with_inner_boxes("Hello", count);
+            let placements = placements(&state);
+            assert_eq!(
+                all_boxes(&placements)[0].height,
+                BOX_HEIGHT + count as i64 * (FLEX_GAP + BOX_HEIGHT)
+            );
+        }
+    }
+
+    #[test]
+    fn the_last_inner_box_ends_on_the_row_above_the_outer_bottom_border() {
+        let state = with_inner_boxes("Hello", 2);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(
+            boxes[2].y + boxes[2].height + 1,
+            boxes[0].y + boxes[0].height
+        );
+    }
+
+    #[test]
+    fn the_outer_width_grows_to_hold_an_inner_box_wider_than_the_text() {
+        let state = with_inner_boxes("", 1);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes[0].width, inner_box_width() + 2);
+        assert!(boxes[1].x > boxes[0].x);
+        assert!(boxes[1].x + boxes[1].width < boxes[0].x + boxes[0].width);
+    }
+
+    fn assert_inner_box_strictly_inside(state: &FlexState) {
+        let placements = placements(state);
+        let boxes = all_boxes(&placements);
+        let (outer, inner) = (boxes[0], boxes[1]);
+        assert!(inner.x > outer.x);
+        assert!(inner.x + inner.width < outer.x + outer.width);
+    }
+
+    #[test]
+    fn an_inner_box_in_a_fit_box_with_empty_text_stays_inside_the_outer_edges() {
+        assert_inner_box_strictly_inside(&with_inner_boxes("", 1));
+    }
+
+    #[test]
+    fn an_inner_box_in_a_fit_box_with_short_text_stays_inside_the_outer_edges() {
+        assert_inner_box_strictly_inside(&with_inner_boxes("a", 1));
+    }
+
+    #[test]
+    fn an_inner_box_in_a_full_start_box_with_short_text_stays_inside_the_outer_edges() {
+        for text in ["", "a"] {
+            let mut state = with_inner_boxes(text, 1);
+            let outer = state.boxes.value_mut(&[0]);
+            outer.width = FlexWidth::Full;
+            outer.justify = Justify::Start;
+            assert_inner_box_strictly_inside(&state);
+        }
+    }
+
+    #[test]
+    fn the_texts_are_centred_in_a_widened_fit_box() {
+        for text in ["", "a"] {
+            let state = with_inner_boxes(text, 1);
+            let placements = placements(&state);
+            let outer = all_boxes(&placements)[0];
+            let label = the_label(&placements);
+            let left = label.x - (outer.x + 1);
+            let right = outer.x + outer.width - 1 - (label.x + label.width);
+            assert!((left - right).abs() <= 1);
+        }
+    }
+
+    #[test]
+    fn the_outer_width_stays_at_the_text_when_it_is_wider_than_an_inner_box() {
+        let with_inner = with_inner_boxes("Hello", 1);
+        let without = with_inner_boxes("Hello", 0);
+        assert_eq!(
+            all_boxes(&placements(&with_inner))[0].width,
+            all_boxes(&placements(&without))[0].width
+        );
+    }
+
+    #[test]
+    fn a_following_outer_box_starts_one_gap_below_the_taller_one() {
+        let state = outer_boxes_with_inner_counts(&[2, 0]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (first, second) = (boxes[0], boxes[3]);
+        assert_eq!(second.y, first.y + first.height + FLEX_GAP);
+    }
+
+    #[test]
+    fn a_full_box_keeps_its_inner_box_centred_on_the_text() {
+        let mut state = with_inner_boxes("Hello", 1);
+        state.boxes.value_mut(&[0]).width = FlexWidth::Full;
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let inner = all_boxes(&placements)[1];
+        assert_eq!(2 * inner.x + inner.width, 2 * label.x + label.width);
+    }
+
+    #[test]
+    fn an_inner_box_is_centred_on_the_span_of_spread_texts() {
+        let mut state = with_inner_boxes("Hello", 1);
+        let outer = state.boxes.value_mut(&[0]);
+        outer.texts = owned(&["Hello", "World"]);
+        outer.width = FlexWidth::Full;
+        outer.justify = Justify::SpaceBetween;
+        let placements = placements(&state);
+        let labels = all_labels(&placements);
+        let last = labels.last().unwrap();
+        let inner = all_boxes(&placements)[1];
+        assert!((2 * inner.x + inner.width - (labels[0].x + last.x + last.width)).abs() <= 1);
+    }
+
+    #[test]
+    fn a_scene_with_inner_boxes_is_centred_in_the_window() {
+        let state = outer_boxes_with_inner_counts(&[2, 1, 0]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let left = boxes.iter().map(|b| b.x).min().unwrap();
+        let right = boxes.iter().map(|b| b.x + b.width).max().unwrap();
+        let top = boxes.iter().map(|b| b.y).min().unwrap();
+        let bottom = boxes.iter().map(|b| b.y + b.height).max().unwrap();
+        assert!(((left - WINDOW.col) - (WINDOW.col + WINDOW.cols - right)).abs() <= 1);
+        assert!(((top - WINDOW.row) - (WINDOW.row + WINDOW.rows - bottom)).abs() <= 1);
+    }
+
+    #[test]
+    fn in_move_an_inner_box_keeps_the_border_colour_when_its_outer_box_is_selected() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            ..with_inner_boxes("Hello", 1)
+        };
+        assert_eq!(
+            borders(&placements(&state)),
+            vec![FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
+        );
     }
 }

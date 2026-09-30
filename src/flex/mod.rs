@@ -114,7 +114,7 @@ mod tests {
         for (key, shown) in [("H", ""), ("i", "H"), ("\x03", "Hi")] {
             screen
                 .expect_render()
-                .withf(move |state| state.boxes.last().unwrap().texts[0] == shown)
+                .withf(move |state| state.outer_boxes().last().unwrap().texts[0] == shown)
                 .times(1)
                 .in_sequence(&mut seq)
                 .returning(|_| Ok(()));
@@ -134,7 +134,7 @@ mod tests {
         let mut seq = Sequence::new();
         screen
             .expect_render()
-            .withf(|state| state.boxes.last().unwrap().texts[0].is_empty())
+            .withf(|state| state.outer_boxes().last().unwrap().texts[0].is_empty())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -144,7 +144,7 @@ mod tests {
             .return_once(|| Ok("a".to_string()));
         screen
             .expect_render()
-            .withf(|state| state.boxes.last().unwrap().texts[0] == "a")
+            .withf(|state| state.outer_boxes().last().unwrap().texts[0] == "a")
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -159,7 +159,7 @@ mod tests {
             .returning(|| Ok(()));
         screen
             .expect_render()
-            .withf(|state| state.boxes.last().unwrap().texts[0] == "a")
+            .withf(|state| state.outer_boxes().last().unwrap().texts[0] == "a")
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
