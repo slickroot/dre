@@ -1126,6 +1126,71 @@ mod tests {
         assert_eq!(world.x, inner.x + inner.width + FLEX_GAP);
     }
 
+    fn from_default_after(keys: &[&str]) -> FlexState {
+        keys.iter()
+            .fold(FlexState::default(), |state, key| reduce(state, key).0)
+    }
+
+    fn empty_box_size() -> Size {
+        measure(&Tree::root(vec![new_box()]), &[0])
+    }
+
+    #[test]
+    fn one_a_centres_an_empty_inner_box_with_one_cell_of_space_on_every_side() {
+        let state = from_default_after(&["A"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (outer, inner) = (boxes[0], boxes[1]);
+        let empty = empty_box_size();
+        assert_eq!(
+            (outer.width, outer.height),
+            (
+                empty.width + 2 * FLEX_BORDER,
+                empty.height + 2 * FLEX_BORDER
+            )
+        );
+        assert_eq!((outer.width, outer.height), (4, 4));
+        assert_eq!(
+            (inner.x, inner.y),
+            (outer.x + FLEX_BORDER, outer.y + FLEX_BORDER)
+        );
+        assert_eq!(
+            (inner.x + inner.width, inner.y + inner.height),
+            (
+                outer.x + outer.width - FLEX_BORDER,
+                outer.y + outer.height - FLEX_BORDER
+            )
+        );
+    }
+
+    #[test]
+    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_and_stays_centred() {
+        let state = from_default_after(&["A", "A"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
+        let empty = empty_box_size();
+        assert_eq!(
+            (outer.width, outer.height),
+            (
+                2 * empty.width + FLEX_GAP + 2 * FLEX_BORDER,
+                empty.height + 2 * FLEX_BORDER
+            )
+        );
+        assert_eq!((outer.width, outer.height), (7, 4));
+        assert_eq!(
+            (second.x, second.y),
+            (first.x + empty.width + FLEX_GAP, first.y)
+        );
+        assert_eq!(second.x, first.x + 3);
+        let left = outer.x - WINDOW.col;
+        let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
+        let top = outer.y - WINDOW.row;
+        let bottom = WINDOW.row + WINDOW.rows - (outer.y + outer.height);
+        assert!((left - right).abs() <= 1);
+        assert!((top - bottom).abs() <= 1);
+    }
+
     const EVEN_SPREAD_WINDOW: Area = Area { cols: 82, ..WINDOW };
     const UNEVEN_SPREAD_WINDOW: Area = Area { cols: 81, ..WINDOW };
 
