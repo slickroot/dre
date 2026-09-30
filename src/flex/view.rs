@@ -1,4 +1,7 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
+
+use types::Tree;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
@@ -42,6 +45,43 @@ fn inner_box_width() -> i64 {
 fn texts_width_end(texts: &[&str], offsets: &[i64]) -> i64 {
     let last = texts.len() - 1;
     offsets[last] + view::interior(texts[last])
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Size {
+    width: i64,
+    height: i64,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn measure(tree: &Tree<FlexNode>) -> HashMap<Vec<usize>, Size> {
+    let mut sizes = HashMap::new();
+    let nodes: Vec<_> = tree.walk().collect();
+    for (path, node) in nodes.into_iter().rev() {
+        let size = match node {
+            FlexNode::Text(text) => Size {
+                width: view::interior(text),
+                height: 1,
+            },
+            FlexNode::Box(_) => {
+                let children: Vec<Size> = (0..)
+                    .map(|index| [path.as_slice(), &[index]].concat())
+                    .take_while(|child| tree.contains(child))
+                    .map(|child| sizes[&child])
+                    .collect();
+                let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
+                let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
+                let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
+                Size {
+                    width: content_width.max(view::interior("")) + 2 * FLEX_BORDER,
+                    height: content_height.max(1) + 2 * FLEX_BORDER,
+                }
+            }
+        };
+        sizes.insert(path, size);
+    }
+    sizes
 }
 
 fn place_outer_box<'a>(
@@ -965,6 +1005,72 @@ mod tests {
         assert_eq!(
             borders(&placements(&state)),
             vec![FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
+        );
+    }
+
+    fn sizes_of(children: Vec<Tree<FlexNode>>) -> HashMap<Vec<usize>, Size> {
+        measure(&Tree::root(vec![Tree::new(
+            FlexNode::Box(FlexBox::default()),
+            children,
+        )]))
+    }
+
+    fn text(text: &str) -> Tree<FlexNode> {
+        Tree::leaf(FlexNode::Text(text.to_string()))
+    }
+
+    #[test]
+    fn a_text_measures_its_interior_by_one_row() {
+        let sizes = sizes_of(vec![text("Hello")]);
+        assert_eq!(
+            sizes[&vec![0, 0]],
+            Size {
+                width: view::interior("Hello"),
+                height: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_box_measures_three_by_three() {
+        let sizes = measure(&Tree::root(vec![Tree::leaf(FlexNode::Box(
+            FlexBox::default(),
+        ))]));
+        assert_eq!(
+            sizes[&vec![0]],
+            Size {
+                width: inner_box_width(),
+                height: BOX_HEIGHT,
+            }
+        );
+    }
+
+    #[test]
+    fn a_new_box_measures_around_its_empty_text() {
+        let sizes = measure(&Tree::root(vec![new_box()]));
+        assert_eq!(
+            sizes[&vec![0]],
+            Size {
+                width: view::interior("") + 2 * FLEX_BORDER,
+                height: 1 + 2 * FLEX_BORDER,
+            }
+        );
+    }
+
+    #[test]
+    fn a_row_measures_its_children_side_by_side_with_gaps() {
+        let sizes = sizes_of(vec![text("Hello"), new_box(), text("World")]);
+        assert_eq!(
+            sizes[&vec![0]],
+            Size {
+                width: view::interior("Hello")
+                    + FLEX_GAP
+                    + inner_box_width()
+                    + FLEX_GAP
+                    + view::interior("World")
+                    + 2 * FLEX_BORDER,
+                height: BOX_HEIGHT + 2 * FLEX_BORDER,
+            }
         );
     }
 }
