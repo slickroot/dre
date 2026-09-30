@@ -43,28 +43,35 @@ impl Justify {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FlexBox {
-    pub(crate) texts: Vec<String>,
     pub(crate) width: FlexWidth,
     pub(crate) justify: Justify,
     pub(crate) filled: bool,
 }
 
-impl Default for FlexBox {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FlexNode {
+    Text(String),
+    Box(FlexBox),
+}
+
+impl Default for FlexNode {
     fn default() -> Self {
-        Self {
-            texts: vec![String::new()],
-            width: FlexWidth::default(),
-            justify: Justify::default(),
-            filled: false,
-        }
+        FlexNode::Box(FlexBox::default())
     }
+}
+
+pub(crate) fn new_box() -> Tree<FlexNode> {
+    Tree::new(
+        FlexNode::Box(FlexBox::default()),
+        vec![Tree::leaf(FlexNode::Text(String::new()))],
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FlexState {
-    pub(crate) boxes: Tree<FlexBox>,
+    pub(crate) boxes: Tree<FlexNode>,
     pub(crate) selected: Vec<usize>,
     pub(crate) mode: FlexMode,
 }
@@ -72,7 +79,7 @@ pub(crate) struct FlexState {
 impl Default for FlexState {
     fn default() -> Self {
         Self {
-            boxes: Tree::root(vec![Tree::leaf(FlexBox::default())]),
+            boxes: Tree::root(vec![new_box()]),
             selected: vec![0],
             mode: FlexMode::Write,
         }
@@ -84,18 +91,53 @@ impl FlexState {
         self.boxes
             .walk()
             .filter(|(path, _)| path.len() == 1)
-            .map(|(_, flex_box)| flex_box)
+            .filter_map(|(_, node)| match node {
+                FlexNode::Box(flex_box) => Some(flex_box),
+                FlexNode::Text(_) => None,
+            })
+    }
+
+    pub(crate) fn children_of(
+        &self,
+        path: &[usize],
+    ) -> impl Iterator<Item = (Vec<usize>, &FlexNode)> {
+        let path = path.to_vec();
+        (0..)
+            .map(move |index| [path.as_slice(), &[index]].concat())
+            .take_while(|child| self.boxes.contains(child))
+            .map(|child| {
+                let node = self.boxes.value(&child);
+                (child, node)
+            })
+    }
+
+    pub(crate) fn texts_of(&self, path: &[usize]) -> Vec<&str> {
+        self.children_of(path)
+            .filter_map(|(_, node)| match node {
+                FlexNode::Text(text) => Some(text.as_str()),
+                FlexNode::Box(_) => None,
+            })
+            .collect()
     }
 
     fn selected_box(&mut self) -> &mut FlexBox {
-        self.boxes.value_mut(&self.selected)
+        let FlexNode::Box(flex_box) = self.boxes.value_mut(&self.selected) else {
+            unreachable!("the selection is always a box")
+        };
+        flex_box
     }
 
     fn selected_text(&mut self) -> &mut String {
-        self.selected_box()
-            .texts
-            .last_mut()
-            .expect("a flex box always holds at least one text")
+        let last_text = self
+            .children_of(&self.selected)
+            .filter(|(_, node)| matches!(node, FlexNode::Text(_)))
+            .map(|(path, _)| path)
+            .last()
+            .expect("a flex box always holds at least one text");
+        let FlexNode::Text(text) = self.boxes.value_mut(&last_text) else {
+            unreachable!("the path was found as a text")
+        };
+        text
     }
 }
 
@@ -125,16 +167,16 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
 fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
         "i" => state.mode = FlexMode::Write,
-        "a" => state.selected = state.boxes.push(&[], Tree::leaf(FlexBox::default())),
+        "a" => state.selected = state.boxes.push(&[], new_box()),
         "A" => {
-            state
-                .boxes
-                .push(&state.selected, Tree::leaf(FlexBox::default()));
+            state.boxes.push(&state.selected, new_box());
         }
         "j" => state.selected = state.boxes.next(&state.selected),
         "k" => state.selected = state.boxes.previous(&state.selected),
         "s" => {
-            state.selected_box().texts.push(String::new());
+            state
+                .boxes
+                .push(&state.selected, Tree::leaf(FlexNode::Text(String::new())));
             state.mode = FlexMode::Write;
         }
         "w" => {
@@ -168,16 +210,27 @@ mod tests {
     use super::*;
     use crate::tty;
 
+    fn box_at<'a>(state: &'a FlexState, path: &[usize]) -> &'a FlexBox {
+        let FlexNode::Box(flex_box) = state.boxes.value(path) else {
+            panic!("no box at {path:?}")
+        };
+        flex_box
+    }
+
     fn selected_box(state: &FlexState) -> &FlexBox {
-        state.boxes.value(&state.selected)
+        box_at(state, &state.selected)
+    }
+
+    fn box_with(text: &str) -> Tree<FlexNode> {
+        Tree::new(
+            FlexNode::Box(FlexBox::default()),
+            vec![Tree::leaf(FlexNode::Text(text.to_string()))],
+        )
     }
 
     fn holding(text: &str, mode: FlexMode) -> FlexState {
         FlexState {
-            boxes: Tree::root(vec![Tree::leaf(FlexBox {
-                texts: vec![text.to_string()],
-                ..FlexBox::default()
-            })]),
+            boxes: Tree::root(vec![box_with(text)]),
             mode,
             ..FlexState::default()
         }
@@ -188,26 +241,33 @@ mod tests {
         let state = FlexState::default();
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.outer_boxes().count(), 1);
-        assert_eq!(selected_box(&state).texts, [""]);
+        assert_eq!(state.boxes, Tree::root(vec![new_box()]));
+        assert_eq!(state.texts_of(&state.selected), [""]);
+    }
+
+    #[test]
+    fn texts_of_returns_the_texts_of_the_box_at_the_path_in_order() {
+        let state = moved(stacked(&["Hello", "World"], FlexMode::Move), &["s", "!"]);
+        assert_eq!(state.texts_of(&[0]), ["Hello"]);
+        assert_eq!(state.texts_of(&[1]), ["World", "!"]);
     }
 
     #[test]
     fn a_default_box_has_exactly_one_empty_text() {
-        assert_eq!(FlexBox::default().texts, [""]);
-    }
-
-    fn texts_of_selected_box(state: &FlexState) -> Vec<&str> {
-        selected_box(state)
-            .texts
-            .iter()
-            .map(String::as_str)
-            .collect()
+        let boxes = Tree::root(vec![new_box()]);
+        assert_eq!(
+            boxes.walk().collect::<Vec<_>>(),
+            [
+                (vec![0], &FlexNode::Box(FlexBox::default())),
+                (vec![0, 0], &FlexNode::Text(String::new())),
+            ]
+        );
     }
 
     #[test]
     fn s_in_move_mode_adds_an_empty_text_and_switches_to_write() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "s");
-        assert_eq!(texts_of_selected_box(&state), ["Hello", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
         assert_eq!(state.outer_boxes().count(), 1);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
@@ -218,7 +278,7 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(texts_of_selected_box(&state), ["Hello", "World"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", "World"]);
     }
 
     #[test]
@@ -226,14 +286,14 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d", "\r", "s"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(texts_of_selected_box(&state), ["Hello", "World", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", "World", ""]);
         assert_eq!(state.mode, FlexMode::Write);
     }
 
     #[test]
     fn s_in_write_mode_is_typed_and_adds_no_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "s");
-        assert_eq!(texts_of_selected_box(&state), ["Hellos"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellos"]);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -249,15 +309,15 @@ mod tests {
         let (state, _) = reduce(hello_in(FlexMode::Move), "s");
         let (state, _) = reduce(state, "W");
         let (state, _) = reduce(state, "\x7f");
-        assert_eq!(texts_of_selected_box(&state), ["Hello", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
         assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
     }
 
     #[test]
     fn s_only_adds_a_text_to_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "s");
-        assert_eq!(state.boxes.value(&[0]).texts, ["Hello"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["World", ""]);
+        assert_eq!(state.texts_of(&[0]), ["Hello"]);
+        assert_eq!(state.texts_of(&[1]), ["World", ""]);
     }
 
     #[test]
@@ -301,28 +361,28 @@ mod tests {
     #[test]
     fn typing_appends_each_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "o"]);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn typing_a_multibyte_character_appends_it() {
         let (state, effects) = typed(&["c", "a", "f", "é"]);
-        assert_eq!(selected_box(&state).texts, ["café"]);
+        assert_eq!(state.texts_of(&state.selected), ["café"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_the_last_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "p", "\x7f"]);
-        assert_eq!(selected_box(&state).texts, ["Hell"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hell"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_a_whole_multibyte_character() {
         let (state, effects) = typed(&["c", "a", "f", "é", "\x7f"]);
-        assert_eq!(selected_box(&state).texts, ["caf"]);
+        assert_eq!(state.texts_of(&state.selected), ["caf"]);
         assert!(effects.is_empty());
     }
 
@@ -373,7 +433,7 @@ mod tests {
     fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(effect, None);
     }
 
@@ -389,7 +449,7 @@ mod tests {
     #[test]
     fn q_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "q");
-        assert_eq!(selected_box(&state).texts, ["Helloq"]);
+        assert_eq!(state.texts_of(&state.selected), ["Helloq"]);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -403,7 +463,7 @@ mod tests {
     fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
         assert_eq!(selected_box(&state).width, FlexWidth::Full);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -412,7 +472,7 @@ mod tests {
     fn f_in_move_mode_fills_the_box_and_keeps_the_text_and_mode() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "f");
         assert!(selected_box(&state).filled);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -436,7 +496,7 @@ mod tests {
     #[test]
     fn w_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
-        assert_eq!(selected_box(&state).texts, ["Hellow"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellow"]);
         assert_eq!(selected_box(&state).width, FlexWidth::Fit);
         assert_eq!(effect, None);
     }
@@ -444,7 +504,7 @@ mod tests {
     #[test]
     fn f_in_write_mode_is_typed_into_the_box_and_leaves_the_fill_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "f");
-        assert_eq!(selected_box(&state).texts, ["Hellof"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellof"]);
         assert!(!selected_box(&state).filled);
         assert_eq!(effect, None);
     }
@@ -475,24 +535,16 @@ mod tests {
 
     fn stacked(texts: &[&str], mode: FlexMode) -> FlexState {
         FlexState {
-            boxes: Tree::root(
-                texts
-                    .iter()
-                    .map(|text| {
-                        Tree::leaf(FlexBox {
-                            texts: vec![text.to_string()],
-                            ..FlexBox::default()
-                        })
-                    })
-                    .collect(),
-            ),
+            boxes: Tree::root(texts.iter().map(|text| box_with(text)).collect()),
             selected: vec![texts.len() - 1],
             mode,
         }
     }
 
     fn texts(state: &FlexState) -> Vec<&str> {
-        state.outer_boxes().map(|b| b.texts[0].as_str()).collect()
+        (0..state.outer_boxes().count())
+            .map(|index| state.texts_of(&[index])[0])
+            .collect()
     }
 
     #[test]
@@ -550,7 +602,7 @@ mod tests {
     fn g_in_move_mode_spreads_the_texts_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "g");
         assert_eq!(selected_box(&state).justify, Justify::SpaceBetween);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -566,7 +618,7 @@ mod tests {
     #[test]
     fn g_in_write_mode_is_typed_into_the_box_and_leaves_the_justify_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "g");
-        assert_eq!(selected_box(&state).texts, ["Hellog"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellog"]);
         assert_eq!(selected_box(&state).justify, Justify::Start);
         assert_eq!(effect, None);
     }
@@ -574,8 +626,8 @@ mod tests {
     #[test]
     fn g_only_spreads_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "g");
-        assert_eq!(state.boxes.value(&[0]).justify, Justify::Start);
-        assert_eq!(state.boxes.value(&[1]).justify, Justify::SpaceBetween);
+        assert_eq!(box_at(&state, &[0]).justify, Justify::Start);
+        assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
     }
 
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
@@ -637,18 +689,26 @@ mod tests {
         assert_eq!(texts(&state), ["Top", "Middle", "Bottom", ""]);
     }
 
+    fn subtree(state: &FlexState, outer: usize) -> Vec<(Vec<usize>, &FlexNode)> {
+        state
+            .boxes
+            .walk()
+            .filter(|(path, _)| path[0] == outer)
+            .collect()
+    }
+
     fn only_the_middle_box_changed(before: &FlexState, after: &FlexState) {
         assert_eq!(after.outer_boxes().count(), before.outer_boxes().count());
-        assert_ne!(after.boxes.value(&[1]), before.boxes.value(&[1]));
-        assert_eq!(after.boxes.value(&[0]), before.boxes.value(&[0]));
-        assert_eq!(after.boxes.value(&[2]), before.boxes.value(&[2]));
+        assert_ne!(subtree(after, 1), subtree(before, 1));
+        assert_eq!(subtree(after, 0), subtree(before, 0));
+        assert_eq!(subtree(after, 2), subtree(before, 2));
     }
 
     #[test]
     fn w_only_toggles_the_width_of_the_selected_box() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "w");
-        assert_eq!(state.boxes.value(&[1]).width, FlexWidth::Full);
+        assert_eq!(box_at(&state, &[1]).width, FlexWidth::Full);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -656,7 +716,7 @@ mod tests {
     fn f_only_fills_the_selected_box() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "f");
-        assert!(state.boxes.value(&[1]).filled);
+        assert!(box_at(&state, &[1]).filled);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -664,7 +724,7 @@ mod tests {
     fn g_only_spreads_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "g");
-        assert_eq!(state.boxes.value(&[1]).justify, Justify::SpaceBetween);
+        assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -672,7 +732,7 @@ mod tests {
     fn s_only_adds_a_text_to_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "s");
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middle", ""]);
+        assert_eq!(state.texts_of(&[1]), ["Middle", ""]);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -680,7 +740,7 @@ mod tests {
     fn typing_after_i_only_goes_into_the_selected_box() {
         let before = middle_selected();
         let state = moved(before.clone(), &["i", "!", "?", "\x7f"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middle!"]);
+        assert_eq!(state.texts_of(&[1]), ["Middle!"]);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -688,7 +748,7 @@ mod tests {
     fn j_and_k_in_write_mode_are_typed_into_the_selected_text() {
         let before = moved(middle_selected(), &["i"]);
         let state = moved(before.clone(), &["j", "k"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middlejk"]);
+        assert_eq!(state.texts_of(&[1]), ["Middlejk"]);
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
         only_the_middle_box_changed(&before, &state);
@@ -698,7 +758,9 @@ mod tests {
         state
             .boxes
             .walk()
-            .filter(|(path, _)| path.len() == 2 && path[0] == outer)
+            .filter(|(path, node)| {
+                path.len() == 2 && path[0] == outer && matches!(node, FlexNode::Box(_))
+            })
             .count()
     }
 
@@ -730,14 +792,14 @@ mod tests {
     #[test]
     fn capital_a_in_write_mode_types_an_a_and_adds_no_inner_box() {
         let (state, _) = reduce(hello_in(FlexMode::Write), "A");
-        assert_eq!(selected_box(&state).texts, ["HelloA"]);
+        assert_eq!(state.texts_of(&state.selected), ["HelloA"]);
         assert_eq!(inner_boxes_of(&state, 0), 0);
     }
 
     #[test]
     fn typing_after_capital_a_and_i_goes_into_the_outer_boxes_last_text() {
         let state = moved(hello_in(FlexMode::Move), &["A", "i", "H", "i"]);
-        assert_eq!(selected_box(&state).texts, ["HelloHi"]);
+        assert_eq!(state.texts_of(&state.selected), ["HelloHi"]);
         assert_eq!(state.outer_boxes().count(), 1);
     }
 
