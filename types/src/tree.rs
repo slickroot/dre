@@ -29,6 +29,12 @@ impl<T> Tree<T> {
         }
     }
 
+    pub fn children(&self, path: &[usize]) -> Vec<Vec<usize>> {
+        (0..self.get(path).children.len())
+            .map(|index| [path, &[index]].concat())
+            .collect()
+    }
+
     pub fn parent(&self, path: &[usize]) -> Vec<usize> {
         self.position(path);
         match path {
@@ -231,6 +237,22 @@ mod tests {
     #[should_panic]
     fn child_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().child(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn children_are_the_child_paths_in_order() {
+        assert_eq!(sample().children(&[0]), vec![vec![0, 0], vec![0, 1]]);
+    }
+
+    #[test]
+    fn children_of_the_root_path_are_the_top_level_boxes() {
+        assert_eq!(sample().children(&[]), vec![vec![0], vec![1]]);
+    }
+
+    #[test]
+    fn children_of_a_leaf_are_empty() {
+        assert!(sample().children(&[1]).is_empty());
+        assert!(sample().children(&[0, 1]).is_empty());
     }
 
     #[test]

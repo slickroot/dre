@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use types::Tree;
 
@@ -20,180 +19,155 @@ struct Size {
     height: i64,
 }
 
-fn child_sizes(
-    tree: &Tree<FlexNode>,
-    sizes: &HashMap<Vec<usize>, Size>,
-    path: &[usize],
-) -> Vec<Size> {
-    (0..)
-        .map(|index| [path, &[index]].concat())
-        .take_while(|child| tree.contains(child))
-        .map(|child| sizes[&child])
+fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
+    match tree.value(path) {
+        FlexNode::Text(text) => Size {
+            width: view::interior(text),
+            height: 1,
+        },
+        FlexNode::Box(_) => {
+            let children: Vec<Size> = tree
+                .children(path)
+                .iter()
+                .map(|child| measure(tree, child))
+                .collect();
+            let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
+            let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
+            let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
+            Size {
+                width: content_width + 2 * FLEX_BORDER,
+                height: content_height + 2 * FLEX_BORDER,
+            }
+        }
+    }
+}
+
+fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
+    let gaps = widths.len().saturating_sub(1) as i64;
+    let (gap, widened_from) = match justify {
+        Justify::SpaceBetween if gaps > 0 => {
+            let free = room - widths.iter().sum::<i64>();
+            (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
+        }
+        _ => (FLEX_GAP, gaps),
+    };
+    let mut x = 0;
+    widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| {
+            let offset = x;
+            x += width + gap + i64::from(index as i64 >= widened_from);
+            offset
+        })
         .collect()
 }
 
-fn measure(tree: &Tree<FlexNode>) -> HashMap<Vec<usize>, Size> {
-    let mut sizes = HashMap::new();
-    let nodes: Vec<_> = tree.walk().collect();
-    for (path, node) in nodes.into_iter().rev() {
-        let size = match node {
-            FlexNode::Text(text) => Size {
-                width: view::interior(text),
-                height: 1,
-            },
-            FlexNode::Box(_) => {
-                let children = child_sizes(tree, &sizes, &path);
-                let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
-                let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
-                let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
-                Size {
-                    width: content_width + 2 * FLEX_BORDER,
-                    height: content_height + 2 * FLEX_BORDER,
-                }
-            }
-        };
-        sizes.insert(path, size);
-    }
-    sizes
-}
-
-struct Frame {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Rect {
+    x: i64,
     y: i64,
-    inner_height: i64,
-    cursor: i64,
-    gap: i64,
-    widened_from: i64,
+    width: i64,
+    height: i64,
 }
 
-impl Frame {
-    fn new(
-        width: FlexWidth,
-        justify: Justify,
-        x: i64,
-        y: i64,
-        size: Size,
-        children: &[Size],
-    ) -> Self {
-        let inner_width = size.width - 2 * FLEX_BORDER;
-        let gaps = children.len().saturating_sub(1) as i64;
-        let children_width: i64 = children.iter().map(|child| child.width).sum();
-        let (gap, widened_from) = match justify {
-            Justify::SpaceBetween if gaps > 0 => {
-                let free = inner_width - children_width;
-                (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
-            }
-            _ => (FLEX_GAP, gaps),
+fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec<usize>, Rect)>) {
+    out.push((path.to_vec(), rect));
+    let FlexNode::Box(flex_box) = tree.value(path) else {
+        return;
+    };
+    let children = tree.children(path);
+    let sizes: Vec<Size> = children.iter().map(|child| measure(tree, child)).collect();
+    let widths: Vec<i64> = sizes.iter().map(|size| size.width).collect();
+    let offsets = distribute(&widths, rect.width - 2 * FLEX_BORDER, flex_box.justify);
+    let inner_height = rect.height - 2 * FLEX_BORDER;
+    for ((child, size), offset) in children.iter().zip(sizes).zip(offsets) {
+        let child_rect = Rect {
+            x: rect.x + FLEX_BORDER + offset,
+            y: rect.y + FLEX_BORDER + (inner_height - size.height) / 2,
+            width: size.width,
+            height: size.height,
         };
-        let row_width = children_width + gap * gaps + (gaps - widened_from);
-        let row_shift = match width {
-            FlexWidth::Fit => (inner_width - row_width).div_euclid(2),
-            FlexWidth::Full => 0,
-        };
-        Frame {
+        arrange(tree, child, child_rect, out);
+    }
+}
+
+fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
+    let outers: Vec<(Vec<usize>, Size)> = state
+        .boxes
+        .children(&[])
+        .into_iter()
+        .map(|path| {
+            let measured = measure(&state.boxes, &path);
+            let width = match state.boxes.value(&path) {
+                FlexNode::Box(FlexBox {
+                    width: FlexWidth::Full,
+                    ..
+                }) => window.cols,
+                _ => measured.width,
+            };
+            (path, Size { width, ..measured })
+        })
+        .collect();
+    let widest = outers.iter().map(|(_, size)| size.width).max().unwrap_or(0);
+    let gaps = FLEX_GAP * outers.len().saturating_sub(1) as i64;
+    let stack_height = outers.iter().map(|(_, size)| size.height).sum::<i64>() + gaps;
+    let left = window.col + (window.cols - widest).div_euclid(2) + widest.div_euclid(2);
+    let mut y = window.row + (window.rows - stack_height).div_euclid(2);
+    let mut out = Vec::new();
+    for (path, size) in outers {
+        let rect = Rect {
+            x: left - size.width.div_euclid(2),
             y,
-            inner_height: size.height - 2 * FLEX_BORDER,
-            cursor: x + FLEX_BORDER + row_shift,
-            gap,
-            widened_from,
-        }
+            width: size.width,
+            height: size.height,
+        };
+        arrange(&state.boxes, &path, rect, &mut out);
+        y += size.height + FLEX_GAP;
     }
-
-    fn gap_after(&self, index: usize) -> i64 {
-        self.gap + i64::from(index as i64 >= self.widened_from)
-    }
+    out
 }
 
-fn place<'a>(state: &'a FlexState, window: Area) -> Vec<Placement<'a>> {
-    let sizes = measure(&state.boxes);
-    let mut frames: HashMap<Vec<usize>, Frame> = HashMap::new();
-    let mut placements = Vec::with_capacity(sizes.len());
-    let mut next_outer_y = 0;
-    for (path, node) in state.boxes.walk() {
-        let measured = sizes[&path];
-        let (x, y, size) = match path.split_last() {
-            Some((_, [])) => {
-                let width = match node {
-                    FlexNode::Box(FlexBox {
-                        width: FlexWidth::Full,
-                        ..
-                    }) => window.cols,
-                    _ => measured.width,
-                };
-                let y = next_outer_y;
-                next_outer_y += measured.height + FLEX_GAP;
-                (-width.div_euclid(2), y, Size { width, ..measured })
-            }
-            Some((&index, parent)) => {
-                let frame = frames
-                    .get_mut(parent)
-                    .expect("a parent is placed before its children");
-                let x = frame.cursor;
-                frame.cursor += measured.width + frame.gap_after(index);
-                let y = frame.y + FLEX_BORDER + (frame.inner_height - measured.height) / 2;
-                (x, y, measured)
-            }
-            None => unreachable!("walk never yields the root"),
-        };
-        match node {
-            FlexNode::Text(text) => placements.push(Placement {
-                node: PlacementNode::Label(Label {
-                    text: Cow::Borrowed(text),
-                    colour: FLEX_TEXT_COLOUR,
-                    bold: false,
-                }),
-                x,
-                y,
-                width: size.width,
-                height: size.height,
-            }),
-            FlexNode::Box(flex_box) => {
-                let outer = path.len() == 1;
-                let colour = if state.mode == FlexMode::Move && state.selected == path {
-                    FLEX_SELECTED_COLOUR
-                } else {
-                    FLEX_BORDER_COLOUR
-                };
-                placements.push(Placement {
-                    node: PlacementNode::Box {
-                        colour,
-                        fill: None,
-                        opacity: None,
-                        solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
-                        rounded: false,
-                        sides: ALL_SIDES,
-                        border: FLEX_BORDER,
-                    },
-                    x,
-                    y,
-                    width: size.width,
-                    height: size.height,
-                });
-                let width = if outer {
-                    flex_box.width
-                } else {
-                    FlexWidth::Fit
-                };
-                let children = child_sizes(&state.boxes, &sizes, &path);
-                let frame = Frame::new(width, flex_box.justify, x, y, size, &children);
-                frames.insert(path, frame);
+fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) -> Placement<'a> {
+    let node = match node {
+        FlexNode::Text(text) => PlacementNode::Label(Label {
+            text: Cow::Borrowed(text),
+            colour: FLEX_TEXT_COLOUR,
+            bold: false,
+        }),
+        FlexNode::Box(flex_box) => {
+            let outer = path.len() == 1;
+            let colour = if state.mode == FlexMode::Move && state.selected == path {
+                FLEX_SELECTED_COLOUR
+            } else {
+                FLEX_BORDER_COLOUR
+            };
+            PlacementNode::Box {
+                colour,
+                fill: None,
+                opacity: None,
+                solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: FLEX_BORDER,
             }
         }
+    };
+    Placement {
+        node,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
     }
-    placements
 }
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let mut placements = place(state, window);
-    // view::centre assumes content starts at x = 0.
-    let left = placements
-        .iter()
-        .map(|placement| placement.x)
-        .min()
-        .unwrap_or(0);
-    for placement in &mut placements {
-        placement.x -= left;
-    }
-    vec![(window, view::centre(placements, window))]
+    let placements = lay_out_window(state, window)
+        .into_iter()
+        .map(|(path, rect)| paint(state, &path, state.boxes.value(&path), rect))
+        .collect();
+    vec![(window, placements)]
 }
 
 #[cfg(test)]
@@ -878,11 +852,8 @@ mod tests {
         assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 
-    fn sizes_of(children: Vec<Tree<FlexNode>>) -> HashMap<Vec<usize>, Size> {
-        measure(&Tree::root(vec![Tree::new(
-            FlexNode::Box(FlexBox::default()),
-            children,
-        )]))
+    fn box_of(children: Vec<Tree<FlexNode>>) -> Tree<FlexNode> {
+        Tree::root(vec![Tree::new(FlexNode::Box(FlexBox::default()), children)])
     }
 
     fn text(text: &str) -> Tree<FlexNode> {
@@ -891,9 +862,9 @@ mod tests {
 
     #[test]
     fn a_text_measures_its_interior_by_one_row() {
-        let sizes = sizes_of(vec![text("Hello")]);
+        let tree = box_of(vec![text("Hello")]);
         assert_eq!(
-            sizes[&vec![0, 0]],
+            measure(&tree, &[0, 0]),
             Size {
                 width: view::interior("Hello"),
                 height: 1,
@@ -903,9 +874,8 @@ mod tests {
 
     #[test]
     fn a_new_box_measures_around_its_empty_text() {
-        let sizes = measure(&Tree::root(vec![new_box()]));
         assert_eq!(
-            sizes[&vec![0]],
+            measure(&Tree::root(vec![new_box()]), &[0]),
             Size {
                 width: view::interior("") + 2 * FLEX_BORDER,
                 height: 1 + 2 * FLEX_BORDER,
@@ -915,10 +885,10 @@ mod tests {
 
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
-        let sizes = sizes_of(vec![text("Hello"), new_box(), text("World")]);
-        let empty_box = measure(&Tree::root(vec![new_box()]))[&vec![0]];
+        let tree = box_of(vec![text("Hello"), new_box(), text("World")]);
+        let empty_box = measure(&Tree::root(vec![new_box()]), &[0]);
         assert_eq!(
-            sizes[&vec![0]],
+            measure(&tree, &[0]),
             Size {
                 width: view::interior("Hello")
                     + FLEX_GAP
@@ -929,6 +899,54 @@ mod tests {
                 height: BOX_HEIGHT + 2 * FLEX_BORDER,
             }
         );
+    }
+
+    #[test]
+    fn start_places_no_children_for_an_empty_row() {
+        assert_eq!(distribute(&[], 10, Justify::Start), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn start_places_a_single_child_at_the_row_start() {
+        assert_eq!(distribute(&[5], 10, Justify::Start), vec![0]);
+    }
+
+    #[test]
+    fn start_places_children_a_gap_apart() {
+        assert_eq!(
+            distribute(&[2, 3, 4], 20, Justify::Start),
+            vec![0, 2 + FLEX_GAP, 2 + FLEX_GAP + 3 + FLEX_GAP]
+        );
+    }
+
+    #[test]
+    fn space_between_splits_free_space_evenly_between_children() {
+        let gap = 4;
+        let room = 2 + gap + 3 + gap + 4;
+        assert_eq!(
+            distribute(&[2, 3, 4], room, Justify::SpaceBetween),
+            vec![0, 2 + gap, 2 + gap + 3 + gap]
+        );
+    }
+
+    #[test]
+    fn space_between_gives_the_remainder_to_the_last_gaps() {
+        let gap = 2;
+        let room = 2 + gap + 3 + (gap + 1) + 4 + (gap + 1) + 5;
+        assert_eq!(
+            distribute(&[2, 3, 4, 5], room, Justify::SpaceBetween),
+            vec![
+                0,
+                2 + gap,
+                2 + gap + 3 + gap + 1,
+                2 + gap + 3 + gap + 1 + 4 + gap + 1
+            ]
+        );
+    }
+
+    #[test]
+    fn space_between_places_a_single_child_at_the_row_start() {
+        assert_eq!(distribute(&[5], 10, Justify::SpaceBetween), vec![0]);
     }
 
     fn hello_box_world() -> FlexState {
@@ -976,7 +994,7 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let outer = all_boxes(&placements)[0];
-        let measured = measure(&state.boxes)[&vec![0]];
+        let measured = measure(&state.boxes, &[0]);
         assert_eq!(
             (outer.width, outer.height),
             (measured.width, measured.height)
