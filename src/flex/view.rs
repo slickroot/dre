@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
-use super::state::FlexState;
+use super::state::{FlexState, FlexWidth};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
@@ -10,7 +10,13 @@ const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let text = state.text.as_str();
-    let width = view::interior(text) + 2;
+    let (width, label_x) = match state.width {
+        FlexWidth::Fit => {
+            let width = view::interior(text) + 2;
+            (width, view::label_centre(width, text))
+        }
+        FlexWidth::Full => (window.cols, 1),
+    };
     let placements = vec![
         Placement {
             node: PlacementNode::Box {
@@ -32,7 +38,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
                 colour: FLEX_TEXT_COLOUR,
                 bold: false,
             }),
-            x: view::label_centre(width, text),
+            x: label_x,
             y: BOX_HEIGHT / 2,
             width: view::interior(text),
             height: 1,
@@ -209,5 +215,36 @@ mod tests {
         let (after, _) = reduce(with_text("Hellp"), "\x7f");
         let placements = placements(&after);
         assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
+    }
+
+    fn full(text: &str) -> FlexState {
+        FlexState {
+            width: FlexWidth::Full,
+            ..with_text(text)
+        }
+    }
+
+    #[test]
+    fn a_full_box_spans_the_window() {
+        let state = full("Hello");
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.x, 0);
+        assert_eq!(the_box.width, WINDOW.cols);
+    }
+
+    #[test]
+    fn a_full_box_starts_its_label_just_inside_the_border() {
+        let state = full("Hello");
+        let placements = placements(&state);
+        assert_eq!(the_label(&placements).x, the_box(&placements).x + 1);
+    }
+
+    #[test]
+    fn a_full_box_follows_the_window() {
+        let narrow = Area { cols: 40, ..WINDOW };
+        let state = full("Hello");
+        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, narrow)).unwrap();
+        assert_eq!(the_box(&placements).width, narrow.cols);
     }
 }
