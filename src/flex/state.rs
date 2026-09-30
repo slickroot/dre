@@ -9,10 +9,26 @@ pub(crate) enum FlexEffect {
     Quit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlexWidth {
+    Fit,
+    Full,
+}
+
+impl FlexWidth {
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            FlexWidth::Fit => FlexWidth::Full,
+            FlexWidth::Full => FlexWidth::Fit,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlexState {
     pub(crate) text: String,
     pub(crate) mode: FlexMode,
+    pub(crate) width: FlexWidth,
 }
 
 impl Default for FlexState {
@@ -20,6 +36,7 @@ impl Default for FlexState {
         Self {
             text: String::new(),
             mode: FlexMode::Write,
+            width: FlexWidth::Fit,
         }
     }
 }
@@ -64,6 +81,13 @@ fn move_key(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
             },
             None,
         ),
+        "w" => (
+            FlexState {
+                width: state.width.toggle(),
+                ..state
+            },
+            None,
+        ),
         "q" => (state, Some(FlexEffect::Quit)),
         _ => (state, None),
     }
@@ -93,6 +117,7 @@ mod tests {
         FlexState {
             text: "Hello".to_string(),
             mode,
+            ..FlexState::default()
         }
     }
 
@@ -222,5 +247,51 @@ mod tests {
         assert_eq!(state.text, "Helloq");
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn starts_with_a_fit_width() {
+        assert_eq!(FlexState::default().width, FlexWidth::Fit);
+    }
+
+    #[test]
+    fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
+        assert_eq!(state.width, FlexWidth::Full);
+        assert_eq!(state.text, "Hello");
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn w_twice_in_move_mode_toggles_the_width_back_to_fit() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "w");
+        let (state, effect) = reduce(state, "w");
+        assert_eq!(state, hello_in(FlexMode::Move));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn w_in_write_mode_is_typed_into_the_box() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
+        assert_eq!(state.text, "Hellow");
+        assert_eq!(state.width, FlexWidth::Fit);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn the_width_carries_over_into_write_mode() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "w");
+        let (state, _) = reduce(state, "i");
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(state.width, FlexWidth::Full);
+        let (state, _) = reduce(state, "x");
+        assert_eq!(state.width, FlexWidth::Full);
+    }
+
+    #[test]
+    fn toggling_the_width_flips_between_fit_and_full() {
+        assert_eq!(FlexWidth::Fit.toggle(), FlexWidth::Full);
+        assert_eq!(FlexWidth::Full.toggle(), FlexWidth::Fit);
     }
 }
