@@ -1,3 +1,5 @@
+use crate::view::Rgb;
+
 const PALETTE: [(&str, (u8, u8, u8)); 8] = [
     ("lime", (0xC6, 0xFF, 0x00)),
     ("mint", (0x39, 0xFF, 0xB0)),
@@ -25,6 +27,10 @@ pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
 }
 
+pub(crate) fn rgb(colour: Option<u8>) -> Rgb {
+    palette(colour.unwrap_or(FOREGROUND)).unwrap()
+}
+
 pub(crate) fn next_on_palette(colour: Option<u8>) -> Option<u8> {
     match colour {
         None => Some(0),
@@ -36,6 +42,16 @@ pub(crate) fn next_on_palette(colour: Option<u8>) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rgb_of_no_colour_is_the_foreground() {
+        assert_eq!(Some(rgb(None)), palette(FOREGROUND));
+    }
+
+    #[test]
+    fn rgb_of_a_palette_index_is_its_palette_colour() {
+        assert_eq!(Some(rgb(Some(DIM))), palette(DIM));
+    }
 
     #[test]
     fn palette_has_a_colour_at_index_zero() {

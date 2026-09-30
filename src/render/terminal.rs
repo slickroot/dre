@@ -12,7 +12,7 @@ use crate::kitty;
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
-use crate::view::{Geometry, Label, Placement, PlacementNode, Sides, BRACKET_MARGIN};
+use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides, BRACKET_MARGIN};
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -33,7 +33,7 @@ const INK_Z: i32 = CONTENT_Z;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct BoxStyle {
-    pub(super) colour: Option<u8>,
+    pub(super) colour: Rgb,
     pub(super) fill: Option<u8>,
     pub(super) fill_alpha: Option<u8>,
     pub(super) rounded: bool,
@@ -54,14 +54,14 @@ struct LedStyle {
 
 struct LabelStyle {
     text: String,
-    colour: Option<u8>,
+    colour: Rgb,
     bold: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphKey {
     character: char,
-    colour: Option<u8>,
+    colour: Rgb,
     bold: bool,
 }
 
@@ -93,7 +93,7 @@ fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
 }
 
 pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
-    let (r, g, b) = colour(style.colour);
+    let (r, g, b) = style.colour;
     let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.fill_alpha);
     BoxShape {
         width,
@@ -163,7 +163,7 @@ enum SpriteKey {
     Box {
         width: i64,
         height: i64,
-        colour: Option<u8>,
+        colour: Rgb,
         fill: Option<u8>,
         fill_alpha: Option<u8>,
         rounded: bool,
@@ -1044,7 +1044,7 @@ mod tests {
 
     fn box_node(colour: Option<u8>, fill: Option<u8>, rounded: bool) -> PlacementNode<'static> {
         PlacementNode::Box {
-            colour,
+            colour: crate::style::rgb(colour),
             fill,
             opacity: fill.map(|_| BOX_FILL_OPACITY),
             rounded,
@@ -1519,7 +1519,7 @@ mod tests {
         crate::view::Placement {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
-                colour: None,
+                colour: crate::style::rgb(None),
                 bold,
             }),
             x,
@@ -2012,7 +2012,7 @@ mod tests {
             crate::view::Placement {
                 node: crate::view::PlacementNode::Label(crate::view::Label {
                     text: "a".into(),
-                    colour: Some(1),
+                    colour: crate::style::rgb(Some(1)),
                     bold: false,
                 }),
                 x: 2,
@@ -2209,7 +2209,7 @@ mod tests {
         crate::view::Placement {
             node: crate::view::PlacementNode::Label(crate::view::Label {
                 text: text.into(),
-                colour,
+                colour: crate::style::rgb(colour),
                 bold: false,
             }),
             x,

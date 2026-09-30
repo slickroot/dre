@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::diagram::{children, Node};
-use crate::style::BOX_FILL_OPACITY;
+use crate::style::{self, BOX_FILL_OPACITY};
 use crate::view::{
     self, Arrow, Caret, Label, Placement, PlacementNode, ALL_SIDES, BORDER, BOX_HEIGHT,
     BRACKET_MARGIN, GAP_WIDTH,
@@ -86,11 +86,10 @@ fn place<'a>(
     ) -> Vec<Placement<'a>> {
         let y = row as i64 * HALF_PITCH;
         let fill = node.filled().then_some(node.colour()).flatten();
-        let colour = node.colour();
         let rounded = node.rounded();
         let mut placements = vec![Placement {
             node: PlacementNode::Box {
-                colour,
+                colour: style::rgb(node.colour()),
                 fill,
                 opacity: fill.is_some().then_some(BOX_FILL_OPACITY),
                 rounded,
@@ -118,7 +117,7 @@ fn place<'a>(
         placements.push(Placement {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(node.label()),
-                colour: None,
+                colour: style::rgb(None),
                 bold: false,
             }),
             x: start,
@@ -525,7 +524,7 @@ mod tests {
         assert_eq!(
             laid_out_box(Some(3), false, true),
             PlacementNode::Box {
-                colour: Some(3),
+                colour: style::rgb(Some(3)),
                 fill: None,
                 opacity: None,
                 rounded: true,
@@ -785,7 +784,7 @@ mod tests {
     fn placement_node_holds_the_matching_variants_inner_value() {
         let box_placement = Placement {
             node: PlacementNode::Box {
-                colour: Some(1),
+                colour: style::rgb(Some(1)),
                 fill: Some(1),
                 opacity: Some(BOX_FILL_OPACITY),
                 rounded: true,
@@ -803,14 +802,17 @@ mod tests {
                 fill,
                 rounded,
                 ..
-            } => assert_eq!((colour, fill, rounded), (Some(1), Some(1), true)),
+            } => assert_eq!(
+                (colour, fill, rounded),
+                (style::rgb(Some(1)), Some(1), true)
+            ),
             _ => panic!("expected a Box variant"),
         }
 
         let label_placement = Placement {
             node: PlacementNode::Label(Label {
                 text: "a".into(),
-                colour: None,
+                colour: style::rgb(None),
                 bold: false,
             }),
             x: 0,
@@ -824,7 +826,7 @@ mod tests {
                     label,
                     Label {
                         text: "a".into(),
-                        colour: None,
+                        colour: style::rgb(None),
                         bold: false,
                     }
                 )
