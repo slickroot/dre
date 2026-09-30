@@ -54,8 +54,14 @@ fn write_key(state: FlexState, key: &str) -> FlexState {
     }
 }
 
-fn move_key(state: FlexState, _key: &str) -> FlexState {
-    state
+fn move_key(state: FlexState, key: &str) -> FlexState {
+    match key {
+        "i" => FlexState {
+            mode: FlexMode::Write,
+            ..state
+        },
+        _ => state,
+    }
 }
 
 fn printable_char(key: &str) -> Option<char> {
@@ -168,6 +174,13 @@ mod tests {
     #[test]
     fn backspace_in_move_mode_leaves_the_text_unchanged() {
         let state = reduce(hello_in(FlexMode::Move), "\x7f");
+        assert_eq!(state.text, "Hello");
+    }
+
+    #[test]
+    fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
+        let state = reduce(hello_in(FlexMode::Move), "i");
+        assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.text, "Hello");
     }
 
