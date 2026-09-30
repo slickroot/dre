@@ -81,6 +81,7 @@ mod tests {
             colour: crate::style::rgb(None),
             fill: None,
             opacity: None,
+            solid_fill: None,
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
