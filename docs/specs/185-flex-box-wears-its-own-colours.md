@@ -19,7 +19,7 @@ Decisions:
 - **Placements carry final RGB, not palette indices.** `PlacementNode::Box.colour` and `Label.colour` change from `Option<u8>` to a required `view::Rgb` (`(u8, u8, u8)`), just as `border` already carries final pixels. Whoever builds a placement decides exactly how it looks, and the renderer stops reading the palette for boxes and labels.
 - **No `None`, no hidden default.** "Plain means foreground" moves out of the renderer and into the main editor's placement builders (`layout::tree`, and `footer` and the other label builders in `view`). The main editor's palette colours are turned into RGB there with a new `style::rgb(Option<u8>) -> Rgb`, which does what `render::colour` does today (`None` → `FOREGROUND`). `render::colour` delegates to it and is still used for brackets, arrows, cursors and LEDs.
 - **Out of scope:** `fill` (`Option<u8>` + opacity) and `Led.colour` (`u8`) stay palette indices. Neither is needed here.
-- **The colours don't depend on the mode.** `scene` never reads `state.mode`, and the colours are constants. 185 doesn't depend on 182: when 182 adds `FlexMode::Move`, it also adds the test that a MOVE state gets the same colours.
+- **The colours don't depend on the mode, by design.** `scene` never reads `state.mode`, and the colours are constants, so WRITE and MOVE can't look different. A MOVE-mode test would pass as soon as it was written and would never force any code, so there isn't one.
 
 ### `view`: what changes
 
