@@ -4,11 +4,15 @@ pub(crate) enum FlexMode {
     Move,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlexEffect {
+    Quit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlexState {
     pub(crate) text: String,
     pub(crate) mode: FlexMode,
-    pub(crate) running: bool,
 }
 
 impl Default for FlexState {
@@ -16,24 +20,20 @@ impl Default for FlexState {
         Self {
             text: String::new(),
             mode: FlexMode::Write,
-            running: true,
         }
     }
 }
 
-pub(crate) fn reduce(state: FlexState, key: &str) -> FlexState {
+pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match (key, state.mode) {
-        ("\x03", _) => FlexState {
-            running: false,
-            ..state
-        },
+        ("\x03", _) => (state, Some(FlexEffect::Quit)),
         (_, FlexMode::Write) => write_key(state, key),
         (_, FlexMode::Move) => move_key(state, key),
     }
 }
 
-fn write_key(state: FlexState, key: &str) -> FlexState {
-    match key {
+fn write_key(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
+    let state = match key {
         "\r" => FlexState {
             mode: FlexMode::Move,
             ..state
@@ -51,16 +51,20 @@ fn write_key(state: FlexState, key: &str) -> FlexState {
             }
             None => state,
         },
-    }
+    };
+    (state, None)
 }
 
-fn move_key(state: FlexState, key: &str) -> FlexState {
+fn move_key(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
-        "i" => FlexState {
-            mode: FlexMode::Write,
-            ..state
-        },
-        _ => state,
+        "i" => (
+            FlexState {
+                mode: FlexMode::Write,
+                ..state
+            },
+            None,
+        ),
+        _ => (state, None),
     }
 }
 
@@ -78,58 +82,80 @@ mod tests {
     use crate::tty;
 
     #[test]
-    fn starts_in_write_mode_with_an_empty_box_and_running() {
+    fn starts_in_write_mode_with_an_empty_box() {
         let state = FlexState::default();
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.text, "");
-        assert!(state.running);
     }
 
-    #[test]
-    fn ctrl_c_stops_running() {
-        let state = reduce(FlexState::default(), "\x03");
-        assert!(!state.running);
-    }
-
-    #[test]
-    fn ctrl_c_keeps_the_text() {
-        let before = FlexState {
+    fn hello_in(mode: FlexMode) -> FlexState {
+        FlexState {
             text: "Hello".to_string(),
-            ..FlexState::default()
-        };
-        let after = reduce(before.clone(), "\x03");
-        assert_eq!(after.text, before.text);
+            mode,
+        }
     }
 
-    fn typed(keys: &[&str]) -> FlexState {
-        keys.iter()
-            .fold(FlexState::default(), |state, key| reduce(state, key))
+    #[test]
+    fn ctrl_c_in_write_mode_quits_and_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Write);
+        assert_eq!(
+            reduce(before.clone(), "\x03"),
+            (before, Some(FlexEffect::Quit))
+        );
+    }
+
+    #[test]
+    fn ctrl_c_in_move_mode_quits_and_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Move);
+        assert_eq!(
+            reduce(before.clone(), "\x03"),
+            (before, Some(FlexEffect::Quit))
+        );
+    }
+
+    fn typed(keys: &[&str]) -> (FlexState, Vec<FlexEffect>) {
+        keys.iter().fold(
+            (FlexState::default(), Vec::new()),
+            |(state, mut effects), key| {
+                let (state, effect) = reduce(state, key);
+                effects.extend(effect);
+                (state, effects)
+            },
+        )
     }
 
     #[test]
     fn typing_appends_each_character() {
-        assert_eq!(typed(&["H", "e", "l", "l", "o"]).text, "Hello");
+        let (state, effects) = typed(&["H", "e", "l", "l", "o"]);
+        assert_eq!(state.text, "Hello");
+        assert!(effects.is_empty());
     }
 
     #[test]
     fn typing_a_multibyte_character_appends_it() {
-        assert_eq!(typed(&["c", "a", "f", "é"]).text, "café");
+        let (state, effects) = typed(&["c", "a", "f", "é"]);
+        assert_eq!(state.text, "café");
+        assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_the_last_character() {
-        assert_eq!(typed(&["H", "e", "l", "l", "p", "\x7f"]).text, "Hell");
+        let (state, effects) = typed(&["H", "e", "l", "l", "p", "\x7f"]);
+        assert_eq!(state.text, "Hell");
+        assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_a_whole_multibyte_character() {
-        assert_eq!(typed(&["c", "a", "f", "é", "\x7f"]).text, "caf");
+        let (state, effects) = typed(&["c", "a", "f", "é", "\x7f"]);
+        assert_eq!(state.text, "caf");
+        assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_on_an_empty_box_leaves_the_state_unchanged() {
         let before = FlexState::default();
-        assert_eq!(reduce(before.clone(), "\x7f"), before);
+        assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
     }
 
     #[test]
@@ -139,54 +165,44 @@ mod tests {
             ..FlexState::default()
         };
         for key in ["\x1b[A", "\x01", "\x1b", "\t", "", "ab", tty::RESIZE] {
-            assert_eq!(reduce(before.clone(), key), before, "key {key:?}");
-        }
-    }
-
-    fn hello_in(mode: FlexMode) -> FlexState {
-        FlexState {
-            text: "Hello".to_string(),
-            mode,
-            ..FlexState::default()
+            assert_eq!(
+                reduce(before.clone(), key),
+                (before.clone(), None),
+                "key {key:?}"
+            );
         }
     }
 
     #[test]
     fn enter_in_write_mode_switches_to_move_and_keeps_the_text() {
-        let state = reduce(hello_in(FlexMode::Write), "\r");
-        assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(state.text, "Hello");
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "\r");
+        assert_eq!(state, hello_in(FlexMode::Move));
+        assert_eq!(effect, None);
     }
 
     #[test]
     fn line_feed_in_write_mode_leaves_the_state_unchanged() {
         let before = hello_in(FlexMode::Write);
-        assert_eq!(reduce(before.clone(), "\n"), before);
+        assert_eq!(reduce(before.clone(), "\n"), (before, None));
     }
 
     #[test]
-    fn typing_in_move_mode_leaves_the_text_and_mode_unchanged() {
-        let state = reduce(hello_in(FlexMode::Move), "x");
-        assert_eq!(state.text, "Hello");
-        assert_eq!(state.mode, FlexMode::Move);
+    fn typing_in_move_mode_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Move);
+        assert_eq!(reduce(before.clone(), "x"), (before, None));
     }
 
     #[test]
-    fn backspace_in_move_mode_leaves_the_text_unchanged() {
-        let state = reduce(hello_in(FlexMode::Move), "\x7f");
-        assert_eq!(state.text, "Hello");
+    fn backspace_in_move_mode_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Move);
+        assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
     }
 
     #[test]
     fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
-        let state = reduce(hello_in(FlexMode::Move), "i");
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.text, "Hello");
-    }
-
-    #[test]
-    fn ctrl_c_in_move_mode_stops_running() {
-        let state = reduce(hello_in(FlexMode::Move), "\x03");
-        assert!(!state.running);
+        assert_eq!(effect, None);
     }
 }

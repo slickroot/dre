@@ -9,7 +9,7 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
-use state::FlexState;
+use state::{FlexEffect, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
@@ -37,16 +37,19 @@ impl FlexScreen for TerminalFlexScreen {
 
 pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
     let mut state = FlexState::default();
-    while state.running {
+    loop {
         screen.render(&state)?;
         let key = keys.next_key()?;
         if key == tty::RESIZE {
             screen.resize()?;
-        } else {
-            state = state::reduce(state, &key);
+            continue;
+        }
+        let effect;
+        (state, effect) = state::reduce(state, &key);
+        if effect == Some(FlexEffect::Quit) {
+            return Ok(());
         }
     }
-    Ok(())
 }
 
 pub fn run() -> ExitCode {
