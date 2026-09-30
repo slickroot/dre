@@ -177,7 +177,7 @@ mod tests {
 
     fn outlined(colour: Option<u8>, rounded: bool, sides: Sides) -> BoxStyle {
         BoxStyle {
-            colour,
+            colour: crate::style::rgb(colour),
             fill: colour,
             fill_alpha: quantized_alpha(colour.map(|_| BOX_FILL_OPACITY)),
             rounded,
@@ -188,7 +188,7 @@ mod tests {
 
     fn borderless(colour: Option<u8>) -> BoxStyle {
         BoxStyle {
-            colour: None,
+            colour: crate::style::rgb(None),
             fill: colour,
             fill_alpha: quantized_alpha(Some(FOOTER_FILL_OPACITY)),
             rounded: false,

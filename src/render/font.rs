@@ -1,21 +1,22 @@
 use std::collections::HashMap;
 
 use crate::canvas::{Canvas, Rgba, Shape};
-use crate::render::{colour, OPAQUE};
+use crate::render::OPAQUE;
+use crate::view::Rgb;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
 const BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaBold.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
 pub(crate) trait GlyphSource {
-    fn glyph(&mut self, ch: char, colour: Option<u8>, bold: bool) -> &Canvas;
+    fn glyph(&mut self, ch: char, colour: Rgb, bold: bool) -> &Canvas;
 }
 
 pub(crate) struct GlyphCache {
     regular: fontdue::Font,
     bold: fontdue::Font,
-    regular_cache: HashMap<(char, Option<u8>), Canvas>,
-    bold_cache: HashMap<(char, Option<u8>), Canvas>,
+    regular_cache: HashMap<(char, Rgb), Canvas>,
+    bold_cache: HashMap<(char, Rgb), Canvas>,
     cell_width: i64,
     cell_height: i64,
     px_size: f32,
@@ -78,7 +79,7 @@ impl GlyphCache {
         }
     }
 
-    fn rasterize(&self, ch: char, colour_index: Option<u8>, bold: bool) -> Canvas {
+    fn rasterize(&self, ch: char, colour: Rgb, bold: bool) -> Canvas {
         let (metrics, bitmap) = self.font(bold).rasterize(ch, self.px_size);
 
         let dest_x0 = metrics.xmin as i64;
@@ -101,7 +102,7 @@ impl GlyphCache {
             }
         }
 
-        let (r, g, b) = colour(colour_index);
+        let (r, g, b) = colour;
         let ink: Rgba = [r, g, b, OPAQUE];
         Canvas::fill(
             self.cell_width,
@@ -117,7 +118,7 @@ impl GlyphCache {
 }
 
 impl GlyphSource for GlyphCache {
-    fn glyph(&mut self, ch: char, colour: Option<u8>, bold: bool) -> &Canvas {
+    fn glyph(&mut self, ch: char, colour: Rgb, bold: bool) -> &Canvas {
         let key = (ch, colour);
         let cache = if bold {
             &self.bold_cache
@@ -173,7 +174,7 @@ impl Shape for GlyphShape {
 pub(crate) struct FakeGlyphSource {
     cell_width: i64,
     cell_height: i64,
-    canvases: HashMap<(Option<u8>, bool), Canvas>,
+    canvases: HashMap<(Rgb, bool), Canvas>,
 }
 
 #[cfg(test)]
@@ -189,45 +190,42 @@ impl FakeGlyphSource {
 
 #[cfg(test)]
 impl GlyphSource for FakeGlyphSource {
-    // `colour: None` stays fully transparent, matching this fake's original
-    // behaviour (and existing tests that tell a label apart from a solid
-    // caret by opacity). A `Some` colour is baked in as a solid, opaque
+    // The foreground colour stays fully transparent, matching this fake's
+    // original behaviour (and existing tests that tell a label apart from a
+    // solid caret by opacity). Any other colour is baked in as a solid, opaque
     // fill so tests can tell two colours apart. `bold` flips the green
     // channel's low bit so bold and regular glyphs are pixel-distinguishable
     // regardless of alpha, without disturbing the alpha-based behaviour above.
-    fn glyph(&mut self, _ch: char, colour_index: Option<u8>, bold: bool) -> &Canvas {
-        self.canvases
-            .entry((colour_index, bold))
-            .or_insert_with(|| {
-                let mut pixel = match colour_index {
-                    None => [0, 0, 0, 0],
-                    Some(index) => {
-                        let (r, g, b) = colour(Some(index));
-                        [r, g, b, OPAQUE]
-                    }
-                };
-                if bold {
-                    pixel[1] ^= 1;
-                }
-                let pixels = pixel
-                    .iter()
-                    .copied()
-                    .cycle()
-                    .take((self.cell_width * self.cell_height) as usize * 4)
-                    .collect();
-                Canvas {
-                    pixels,
-                    width: self.cell_width,
-                    height: self.cell_height,
-                }
-            })
+    fn glyph(&mut self, _ch: char, colour: Rgb, bold: bool) -> &Canvas {
+        self.canvases.entry((colour, bold)).or_insert_with(|| {
+            let mut pixel = if colour == crate::style::rgb(None) {
+                [0, 0, 0, 0]
+            } else {
+                let (r, g, b) = colour;
+                [r, g, b, OPAQUE]
+            };
+            if bold {
+                pixel[1] ^= 1;
+            }
+            let pixels = pixel
+                .iter()
+                .copied()
+                .cycle()
+                .take((self.cell_width * self.cell_height) as usize * 4)
+                .collect();
+            Canvas {
+                pixels,
+                width: self.cell_width,
+                height: self.cell_height,
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::OPAQUE;
+    use crate::render::{colour, OPAQUE};
     use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
@@ -285,8 +283,8 @@ mod tests {
     #[test]
     fn the_same_character_rasterized_twice_is_pixel_identical() {
         let mut cache = test_cache();
-        let first = cache.glyph('B', None, false).pixels.clone();
-        let second = cache.glyph('B', None, false).pixels.clone();
+        let first = cache.glyph('B', colour(None), false).pixels.clone();
+        let second = cache.glyph('B', colour(None), false).pixels.clone();
         assert_eq!(first, second);
     }
 
@@ -300,7 +298,7 @@ mod tests {
             "test font must actually rasterize 'g' with some ink"
         );
 
-        let canvas = cache.rasterize('g', None, false);
+        let canvas = cache.rasterize('g', colour(None), false);
         let placed_coverage: u32 = canvas.pixels.chunks(4).map(|pixel| pixel[3] as u32).sum();
         assert_eq!(placed_coverage, raw_coverage);
     }
@@ -308,7 +306,7 @@ mod tests {
     #[test]
     fn glyph_ink_matches_the_default_foreground_colour() {
         let mut cache = test_cache();
-        let canvas = cache.glyph('M', None, false);
+        let canvas = cache.glyph('M', colour(None), false);
         let pixel = canvas
             .pixels
             .chunks(4)
@@ -321,7 +319,7 @@ mod tests {
     #[test]
     fn glyph_ink_matches_the_requested_palette_colour() {
         let mut cache = test_cache();
-        let canvas = cache.glyph('M', Some(crate::style::LIME), false);
+        let canvas = cache.glyph('M', colour(Some(crate::style::LIME)), false);
         let pixel = canvas
             .pixels
             .chunks(4)
@@ -335,7 +333,7 @@ mod tests {
     fn every_glyph_canvas_is_exactly_one_cell() {
         let mut cache = test_cache();
         for ch in ['M', 'i'] {
-            let canvas = cache.glyph(ch, None, false);
+            let canvas = cache.glyph(ch, colour(None), false);
             assert_eq!(canvas.width, CELL_WIDTH);
             assert_eq!(canvas.height, CELL_HEIGHT);
         }
@@ -344,14 +342,14 @@ mod tests {
     #[test]
     fn bold_and_regular_glyphs_are_cached_independently() {
         let mut cache = test_cache();
-        let regular = cache.glyph('M', None, false).pixels.clone();
-        let bold = cache.glyph('M', None, true).pixels.clone();
+        let regular = cache.glyph('M', colour(None), false).pixels.clone();
+        let bold = cache.glyph('M', colour(None), true).pixels.clone();
         assert_ne!(
             regular, bold,
             "bold and regular weights must rasterize from different fonts"
         );
 
-        let regular_again = cache.glyph('M', None, false).pixels.clone();
+        let regular_again = cache.glyph('M', colour(None), false).pixels.clone();
         assert_eq!(
             regular, regular_again,
             "fetching the regular weight again must come from the regular cache, not be clobbered by bold"
@@ -361,7 +359,7 @@ mod tests {
     #[test]
     fn a_bold_glyph_canvas_is_exactly_one_cell() {
         let mut cache = test_cache();
-        let canvas = cache.glyph('M', None, true);
+        let canvas = cache.glyph('M', colour(None), true);
         assert_eq!(canvas.width, CELL_WIDTH);
         assert_eq!(canvas.height, CELL_HEIGHT);
     }

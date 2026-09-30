@@ -6,6 +6,8 @@ use crate::state::{CommandStatus, FooterMode, FooterModel, Mode, State};
 use crate::style::{self, FOOTER_FILL_OPACITY, FOREGROUND};
 
 pub use crate::composer::Area;
+pub type Rgb = (u8, u8, u8);
+
 pub type Sides = (bool, bool, bool, bool);
 pub const ALL_SIDES: Sides = (true, true, true, true);
 pub const NO_SIDES: Sides = (false, false, false, false);
@@ -20,7 +22,7 @@ pub(crate) const BRACKET_MARGIN: i64 = 1;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label<'a> {
     pub text: Cow<'a, str>,
-    pub colour: Option<u8>,
+    pub colour: Rgb,
     pub bold: bool,
 }
 
@@ -39,7 +41,7 @@ pub struct Cursor;
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlacementNode<'a> {
     Box {
-        colour: Option<u8>,
+        colour: Rgb,
         fill: Option<u8>,
         opacity: Option<f64>,
         rounded: bool,
@@ -198,7 +200,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         Column {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(mode_word),
-                colour: None,
+                colour: style::rgb(None),
                 bold: true,
             }),
             width: interior(mode_word),
@@ -208,7 +210,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         Column {
             node: PlacementNode::Label(Label {
                 text: Cow::Owned(padded_filename.clone()),
-                colour: Some(style::DIM),
+                colour: style::rgb(Some(style::DIM)),
                 bold: false,
             }),
             width: interior(&padded_filename),
@@ -220,7 +222,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         Column {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(FOOTER_SUFFIX),
-                colour: None,
+                colour: style::rgb(None),
                 bold: true,
             }),
             width: interior(FOOTER_SUFFIX),
@@ -233,7 +235,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
         0,
         Placement {
             node: PlacementNode::Box {
-                colour: None,
+                colour: style::rgb(None),
                 fill: Some(FOREGROUND),
                 opacity: Some(FOOTER_FILL_OPACITY),
                 rounded: false,
@@ -268,7 +270,7 @@ pub(crate) fn command_status(status: &Option<CommandStatus>) -> Vec<Placement<'s
         y: 0,
         node: PlacementNode::Label(Label {
             text: Cow::Owned(text),
-            colour: None,
+            colour: style::rgb(None),
             bold: false,
         }),
     }]
@@ -634,7 +636,7 @@ mod tests {
         let placements = vec![Placement {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed("hi"),
-                colour: None,
+                colour: style::rgb(None),
                 bold: false,
             }),
             x: 0,

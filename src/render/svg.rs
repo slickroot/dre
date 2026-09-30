@@ -7,7 +7,7 @@ use super::{
 use crate::composer::Area;
 use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 use crate::view::Scene;
-use crate::view::{Placement, PlacementNode, Sides, ALL_SIDES, BRACKET_MARGIN, NO_SIDES};
+use crate::view::{Placement, PlacementNode, Rgb, Sides, ALL_SIDES, BRACKET_MARGIN, NO_SIDES};
 
 const ARROW_STROKE: i64 = 2;
 const ARROW_JOIN_OVERLAP: i64 = ARROW_STROKE / 2;
@@ -291,7 +291,7 @@ fn brackets_path(placement: &Placement, border: i64) -> String {
 
 fn rect(
     placement: &crate::view::Placement,
-    edge: Option<u8>,
+    edge: Rgb,
     fill: Option<u8>,
     opacity: Option<f64>,
     rounded: bool,
@@ -309,7 +309,7 @@ fn rect(
         placement.height * CELL_HEIGHT,
     );
     if sides != NO_SIDES {
-        let (r, g, b) = colour(edge);
+        let (r, g, b) = edge;
         write!(
             rect,
             " stroke=\"rgb({r},{g},{b})\" stroke-width=\"{}\"",
@@ -337,7 +337,7 @@ fn rect(
 
 fn label_text(placement: &crate::view::Placement, label: &crate::view::Label) -> String {
     let chars = label.text.chars().count() as i64;
-    let (r, g, b) = colour(label.colour);
+    let (r, g, b) = label.colour;
     let font_weight = if label.bold {
         " font-weight=\"bold\""
     } else {
@@ -385,7 +385,7 @@ mod tests {
     ) -> Placement<'static> {
         Placement {
             node: PlacementNode::Box {
-                colour,
+                colour: crate::style::rgb(colour),
                 fill,
                 opacity: fill.map(|_| BOX_FILL_OPACITY),
                 rounded,
@@ -402,7 +402,7 @@ mod tests {
     fn footer_placement(x: i64, y: i64, width: i64, height: i64) -> Placement<'static> {
         Placement {
             node: PlacementNode::Box {
-                colour: None,
+                colour: crate::style::rgb(None),
                 fill: Some(FOREGROUND),
                 opacity: Some(FOOTER_FILL_OPACITY),
                 rounded: false,
@@ -896,7 +896,7 @@ mod tests {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
-                colour: None,
+                colour: crate::style::rgb(None),
                 bold: false,
             }),
             x,
@@ -933,7 +933,7 @@ mod tests {
         let placements = vec![Placement {
             node: PlacementNode::Label(Label {
                 text: "hi".into(),
-                colour: Some(crate::style::LIME),
+                colour: crate::style::rgb(Some(crate::style::LIME)),
                 bold: false,
             }),
             x: 1,
@@ -965,7 +965,7 @@ mod tests {
         let placements = vec![Placement {
             node: PlacementNode::Label(Label {
                 text: "hi".into(),
-                colour: None,
+                colour: crate::style::rgb(None),
                 bold: true,
             }),
             x: 1,

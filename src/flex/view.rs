@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::style;
 use crate::view::{
     self, Area, Label, Placement, PlacementNode, Scene, ALL_SIDES, BORDER, BOX_HEIGHT,
 };
@@ -12,7 +13,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let placements = vec![
         Placement {
             node: PlacementNode::Box {
-                colour: None,
+                colour: style::rgb(None),
                 fill: None,
                 opacity: None,
                 rounded: false,
@@ -27,7 +28,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
         Placement {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(text),
-                colour: None,
+                colour: style::rgb(None),
                 bold: false,
             }),
             x: view::label_centre(width, text),

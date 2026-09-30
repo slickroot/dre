@@ -2,7 +2,6 @@ use std::io::{self, Write};
 
 #[cfg(test)]
 use crate::style::palette;
-use crate::style::FOREGROUND;
 use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,7 +43,7 @@ const LED_DIM_ALPHA: f64 = 0.3;
 const OPAQUE: u8 = 255;
 const ARROW_OPACITY: f64 = 0.5;
 fn colour(colour: Option<u8>) -> (u8, u8, u8) {
-    crate::style::palette(colour.unwrap_or(FOREGROUND)).unwrap()
+    crate::style::rgb(colour)
 }
 
 #[cfg(test)]
@@ -53,6 +52,7 @@ mod tests {
     use crate::diagram::{node, node_with_children};
     use crate::layout::tree::diagram;
     use crate::state::{new_state, Mode};
+    use crate::style::FOREGROUND;
     use crate::test_support::handle_key;
     use crate::view::{align_right, body, centre, editor, shift, Area, Placement};
     use crate::view::{
@@ -76,7 +76,7 @@ mod tests {
 
     fn plain_box() -> PlacementNode<'static> {
         PlacementNode::Box {
-            colour: None,
+            colour: crate::style::rgb(None),
             fill: None,
             opacity: None,
             rounded: false,
@@ -115,7 +115,7 @@ mod tests {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
-                colour: None,
+                colour: crate::style::rgb(None),
                 bold: true,
             }),
             x,
@@ -129,7 +129,7 @@ mod tests {
         Placement {
             node: PlacementNode::Label(Label {
                 text: text.into(),
-                colour,
+                colour: crate::style::rgb(colour),
                 bold: false,
             }),
             x,
