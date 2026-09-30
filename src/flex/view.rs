@@ -211,21 +211,25 @@ fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
 }
 
 fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) -> Placement<'a> {
+    let selected = state.mode == FlexMode::Move && state.selected == path;
     let node = match node {
         FlexNode::Text(text) => PlacementNode::Label(Label {
             text: Cow::Borrowed(text),
-            colour: FLEX_TEXT_COLOUR,
+            colour: if selected {
+                FLEX_SELECTED_COLOUR
+            } else {
+                FLEX_TEXT_COLOUR
+            },
             bold: false,
         }),
         FlexNode::Box(flex_box) => {
             let outer = path.len() == 1;
-            let colour = if state.mode == FlexMode::Move && state.selected == path {
-                FLEX_SELECTED_COLOUR
-            } else {
-                FLEX_BORDER_COLOUR
-            };
             PlacementNode::Box {
-                colour,
+                colour: if selected {
+                    FLEX_SELECTED_COLOUR
+                } else {
+                    FLEX_BORDER_COLOUR
+                },
                 fill: None,
                 opacity: None,
                 solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
@@ -1392,5 +1396,69 @@ mod tests {
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+    }
+
+    fn text_colours(placements: &[Placement<'_>], shown: &[&str]) -> Vec<Rgb> {
+        shown
+            .iter()
+            .map(|shown| {
+                let PlacementNode::Label(Label { colour, .. }) =
+                    label_showing(placements, shown).node
+                else {
+                    unreachable!()
+                };
+                colour
+            })
+            .collect()
+    }
+
+    fn world_selected(mode: FlexMode) -> FlexState {
+        FlexState {
+            mode,
+            selected: vec![0, 2],
+            ..hello_box_world()
+        }
+    }
+
+    #[test]
+    fn in_move_the_selected_text_has_the_selected_colour() {
+        let state = world_selected(FlexMode::Move);
+        assert_eq!(
+            text_colours(&placements(&state), &["Hello", "World"]),
+            vec![FLEX_TEXT_COLOUR, FLEX_SELECTED_COLOUR]
+        );
+    }
+
+    #[test]
+    fn in_write_the_selected_text_keeps_the_text_colour() {
+        let state = world_selected(FlexMode::Write);
+        assert_eq!(
+            text_colours(&placements(&state), &["Hello", "World"]),
+            vec![FLEX_TEXT_COLOUR; 2]
+        );
+    }
+
+    #[test]
+    fn in_move_the_box_around_a_selected_text_keeps_the_border_colour() {
+        let state = world_selected(FlexMode::Move);
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 2]);
+    }
+
+    #[test]
+    fn in_move_a_selected_inner_box_beside_texts_has_the_selected_border() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0, 1],
+            ..hello_box_world()
+        };
+        let placements = placements(&state);
+        assert_eq!(
+            borders(&placements),
+            vec![FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR]
+        );
+        assert_eq!(
+            text_colours(&placements, &["Hello", "World"]),
+            vec![FLEX_TEXT_COLOUR; 2]
+        );
     }
 }
