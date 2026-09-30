@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, LedShape};
-use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
+use super::tiles::{CellSize, TileKey, TileShape};
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -551,7 +551,7 @@ impl TerminalRenderer {
     fn place_tiles(
         &mut self,
         frame: &mut Frame,
-        style: TileStyle,
+        style: BoxStyle,
         geometry: Geometry,
         area: Area,
         z: i32,
@@ -589,7 +589,7 @@ impl TerminalRenderer {
     }
 
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
-        if self.place_tiles(frame, TileStyle::Box(style), geometry, area, BOX_Z) {
+        if self.place_tiles(frame, style, geometry, area, BOX_Z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
@@ -769,7 +769,7 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
-    use super::super::tiles::{cells_with_middle, TileShape, TileStyle};
+    use super::super::tiles::{cells_with_middle, TileShape};
     use super::*;
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
@@ -2991,14 +2991,14 @@ mod tests {
                 rounded,
                 sides,
                 border,
-            } => TileStyle::Box(BoxStyle {
+            } => BoxStyle {
                 colour: *colour,
                 fill: *fill,
                 fill_alpha: quantized_alpha(*opacity),
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
-            }),
+            },
             _ => panic!("expected a box or brackets"),
         };
         TileShape {
