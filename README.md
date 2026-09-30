@@ -45,7 +45,7 @@ export it to a crisp SVG when it is ready to share.
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/slickroot/dre/main/install.sh | bash
+curl -fsSL https://dre.elaich.com/install.sh | bash
 ```
 
 ## Getting started
