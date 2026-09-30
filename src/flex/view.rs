@@ -36,8 +36,8 @@ fn text_offsets(texts: &[String], justify: Justify, inner_width: i64) -> Vec<i64
 }
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let mut placements = Vec::with_capacity(state.boxes.len() * 2);
-    for (i, flex_box) in (0..).zip(&state.boxes) {
+    let mut placements = Vec::with_capacity(state.outer_boxes().count() * 2);
+    for (i, flex_box) in (0..).zip(state.outer_boxes()) {
         let width = match flex_box.width {
             FlexWidth::Fit => {
                 let interiors: i64 = flex_box.texts.iter().map(|text| view::interior(text)).sum();
@@ -48,7 +48,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
         let offsets = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
         let x = -width.div_euclid(2);
         let y = i * (BOX_HEIGHT + FLEX_GAP);
-        let colour = if state.mode == FlexMode::Move && i == state.selected as i64 {
+        let colour = if state.mode == FlexMode::Move && state.selected == [i as usize] {
             FLEX_SELECTED_COLOUR
         } else {
             FLEX_BORDER_COLOUR
@@ -98,6 +98,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
 mod tests {
     use super::*;
     use crate::flex::state::{reduce, FlexBox, Justify};
+    use types::Tree;
 
     const WINDOW: Area = Area {
         col: 0,
@@ -108,7 +109,7 @@ mod tests {
 
     fn holding(the_box: FlexBox) -> FlexState {
         FlexState {
-            boxes: vec![the_box],
+            boxes: Tree::root(vec![Tree::leaf(the_box)]),
             ..FlexState::default()
         }
     }
@@ -196,7 +197,7 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, &state.boxes.last().unwrap().texts[0]);
+        assert_eq!(text, &state.outer_boxes().last().unwrap().texts[0]);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }
@@ -308,7 +309,7 @@ mod tests {
 
     fn stacked(texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: texts.iter().map(|text| a_box(text)).collect(),
+            boxes: Tree::root(texts.iter().map(|text| Tree::leaf(a_box(text))).collect()),
             ..FlexState::default()
         }
     }
@@ -597,7 +598,7 @@ mod tests {
         let start = beside(texts);
         let spread = holding(FlexBox {
             justify: Justify::SpaceBetween,
-            ..start.boxes[0].clone()
+            ..start.outer_boxes().next().unwrap().clone()
         });
         assert_eq!(placements(&spread), placements(&start));
     }
@@ -627,7 +628,7 @@ mod tests {
     fn selecting(mode: FlexMode, selected: usize) -> FlexState {
         FlexState {
             mode,
-            selected,
+            selected: vec![selected],
             ..stacked(&["Hello", "Hi", ""])
         }
     }
