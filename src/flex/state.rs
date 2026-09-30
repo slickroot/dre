@@ -87,6 +87,7 @@ impl Default for FlexState {
 }
 
 impl FlexState {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn outer_boxes(&self) -> impl Iterator<Item = &FlexBox> {
         self.boxes
             .walk()
@@ -111,6 +112,7 @@ impl FlexState {
             })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn texts_of(&self, path: &[usize]) -> Vec<&str> {
         self.children_of(path)
             .filter_map(|(_, node)| match node {
