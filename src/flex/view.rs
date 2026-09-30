@@ -1369,7 +1369,7 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 7] = ["H", "e", "l", "l", "o", "\r", "A"];
+    const HELLO_WITH_AN_INNER_BOX: [&str; 8] = ["i", "H", "e", "l", "l", "o", "\r", "A"];
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
@@ -1388,7 +1388,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["H", "e", "l", "l", "o", "\r", "f", "A"]);
+        let state = pressed(&["i", "H", "e", "l", "l", "o", "\r", "f", "A"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
