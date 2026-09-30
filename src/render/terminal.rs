@@ -437,6 +437,29 @@ pub(crate) struct TerminalRenderer {
     image_ids: ImageIds,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn place_sprite<K, C>(
+    images: &mut std::collections::HashMap<K, kitty::ImageId>,
+    image_ids: &mut ImageIds,
+    frame: &mut Frame,
+    key: K,
+    geometry: Geometry,
+    area: Area,
+    z: i32,
+    canvas: impl FnOnce() -> C,
+) where
+    K: std::hash::Hash + Eq,
+    C: std::borrow::Borrow<Canvas>,
+{
+    if let Some(id) = images.get(&key).copied() {
+        frame.place_cached(id, geometry, area, z);
+    } else {
+        let id = image_ids.allocate();
+        images.insert(key, id);
+        frame.place_fresh(id, canvas().borrow(), geometry, area, z);
+    }
+}
+
 impl Renderer for TerminalRenderer {
     fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
         let frame = self.frame(scene);
@@ -584,17 +607,17 @@ impl TerminalRenderer {
             if !frame.shows(cell, area) {
                 continue;
             }
-            if let Some(id) = self.tile_images.get(&key).copied() {
-                frame.place_cached(id, cell, area, z);
-            } else {
-                let id = self.image_ids.allocate();
-                self.tile_images.insert(key, id);
-                let tile = self
-                    .tile_canvases
-                    .entry(key)
-                    .or_insert_with(|| key.canvas());
-                frame.place_fresh(id, tile, cell, area, z);
-            }
+            let tile_canvases = &mut self.tile_canvases;
+            place_sprite(
+                &mut self.tile_images,
+                &mut self.image_ids,
+                frame,
+                key,
+                cell,
+                area,
+                z,
+                || &*tile_canvases.entry(key).or_insert_with(|| key.canvas()),
+            );
         }
         true
     }
