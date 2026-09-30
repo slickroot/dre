@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn the_colours_stay_while_the_box_grows_and_shrinks() {
         let grown = with_text("Hello");
-        let shrunk = reduce(with_text("Hellp"), "\x7f");
+        let (shrunk, _) = reduce(with_text("Hellp"), "\x7f");
         for state in [&grown, &shrunk] {
             assert_eq!(
                 colours(&placements(state)),
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn the_border_stays_thin_after_backspace() {
-        let after = reduce(with_text("Hellp"), "\x7f");
+        let (after, _) = reduce(with_text("Hellp"), "\x7f");
         let placements = placements(&after);
         assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
     }

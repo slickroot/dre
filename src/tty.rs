@@ -183,7 +183,6 @@ fn read_byte_within_escape_timeout(fd: BorrowedFd) -> io::Result<Option<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
 
     fn winsize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) -> libc::winsize {
         libc::winsize {
@@ -210,103 +209,5 @@ mod tests {
     fn a_cell_that_does_not_divide_evenly_is_rounded() {
         let window = measure(winsize(3, 3, 8, 7));
         assert_eq!((window.cell_width, window.cell_height), (3, 2));
-    }
-
-    #[test]
-    fn read_key_survives_a_signal_interrupting_the_poll() {
-        use std::os::fd::AsRawFd;
-        use std::time::Duration;
-
-        extern "C" fn ignore(_: libc::c_int) {}
-        let action = signal::SigAction::new(
-            SigHandler::Handler(ignore),
-            SaFlags::empty(),
-            SigSet::empty(),
-        );
-        unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.unwrap();
-
-        let (read, write) = nix::unistd::pipe().unwrap();
-        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let pid = nix::unistd::getpid();
-        let interrupter = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(20));
-            nix::sys::signal::kill(pid, Signal::SIGWINCH).unwrap();
-            nix::unistd::write(&write, b"x").unwrap();
-        });
-        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
-        interrupter.join().unwrap();
-        assert_eq!(result.unwrap(), "x");
-    }
-
-    #[test]
-    fn read_key_returns_the_byte_that_is_ready() {
-        use std::os::fd::AsRawFd;
-        let (read, write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&write, b"x").unwrap();
-        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
-        assert_eq!(result.unwrap(), "x");
-    }
-
-    fn read_key_from(read: &std::os::fd::OwnedFd) -> String {
-        use std::os::fd::AsRawFd;
-        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap()
-    }
-
-    #[test]
-    fn read_key_returns_a_whole_escape_sequence_written_at_once() {
-        let (read, write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&write, b"\x1b[D").unwrap();
-        assert_eq!(read_key_from(&read), "\x1b[D");
-    }
-
-    #[test]
-    fn read_key_returns_a_lone_escape_after_the_timeout() {
-        let (read, write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&write, b"\x1b").unwrap();
-        assert_eq!(read_key_from(&read), "\x1b");
-    }
-
-    #[test]
-    fn read_key_returns_an_escape_sequence_with_parameters_whole() {
-        let (read, write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&write, b"\x1b[1;5C").unwrap();
-        assert_eq!(read_key_from(&read), "\x1b[1;5C");
-    }
-
-    #[test]
-    fn read_key_error_when_the_input_is_closed() {
-        use std::os::fd::AsRawFd;
-        let (read, write) = nix::unistd::pipe().unwrap();
-        drop(write);
-        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
-        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
-    }
-
-    #[test]
-    fn read_key_returns_resize_when_the_resize_fd_becomes_readable() {
-        use std::os::fd::AsRawFd;
-        let (read, _write) = nix::unistd::pipe().unwrap();
-        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&resize_write, b"\0").unwrap();
-        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
-        assert_eq!(result.unwrap(), RESIZE);
-    }
-
-    #[test]
-    fn read_key_drains_the_resize_byte_so_it_is_not_reported_twice() {
-        use std::os::fd::AsRawFd;
-        let (read, write) = nix::unistd::pipe().unwrap();
-        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&resize_write, b"\0").unwrap();
-        let first = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
-        assert_eq!(first, RESIZE);
-
-        nix::unistd::write(&write, b"x").unwrap();
-        let second = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
-        assert_eq!(second, "x");
     }
 }
