@@ -1056,4 +1056,102 @@ mod tests {
         assert_eq!(inner.x, hello.x + hello.width + FLEX_GAP);
         assert_eq!(world.x, inner.x + inner.width + FLEX_GAP);
     }
+
+    const EVEN_SPREAD_WINDOW: Area = Area { cols: 81, ..WINDOW };
+
+    fn spread(children: Vec<Tree<FlexNode>>) -> FlexState {
+        FlexState {
+            boxes: Tree::root(vec![Tree::new(
+                FlexNode::Box(FlexBox {
+                    width: FlexWidth::Full,
+                    justify: Justify::SpaceBetween,
+                    ..FlexBox::default()
+                }),
+                children,
+            )]),
+            ..FlexState::default()
+        }
+    }
+
+    fn row_of<'a>(placements: &'a [Placement<'a>], state: &FlexState) -> Vec<&'a Placement<'a>> {
+        placements
+            .iter()
+            .zip(state.boxes.walk())
+            .filter(|(_, (path, _))| path.len() == 2)
+            .map(|(placement, _)| placement)
+            .collect()
+    }
+
+    fn gaps_between(row: &[&Placement<'_>]) -> Vec<i64> {
+        row.windows(2)
+            .map(|pair| pair[1].x - (pair[0].x + pair[0].width))
+            .collect()
+    }
+
+    fn free_space(window: Area, row: &[&Placement<'_>]) -> i64 {
+        window.cols - 2 * FLEX_BORDER - row.iter().map(|sibling| sibling.width).sum::<i64>()
+    }
+
+    fn assert_spread_edge_to_edge(placements: &[Placement<'_>], row: &[&Placement<'_>]) {
+        let outer = &placements[0];
+        let (first, last) = (row[0], row[row.len() - 1]);
+        assert_eq!(first.x, outer.x + FLEX_BORDER);
+        assert_eq!(last.x + last.width, outer.x + outer.width - FLEX_BORDER);
+    }
+
+    #[test]
+    fn a_full_space_between_box_spreads_mixed_siblings_edge_to_edge_with_equal_gaps() {
+        let state = spread(vec![text("Hello"), new_box(), text("World")]);
+        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW)).unwrap();
+        let row = row_of(&placements, &state);
+        assert_spread_edge_to_edge(&placements, &row);
+        let gap = free_space(EVEN_SPREAD_WINDOW, &row) / 2;
+        assert_eq!(gaps_between(&row), vec![gap, gap]);
+    }
+
+    #[test]
+    fn a_full_space_between_box_gives_the_extra_cells_to_the_last_gaps() {
+        let state = spread(vec![text("Hello"), new_box(), text("World")]);
+        let placements = placements(&state);
+        let row = row_of(&placements, &state);
+        assert_spread_edge_to_edge(&placements, &row);
+        let base = free_space(WINDOW, &row).div_euclid(2);
+        assert_eq!(gaps_between(&row), vec![base, base + 1]);
+    }
+
+    #[test]
+    fn a_full_space_between_box_widens_the_last_gaps_first() {
+        let state = spread(vec![text("a"), new_box(), text("b"), new_box()]);
+        for (window, widened) in [(WINDOW, 1), (EVEN_SPREAD_WINDOW, 2)] {
+            let [(_, placements)] = <[_; 1]>::try_from(scene(&state, window)).unwrap();
+            let row = row_of(&placements, &state);
+            assert_spread_edge_to_edge(&placements, &row);
+            let base = free_space(window, &row).div_euclid(3);
+            let mut expected = vec![base; 3 - widened];
+            expected.extend(vec![base + 1; widened]);
+            assert_eq!(gaps_between(&row), expected);
+        }
+    }
+
+    #[test]
+    fn full_and_g_spread_hello_the_inner_box_and_world_across_the_outer_box() {
+        let keys = [
+            "H", "e", "l", "l", "o", "\r", "A", "s", "W", "o", "r", "l", "d", "\r", "w", "g",
+        ];
+        let state = keys
+            .into_iter()
+            .fold(FlexState::default(), |state, key| reduce(state, key).0);
+        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW)).unwrap();
+        let outer = &placements[0];
+        let hello = label_showing(&placements, "Hello");
+        let inner = all_boxes(&placements)[1];
+        let world = label_showing(&placements, "World");
+        assert_eq!(outer.width, EVEN_SPREAD_WINDOW.cols);
+        assert_eq!(hello.x, outer.x + FLEX_BORDER);
+        assert_eq!(world.x + world.width, outer.x + outer.width - FLEX_BORDER);
+        assert_eq!(
+            inner.x - (hello.x + hello.width),
+            world.x - (inner.x + inner.width)
+        );
+    }
 }
