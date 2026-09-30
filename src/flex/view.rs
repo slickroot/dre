@@ -112,4 +112,25 @@ mod tests {
             .count();
         assert_eq!((boxes, labels, placements.len()), (1, 1, 2));
     }
+
+    #[test]
+    fn the_box_grows_to_fit_the_text() {
+        let state = with_text("Hello");
+        let placements = placements(&state);
+        assert_eq!(the_box(&placements).width, 7);
+    }
+
+    #[test]
+    fn the_label_shows_the_text_inside_the_box() {
+        let state = with_text("Hello");
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        let label = the_label(&placements);
+        let PlacementNode::Label(Label { text, .. }) = &label.node else {
+            unreachable!()
+        };
+        assert_eq!(text, &state.text);
+        assert!(label.x > the_box.x);
+        assert!(label.x + label.width < the_box.x + the_box.width);
+    }
 }

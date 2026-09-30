@@ -92,4 +92,25 @@ mod tests {
 
         run_loop(&mut keys, &mut screen).unwrap();
     }
+
+    #[test]
+    fn renders_the_text_as_it_is_typed() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        for (key, shown) in [("H", ""), ("i", "H"), ("\x03", "Hi")] {
+            screen
+                .expect_render()
+                .withf(move |state| state.text == shown)
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(|_| Ok(()));
+            keys.expect_next_key()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_once(move || Ok(key.to_string()));
+        }
+
+        run_loop(&mut keys, &mut screen).unwrap();
+    }
 }
