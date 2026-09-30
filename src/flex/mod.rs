@@ -111,10 +111,12 @@ mod tests {
         let mut keys = MockKeySource::new();
         let mut screen = MockFlexScreen::new();
         let mut seq = Sequence::new();
-        for (key, shown) in [("H", ""), ("i", "H"), ("\x03", "Hi")] {
+        for (key, shown) in [("i", ""), ("H", ""), ("i", "H"), ("\x03", "Hi")] {
             screen
                 .expect_render()
-                .withf(move |state| state.texts_of(&[state.outer_boxes().count() - 1])[0] == shown)
+                .withf(move |state| {
+                    state.texts_of(&[state.outer_boxes().count() - 1]).concat() == shown
+                })
                 .times(1)
                 .in_sequence(&mut seq)
                 .returning(|_| Ok(()));
@@ -134,7 +136,21 @@ mod tests {
         let mut seq = Sequence::new();
         screen
             .expect_render()
-            .withf(|state| state.texts_of(&[state.outer_boxes().count() - 1])[0].is_empty())
+            .withf(|state| {
+                state
+                    .texts_of(&[state.outer_boxes().count() - 1])
+                    .is_empty()
+            })
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("i".to_string()));
+        screen
+            .expect_render()
+            .withf(|state| state.texts_of(&[state.outer_boxes().count() - 1]) == [""])
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
