@@ -7,7 +7,13 @@ use russh::{Channel, ChannelId};
 use std::future::Future;
 use std::sync::{Arc, Weak};
 
-const NO_KEY_MESSAGE: &str = "dre needs an SSH key to remember your diagram. Run `ssh-keygen`, then try `ssh dre.sh` again.\r\n";
+const PUBLIC_HOST: &str = "dre.elaich.com";
+
+fn no_key_message() -> String {
+    format!(
+        "dre needs an SSH key to remember your diagram. Run `ssh-keygen`, then try `ssh {PUBLIC_HOST}` again.\r\n"
+    )
+}
 
 pub(crate) trait Outlet: Clone + Send + 'static {
     fn send(&self, bytes: Vec<u8>) -> impl Future<Output = ()> + Send;
@@ -107,7 +113,7 @@ impl VisitorHandler {
 
     async fn begin(&mut self, outlet: impl Outlet + Sync) -> std::io::Result<()> {
         let Some(fingerprint) = self.fingerprint.clone() else {
-            outlet.send(NO_KEY_MESSAGE.as_bytes().to_vec()).await;
+            outlet.send(no_key_message().into_bytes()).await;
             outlet.close().await;
             return Ok(());
         };
@@ -500,6 +506,11 @@ mod tests {
         assert_eq!(handler.fingerprint, None);
     }
 
+    #[test]
+    fn the_no_key_message_names_the_public_host() {
+        assert!(no_key_message().contains(PUBLIC_HOST));
+    }
+
     #[tokio::test]
     async fn a_keyless_visitor_gets_the_message_and_the_channel_closes_without_a_spawn() {
         let mut spawner = MockSpawner::new();
@@ -509,7 +520,7 @@ mod tests {
         handler.begin(outlet).await.unwrap();
         assert_eq!(
             received.recv().await,
-            Some(Some(NO_KEY_MESSAGE.as_bytes().to_vec()))
+            Some(Some(no_key_message().into_bytes()))
         );
         assert_eq!(received.recv().await, Some(None));
     }
