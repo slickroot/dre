@@ -25,10 +25,27 @@ impl FlexWidth {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Justify {
+    #[default]
+    Start,
+    SpaceBetween,
+}
+
+impl Justify {
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Justify::Start => Justify::SpaceBetween,
+            Justify::SpaceBetween => Justify::Start,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlexBox {
     pub(crate) texts: Vec<String>,
     pub(crate) width: FlexWidth,
+    pub(crate) justify: Justify,
     pub(crate) filled: bool,
 }
 
@@ -37,6 +54,7 @@ impl Default for FlexBox {
         Self {
             texts: vec![String::new()],
             width: FlexWidth::default(),
+            justify: Justify::default(),
             filled: false,
         }
     }
@@ -106,6 +124,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         "w" => {
             let newest = state.newest_box();
             newest.width = newest.width.toggle();
+        }
+        "g" => {
+            let newest = state.newest_box();
+            newest.justify = newest.justify.toggle();
         }
         "f" => {
             let newest = state.newest_box();
@@ -485,5 +507,48 @@ mod tests {
     fn backspace_on_an_empty_last_box_keeps_the_box() {
         let before = stacked(&["Hello", ""], FlexMode::Write);
         assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
+    }
+
+    #[test]
+    fn starts_with_a_start_justify() {
+        assert_eq!(newest(&FlexState::default()).justify, Justify::Start);
+    }
+
+    #[test]
+    fn toggling_the_justify_flips_between_start_and_space_between() {
+        assert_eq!(Justify::Start.toggle(), Justify::SpaceBetween);
+        assert_eq!(Justify::SpaceBetween.toggle(), Justify::Start);
+    }
+
+    #[test]
+    fn g_in_move_mode_spreads_the_texts_and_keeps_the_rest() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "g");
+        assert_eq!(newest(&state).justify, Justify::SpaceBetween);
+        assert_eq!(newest(&state).texts, ["Hello"]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn g_twice_in_move_mode_toggles_the_justify_back_to_start() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "g");
+        let (state, effect) = reduce(state, "g");
+        assert_eq!(state, hello_in(FlexMode::Move));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn g_in_write_mode_is_typed_into_the_box_and_leaves_the_justify_alone() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "g");
+        assert_eq!(newest(&state).texts, ["Hellog"]);
+        assert_eq!(newest(&state).justify, Justify::Start);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn g_only_spreads_the_newest_box() {
+        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "g");
+        assert_eq!(state.boxes[0].justify, Justify::Start);
+        assert_eq!(state.boxes[1].justify, Justify::SpaceBetween);
     }
 }
