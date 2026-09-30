@@ -1,91 +1,205 @@
-#[derive(Clone, Debug, PartialEq)]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::dre_format::{FileBox, FileDoc};
+
+use types::Tree;
+
+#[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct Node {
-    pub(crate) label: String,
-    pub(crate) colour: Option<u8>,
-    pub(crate) filled: bool,
-    pub(crate) rounded: bool,
-    pub(crate) children: Vec<Node>,
+    label: String,
+    colour: Option<u8>,
+    filled: bool,
+    rounded: bool,
 }
 
-impl Default for Node {
+impl Node {
+    pub(crate) fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub(crate) fn colour(&self) -> Option<u8> {
+        self.colour
+    }
+
+    pub(crate) fn filled(&self) -> bool {
+        self.filled
+    }
+
+    pub(crate) fn rounded(&self) -> bool {
+        self.rounded
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Document {
+    root: Tree<Node>,
+}
+
+impl Default for Document {
     fn default() -> Self {
-        Node {
-            label: String::new(),
-            colour: None,
-            filled: false,
-            rounded: false,
-            children: Vec::new(),
+        Document {
+            root: Tree::root(Vec::new()),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Path {
-    pub(crate) ancestors: Vec<usize>,
-    pub(crate) index: usize,
+pub(crate) enum Scope {
+    Box,
+    Siblings,
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct Document {
-    pub(crate) boxes: Vec<Node>,
-    pub(crate) selected: Option<Path>,
-}
-
-pub(crate) fn children_at<'a>(boxes: &'a mut Vec<Node>, ancestors: &[usize]) -> &'a mut Vec<Node> {
-    let mut children = boxes;
-    for &index in ancestors {
-        children = &mut children[index].children;
+impl Document {
+    pub(crate) fn tree(&self) -> &Tree<Node> {
+        &self.root
     }
-    children
+
+    pub(crate) fn set_label(&mut self, path: &[usize], label: String) {
+        self.root.value_mut(path).label = label;
+    }
+
+    pub(crate) fn set_colour(&mut self, path: &[usize], colour: Option<u8>, scope: Scope) {
+        self.set(path, scope, |node| node.colour = colour);
+    }
+
+    pub(crate) fn set_fill(&mut self, path: &[usize], filled: bool, scope: Scope) {
+        self.set(path, scope, |node| node.filled = filled);
+    }
+
+    pub(crate) fn set_rounded(&mut self, path: &[usize], rounded: bool, scope: Scope) {
+        self.set(path, scope, |node| node.rounded = rounded);
+    }
+
+    pub(crate) fn siblings(&self, path: &[usize]) -> Vec<Vec<usize>> {
+        children(&self.root, parent_of(path)).collect()
+    }
+
+    pub(crate) fn insert(&mut self, parent: &[usize], subtree: &Tree<Node>) -> Vec<usize> {
+        self.root.push(parent, subtree.clone())
+    }
+
+    pub(crate) fn remove(&mut self, path: &[usize]) -> Tree<Node> {
+        self.root.remove(path)
+    }
+
+    fn set(&mut self, path: &[usize], scope: Scope, write: impl Fn(&mut Node)) {
+        let targets: Vec<Vec<usize>> = match scope {
+            Scope::Box => vec![path.to_vec()],
+            Scope::Siblings => children(&self.root, parent_of(path)).collect(),
+        };
+        for target in targets {
+            write(self.root.value_mut(&target));
+        }
+    }
 }
 
-pub(crate) fn at<'a>(boxes: &'a mut Vec<Node>, path: &Path) -> &'a mut Node {
-    &mut children_at(boxes, &path.ancestors)[path.index]
+pub(crate) fn parent_of(path: &[usize]) -> &[usize] {
+    &path[..path.len() - 1]
 }
 
-const PALETTE: [(u8, u8, u8); 5] = [
-    (255, 190, 11),
-    (251, 86, 7),
-    (255, 0, 110),
-    (131, 56, 236),
-    (58, 134, 255),
-];
-
-pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
-    PALETTE.get(index as usize).copied()
+pub(crate) fn children<'a, T>(
+    tree: &'a Tree<T>,
+    parent: &'a [usize],
+) -> impl Iterator<Item = Vec<usize>> + 'a {
+    (0..)
+        .map(move |index| [parent, &[index]].concat())
+        .take_while(|path| tree.contains(path))
 }
 
-pub(crate) fn append(siblings: &mut Vec<Node>, node: Node) -> usize {
-    siblings.push(node);
-    siblings.len() - 1
+#[cfg(not(target_arch = "wasm32"))]
+fn file_box(tree: &Tree<Node>, path: &[usize]) -> FileBox {
+    let node = tree.value(path);
+    FileBox {
+        label: node.label.clone(),
+        colour: node.colour,
+        fill: if node.filled && node.colour.is_some() {
+            node.colour
+        } else {
+            None
+        },
+        rounded: node.rounded,
+        children: children(tree, path)
+            .map(|child| file_box(tree, &child))
+            .collect(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn from_document(doc: &Document) -> FileDoc {
+    FileDoc {
+        boxes: children(doc.tree(), &[])
+            .map(|path| file_box(doc.tree(), &path))
+            .collect(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn node_from_file_box(file_box: FileBox) -> Tree<Node> {
+    Tree::new(
+        Node {
+            label: file_box.label,
+            colour: file_box.colour,
+            filled: file_box.fill.is_some(),
+            rounded: file_box.rounded,
+        },
+        file_box
+            .children
+            .into_iter()
+            .map(node_from_file_box)
+            .collect(),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn to_document(doc: FileDoc) -> Document {
+    Document {
+        root: Tree::root(doc.boxes.into_iter().map(node_from_file_box).collect()),
+    }
 }
 
 #[cfg(test)]
-pub(crate) fn node(label: &str) -> Node {
-    Node { label: label.to_string(), ..Default::default() }
+pub(crate) fn labelled(label: &str) -> Node {
+    Node {
+        label: label.to_string(),
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
-pub(crate) fn node_with_children(label: &str, children: Vec<Node>) -> Node {
-    Node { label: label.to_string(), children, ..Default::default() }
+pub(crate) fn node(label: &str) -> Tree<Node> {
+    Tree::leaf(labelled(label))
+}
+
+#[cfg(test)]
+pub(crate) fn node_with_children(label: &str, children: Vec<Tree<Node>>) -> Tree<Node> {
+    Tree::new(labelled(label), children)
+}
+
+#[cfg(test)]
+impl Node {
+    pub(crate) fn with_colour(self, colour: Option<u8>) -> Node {
+        Node { colour, ..self }
+    }
+
+    pub(crate) fn with_fill(self, filled: bool) -> Node {
+        Node { filled, ..self }
+    }
+
+    pub(crate) fn with_rounded(self, rounded: bool) -> Node {
+        Node { rounded, ..self }
+    }
+}
+
+#[cfg(test)]
+impl Document {
+    pub(crate) fn with_boxes(boxes: Vec<Tree<Node>>) -> Document {
+        Document {
+            root: Tree::root(boxes),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn palette_has_a_colour_at_index_zero() {
-        assert!(palette(0).is_some());
-    }
-
-    #[test]
-    fn palette_has_no_colour_past_its_last_index() {
-        let first_missing = (0..=u8::MAX).find(|&i| palette(i).is_none()).unwrap();
-        assert!(first_missing > 0);
-        assert_eq!(palette(first_missing), None);
-        assert!((first_missing..=u8::MAX).all(|i| palette(i).is_none()));
-    }
 
     #[test]
     fn boxes_are_equal() {
@@ -99,12 +213,12 @@ mod tests {
 
     #[test]
     fn boxes_default_to_the_plain_fill() {
-        assert_eq!(Node::default().filled, false);
+        assert!(!Node::default().filled);
     }
 
     #[test]
     fn boxes_default_to_an_empty_label() {
-        assert_eq!(Node::default(), node(""));
+        assert_eq!(Tree::leaf(Node::default()), node(""));
     }
 
     #[test]
@@ -114,7 +228,8 @@ mod tests {
 
     #[test]
     fn boxes_default_to_no_children() {
-        assert_eq!(Node::default().children, Vec::<Node>::new());
+        let tree = Tree::root(vec![node("a")]);
+        assert_eq!(children(&tree, &[0]).count(), 0);
     }
 
     #[test]
@@ -127,67 +242,378 @@ mod tests {
 
     #[test]
     fn new_box_starts_with_square_corners() {
-        assert_eq!(node("a").rounded, false);
+        assert!(!Tree::root(vec![node("a")]).value(&[0]).rounded);
     }
 
     #[test]
-    fn children_at_no_ancestors_returns_the_top_level_boxes() {
-        let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*children_at(&mut boxes, &[]), vec![node("a"), node("b")]);
+    fn a_default_document_has_no_boxes() {
+        assert_eq!(Document::default().tree().walk().count(), 0);
     }
 
     #[test]
-    fn children_at_ancestors_returns_the_addressed_nodes_children() {
-        let mut boxes = vec![node_with_children(
+    fn children_of_the_root_are_the_top_level_boxes() {
+        let tree = Tree::root(vec![node_with_children("a", vec![node("c")]), node("b")]);
+        assert_eq!(
+            children(&tree, &[]).collect::<Vec<_>>(),
+            vec![vec![0], vec![1]]
+        );
+    }
+
+    #[test]
+    fn children_of_a_box_are_its_child_paths_in_order() {
+        let tree = Tree::root(vec![node_with_children(
             "a",
-            vec![node_with_children("b", vec![node("c"), node("d")])],
-        )];
-        assert_eq!(*children_at(&mut boxes, &[0]), vec![node_with_children("b", vec![node("c"), node("d")])]);
-        assert_eq!(*children_at(&mut boxes, &[0, 0]), vec![node("c"), node("d")]);
+            vec![node_with_children("b", vec![node("d")]), node("c")],
+        )]);
+        assert_eq!(
+            children(&tree, &[0]).collect::<Vec<_>>(),
+            vec![vec![0, 0], vec![0, 1]]
+        );
     }
 
     #[test]
-    fn at_a_single_index_returns_the_top_level_box() {
-        let mut boxes = vec![node("a"), node("b")];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![], index: 1 }), node("b"));
+    fn saving_a_document_maps_labels_colours_fills_rounding_and_nesting_across() {
+        let child = Tree::leaf(Node {
+            label: "Auth".to_string(),
+            colour: Some(1),
+            filled: true,
+            ..Node::default()
+        });
+        let doc = Document {
+            root: Tree::root(vec![
+                Tree::new(
+                    Node {
+                        label: "API".to_string(),
+                        colour: Some(2),
+                        rounded: true,
+                        ..Node::default()
+                    },
+                    vec![child],
+                ),
+                Tree::leaf(Node {
+                    label: "Billing".to_string(),
+                    filled: true,
+                    ..Node::default()
+                }),
+            ]),
+        };
+        let expected = FileDoc {
+            boxes: vec![
+                FileBox {
+                    label: "API".to_string(),
+                    colour: Some(2),
+                    fill: None,
+                    rounded: true,
+                    children: vec![FileBox {
+                        label: "Auth".to_string(),
+                        colour: Some(1),
+                        fill: Some(1),
+                        rounded: false,
+                        children: vec![],
+                    }],
+                },
+                FileBox {
+                    label: "Billing".to_string(),
+                    colour: None,
+                    fill: None,
+                    rounded: false,
+                    children: vec![],
+                },
+            ],
+        };
+        assert_eq!(from_document(&doc), expected);
     }
 
     #[test]
-    fn at_a_longer_path_walks_into_children() {
-        let mut boxes = vec![node_with_children("a", vec![node("c"), node("d")])];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0], index: 1 }), node("d"));
+    fn opening_an_empty_file_doc_gives_no_boxes() {
+        let doc = to_document(FileDoc { boxes: vec![] });
+        assert_eq!(doc, Document::default());
     }
 
     #[test]
-    fn at_a_deep_path_walks_multiple_levels() {
-        let mut boxes = vec![node_with_children(
-            "a",
-            vec![node_with_children("b", vec![node("c")])],
-        )];
-        assert_eq!(*at(&mut boxes, &Path { ancestors: vec![0, 0], index: 0 }), node("c"));
+    fn opening_a_file_doc_maps_labels_colours_fills_rounding_and_nesting_into_the_document() {
+        let doc = FileDoc {
+            boxes: vec![
+                FileBox {
+                    label: "API".to_string(),
+                    colour: Some(2),
+                    fill: None,
+                    rounded: true,
+                    children: vec![FileBox {
+                        label: "Auth".to_string(),
+                        colour: None,
+                        fill: Some(3),
+                        rounded: false,
+                        children: vec![],
+                    }],
+                },
+                FileBox {
+                    label: "Billing".to_string(),
+                    colour: Some(4),
+                    fill: Some(1),
+                    rounded: false,
+                    children: vec![],
+                },
+            ],
+        };
+        let child = Tree::leaf(Node {
+            label: "Auth".to_string(),
+            filled: true,
+            ..Node::default()
+        });
+        let expected = Tree::root(vec![
+            Tree::new(
+                Node {
+                    label: "API".to_string(),
+                    colour: Some(2),
+                    rounded: true,
+                    ..Node::default()
+                },
+                vec![child],
+            ),
+            Tree::leaf(Node {
+                label: "Billing".to_string(),
+                colour: Some(4),
+                filled: true,
+                ..Node::default()
+            }),
+        ]);
+        assert_eq!(*to_document(doc).tree(), expected);
     }
 
     #[test]
-    fn append_on_an_empty_list_pushes_the_node_and_returns_its_index() {
-        let mut boxes = Vec::new();
-        let index = append(&mut boxes, node("a"));
-        assert_eq!(boxes, vec![node("a")]);
-        assert_eq!(index, 0);
+    fn from_document_writes_fill_equal_to_border_colour_index_when_filled() {
+        let doc = Document {
+            root: Tree::root(vec![
+                Tree::leaf(Node {
+                    label: "A".to_string(),
+                    colour: Some(2),
+                    filled: true,
+                    ..Node::default()
+                }),
+                Tree::leaf(Node {
+                    label: "B".to_string(),
+                    colour: Some(2),
+                    filled: false,
+                    ..Node::default()
+                }),
+            ]),
+        };
+        let fd = from_document(&doc);
+        assert_eq!(fd.boxes[0].fill, Some(2));
+        assert_eq!(fd.boxes[1].fill, None);
     }
 
     #[test]
-    fn append_pushes_after_existing_nodes_and_returns_its_index() {
-        let mut boxes = vec![node("a")];
-        let index = append(&mut boxes, node("b"));
-        assert_eq!(boxes, vec![node("a"), node("b")]);
-        assert_eq!(index, 1);
+    fn from_document_omits_fill_when_filled_but_colourless() {
+        let doc = Document {
+            root: Tree::root(vec![Tree::leaf(Node {
+                label: "A".to_string(),
+                colour: None,
+                filled: true,
+                ..Node::default()
+            })]),
+        };
+        let fd = from_document(&doc);
+        assert_eq!(fd.boxes[0].fill, None);
     }
 
     #[test]
-    fn append_on_a_nodes_children_appends_a_child() {
-        let mut boxes = vec![node_with_children("a", vec![node("c")])];
-        let index = append(&mut boxes[0].children, node("d"));
-        assert_eq!(boxes, vec![node_with_children("a", vec![node("c"), node("d")])]);
-        assert_eq!(index, 1);
+    fn filled_colourless_box_round_trips_as_unfilled() {
+        let doc = Document {
+            root: Tree::root(vec![Tree::leaf(Node {
+                label: "A".to_string(),
+                colour: None,
+                filled: true,
+                ..Node::default()
+            })]),
+        };
+        let fd = from_document(&doc);
+        let reloaded = to_document(fd);
+        let reloaded = reloaded.tree().value(&[0]);
+        assert!(!reloaded.filled);
+        assert_eq!(reloaded.label, "A");
+        assert_eq!(reloaded.colour, None);
+    }
+
+    #[test]
+    fn legacy_fill_zero_means_filled() {
+        let fd = FileDoc {
+            boxes: vec![FileBox {
+                label: "A".to_string(),
+                colour: None,
+                fill: Some(0),
+                rounded: false,
+                children: vec![],
+            }],
+        };
+        let doc = to_document(fd);
+        assert!(doc.tree().value(&[0]).filled);
+    }
+
+    fn row() -> Document {
+        Document::with_boxes(vec![
+            node_with_children("a", vec![node("c"), node("d")]),
+            node("b"),
+        ])
+    }
+
+    fn row_with_child_of_a(subtree: Tree<Node>) -> Document {
+        Document::with_boxes(vec![
+            node_with_children("a", vec![node("c"), node("d"), subtree]),
+            node("b"),
+        ])
+    }
+
+    #[test]
+    fn set_label_writes_the_label_of_the_box() {
+        let mut doc = row();
+        doc.set_label(&[0, 1], "e".to_string());
+        assert_eq!(doc.tree().value(&[0, 1]).label(), "e");
+    }
+
+    #[test]
+    fn set_label_leaves_other_boxes_alone() {
+        let mut doc = row();
+        doc.set_label(&[0, 1], "e".to_string());
+        assert_eq!(doc.tree().value(&[0, 0]).label(), "c");
+    }
+
+    #[test]
+    fn set_colour_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_colour(&[0], Some(3), Scope::Box);
+        assert_eq!(doc.tree().value(&[0]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[1]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_on_siblings_writes_every_child_of_the_parent() {
+        let mut doc = row();
+        doc.set_colour(&[0, 0], Some(3), Scope::Siblings);
+        assert_eq!(doc.tree().value(&[0, 0]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[0, 1]).colour(), Some(3));
+        assert_eq!(doc.tree().value(&[0]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_writes_no_colour() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_colour(Some(2)))]);
+        doc.set_colour(&[0], None, Scope::Box);
+        assert_eq!(doc.tree().value(&[0]).colour(), None);
+    }
+
+    #[test]
+    fn set_colour_leaves_the_fill_alone() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(
+            labelled("a").with_colour(Some(2)).with_fill(true),
+        )]);
+        doc.set_colour(&[0], None, Scope::Box);
+        assert!(doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_fill(&[1], true, Scope::Box);
+        assert!(doc.tree().value(&[1]).filled());
+        assert!(!doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_writes_the_value_even_without_a_colour() {
+        let mut doc = row();
+        doc.set_fill(&[0], true, Scope::Box);
+        assert!(doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_fill_on_siblings_writes_every_top_level_box() {
+        let mut doc = row();
+        doc.set_fill(&[1], true, Scope::Siblings);
+        assert!(doc.tree().value(&[0]).filled());
+        assert!(doc.tree().value(&[1]).filled());
+        assert!(!doc.tree().value(&[0, 0]).filled());
+    }
+
+    #[test]
+    fn set_fill_writes_false() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_fill(true))]);
+        doc.set_fill(&[0], false, Scope::Box);
+        assert!(!doc.tree().value(&[0]).filled());
+    }
+
+    #[test]
+    fn set_rounded_on_a_box_writes_only_that_box() {
+        let mut doc = row();
+        doc.set_rounded(&[0, 1], true, Scope::Box);
+        assert!(doc.tree().value(&[0, 1]).rounded());
+        assert!(!doc.tree().value(&[0, 0]).rounded());
+    }
+
+    #[test]
+    fn set_rounded_on_siblings_writes_every_child_of_the_parent() {
+        let mut doc = row();
+        doc.set_rounded(&[0, 1], true, Scope::Siblings);
+        assert!(doc.tree().value(&[0, 0]).rounded());
+        assert!(doc.tree().value(&[0, 1]).rounded());
+    }
+
+    #[test]
+    fn set_rounded_writes_false() {
+        let mut doc = Document::with_boxes(vec![Tree::leaf(labelled("a").with_rounded(true))]);
+        doc.set_rounded(&[0], false, Scope::Box);
+        assert!(!doc.tree().value(&[0]).rounded());
+    }
+
+    #[test]
+    fn siblings_returns_every_siblings_path_in_order_including_the_target() {
+        let doc = row();
+
+        assert_eq!(doc.siblings(&[0, 0]), vec![vec![0, 0], vec![0, 1]]);
+    }
+
+    #[test]
+    fn insert_adds_the_subtree_as_the_last_child_and_returns_its_path() {
+        let mut doc = row();
+        let subtree = node_with_children("e", vec![node("f")]);
+        let path = doc.insert(&[0], &subtree);
+        assert_eq!(path, vec![0, 2]);
+        assert_eq!(doc.tree(), row_with_child_of_a(subtree).tree());
+    }
+
+    #[test]
+    fn insert_at_the_root_adds_a_top_level_box() {
+        let mut doc = row();
+        let path = doc.insert(&[], &node("e"));
+        assert_eq!(path, vec![2]);
+        assert_eq!(doc.tree().value(&path).label(), "e");
+    }
+
+    #[test]
+    fn insert_into_an_empty_document_adds_the_first_box() {
+        let mut doc = Document::default();
+        let path = doc.insert(&[], &node("a"));
+        assert_eq!(doc, Document::with_boxes(vec![node("a")]));
+        assert_eq!(path, vec![0]);
+    }
+
+    #[test]
+    fn remove_returns_the_detached_subtree() {
+        let mut doc = row();
+        assert_eq!(
+            doc.remove(&[0]),
+            node_with_children("a", vec![node("c"), node("d")])
+        );
+    }
+
+    #[test]
+    fn remove_takes_the_box_out_of_the_document() {
+        let mut doc = row();
+        doc.remove(&[0, 0]);
+        assert_eq!(
+            doc,
+            Document::with_boxes(vec![node_with_children("a", vec![node("d")]), node("b")])
+        );
     }
 }

@@ -8,6 +8,7 @@ use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
 use std::fmt;
 use std::io::{self, Write};
+use std::num::NonZeroU32;
 use std::os::fd::{BorrowedFd, RawFd};
 
 pub(crate) struct Command(String);
@@ -18,16 +19,57 @@ impl fmt::Display for Command {
     }
 }
 
-pub(crate) fn clear() -> Command {
-    Command(DELETE_ALL.to_string())
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ImageId(NonZeroU32);
+
+impl ImageId {
+    pub(crate) fn new(value: NonZeroU32) -> Self {
+        ImageId(value)
+    }
+
+    fn value(self) -> u32 {
+        self.0.get()
+    }
 }
 
-pub(crate) fn show(canvas: &Canvas, col: i64, row: i64) -> Command {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlacementId(NonZeroU32);
+
+impl PlacementId {
+    pub(crate) fn new(value: NonZeroU32) -> Self {
+        PlacementId(value)
+    }
+
+    fn value(self) -> u32 {
+        self.0.get()
+    }
+}
+
+pub(crate) fn soft_clear() -> Command {
+    Command("\x1b_Ga=d,d=a,q=2;\x1b\\".to_string())
+}
+
+pub(crate) fn delete(id: ImageId) -> Command {
+    Command(format!("\x1b_Ga=d,d=I,i={},q=2;\x1b\\", id.value()))
+}
+
+pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
         "\x1b[{};{}H{}",
         row + 1,
         col + 1,
-        transmission(&canvas.pixels, canvas.width, canvas.height)
+        transmission(&canvas.pixels, canvas.width, canvas.height, id, z)
+    ))
+}
+
+pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: i32) -> Command {
+    Command(format!(
+        "\x1b[{};{}H\x1b_Ga=p,i={},p={},q=2,z={};\x1b\\",
+        row + 1,
+        col + 1,
+        id.value(),
+        placement.value(),
+        z
     ))
 }
 
@@ -62,15 +104,16 @@ pub(crate) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<(
     }
     stream.write_all(CLEAR_LINE.as_bytes())?;
     stream.flush()?;
-    Err(io::Error::new(io::ErrorKind::Unsupported, NOT_SUPPORTED_MESSAGE))
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        NOT_SUPPORTED_MESSAGE,
+    ))
 }
 
 const CHUNK_SIZE: usize = 4096;
-const DELETE_ALL: &str = "\x1b_Ga=d,d=A,q=2;\x1b\\";
 const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
 const CLEAR_LINE: &str = "\r\x1b[K";
-const NOT_SUPPORTED_MESSAGE: &str =
-    "Dre requires a terminal with Kitty graphics protocol support.";
+const NOT_SUPPORTED_MESSAGE: &str = "Dre requires a terminal with Kitty graphics protocol support.";
 const REPLY_TIMEOUT_MICROS: i64 = 500_000;
 
 fn is_supported(reply: &[u8]) -> bool {
@@ -99,25 +142,32 @@ fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
         .chunks(chunk_size)
         .map(|chunk| {
             std::str::from_utf8(chunk)
-                .expect("base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8")
+                .expect(
+                    "base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8",
+                )
                 .to_owned()
         })
         .collect()
 }
 
 fn more(chunks: &[String], index: usize) -> i32 {
-    if index == chunks.len() - 1 { 0 } else { 1 }
+    if index == chunks.len() - 1 {
+        0
+    } else {
+        1
+    }
 }
 
 fn escape(keys: &str, payload: &str) -> String {
     format!("\x1b_G{keys};{payload}\x1b\\")
 }
 
-fn transmission(pixels: &[u8], width: i64, height: i64) -> String {
+fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> String {
     let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
     let header = format!(
-        "a=T,f=32,s={width},v={height},o=z,q=2,z=-1,m={}",
+        "a=T,f=32,s={width},v={height},o=z,q=2,i={},z={z},m={}",
+        id.value(),
         more(&chunk_list, 0)
     );
     let mut escapes = vec![escape(&header, &chunk_list[0])];
@@ -133,6 +183,14 @@ mod tests {
     use super::*;
     use flate2::read::ZlibDecoder;
     use std::io::Read as _;
+
+    fn image_id(value: u32) -> ImageId {
+        ImageId::new(NonZeroU32::new(value).unwrap())
+    }
+
+    fn placement_id(value: u32) -> PlacementId {
+        PlacementId::new(NonZeroU32::new(value).unwrap())
+    }
 
     #[test]
     fn chunks_splits_at_boundaries() {
@@ -194,33 +252,36 @@ mod tests {
     #[test]
     fn transmission_single_chunk_has_expected_header_and_m0() {
         let pixels = vec![1u8, 2, 3, 4];
-        let result = transmission(&pixels, 2, 1);
+        let result = transmission(&pixels, 2, 1, image_id(1), -1);
 
         let expected_payload = encode(&pixels);
-        let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0".to_string();
+        let expected_header = "a=T,f=32,s=2,v=1,o=z,q=2,i=1,z=-1,m=0".to_string();
         let expected = escape(&expected_header, &expected_payload);
         assert_eq!(result, expected);
-        assert!(result.starts_with("\x1b_Ga=T,f=32,s=2,v=1,o=z,q=2,z=-1,m=0;"));
+        assert!(result.starts_with("\x1b_Ga=T,f=32,s=2,v=1,o=z,q=2,i=1,z=-1,m=0;"));
         assert!(result.ends_with("\x1b\\"));
     }
 
     #[test]
     fn transmission_multi_chunk_splits_and_sets_more_flag() {
         let mut state: u32 = 0x9E3779B9;
-        let pixels: Vec<u8> = (0..200_000u32)
+        let pixels: Vec<u8> = (0..8_000u32)
             .map(|_| {
                 state = state.wrapping_mul(1664525).wrapping_add(1013904223);
                 (state >> 16) as u8
             })
             .collect();
-        let result = transmission(&pixels, 100, 100);
+        let result = transmission(&pixels, 100, 100, image_id(1), -1);
 
         let payload = encode(&pixels);
         let chunk_list = chunks(&payload, CHUNK_SIZE);
-        assert!(chunk_list.len() > 1, "expected payload to span multiple chunks");
+        assert!(
+            chunk_list.len() > 1,
+            "expected payload to span multiple chunks"
+        );
 
         let header = format!(
-            "a=T,f=32,s=100,v=100,o=z,q=2,z=-1,m={}",
+            "a=T,f=32,s=100,v=100,o=z,q=2,i=1,z=-1,m={}",
             more(&chunk_list, 0)
         );
         let mut expected = escape(&header, &chunk_list[0]);
@@ -236,17 +297,47 @@ mod tests {
     }
 
     #[test]
-    fn clear_deletes_all_images() {
-        assert_eq!(clear().to_string(), "\x1b_Ga=d,d=A,q=2;\x1b\\");
+    fn soft_clear_removes_placements_but_keeps_image_data() {
+        assert_eq!(soft_clear().to_string(), "\x1b_Ga=d,d=a,q=2;\x1b\\");
+    }
+
+    #[test]
+    fn delete_frees_a_named_image() {
+        assert_eq!(
+            delete(image_id(7)).to_string(),
+            "\x1b_Ga=d,d=I,i=7,q=2;\x1b\\"
+        );
     }
 
     #[test]
     fn show_moves_the_cursor_to_the_sprite_cell_then_transmits_its_pixels() {
-        let canvas = Canvas { pixels: vec![1, 2, 3, 4, 5, 6, 7, 8], width: 2, height: 1 };
+        let canvas = Canvas {
+            pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            width: 2,
+            height: 1,
+        };
         assert_eq!(
-            show(&canvas, 3, 5).to_string(),
-            format!("\x1b[6;4H{}", transmission(&canvas.pixels, canvas.width, canvas.height))
+            show(&canvas, image_id(1), 3, 5, -1).to_string(),
+            format!(
+                "\x1b[6;4H{}",
+                transmission(&canvas.pixels, canvas.width, canvas.height, image_id(1), -1)
+            )
         );
+    }
+
+    #[test]
+    fn place_positions_the_cursor_and_names_the_image_without_payload() {
+        assert_eq!(
+            place(image_id(7), placement_id(2), 3, 5, -1).to_string(),
+            "\x1b[6;4H\x1b_Ga=p,i=7,p=2,q=2,z=-1;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn place_names_the_requested_placement() {
+        assert!(place(image_id(7), placement_id(9), 0, 0, 0)
+            .to_string()
+            .contains(",p=9,"));
     }
 
     #[test]

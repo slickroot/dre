@@ -1,0 +1,326 @@
+use nix::libc;
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use nix::sys::signal::{self, SaFlags, SigHandler, SigSet, Signal};
+use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
+use nix::unistd::read;
+use std::io::{self, Write};
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::sync::atomic::{AtomicI32, Ordering};
+
+nix::ioctl_read_bad!(terminal_window_size, libc::TIOCGWINSZ, libc::winsize);
+
+const ENTER_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
+const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+const HIDE_CURSOR: &str = "\x1b[?25l";
+const SHOW_CURSOR: &str = "\x1b[?25h";
+const RESET_BACKGROUND_COLOUR: &str = "\x1b]111\x1b\\";
+
+pub(crate) const RESIZE: &str = "\x1bRESIZE";
+
+const ESC: u8 = 0x1b;
+const ESCAPE_TIMEOUT_MS: u16 = 25;
+const CSI_FINAL_BYTES: std::ops::RangeInclusive<u8> = 0x40..=0x7e;
+
+pub(crate) struct RawMode {
+    fd: RawFd,
+    saved: Termios,
+}
+
+impl RawMode {
+    pub(crate) fn enter(fd: RawFd) -> io::Result<Self> {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+        let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
+        let mut stdout = io::stdout();
+        stdout.write_all(ENTER_ALTERNATE_SCREEN.as_bytes())?;
+        stdout.write_all(HIDE_CURSOR.as_bytes())?;
+        let (r, g, b) = crate::style::palette(crate::style::BACKGROUND).unwrap();
+        write!(stdout, "\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x1b\\", r, g, b)?;
+        stdout.flush()?;
+        let mut raw = saved.clone();
+        cfmakeraw(&mut raw);
+        tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+        Ok(RawMode { fd, saved })
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
+        let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(SHOW_CURSOR.as_bytes());
+        let _ = stdout.write_all(RESET_BACKGROUND_COLOUR.as_bytes());
+        let _ = stdout.write_all(LEAVE_ALTERNATE_SCREEN.as_bytes());
+        let _ = stdout.flush();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Window {
+    pub(crate) cols: i64,
+    pub(crate) rows: i64,
+    pub(crate) cell_width: i64,
+    pub(crate) cell_height: i64,
+}
+
+fn retry_on_eintr<T>(mut syscall: impl FnMut() -> nix::Result<T>) -> io::Result<T> {
+    loop {
+        match syscall() {
+            Err(nix::errno::Errno::EINTR) => continue,
+            result => return result.map_err(io::Error::from),
+        }
+    }
+}
+
+pub(crate) fn probe() -> io::Result<Window> {
+    let stdout_fd = io::stdout().as_raw_fd();
+    let mut winsize: libc::winsize = unsafe { std::mem::zeroed() };
+    retry_on_eintr(|| unsafe { terminal_window_size(stdout_fd, &mut winsize) })?;
+    Ok(measure(winsize))
+}
+
+fn measure(winsize: libc::winsize) -> Window {
+    let cols = winsize.ws_col as f64;
+    let rows = winsize.ws_row as f64;
+    Window {
+        cols: winsize.ws_col as i64,
+        rows: winsize.ws_row as i64,
+        cell_width: (winsize.ws_xpixel as f64 / cols).round() as i64,
+        cell_height: (winsize.ws_ypixel as f64 / rows).round() as i64,
+    }
+}
+
+static RESIZE_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
+
+// Signal-safe: only touches the static fd and makes a raw async-signal-safe write(2) call.
+#[allow(dead_code)]
+extern "C" fn handle_sigwinch(_: libc::c_int) {
+    let fd = RESIZE_WRITE_FD.load(Ordering::Relaxed);
+    if fd >= 0 {
+        let byte = [0u8; 1];
+        unsafe {
+            libc::write(fd, byte.as_ptr() as *const libc::c_void, 1);
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn install_resize_pipe() -> io::Result<RawFd> {
+    let (read_fd, write_fd) = nix::unistd::pipe().map_err(io::Error::from)?;
+    let write_raw_fd = write_fd.as_raw_fd();
+    RESIZE_WRITE_FD.store(write_raw_fd, Ordering::Relaxed);
+    std::mem::forget(write_fd);
+    let action = signal::SigAction::new(
+        SigHandler::Handler(handle_sigwinch),
+        SaFlags::empty(),
+        SigSet::empty(),
+    );
+    unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.map_err(io::Error::from)?;
+    let read_raw_fd = read_fd.as_raw_fd();
+    std::mem::forget(read_fd);
+    Ok(read_raw_fd)
+}
+
+pub(crate) fn read_key(fd: RawFd, resize_fd: RawFd) -> io::Result<String> {
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    let resize_borrowed = unsafe { BorrowedFd::borrow_raw(resize_fd) };
+    let mut fds = [
+        PollFd::new(borrowed, PollFlags::POLLIN),
+        PollFd::new(resize_borrowed, PollFlags::POLLIN),
+    ];
+    retry_on_eintr(|| poll(&mut fds, PollTimeout::NONE))?;
+    if fds[1]
+        .revents()
+        .is_some_and(|events| events.contains(PollFlags::POLLIN))
+    {
+        let mut byte = [0u8; 1];
+        retry_on_eintr(|| read(resize_borrowed, &mut byte))?;
+        return Ok(RESIZE.to_string());
+    }
+    let mut byte = [0u8; 1];
+    let n = retry_on_eintr(|| read(borrowed, &mut byte))?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
+    }
+    let mut key = (byte[0] as char).to_string();
+    if byte[0] == ESC {
+        read_escape_sequence(borrowed, &mut key)?;
+    }
+    Ok(key)
+}
+
+fn read_escape_sequence(fd: BorrowedFd, key: &mut String) -> io::Result<()> {
+    let Some(introducer) = read_byte_within_escape_timeout(fd)? else {
+        return Ok(());
+    };
+    key.push(introducer as char);
+    if introducer != b'[' {
+        return Ok(());
+    }
+    while let Some(byte) = read_byte_within_escape_timeout(fd)? {
+        key.push(byte as char);
+        if CSI_FINAL_BYTES.contains(&byte) {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn read_byte_within_escape_timeout(fd: BorrowedFd) -> io::Result<Option<u8>> {
+    let mut fds = [PollFd::new(fd, PollFlags::POLLIN)];
+    let ready = retry_on_eintr(|| poll(&mut fds, PollTimeout::from(ESCAPE_TIMEOUT_MS)))?;
+    if ready == 0 {
+        return Ok(None);
+    }
+    let mut byte = [0u8; 1];
+    let n = retry_on_eintr(|| read(fd, &mut byte))?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "input closed"));
+    }
+    Ok(Some(byte[0]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    fn winsize(cols: u16, rows: u16, xpixel: u16, ypixel: u16) -> libc::winsize {
+        libc::winsize {
+            ws_col: cols,
+            ws_row: rows,
+            ws_xpixel: xpixel,
+            ws_ypixel: ypixel,
+        }
+    }
+
+    #[test]
+    fn the_window_size_gives_the_columns_and_rows() {
+        let window = measure(winsize(80, 24, 800, 480));
+        assert_eq!((window.cols, window.rows), (80, 24));
+    }
+
+    #[test]
+    fn a_cell_is_the_pixel_size_divided_by_the_grid() {
+        let window = measure(winsize(80, 24, 800, 480));
+        assert_eq!((window.cell_width, window.cell_height), (10, 20));
+    }
+
+    #[test]
+    fn a_cell_that_does_not_divide_evenly_is_rounded() {
+        let window = measure(winsize(3, 3, 8, 7));
+        assert_eq!((window.cell_width, window.cell_height), (3, 2));
+    }
+
+    #[test]
+    fn read_key_survives_a_signal_interrupting_the_poll() {
+        use std::os::fd::AsRawFd;
+        use std::time::Duration;
+
+        extern "C" fn ignore(_: libc::c_int) {}
+        let action = signal::SigAction::new(
+            SigHandler::Handler(ignore),
+            SaFlags::empty(),
+            SigSet::empty(),
+        );
+        unsafe { signal::sigaction(Signal::SIGWINCH, &action) }.unwrap();
+
+        let (read, write) = nix::unistd::pipe().unwrap();
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let pid = nix::unistd::getpid();
+        let interrupter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            nix::sys::signal::kill(pid, Signal::SIGWINCH).unwrap();
+            nix::unistd::write(&write, b"x").unwrap();
+        });
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        interrupter.join().unwrap();
+        assert_eq!(result.unwrap(), "x");
+    }
+
+    #[test]
+    fn read_key_returns_the_byte_that_is_ready() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"x").unwrap();
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        assert_eq!(result.unwrap(), "x");
+    }
+
+    fn read_key_from(read: &std::os::fd::OwnedFd) -> String {
+        use std::os::fd::AsRawFd;
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap()
+    }
+
+    #[test]
+    fn read_key_returns_a_whole_escape_sequence_written_at_once() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b[D").unwrap();
+        assert_eq!(read_key_from(&read), "\x1b[D");
+    }
+
+    #[test]
+    fn read_key_returns_a_lone_escape_after_the_timeout() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b").unwrap();
+        assert_eq!(read_key_from(&read), "\x1b");
+    }
+
+    #[test]
+    fn read_key_joins_an_escape_sequence_delivered_in_two_steps() {
+        use std::time::Duration;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b").unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(ESCAPE_TIMEOUT_MS as u64 / 5));
+            nix::unistd::write(&write, b"[D").unwrap();
+        });
+        let key = read_key_from(&read);
+        writer.join().unwrap();
+        assert_eq!(key, "\x1b[D");
+    }
+
+    #[test]
+    fn read_key_returns_an_escape_sequence_with_parameters_whole() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&write, b"\x1b[1;5C").unwrap();
+        assert_eq!(read_key_from(&read), "\x1b[1;5C");
+    }
+
+    #[test]
+    fn read_key_error_when_the_input_is_closed() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        drop(write);
+        let (resize_read, _resize_write) = nix::unistd::pipe().unwrap();
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn read_key_returns_resize_when_the_resize_fd_becomes_readable() {
+        use std::os::fd::AsRawFd;
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&resize_write, b"\0").unwrap();
+        let result = read_key(read.as_raw_fd(), resize_read.as_raw_fd());
+        assert_eq!(result.unwrap(), RESIZE);
+    }
+
+    #[test]
+    fn read_key_drains_the_resize_byte_so_it_is_not_reported_twice() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = nix::unistd::pipe().unwrap();
+        let (resize_read, resize_write) = nix::unistd::pipe().unwrap();
+        nix::unistd::write(&resize_write, b"\0").unwrap();
+        let first = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
+        assert_eq!(first, RESIZE);
+
+        nix::unistd::write(&write, b"x").unwrap();
+        let second = read_key(read.as_raw_fd(), resize_read.as_raw_fd()).unwrap();
+        assert_eq!(second, "x");
+    }
+}

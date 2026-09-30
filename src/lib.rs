@@ -2,33 +2,34 @@
 mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
-mod command_mode;
+mod composer;
 mod diagram;
 #[cfg(not(target_arch = "wasm32"))]
 mod dre_format;
 #[cfg(not(target_arch = "wasm32"))]
 mod editor;
 #[cfg(not(target_arch = "wasm32"))]
-mod file_document;
-#[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
-mod insert_mode;
 #[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
 mod render;
-mod save_prompt_mode;
-mod state;
 #[cfg(not(target_arch = "wasm32"))]
-mod terminal;
+mod serve;
+mod state;
+mod style;
+#[cfg(test)]
+mod test_support;
+#[cfg(not(target_arch = "wasm32"))]
+mod tty;
+pub mod view;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::ExitCode;
 
 pub use diagram::Document;
 pub use render::{Renderer, SvgRenderer};
-
-pub const IDLE_TIMEOUT_MS: u16 = 1000;
+pub use state::State;
 
 pub struct Session {
     state: state::State,
@@ -42,27 +43,19 @@ impl Session {
     }
 
     pub fn press_key(&mut self, key: &str) {
-        self.state = state::handle_key(std::mem::take(&mut self.state), key);
-    }
-
-    #[doc(hidden)]
-    pub fn go_idle(&mut self) {
-        self.state = state::hide_idle_cursor(std::mem::take(&mut self.state));
+        self.state = state::reduce(std::mem::take(&mut self.state), key).0;
     }
 
     pub fn is_running(&self) -> bool {
-        self.state.running
+        self.state.is_running()
     }
 
     pub fn document(&self) -> &Document {
-        &self.state.doc
+        self.state.doc()
     }
 
-    pub fn extent(&self) -> (i64, i64) {
-        let placements = layout::layout(&self.state.doc.boxes);
-        let width = placements.iter().map(|placement| placement.x + placement.width).max().unwrap_or(0);
-        let height = placements.iter().map(|placement| placement.y + placement.height).max().unwrap_or(0);
-        (width, height)
+    pub fn state(&self) -> &State {
+        &self.state
     }
 }
 
@@ -76,8 +69,13 @@ impl Default for Session {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run() -> ExitCode {
     let result = match cli::parse_args() {
-        cli::Command::Edit(file) => editor::open(file),
+        cli::Command::Edit(file) => editor::bootstrap::run(file),
         cli::Command::Export { input } => cli::export(input),
+        cli::Command::Serve {
+            listen,
+            host_key,
+            data_dir,
+        } => serve::run(listen, host_key, data_dir),
     };
     match result {
         Ok(code) => code,
@@ -85,38 +83,5 @@ pub fn run() -> ExitCode {
             eprintln!("{e}");
             ExitCode::FAILURE
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn session_with_a_box_selected() -> Session {
-        let mut session = Session::new();
-        session.press_key("b");
-        session.press_key("\x1b");
-        session
-    }
-
-    #[test]
-    fn going_idle_hides_the_cursor_and_the_next_key_restores_it_on_the_same_box() {
-        let mut session = session_with_a_box_selected();
-        let selected = session.document().selected.clone();
-        assert!(selected.is_some());
-        session.go_idle();
-        assert_eq!(session.document().selected, None);
-        session.press_key("z");
-        assert_eq!(session.document().selected, selected);
-    }
-
-    #[test]
-    fn going_idle_in_insert_mode_leaves_the_caret() {
-        let mut session = Session::new();
-        session.press_key("b");
-        let selected = session.document().selected.clone();
-        assert!(selected.is_some());
-        session.go_idle();
-        assert_eq!(session.document().selected, selected);
     }
 }
