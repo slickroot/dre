@@ -135,21 +135,36 @@ impl FlexState {
             .collect()
     }
 
+    fn selected_box_path(&self) -> Vec<usize> {
+        match self.boxes.value(&self.selected) {
+            FlexNode::Box(_) => self.selected.clone(),
+            FlexNode::Text(_) => self.boxes.parent(&self.selected),
+        }
+    }
+
     fn selected_box(&mut self) -> &mut FlexBox {
-        let FlexNode::Box(flex_box) = self.boxes.value_mut(&self.selected) else {
-            unreachable!("the selection is always a box")
+        let path = self.selected_box_path();
+        let FlexNode::Box(flex_box) = self.boxes.value_mut(&path) else {
+            unreachable!("the selected box path always points at a box")
         };
         flex_box
     }
 
+    fn selected_text_path(&self) -> Vec<usize> {
+        match self.boxes.value(&self.selected) {
+            FlexNode::Text(_) => self.selected.clone(),
+            FlexNode::Box(_) => self
+                .children_of(&self.selected)
+                .filter(|(_, node)| matches!(node, FlexNode::Text(_)))
+                .map(|(path, _)| path)
+                .last()
+                .expect("a flex box always holds at least one text"),
+        }
+    }
+
     fn selected_text(&mut self) -> &mut String {
-        let last_text = self
-            .children_of(&self.selected)
-            .filter(|(_, node)| matches!(node, FlexNode::Text(_)))
-            .map(|(path, _)| path)
-            .last()
-            .expect("a flex box always holds at least one text");
-        let FlexNode::Text(text) = self.boxes.value_mut(&last_text) else {
+        let path = self.selected_text_path();
+        let FlexNode::Text(text) = self.boxes.value_mut(&path) else {
             unreachable!("the path was found as a text")
         };
         text
@@ -191,16 +206,17 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         }
         "a" => state.selected = state.boxes.push(&[], new_box()),
         "A" => {
-            state.boxes.push(&state.selected, new_box());
+            state.boxes.push(&state.selected_box_path(), new_box());
         }
         "j" => state.selected = state.boxes.next(&state.selected),
         "k" => state.selected = state.boxes.previous(&state.selected),
         "l" => state.selected = state.boxes.child(&state.selected),
         "h" => state.selected = state.boxes.parent(&state.selected),
         "s" => {
-            state
-                .boxes
-                .push(&state.selected, Tree::leaf(FlexNode::Text(String::new())));
+            state.selected = state.boxes.push(
+                &state.selected_box_path(),
+                Tree::leaf(FlexNode::Text(String::new())),
+            );
             state.mode = FlexMode::Write;
         }
         "w" => {
@@ -291,8 +307,9 @@ mod tests {
 
     #[test]
     fn s_in_move_mode_adds_an_empty_text_and_switches_to_write() {
-        let (state, effect) = reduce(hello_in(FlexMode::Move), "s");
-        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
+        let before = hello_in(FlexMode::Move);
+        let (state, effect) = reduce(before.clone(), "s");
+        assert_eq!(state.texts_of(&before.selected), ["Hello", ""]);
         assert_eq!(state.outer_boxes().count(), 1);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
@@ -303,7 +320,7 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(state.texts_of(&state.selected), ["Hello", "World"]);
+        assert_eq!(state.texts_of(&[0]), ["Hello", "World"]);
     }
 
     #[test]
@@ -311,7 +328,7 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d", "\r", "s"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(state.texts_of(&state.selected), ["Hello", "World", ""]);
+        assert_eq!(state.texts_of(&[0]), ["Hello", "World", ""]);
         assert_eq!(state.mode, FlexMode::Write);
     }
 
@@ -334,7 +351,7 @@ mod tests {
         let (state, _) = reduce(hello_in(FlexMode::Move), "s");
         let (state, _) = reduce(state, "W");
         let (state, _) = reduce(state, "\x7f");
-        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
+        assert_eq!(state.texts_of(&[0]), ["Hello", ""]);
         assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
     }
 
@@ -1029,5 +1046,81 @@ mod tests {
         assert_eq!(state.texts_of(&state.selected), ["Hellohl"]);
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    fn world_selected() -> FlexState {
+        moved(hello_box_world(), &["l", "j", "j"])
+    }
+
+    #[test]
+    fn w_on_a_selected_text_makes_its_parent_box_full_width() {
+        let before = world_selected();
+        let (state, effect) = reduce(before.clone(), "w");
+        assert_eq!(box_at(&state, &[0]).width, FlexWidth::Full);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn g_on_a_selected_text_spreads_its_parent_box() {
+        let state = moved(world_selected(), &["g"]);
+        assert_eq!(box_at(&state, &[0]).justify, Justify::SpaceBetween);
+    }
+
+    #[test]
+    fn f_on_a_selected_text_fills_its_parent_box() {
+        let state = moved(world_selected(), &["f"]);
+        assert!(box_at(&state, &[0]).filled);
+    }
+
+    #[test]
+    fn d_on_a_selected_text_turns_its_parent_box_into_a_column() {
+        let state = moved(world_selected(), &["d"]);
+        assert_eq!(box_at(&state, &[0]).direction, Direction::Column);
+    }
+
+    #[test]
+    fn capital_a_on_a_selected_text_adds_a_box_to_its_parent_and_keeps_the_selection() {
+        let before = world_selected();
+        let (state, effect) = reduce(before.clone(), "A");
+        assert_eq!(inner_boxes_of(&state, 0), inner_boxes_of(&before, 0) + 1);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(selected_node(&state), selected_node(&before));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn s_on_a_selected_text_appends_an_empty_text_to_its_parent_and_selects_it() {
+        let before = moved(hello_box_world(), &["l"]);
+        let (state, effect) = reduce(before, "s");
+        assert_eq!(state.texts_of(&[0]), ["Hello", "World", ""]);
+        assert_eq!(state.boxes.parent(&state.selected), [0]);
+        assert_eq!(selected_node(&state), &FlexNode::Text(String::new()));
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn i_and_typing_on_a_selected_text_types_into_that_text() {
+        let before = world_selected();
+        let state = moved(before.clone(), &["i", "!"]);
+        assert_eq!(state.texts_of(&[0]), ["Hello", "World!"]);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn backspace_on_a_selected_text_deletes_from_that_text() {
+        let state = moved(world_selected(), &["i", "\x7f"]);
+        assert_eq!(state.texts_of(&[0]), ["Hello", "Worl"]);
+    }
+
+    #[test]
+    fn s_on_a_selected_box_selects_the_new_text() {
+        let before = hello_in(FlexMode::Move);
+        let (state, _) = reduce(before.clone(), "s");
+        assert_eq!(state.boxes.parent(&state.selected), before.selected);
+        assert_eq!(selected_node(&state), &FlexNode::Text(String::new()));
     }
 }
