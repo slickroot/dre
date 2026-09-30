@@ -4,7 +4,7 @@ use types::Tree;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES};
 
-use super::state::{FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
+use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
@@ -19,25 +19,60 @@ struct Size {
     height: i64,
 }
 
+impl Size {
+    fn main(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.width,
+            Direction::Column => self.height,
+        }
+    }
+
+    fn cross(self, direction: Direction) -> i64 {
+        match direction {
+            Direction::Row => self.height,
+            Direction::Column => self.width,
+        }
+    }
+
+    fn along(direction: Direction, main: i64, cross: i64) -> Size {
+        match direction {
+            Direction::Row => Size {
+                width: main,
+                height: cross,
+            },
+            Direction::Column => Size {
+                width: cross,
+                height: main,
+            },
+        }
+    }
+}
+
 fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
     match tree.value(path) {
         FlexNode::Text(text) => Size {
             width: view::interior(text),
             height: 1,
         },
-        FlexNode::Box(_) => {
+        FlexNode::Box(flex_box) => {
+            let direction = flex_box.direction;
             let children: Vec<Size> = tree
                 .children(path)
                 .iter()
                 .map(|child| measure(tree, child))
                 .collect();
             let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
-            let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
-            let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
-            Size {
-                width: content_width + 2 * FLEX_BORDER,
-                height: content_height + 2 * FLEX_BORDER,
-            }
+            let main = children
+                .iter()
+                .map(|child| child.main(direction))
+                .sum::<i64>()
+                + gaps;
+            let cross = children
+                .iter()
+                .map(|child| child.cross(direction))
+                .max()
+                .unwrap_or(0);
+            Size::along(direction, main + 2 * FLEX_BORDER, cross + 2 * FLEX_BORDER)
         }
     }
 }
@@ -957,6 +992,29 @@ mod tests {
             )]),
             ..FlexState::default()
         }
+    }
+
+    #[test]
+    fn a_column_measures_its_children_stacked_with_gaps() {
+        let mut state = hello_box_world();
+        if let FlexNode::Box(the_box) = state.boxes.value_mut(&[0]) {
+            the_box.direction = Direction::Column;
+        }
+        let children: Vec<Size> = state
+            .boxes
+            .children(&[0])
+            .iter()
+            .map(|child| measure(&state.boxes, child))
+            .collect();
+        let widest = children.iter().map(|child| child.width).max().unwrap();
+        let heights = children.iter().map(|child| child.height).sum::<i64>();
+        assert_eq!(
+            measure(&state.boxes, &[0]),
+            Size {
+                width: widest + 2 * FLEX_BORDER,
+                height: heights + FLEX_GAP * (children.len() as i64 - 1) + 2 * FLEX_BORDER,
+            }
+        );
     }
 
     fn label_showing<'a>(placements: &'a [Placement<'a>], shown: &str) -> &'a Placement<'a> {
