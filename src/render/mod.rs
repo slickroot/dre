@@ -5,6 +5,8 @@ use crate::style::palette;
 use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod brackets;
+#[cfg(not(target_arch = "wasm32"))]
 mod font;
 #[cfg(not(target_arch = "wasm32"))]
 mod shapes;
