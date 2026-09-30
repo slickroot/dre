@@ -64,6 +64,7 @@ fn move_key(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
             },
             None,
         ),
+        "q" => (state, Some(FlexEffect::Quit)),
         _ => (state, None),
     }
 }
@@ -203,6 +204,23 @@ mod tests {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.text, "Hello");
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn q_in_move_mode_quits_and_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Move);
+        assert_eq!(
+            reduce(before.clone(), "q"),
+            (before, Some(FlexEffect::Quit))
+        );
+    }
+
+    #[test]
+    fn q_in_write_mode_is_typed_into_the_box() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "q");
+        assert_eq!(state.text, "Helloq");
+        assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
 }

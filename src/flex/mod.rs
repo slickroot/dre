@@ -170,4 +170,24 @@ mod tests {
 
         run_loop(&mut keys, &mut screen).unwrap();
     }
+
+    #[test]
+    fn renders_before_each_key_and_stops_after_q_in_move_mode() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        for key in ["\r", "q"] {
+            screen
+                .expect_render()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(|_| Ok(()));
+            keys.expect_next_key()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_once(move || Ok(key.to_string()));
+        }
+
+        run_loop(&mut keys, &mut screen).unwrap();
+    }
 }
