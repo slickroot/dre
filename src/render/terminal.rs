@@ -83,7 +83,7 @@ pub(super) fn quantized_alpha(opacity: Option<f64>) -> Option<u8> {
 fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
     match (fill, alpha) {
         (Some(colour), Some(alpha)) => {
-            let (r, g, b) = crate::style::colour(colour).unwrap();
+            let (r, g, b) = crate::style::palette(colour).unwrap();
             let composite =
                 |channel: u8| (channel as f64 * alpha as f64 / OPAQUE as f64).round() as u8;
             (composite(r), composite(g), composite(b), OPAQUE)

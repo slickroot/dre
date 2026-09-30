@@ -1,4 +1,4 @@
-const PALETTE: [(&str, (u8, u8, u8)); 7] = [
+const PALETTE: [(&str, (u8, u8, u8)); 8] = [
     ("lime", (0xC6, 0xFF, 0x00)),
     ("mint", (0x39, 0xFF, 0xB0)),
     ("violet", (0xB3, 0x88, 0xFF)),
@@ -6,6 +6,7 @@ const PALETTE: [(&str, (u8, u8, u8)); 7] = [
     ("amber", (0xFF, 0xB0, 0x20)),
     ("foreground", (0xE8, 0xEA, 0xED)),
     ("background", (0x0A, 0x0B, 0x0D)),
+    ("dim", (0x8C, 0x8E, 0x91)),
 ];
 
 pub(crate) const FOREGROUND: u8 = 5;
@@ -22,14 +23,6 @@ pub(crate) const FOOTER_FILL_OPACITY: f64 = 0.12;
 
 pub(crate) fn palette(index: u8) -> Option<(u8, u8, u8)> {
     PALETTE.get(index as usize).map(|&(_, rgb)| rgb)
-}
-
-pub(crate) fn colour(index: u8) -> Option<(u8, u8, u8)> {
-    if index == DIM {
-        Some((0x8C, 0x8E, 0x91))
-    } else {
-        palette(index)
-    }
 }
 
 pub(crate) fn next_on_palette(colour: Option<u8>) -> Option<u8> {
@@ -70,6 +63,17 @@ mod tests {
     }
 
     #[test]
+    fn palette_has_the_dim_grey_at_its_index() {
+        assert_eq!(palette(DIM), Some((140, 142, 145)));
+    }
+
+    #[test]
+    fn dim_is_the_last_index_of_the_palette() {
+        assert_eq!(last_index(), DIM);
+        assert_eq!(palette(DIM + 1), None);
+    }
+
+    #[test]
     fn palette_has_no_colour_past_its_last_index() {
         let first_missing = (0..=u8::MAX).find(|&i| palette(i).is_none()).unwrap();
         assert!(first_missing > 0);
@@ -105,7 +109,7 @@ mod tests {
         for _ in 0..=last_index() {
             colour = next_on_palette(colour);
         }
-        assert_eq!(colour, Some(last_index()));
+        assert_eq!(colour, Some(DIM));
         assert_eq!(next_on_palette(colour), None);
     }
 }
