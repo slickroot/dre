@@ -87,6 +87,15 @@ impl FlexState {
             .map(|(_, flex_box)| flex_box)
     }
 
+    pub(crate) fn texts_of(&self, path: &[usize]) -> Vec<&str> {
+        self.boxes
+            .value(path)
+            .texts
+            .iter()
+            .map(String::as_str)
+            .collect()
+    }
+
     fn selected_box(&mut self) -> &mut FlexBox {
         self.boxes.value_mut(&self.selected)
     }
@@ -192,22 +201,21 @@ mod tests {
     }
 
     #[test]
-    fn a_default_box_has_exactly_one_empty_text() {
-        assert_eq!(FlexBox::default().texts, [""]);
+    fn texts_of_returns_the_texts_of_the_box_at_the_path_in_order() {
+        let state = moved(stacked(&["Hello", "World"], FlexMode::Move), &["s", "!"]);
+        assert_eq!(state.texts_of(&[0]), ["Hello"]);
+        assert_eq!(state.texts_of(&[1]), ["World", "!"]);
     }
 
-    fn texts_of_selected_box(state: &FlexState) -> Vec<&str> {
-        selected_box(state)
-            .texts
-            .iter()
-            .map(String::as_str)
-            .collect()
+    #[test]
+    fn a_default_box_has_exactly_one_empty_text() {
+        assert_eq!(FlexBox::default().texts, [""]);
     }
 
     #[test]
     fn s_in_move_mode_adds_an_empty_text_and_switches_to_write() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "s");
-        assert_eq!(texts_of_selected_box(&state), ["Hello", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
         assert_eq!(state.outer_boxes().count(), 1);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
@@ -218,7 +226,7 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(texts_of_selected_box(&state), ["Hello", "World"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", "World"]);
     }
 
     #[test]
@@ -226,14 +234,14 @@ mod tests {
         let state = ["s", "W", "o", "r", "l", "d", "\r", "s"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(texts_of_selected_box(&state), ["Hello", "World", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", "World", ""]);
         assert_eq!(state.mode, FlexMode::Write);
     }
 
     #[test]
     fn s_in_write_mode_is_typed_and_adds_no_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "s");
-        assert_eq!(texts_of_selected_box(&state), ["Hellos"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellos"]);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -249,15 +257,15 @@ mod tests {
         let (state, _) = reduce(hello_in(FlexMode::Move), "s");
         let (state, _) = reduce(state, "W");
         let (state, _) = reduce(state, "\x7f");
-        assert_eq!(texts_of_selected_box(&state), ["Hello", ""]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello", ""]);
         assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
     }
 
     #[test]
     fn s_only_adds_a_text_to_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "s");
-        assert_eq!(state.boxes.value(&[0]).texts, ["Hello"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["World", ""]);
+        assert_eq!(state.texts_of(&[0]), ["Hello"]);
+        assert_eq!(state.texts_of(&[1]), ["World", ""]);
     }
 
     #[test]
@@ -301,28 +309,28 @@ mod tests {
     #[test]
     fn typing_appends_each_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "o"]);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn typing_a_multibyte_character_appends_it() {
         let (state, effects) = typed(&["c", "a", "f", "é"]);
-        assert_eq!(selected_box(&state).texts, ["café"]);
+        assert_eq!(state.texts_of(&state.selected), ["café"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_the_last_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "p", "\x7f"]);
-        assert_eq!(selected_box(&state).texts, ["Hell"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hell"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_a_whole_multibyte_character() {
         let (state, effects) = typed(&["c", "a", "f", "é", "\x7f"]);
-        assert_eq!(selected_box(&state).texts, ["caf"]);
+        assert_eq!(state.texts_of(&state.selected), ["caf"]);
         assert!(effects.is_empty());
     }
 
@@ -373,7 +381,7 @@ mod tests {
     fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(effect, None);
     }
 
@@ -389,7 +397,7 @@ mod tests {
     #[test]
     fn q_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "q");
-        assert_eq!(selected_box(&state).texts, ["Helloq"]);
+        assert_eq!(state.texts_of(&state.selected), ["Helloq"]);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -403,7 +411,7 @@ mod tests {
     fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
         assert_eq!(selected_box(&state).width, FlexWidth::Full);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -412,7 +420,7 @@ mod tests {
     fn f_in_move_mode_fills_the_box_and_keeps_the_text_and_mode() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "f");
         assert!(selected_box(&state).filled);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -436,7 +444,7 @@ mod tests {
     #[test]
     fn w_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
-        assert_eq!(selected_box(&state).texts, ["Hellow"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellow"]);
         assert_eq!(selected_box(&state).width, FlexWidth::Fit);
         assert_eq!(effect, None);
     }
@@ -444,7 +452,7 @@ mod tests {
     #[test]
     fn f_in_write_mode_is_typed_into_the_box_and_leaves_the_fill_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "f");
-        assert_eq!(selected_box(&state).texts, ["Hellof"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellof"]);
         assert!(!selected_box(&state).filled);
         assert_eq!(effect, None);
     }
@@ -492,7 +500,9 @@ mod tests {
     }
 
     fn texts(state: &FlexState) -> Vec<&str> {
-        state.outer_boxes().map(|b| b.texts[0].as_str()).collect()
+        (0..state.outer_boxes().count())
+            .map(|index| state.texts_of(&[index])[0])
+            .collect()
     }
 
     #[test]
@@ -550,7 +560,7 @@ mod tests {
     fn g_in_move_mode_spreads_the_texts_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "g");
         assert_eq!(selected_box(&state).justify, Justify::SpaceBetween);
-        assert_eq!(selected_box(&state).texts, ["Hello"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -566,7 +576,7 @@ mod tests {
     #[test]
     fn g_in_write_mode_is_typed_into_the_box_and_leaves_the_justify_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "g");
-        assert_eq!(selected_box(&state).texts, ["Hellog"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellog"]);
         assert_eq!(selected_box(&state).justify, Justify::Start);
         assert_eq!(effect, None);
     }
@@ -672,7 +682,7 @@ mod tests {
     fn s_only_adds_a_text_to_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "s");
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middle", ""]);
+        assert_eq!(state.texts_of(&[1]), ["Middle", ""]);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -680,7 +690,7 @@ mod tests {
     fn typing_after_i_only_goes_into_the_selected_box() {
         let before = middle_selected();
         let state = moved(before.clone(), &["i", "!", "?", "\x7f"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middle!"]);
+        assert_eq!(state.texts_of(&[1]), ["Middle!"]);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -688,7 +698,7 @@ mod tests {
     fn j_and_k_in_write_mode_are_typed_into_the_selected_text() {
         let before = moved(middle_selected(), &["i"]);
         let state = moved(before.clone(), &["j", "k"]);
-        assert_eq!(state.boxes.value(&[1]).texts, ["Middlejk"]);
+        assert_eq!(state.texts_of(&[1]), ["Middlejk"]);
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
         only_the_middle_box_changed(&before, &state);
@@ -730,14 +740,14 @@ mod tests {
     #[test]
     fn capital_a_in_write_mode_types_an_a_and_adds_no_inner_box() {
         let (state, _) = reduce(hello_in(FlexMode::Write), "A");
-        assert_eq!(selected_box(&state).texts, ["HelloA"]);
+        assert_eq!(state.texts_of(&state.selected), ["HelloA"]);
         assert_eq!(inner_boxes_of(&state, 0), 0);
     }
 
     #[test]
     fn typing_after_capital_a_and_i_goes_into_the_outer_boxes_last_text() {
         let state = moved(hello_in(FlexMode::Move), &["A", "i", "H", "i"]);
-        assert_eq!(selected_box(&state).texts, ["HelloHi"]);
+        assert_eq!(state.texts_of(&state.selected), ["HelloHi"]);
         assert_eq!(state.outer_boxes().count(), 1);
     }
 

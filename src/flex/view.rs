@@ -12,7 +12,7 @@ const FLEX_SELECTED_COLOUR: Rgb = (0x8A, 0xB4, 0xF8);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
-fn text_offsets(texts: &[String], justify: Justify, inner_width: i64) -> Vec<i64> {
+fn text_offsets(texts: &[&str], justify: Justify, inner_width: i64) -> Vec<i64> {
     let gaps = texts.len() as i64 - 1;
     let free = inner_width - texts.iter().map(|text| view::interior(text)).sum::<i64>();
     let gap_after = |index: i64| match justify {
@@ -39,13 +39,13 @@ fn inner_box_width() -> i64 {
     view::interior("") + 2
 }
 
-fn texts_width_end(texts: &[String], offsets: &[i64]) -> i64 {
+fn texts_width_end(texts: &[&str], offsets: &[i64]) -> i64 {
     let last = texts.len() - 1;
-    offsets[last] + view::interior(&texts[last])
+    offsets[last] + view::interior(texts[last])
 }
 
 fn place_outer_box<'a>(
-    state: &FlexState,
+    state: &'a FlexState,
     index: usize,
     flex_box: &'a FlexBox,
     y: i64,
@@ -56,12 +56,9 @@ fn place_outer_box<'a>(
         .take_while(|&inner| state.boxes.contains(&[index, inner]))
         .count() as i64;
     let height = BOX_HEIGHT + inner_boxes * (FLEX_GAP + BOX_HEIGHT);
-    let texts_width: i64 = flex_box
-        .texts
-        .iter()
-        .map(|text| view::interior(text))
-        .sum::<i64>()
-        + TEXT_GAP * (flex_box.texts.len() as i64 - 1);
+    let texts = state.texts_of(&[index]);
+    let texts_width: i64 = texts.iter().map(|text| view::interior(text)).sum::<i64>()
+        + TEXT_GAP * (texts.len() as i64 - 1);
     let width = match flex_box.width {
         FlexWidth::Fit => {
             let content = if inner_boxes > 0 {
@@ -73,9 +70,9 @@ fn place_outer_box<'a>(
         }
         FlexWidth::Full => window.cols,
     };
-    let packed = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
+    let packed = text_offsets(&texts, flex_box.justify, width - 2);
     let centring_shift = match flex_box.width {
-        FlexWidth::Fit => (width - 2 - texts_width_end(&flex_box.texts, &packed)).div_euclid(2),
+        FlexWidth::Fit => (width - 2 - texts_width_end(&texts, &packed)).div_euclid(2),
         FlexWidth::Full => 0,
     };
     let offsets: Vec<i64> = packed
@@ -103,10 +100,10 @@ fn place_outer_box<'a>(
         width,
         height,
     });
-    for (text, offset) in flex_box.texts.iter().zip(&offsets) {
+    for (text, offset) in texts.iter().zip(&offsets) {
         placements.push(Placement {
             node: PlacementNode::Label(Label {
-                text: Cow::Borrowed(text.as_str()),
+                text: Cow::Borrowed(text),
                 colour: FLEX_TEXT_COLOUR,
                 bold: false,
             }),
@@ -118,7 +115,7 @@ fn place_outer_box<'a>(
     }
     let text_row = y + BOX_HEIGHT / 2;
     let texts_start = x + 1 + offsets[0];
-    let texts_end = x + 1 + texts_width_end(&flex_box.texts, &offsets);
+    let texts_end = x + 1 + texts_width_end(&texts, &offsets);
     let centred_x = texts_start + (texts_end - texts_start - inner_box_width()).div_euclid(2);
     let inner_x = centred_x.min(x + width - 1 - inner_box_width()).max(x + 1);
     for inner in 0..inner_boxes {
@@ -509,7 +506,7 @@ mod tests {
 
     #[test]
     fn each_text_starts_after_the_previous_one_and_a_gap() {
-        let texts = owned(&["Hello", "World", ""]);
+        let texts = ["Hello", "World", ""];
         let first = view::interior("Hello") + TEXT_GAP;
         let second = first + view::interior("World") + TEXT_GAP;
         assert_eq!(
@@ -587,19 +584,19 @@ mod tests {
 
     #[test]
     fn start_ignores_the_inner_width() {
-        let texts = owned(&["Hello", "World"]);
+        let texts = ["Hello", "World"];
         assert_eq!(text_offsets(&texts, Justify::Start, 78), vec![0, 6]);
     }
 
     #[test]
     fn space_between_puts_the_last_text_at_the_inner_right_edge() {
-        let texts = owned(&["Hello", "World"]);
+        let texts = ["Hello", "World"];
         assert_eq!(text_offsets(&texts, Justify::SpaceBetween, 78), vec![0, 73]);
     }
 
     #[test]
     fn space_between_splits_the_free_space_evenly() {
-        let texts = owned(&["a", "b", "c"]);
+        let texts = ["a", "b", "c"];
         assert_eq!(
             text_offsets(&texts, Justify::SpaceBetween, 9),
             vec![0, 4, 8]
@@ -609,26 +606,23 @@ mod tests {
     #[test]
     fn space_between_gives_the_extra_cells_to_the_right_gaps() {
         assert_eq!(
-            text_offsets(&owned(&["a", "b", "c"]), Justify::SpaceBetween, 10),
+            text_offsets(&["a", "b", "c"], Justify::SpaceBetween, 10),
             vec![0, 4, 9]
         );
         assert_eq!(
-            text_offsets(&owned(&["a", "b", "c", "d"]), Justify::SpaceBetween, 12),
+            text_offsets(&["a", "b", "c", "d"], Justify::SpaceBetween, 12),
             vec![0, 3, 7, 11]
         );
     }
 
     #[test]
     fn space_between_with_one_text_sits_at_the_start() {
-        assert_eq!(
-            text_offsets(&owned(&["Hello"]), Justify::SpaceBetween, 78),
-            vec![0]
-        );
+        assert_eq!(text_offsets(&["Hello"], Justify::SpaceBetween, 78), vec![0]);
     }
 
     #[test]
     fn space_between_in_the_packed_width_matches_start() {
-        let texts = owned(&["Hello", "World", ""]);
+        let texts = ["Hello", "World", ""];
         let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
         let packed = interiors + TEXT_GAP * (texts.len() as i64 - 1);
         assert_eq!(
