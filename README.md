@@ -62,39 +62,6 @@ To quit, press `q`. With a filename, `q` saves to that file and quits. Without
 a filename, `q` asks for one, and `Enter` saves and quits, `Esc` quits
 without saving. `Ctrl-C` quits without saving.
 
-## Example
-
-`docs/example.dre` shows off rounded corners, border colours, translucent
-fills, and arrows:
-
-```xml
-<dre>
-  <box label="API gateway" colour="2" fill="1" rounded="true">
-    <box label="Auth" colour="1" fill="1"/>
-    <box label="Orders" colour="1" fill="1">
-      <box label="Postgres" colour="4" fill="1">
-        <box label="Replica" colour="4" fill="1"/>
-        <box label="Archive" colour="4" fill="1"/>
-      </box>
-    </box>
-    <box label="Payments" colour="1" fill="1"/>
-  </box>
-</dre>
-```
-
-Each colour names a layer — pink the edge, orange the services, blue the
-data — and the rounded corners mark the single entry point.
-
-`dre --svg docs/example.dre` renders it as `docs/example.svg`:
-
-![The example diagram rendered by dre](docs/example.svg)
-
-## Export to SVG
-
-`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
-exits — a crisp, vector copy with the same boxes, labels, colours, fills,
-rounded corners, and arrows, but no cursor or selection.
-
 ## Command mode
 
 <!-- keymap:start -->
@@ -137,12 +104,43 @@ rounded corners, and arrows, but no cursor or selection.
 
 Any printable character appends to the label.
 
-## Other keys
-
 Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
 removes a character from the name.
 
 `Ctrl-C` quits without saving.
+
+## Example
+
+`docs/example.dre` shows off rounded corners, border colours, translucent
+fills, and arrows:
+
+```xml
+<dre>
+  <box label="API gateway" colour="2" fill="1" rounded="true">
+    <box label="Auth" colour="1" fill="1"/>
+    <box label="Orders" colour="1" fill="1">
+      <box label="Postgres" colour="4" fill="1">
+        <box label="Replica" colour="4" fill="1"/>
+        <box label="Archive" colour="4" fill="1"/>
+      </box>
+    </box>
+    <box label="Payments" colour="1" fill="1"/>
+  </box>
+</dre>
+```
+
+Each colour names a layer — pink the edge, orange the services, blue the
+data — and the rounded corners mark the single entry point.
+
+`dre --svg docs/example.dre` renders it as `docs/example.svg`:
+
+![The example diagram rendered by dre](docs/example.svg)
+
+## Export to SVG
+
+`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
+exits — a crisp, vector copy with the same boxes, labels, colours, fills,
+rounded corners, and arrows, but no cursor or selection.
 
 ## How dre is built
 
@@ -166,3 +164,5 @@ own way: `tui` (`src/render.rs`) paints sprites in the editor, and `svg`
 (`src/svg.rs`) writes `<rect>`s and `<text>`s. Purple marks the renderers.
 
 ![The architecture of dre rendered by dre](docs/architecture.svg)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.
