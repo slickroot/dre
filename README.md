@@ -19,6 +19,18 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Demo of dre: building and styling a diagram with a few keystrokes" width="720">
+</p>
+
+## Try it without installing
+
+```
+ssh dre.elaich.com
+```
+
+Visitors get their own canvas, remembered between sessions.
+
 ## About
 
 **dre** is a keyboard-driven diagram editor that runs in your terminal. Build
