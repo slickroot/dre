@@ -1,11 +1,13 @@
 use std::borrow::Cow;
 
-use crate::style;
 use crate::view::{
-    self, Area, Label, Placement, PlacementNode, Scene, ALL_SIDES, BORDER, BOX_HEIGHT,
+    self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BORDER, BOX_HEIGHT,
 };
 
 use super::state::FlexState;
+
+const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
+const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let text = state.text.as_str();
@@ -13,7 +15,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let placements = vec![
         Placement {
             node: PlacementNode::Box {
-                colour: style::rgb(None),
+                colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
                 rounded: false,
@@ -28,7 +30,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
         Placement {
             node: PlacementNode::Label(Label {
                 text: Cow::Borrowed(text),
-                colour: style::rgb(None),
+                colour: FLEX_TEXT_COLOUR,
                 bold: false,
             }),
             x: view::label_centre(width, text),
@@ -144,5 +146,36 @@ mod tests {
         let after_width = the_box(&placements(&after)).width;
         assert!(after_width < before_width);
         assert_eq!(after_width, the_box(&placements(&with_text("Hell"))).width);
+    }
+
+    fn colours(placements: &[Placement<'_>]) -> (Rgb, Rgb) {
+        let PlacementNode::Box { colour: border, .. } = the_box(placements).node else {
+            unreachable!()
+        };
+        let PlacementNode::Label(Label { colour: text, .. }) = &the_label(placements).node else {
+            unreachable!()
+        };
+        (border, *text)
+    }
+
+    #[test]
+    fn an_empty_box_wears_its_own_colours() {
+        let state = with_text("");
+        assert_eq!(
+            colours(&placements(&state)),
+            ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
+        );
+    }
+
+    #[test]
+    fn the_colours_stay_while_the_box_grows_and_shrinks() {
+        let grown = with_text("Hello");
+        let shrunk = reduce(with_text("Hellp"), "\x7f");
+        for state in [&grown, &shrunk] {
+            assert_eq!(
+                colours(&placements(state)),
+                ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
+            );
+        }
     }
 }
