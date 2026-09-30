@@ -13,7 +13,7 @@ const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let mut placements = Vec::with_capacity(state.boxes.len() * 2);
     for (i, flex_box) in (0..).zip(&state.boxes) {
-        let text = flex_box.text.as_str();
+        let text = flex_box.texts[0].as_str();
         let (width, label_offset) = match flex_box.width {
             FlexWidth::Fit => {
                 let width = view::interior(text) + 2;
@@ -83,7 +83,7 @@ mod tests {
 
     fn a_box(text: &str) -> FlexBox {
         FlexBox {
-            text: text.to_string(),
+            texts: vec![text.to_string()],
             ..FlexBox::default()
         }
     }
@@ -164,7 +164,7 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, &state.boxes.last().unwrap().text);
+        assert_eq!(text, &state.boxes.last().unwrap().texts[0]);
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }

@@ -25,11 +25,21 @@ impl FlexWidth {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlexBox {
-    pub(crate) text: String,
+    pub(crate) texts: Vec<String>,
     pub(crate) width: FlexWidth,
     pub(crate) filled: bool,
+}
+
+impl Default for FlexBox {
+    fn default() -> Self {
+        Self {
+            texts: vec![String::new()],
+            width: FlexWidth::default(),
+            filled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +63,13 @@ impl FlexState {
             .last_mut()
             .expect("a flex state always holds at least one box")
     }
+
+    fn newest_text(&mut self) -> &mut String {
+        self.newest_box()
+            .texts
+            .last_mut()
+            .expect("a flex box always holds at least one text")
+    }
 }
 
 pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
@@ -67,11 +84,11 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
     match key {
         "\r" => state.mode = FlexMode::Move,
         "\x7f" => {
-            state.newest_box().text.pop();
+            state.newest_text().pop();
         }
         _ => {
             if let Some(c) = printable_char(key) {
-                state.newest_box().text.push(c);
+                state.newest_text().push(c);
             }
         }
     }
@@ -82,6 +99,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
     match key {
         "i" => state.mode = FlexMode::Write,
         "a" => state.boxes.push(FlexBox::default()),
+        "s" => {
+            state.newest_box().texts.push(String::new());
+            state.mode = FlexMode::Write;
+        }
         "w" => {
             let newest = state.newest_box();
             newest.width = newest.width.toggle();
@@ -116,7 +137,7 @@ mod tests {
     fn holding(text: &str, mode: FlexMode) -> FlexState {
         FlexState {
             boxes: vec![FlexBox {
-                text: text.to_string(),
+                texts: vec![text.to_string()],
                 ..FlexBox::default()
             }],
             mode,
@@ -128,7 +149,72 @@ mod tests {
         let state = FlexState::default();
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(state.boxes.len(), 1);
-        assert_eq!(newest(&state).text, "");
+        assert_eq!(newest(&state).texts, [""]);
+    }
+
+    #[test]
+    fn a_default_box_has_exactly_one_empty_text() {
+        assert_eq!(FlexBox::default().texts, [""]);
+    }
+
+    fn texts_of_newest(state: &FlexState) -> Vec<&str> {
+        newest(state).texts.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn s_in_move_mode_adds_an_empty_text_and_switches_to_write() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "s");
+        assert_eq!(texts_of_newest(&state), ["Hello", ""]);
+        assert_eq!(state.boxes.len(), 1);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn typing_after_s_goes_into_the_new_text() {
+        let state = ["s", "W", "o", "r", "l", "d"]
+            .iter()
+            .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
+        assert_eq!(texts_of_newest(&state), ["Hello", "World"]);
+    }
+
+    #[test]
+    fn a_second_s_after_enter_adds_a_third_text() {
+        let state = ["s", "W", "o", "r", "l", "d", "\r", "s"]
+            .iter()
+            .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
+        assert_eq!(texts_of_newest(&state), ["Hello", "World", ""]);
+        assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn s_in_write_mode_is_typed_and_adds_no_text() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "s");
+        assert_eq!(texts_of_newest(&state), ["Hellos"]);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn backspace_on_an_empty_new_text_leaves_the_state_unchanged() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "s");
+        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+    }
+
+    #[test]
+    fn backspace_empties_the_new_text_and_then_changes_nothing() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "s");
+        let (state, _) = reduce(state, "W");
+        let (state, _) = reduce(state, "\x7f");
+        assert_eq!(texts_of_newest(&state), ["Hello", ""]);
+        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+    }
+
+    #[test]
+    fn s_only_adds_a_text_to_the_newest_box() {
+        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "s");
+        assert_eq!(state.boxes[0].texts, ["Hello"]);
+        assert_eq!(state.boxes[1].texts, ["World", ""]);
     }
 
     #[test]
@@ -172,28 +258,28 @@ mod tests {
     #[test]
     fn typing_appends_each_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "o"]);
-        assert_eq!(newest(&state).text, "Hello");
+        assert_eq!(newest(&state).texts, ["Hello"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn typing_a_multibyte_character_appends_it() {
         let (state, effects) = typed(&["c", "a", "f", "é"]);
-        assert_eq!(newest(&state).text, "café");
+        assert_eq!(newest(&state).texts, ["café"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_the_last_character() {
         let (state, effects) = typed(&["H", "e", "l", "l", "p", "\x7f"]);
-        assert_eq!(newest(&state).text, "Hell");
+        assert_eq!(newest(&state).texts, ["Hell"]);
         assert!(effects.is_empty());
     }
 
     #[test]
     fn backspace_removes_a_whole_multibyte_character() {
         let (state, effects) = typed(&["c", "a", "f", "é", "\x7f"]);
-        assert_eq!(newest(&state).text, "caf");
+        assert_eq!(newest(&state).texts, ["caf"]);
         assert!(effects.is_empty());
     }
 
@@ -244,7 +330,7 @@ mod tests {
     fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(newest(&state).text, "Hello");
+        assert_eq!(newest(&state).texts, ["Hello"]);
         assert_eq!(effect, None);
     }
 
@@ -260,7 +346,7 @@ mod tests {
     #[test]
     fn q_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "q");
-        assert_eq!(newest(&state).text, "Helloq");
+        assert_eq!(newest(&state).texts, ["Helloq"]);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -274,7 +360,7 @@ mod tests {
     fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
         assert_eq!(newest(&state).width, FlexWidth::Full);
-        assert_eq!(newest(&state).text, "Hello");
+        assert_eq!(newest(&state).texts, ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -283,7 +369,7 @@ mod tests {
     fn f_in_move_mode_fills_the_box_and_keeps_the_text_and_mode() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "f");
         assert!(newest(&state).filled);
-        assert_eq!(newest(&state).text, "Hello");
+        assert_eq!(newest(&state).texts, ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
     }
@@ -307,7 +393,7 @@ mod tests {
     #[test]
     fn w_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
-        assert_eq!(newest(&state).text, "Hellow");
+        assert_eq!(newest(&state).texts, ["Hellow"]);
         assert_eq!(newest(&state).width, FlexWidth::Fit);
         assert_eq!(effect, None);
     }
@@ -315,7 +401,7 @@ mod tests {
     #[test]
     fn f_in_write_mode_is_typed_into_the_box_and_leaves_the_fill_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "f");
-        assert_eq!(newest(&state).text, "Hellof");
+        assert_eq!(newest(&state).texts, ["Hellof"]);
         assert!(!newest(&state).filled);
         assert_eq!(effect, None);
     }
@@ -349,7 +435,7 @@ mod tests {
             boxes: texts
                 .iter()
                 .map(|text| FlexBox {
-                    text: text.to_string(),
+                    texts: vec![text.to_string()],
                     ..FlexBox::default()
                 })
                 .collect(),
@@ -358,7 +444,7 @@ mod tests {
     }
 
     fn texts(state: &FlexState) -> Vec<&str> {
-        state.boxes.iter().map(|b| b.text.as_str()).collect()
+        state.boxes.iter().map(|b| b.texts[0].as_str()).collect()
     }
 
     #[test]
