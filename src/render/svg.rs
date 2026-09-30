@@ -397,6 +397,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -415,6 +416,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -430,6 +432,7 @@ mod tests {
             y: placement.y - BRACKET_MARGIN,
             width: placement.width + 2 * BRACKET_MARGIN,
             height: placement.height + 2 * BRACKET_MARGIN,
+            depth: 0,
         }
     }
 
@@ -449,6 +452,7 @@ mod tests {
             y,
             width,
             height: stops[stops.len() - 1] - stops[0] + 1,
+            depth: 0,
         }
     }
 
@@ -905,6 +909,7 @@ mod tests {
             y,
             width: text.chars().count() as i64,
             height: 1,
+            depth: 1,
         }
     }
 
@@ -942,6 +947,7 @@ mod tests {
             y: 1,
             width: 2,
             height: 1,
+            depth: 1,
         }];
 
         let svg = draw(&placements);
@@ -974,6 +980,7 @@ mod tests {
             y: 1,
             width: 2,
             height: 1,
+            depth: 1,
         }];
 
         let svg = draw(&placements);
@@ -1561,6 +1568,7 @@ mod tests {
                 y: 1,
                 width: 1,
                 height: 1,
+                depth: 0,
             },
         ];
 
@@ -1754,6 +1762,7 @@ mod tests {
                 y: area.row + BOX_HEIGHT / 2,
                 width: 2,
                 height: 1,
+                depth: 0,
             },
             crate::style::LIME,
             false,
@@ -1772,6 +1781,7 @@ mod tests {
                 y: area.row + BOX_HEIGHT / 2,
                 width: 2,
                 height: 1,
+                depth: 0,
             },
             crate::style::LIME,
             true,

@@ -664,6 +664,7 @@ impl TerminalRenderer {
                 y: geometry.y,
                 width: 1,
                 height: 1,
+                depth: 1,
             };
             if !frame.shows(&char_placement, area) {
                 continue;
@@ -1136,6 +1137,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -1153,6 +1155,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -1571,6 +1574,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 1,
         }
     }
 
@@ -1581,6 +1585,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -2064,6 +2069,7 @@ mod tests {
                 y: 0,
                 width: 1,
                 height: 1,
+                depth: 1,
             },
             bold_label_placement("a", 3, 0, 1, 1, true),
         ];
@@ -2261,6 +2267,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 1,
         }
     }
 
