@@ -9,41 +9,10 @@ use super::state::{FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
-#[cfg_attr(not(test), allow(dead_code))]
-const TEXT_GAP: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_SELECTED_COLOUR: Rgb = (0x8A, 0xB4, 0xF8);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn text_offsets(texts: &[&str], justify: Justify, inner_width: i64) -> Vec<i64> {
-    let gaps = texts.len() as i64 - 1;
-    let free = inner_width - texts.iter().map(|text| view::interior(text)).sum::<i64>();
-    let gap_after = |index: i64| match justify {
-        Justify::Start => TEXT_GAP,
-        Justify::SpaceBetween => {
-            let widened_from = gaps - free.rem_euclid(gaps);
-            free.div_euclid(gaps) + i64::from(index >= widened_from)
-        }
-    };
-    let mut next = 0;
-    (0..)
-        .zip(texts)
-        .map(|(index, text)| {
-            let offset = next;
-            if index < gaps {
-                next += view::interior(text) + gap_after(index);
-            }
-            offset
-        })
-        .collect()
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn inner_box_width() -> i64 {
-    view::interior("") + 2
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Size {
@@ -592,23 +561,12 @@ mod tests {
     }
 
     #[test]
-    fn each_text_starts_after_the_previous_one_and_a_gap() {
-        let texts = ["Hello", "World", ""];
-        let first = view::interior("Hello") + TEXT_GAP;
-        let second = first + view::interior("World") + TEXT_GAP;
-        assert_eq!(
-            text_offsets(&texts, Justify::Start, 0),
-            vec![0, first, second]
-        );
-    }
-
-    #[test]
     fn a_fit_box_is_as_wide_as_its_texts_and_gaps() {
         for texts in [&["Hello", ""][..], &["Hello", "World"][..]] {
             let state = beside(texts);
             let placements = placements(&state);
             let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
-            let gaps = TEXT_GAP * (texts.len() as i64 - 1);
+            let gaps = FLEX_GAP * (texts.len() as i64 - 1);
             assert_eq!(the_box(&placements).width, interiors + gaps + 2);
         }
     }
@@ -636,7 +594,7 @@ mod tests {
         let labels = all_labels(&placements);
         assert_eq!(
             labels[1].x,
-            labels[0].x + view::interior("Hello") + TEXT_GAP
+            labels[0].x + view::interior("Hello") + FLEX_GAP
         );
     }
 
@@ -669,55 +627,6 @@ mod tests {
         assert_eq!(all_labels(&placements)[0].x, the_box.x + 1);
     }
 
-    #[test]
-    fn start_ignores_the_inner_width() {
-        let texts = ["Hello", "World"];
-        assert_eq!(text_offsets(&texts, Justify::Start, 78), vec![0, 6]);
-    }
-
-    #[test]
-    fn space_between_puts_the_last_text_at_the_inner_right_edge() {
-        let texts = ["Hello", "World"];
-        assert_eq!(text_offsets(&texts, Justify::SpaceBetween, 78), vec![0, 73]);
-    }
-
-    #[test]
-    fn space_between_splits_the_free_space_evenly() {
-        let texts = ["a", "b", "c"];
-        assert_eq!(
-            text_offsets(&texts, Justify::SpaceBetween, 9),
-            vec![0, 4, 8]
-        );
-    }
-
-    #[test]
-    fn space_between_gives_the_extra_cells_to_the_right_gaps() {
-        assert_eq!(
-            text_offsets(&["a", "b", "c"], Justify::SpaceBetween, 10),
-            vec![0, 4, 9]
-        );
-        assert_eq!(
-            text_offsets(&["a", "b", "c", "d"], Justify::SpaceBetween, 12),
-            vec![0, 3, 7, 11]
-        );
-    }
-
-    #[test]
-    fn space_between_with_one_text_sits_at_the_start() {
-        assert_eq!(text_offsets(&["Hello"], Justify::SpaceBetween, 78), vec![0]);
-    }
-
-    #[test]
-    fn space_between_in_the_packed_width_matches_start() {
-        let texts = ["Hello", "World", ""];
-        let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
-        let packed = interiors + TEXT_GAP * (texts.len() as i64 - 1);
-        assert_eq!(
-            text_offsets(&texts, Justify::SpaceBetween, packed),
-            text_offsets(&texts, Justify::Start, packed)
-        );
-    }
-
     fn full_beside(texts: &[&str], justify: Justify) -> FlexState {
         holding(
             FlexBox {
@@ -741,6 +650,16 @@ mod tests {
     }
 
     #[test]
+    fn a_full_space_between_box_with_one_text_starts_it_just_inside_the_border() {
+        let state = full_beside(&["Hello"], Justify::SpaceBetween);
+        let placements = placements(&state);
+        assert_eq!(
+            the_label(&placements).x,
+            the_box(&placements).x + FLEX_BORDER
+        );
+    }
+
+    #[test]
     fn a_fit_space_between_box_places_the_same_as_a_fit_start_box() {
         let texts = &["Hello", "World"];
         let start = beside(texts);
@@ -761,7 +680,7 @@ mod tests {
         let the_box = the_box(&placements);
         let labels = all_labels(&placements);
         assert_eq!(labels[0].x, the_box.x + 1);
-        assert_eq!(labels[1].x, labels[0].x + labels[0].width + TEXT_GAP);
+        assert_eq!(labels[1].x, labels[0].x + labels[0].width + FLEX_GAP);
     }
 
     fn borders(placements: &[Placement<'_>]) -> Vec<Rgb> {
@@ -820,10 +739,12 @@ mod tests {
 
     #[test]
     fn an_inner_box_is_as_wide_as_an_empty_box() {
+        let empty_state = with_text("");
+        let empty = placements(&empty_state);
         let state = with_inner_boxes("Hello", 1);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
-        assert_eq!(boxes[1].width, inner_box_width());
+        assert_eq!(boxes[1].width, the_box(&empty).width);
         assert_eq!(boxes[1].height, BOX_HEIGHT);
     }
 
@@ -995,12 +916,13 @@ mod tests {
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
         let sizes = sizes_of(vec![text("Hello"), new_box(), text("World")]);
+        let empty_box = measure(&Tree::root(vec![new_box()]))[&vec![0]];
         assert_eq!(
             sizes[&vec![0]],
             Size {
                 width: view::interior("Hello")
                     + FLEX_GAP
-                    + inner_box_width()
+                    + empty_box.width
                     + FLEX_GAP
                     + view::interior("World")
                     + 2 * FLEX_BORDER,
