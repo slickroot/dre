@@ -20,6 +20,7 @@ struct Size {
     height: i64,
 }
 
+#[allow(dead_code)]
 fn child_sizes(
     tree: &Tree<FlexNode>,
     sizes: &HashMap<Vec<usize>, Size>,
@@ -55,7 +56,6 @@ fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
     let gaps = widths.len().saturating_sub(1) as i64;
     let (gap, widened_from) = match justify {
@@ -77,6 +77,7 @@ fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
         .collect()
 }
 
+#[allow(dead_code)]
 struct Frame {
     y: i64,
     inner_height: i64,
@@ -85,6 +86,7 @@ struct Frame {
     widened_from: i64,
 }
 
+#[allow(dead_code)]
 impl Frame {
     fn new(
         width: FlexWidth,
@@ -123,104 +125,111 @@ impl Frame {
     }
 }
 
-fn place<'a>(state: &'a FlexState, window: Area) -> Vec<Placement<'a>> {
-    let sizes: HashMap<Vec<usize>, Size> = state
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Rect {
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+}
+
+fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec<usize>, Rect)>) {
+    out.push((path.to_vec(), rect));
+    let FlexNode::Box(flex_box) = tree.value(path) else {
+        return;
+    };
+    let children = tree.children(path);
+    let sizes: Vec<Size> = children.iter().map(|child| measure(tree, child)).collect();
+    let widths: Vec<i64> = sizes.iter().map(|size| size.width).collect();
+    let offsets = distribute(&widths, rect.width - 2 * FLEX_BORDER, flex_box.justify);
+    let inner_height = rect.height - 2 * FLEX_BORDER;
+    for ((child, size), offset) in children.iter().zip(sizes).zip(offsets) {
+        let child_rect = Rect {
+            x: rect.x + FLEX_BORDER + offset,
+            y: rect.y + FLEX_BORDER + (inner_height - size.height) / 2,
+            width: size.width,
+            height: size.height,
+        };
+        arrange(tree, child, child_rect, out);
+    }
+}
+
+fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
+    let outers: Vec<(Vec<usize>, Size)> = state
         .boxes
-        .walk()
-        .map(|(path, _)| {
-            let size = measure(&state.boxes, &path);
-            (path, size)
+        .children(&[])
+        .into_iter()
+        .map(|path| {
+            let measured = measure(&state.boxes, &path);
+            let width = match state.boxes.value(&path) {
+                FlexNode::Box(FlexBox {
+                    width: FlexWidth::Full,
+                    ..
+                }) => window.cols,
+                _ => measured.width,
+            };
+            (path, Size { width, ..measured })
         })
         .collect();
-    let mut frames: HashMap<Vec<usize>, Frame> = HashMap::new();
-    let mut placements = Vec::with_capacity(sizes.len());
-    let mut next_outer_y = 0;
-    for (path, node) in state.boxes.walk() {
-        let measured = sizes[&path];
-        let (x, y, size) = match path.split_last() {
-            Some((_, [])) => {
-                let width = match node {
-                    FlexNode::Box(FlexBox {
-                        width: FlexWidth::Full,
-                        ..
-                    }) => window.cols,
-                    _ => measured.width,
-                };
-                let y = next_outer_y;
-                next_outer_y += measured.height + FLEX_GAP;
-                (-width.div_euclid(2), y, Size { width, ..measured })
-            }
-            Some((&index, parent)) => {
-                let frame = frames
-                    .get_mut(parent)
-                    .expect("a parent is placed before its children");
-                let x = frame.cursor;
-                frame.cursor += measured.width + frame.gap_after(index);
-                let y = frame.y + FLEX_BORDER + (frame.inner_height - measured.height) / 2;
-                (x, y, measured)
-            }
-            None => unreachable!("walk never yields the root"),
+    let widest = outers.iter().map(|(_, size)| size.width).max().unwrap_or(0);
+    let gaps = FLEX_GAP * outers.len().saturating_sub(1) as i64;
+    let stack_height = outers.iter().map(|(_, size)| size.height).sum::<i64>() + gaps;
+    let left = window.col + (window.cols - widest).div_euclid(2) + widest.div_euclid(2);
+    let mut y = window.row + (window.rows - stack_height).div_euclid(2);
+    let mut out = Vec::new();
+    for (path, size) in outers {
+        let rect = Rect {
+            x: left - size.width.div_euclid(2),
+            y,
+            width: size.width,
+            height: size.height,
         };
-        match node {
-            FlexNode::Text(text) => placements.push(Placement {
-                node: PlacementNode::Label(Label {
-                    text: Cow::Borrowed(text),
-                    colour: FLEX_TEXT_COLOUR,
-                    bold: false,
-                }),
-                x,
-                y,
-                width: size.width,
-                height: size.height,
-            }),
-            FlexNode::Box(flex_box) => {
-                let outer = path.len() == 1;
-                let colour = if state.mode == FlexMode::Move && state.selected == path {
-                    FLEX_SELECTED_COLOUR
-                } else {
-                    FLEX_BORDER_COLOUR
-                };
-                placements.push(Placement {
-                    node: PlacementNode::Box {
-                        colour,
-                        fill: None,
-                        opacity: None,
-                        solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
-                        rounded: false,
-                        sides: ALL_SIDES,
-                        border: FLEX_BORDER,
-                    },
-                    x,
-                    y,
-                    width: size.width,
-                    height: size.height,
-                });
-                let width = if outer {
-                    flex_box.width
-                } else {
-                    FlexWidth::Fit
-                };
-                let children = child_sizes(&state.boxes, &sizes, &path);
-                let frame = Frame::new(width, flex_box.justify, x, y, size, &children);
-                frames.insert(path, frame);
+        arrange(&state.boxes, &path, rect, &mut out);
+        y += size.height + FLEX_GAP;
+    }
+    out
+}
+
+fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) -> Placement<'a> {
+    let node = match node {
+        FlexNode::Text(text) => PlacementNode::Label(Label {
+            text: Cow::Borrowed(text),
+            colour: FLEX_TEXT_COLOUR,
+            bold: false,
+        }),
+        FlexNode::Box(flex_box) => {
+            let outer = path.len() == 1;
+            let colour = if state.mode == FlexMode::Move && state.selected == path {
+                FLEX_SELECTED_COLOUR
+            } else {
+                FLEX_BORDER_COLOUR
+            };
+            PlacementNode::Box {
+                colour,
+                fill: None,
+                opacity: None,
+                solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: FLEX_BORDER,
             }
         }
+    };
+    Placement {
+        node,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
     }
-    placements
 }
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let mut placements = place(state, window);
-    // view::centre assumes content starts at x = 0.
-    let left = placements
-        .iter()
-        .map(|placement| placement.x)
-        .min()
-        .unwrap_or(0);
-    for placement in &mut placements {
-        placement.x -= left;
-    }
-    vec![(window, view::centre(placements, window))]
+    let placements = lay_out_window(state, window)
+        .into_iter()
+        .map(|(path, rect)| paint(state, &path, state.boxes.value(&path), rect))
+        .collect();
+    vec![(window, placements)]
 }
 
 #[cfg(test)]
