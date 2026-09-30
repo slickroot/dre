@@ -14,6 +14,7 @@ use state::FlexState;
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
     fn render(&mut self, state: &FlexState) -> io::Result<()>;
+    fn resize(&mut self) -> io::Result<()>;
 }
 
 pub(crate) struct TerminalFlexScreen {
@@ -27,6 +28,11 @@ impl FlexScreen for TerminalFlexScreen {
             .render(&view::scene(state, self.renderer.area()), &mut self.out)?;
         self.out.flush()
     }
+
+    fn resize(&mut self) -> io::Result<()> {
+        self.renderer.on_resize(tty::probe()?);
+        Ok(())
+    }
 }
 
 pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
@@ -34,7 +40,11 @@ pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) ->
     while state.running {
         screen.render(&state)?;
         let key = keys.next_key()?;
-        state = state::reduce(state, &key);
+        if key == tty::RESIZE {
+            screen.resize()?;
+        } else {
+            state = state::reduce(state, &key);
+        }
     }
     Ok(())
 }
@@ -110,6 +120,50 @@ mod tests {
                 .in_sequence(&mut seq)
                 .return_once(move || Ok(key.to_string()));
         }
+
+        run_loop(&mut keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn resizes_on_tty_resize_without_reducing() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        screen
+            .expect_render()
+            .withf(|state| state.text.is_empty())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("a".to_string()));
+        screen
+            .expect_render()
+            .withf(|state| state.text == "a")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok(tty::RESIZE.to_string()));
+        screen
+            .expect_resize()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|| Ok(()));
+        screen
+            .expect_render()
+            .withf(|state| state.text == "a")
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("\x03".to_string()));
 
         run_loop(&mut keys, &mut screen).unwrap();
     }
