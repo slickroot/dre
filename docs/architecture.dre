@@ -1,8 +1,15 @@
 <dre>
-  <box label="state" rounded="true">
-    <box label="layout">
-      <box label="tui" colour="3"/>
-      <box label="svg" colour="3"/>
+  <box label="editor" colour="0" rounded="true">
+    <box label="store" colour="7"/>
+    <box label="state" colour="1">
+      <box label="layout" colour="1">
+        <box label="render" colour="1">
+          <box label="tui" colour="2"/>
+          <box label="svg" colour="2"/>
+        </box>
+      </box>
     </box>
   </box>
+  <box label="serve" colour="0" rounded="true"/>
+  <box label="web" colour="0" rounded="true"/>
 </dre>

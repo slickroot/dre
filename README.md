@@ -145,19 +145,32 @@ itself a dre diagram — `docs/architecture.dre`:
 
 ```xml
 <dre>
-  <box label="state" rounded="true">
-    <box label="layout">
-      <box label="tui" colour="3"/>
-      <box label="svg" colour="3"/>
+  <box label="editor" colour="0" rounded="true">
+    <box label="store" colour="7"/>
+    <box label="state" colour="1">
+      <box label="layout" colour="1">
+        <box label="render" colour="1">
+          <box label="tui" colour="2"/>
+          <box label="svg" colour="2"/>
+        </box>
+      </box>
     </box>
   </box>
+  <box label="serve" colour="0" rounded="true"/>
+  <box label="web" colour="0" rounded="true"/>
 </dre>
 ```
 
-`state` holds the tree of boxes and is where everything starts. `layout` turns
-that tree into placements, and two renderers draw the same placements in their
-own way: `tui` (`src/render.rs`) paints sprites in the editor, and `svg`
-(`src/svg.rs`) writes `<rect>`s and `<text>`s. Purple marks the renderers.
+Three entry points share one core: `editor` is the terminal app, `serve` hosts
+it over SSH and `web` runs it in the browser as wasm. A tree of boxes only has
+arrows from parent to child, so the figure draws the core under `editor`;
+`serve` and `web` sit beside it and drive the same core. `store` reads and
+writes the `.dre` files for `editor`. In the core, `state` holds the tree of
+boxes, `layout` turns it into placements and `render` hands those placements to
+two renderers: `tui` (`src/render/terminal.rs`) paints sprites in the terminal
+and `svg` (`src/render/svg.rs`) writes `<rect>`s and `<text>`s. Colour marks
+the layers: lime for entry points, mint for the core, violet for the renderers.
+`store` is grey.
 
 ![The architecture of dre rendered by dre](docs/architecture.svg)
 
