@@ -179,7 +179,7 @@ fn place<'a>(state: &'a FlexState, window: Area) -> Vec<Placement<'a>> {
             }),
             FlexNode::Box(flex_box) => {
                 let outer = path.len() == 1;
-                let colour = if outer && state.mode == FlexMode::Move && state.selected == path {
+                let colour = if state.mode == FlexMode::Move && state.selected == path {
                     FLEX_SELECTED_COLOUR
                 } else {
                     FLEX_BORDER_COLOUR
@@ -932,6 +932,29 @@ mod tests {
             borders(&placements(&state)),
             vec![FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
         );
+    }
+
+    #[test]
+    fn in_move_a_selected_inner_box_has_the_selected_border() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0, 2],
+            ..with_inner_boxes("Hello", 2)
+        };
+        assert_eq!(
+            borders(&placements(&state)),
+            vec![FLEX_BORDER_COLOUR, FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR]
+        );
+    }
+
+    #[test]
+    fn in_write_a_selected_inner_box_keeps_the_border_colour() {
+        let state = FlexState {
+            mode: FlexMode::Write,
+            selected: vec![0, 2],
+            ..with_inner_boxes("Hello", 2)
+        };
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 
     fn sizes_of(children: Vec<Tree<FlexNode>>) -> HashMap<Vec<usize>, Size> {
