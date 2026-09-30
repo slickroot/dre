@@ -81,6 +81,7 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
 fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
         "i" => state.mode = FlexMode::Write,
+        "a" => state.boxes.push(FlexBox::default()),
         "w" => {
             let newest = state.newest_box();
             newest.width = newest.width.toggle();
@@ -341,5 +342,62 @@ mod tests {
         assert_eq!(state.mode, FlexMode::Write);
         assert!(newest(&state).filled);
         assert!(effects.is_empty());
+    }
+
+    fn stacked(texts: &[&str], mode: FlexMode) -> FlexState {
+        FlexState {
+            boxes: texts
+                .iter()
+                .map(|text| FlexBox {
+                    text: text.to_string(),
+                    ..FlexBox::default()
+                })
+                .collect(),
+            mode,
+        }
+    }
+
+    fn texts(state: &FlexState) -> Vec<&str> {
+        state.boxes.iter().map(|b| b.text.as_str()).collect()
+    }
+
+    #[test]
+    fn a_in_move_mode_adds_an_empty_box_below_and_stays_in_move() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "a");
+        assert_eq!(texts(&state), ["Hello", ""]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn a_second_a_in_move_mode_adds_a_third_box() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "a");
+        let (state, effect) = reduce(state, "a");
+        assert_eq!(texts(&state), ["Hello", "", ""]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn a_in_write_mode_is_typed_into_the_box_and_adds_no_box() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "a");
+        assert_eq!(texts(&state), ["Helloa"]);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn typing_goes_into_the_last_box() {
+        let state = ["i", "H", "i"]
+            .iter()
+            .fold(stacked(&["Hello", ""], FlexMode::Move), |state, key| {
+                reduce(state, key).0
+            });
+        assert_eq!(texts(&state), ["Hello", "Hi"]);
+    }
+
+    #[test]
+    fn backspace_on_an_empty_last_box_keeps_the_box() {
+        let before = stacked(&["Hello", ""], FlexMode::Write);
+        assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
     }
 }
