@@ -1,5 +1,4 @@
 pub(crate) mod effects;
-pub(crate) mod key_source;
 pub(crate) mod reducer;
 pub(crate) mod screen;
 
@@ -7,10 +6,10 @@ use std::io;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::key_source::KeySource;
 use crate::state::{self, State};
 use crate::tty;
 use effects::EffectExecutor;
-use key_source::KeySource;
 use reducer::Reducer;
 use screen::Screen;
 
@@ -76,10 +75,10 @@ impl Controller for DreController {
 #[cfg(test)]
 mod tests {
     use super::effects::MockEffectExecutor;
-    use super::key_source::MockKeySource;
     use super::reducer::MockReducer;
     use super::screen::MockScreen;
     use super::*;
+    use crate::key_source::MockKeySource;
     use crate::state::{new_state, CommandStatus, Effect, Mode};
     use crate::tty::RESIZE;
     use mockall::Sequence;

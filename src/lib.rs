@@ -11,6 +11,11 @@ mod editor;
 #[cfg(not(target_arch = "wasm32"))]
 mod filesystem;
 #[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod flex;
+#[cfg(not(target_arch = "wasm32"))]
+mod key_source;
+#[cfg(not(target_arch = "wasm32"))]
 mod kitty;
 mod layout;
 mod render;

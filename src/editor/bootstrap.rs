@@ -3,13 +3,13 @@ use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
 use super::controller::effects::StoreEffectExecutor;
-use super::controller::key_source::TtyKeySource;
 use super::controller::reducer::StateReducer;
 use super::controller::screen::TerminalScreen;
 use super::controller::DreController;
 use super::store::files::DiskFiles;
 use super::store::FileStateStore;
 use super::Editor;
+use crate::key_source::TtyKeySource;
 use crate::kitty;
 use crate::render::{GlyphCache, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
