@@ -52,6 +52,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      - name: Install musl-gcc for C dependencies (ring)
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo "CC_$(echo '${{ matrix.target }}' | tr '-' '_')=musl-gcc" >> "$GITHUB_ENV"
       - run: cargo test --all-targets --target ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }}
       - run: mv target/${{ matrix.target }}/release/dre ${{ matrix.asset }}
