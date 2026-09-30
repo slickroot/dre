@@ -999,10 +999,17 @@ mod tests {
     }
 
     #[test]
-    fn l_on_an_inner_box_selects_its_text() {
-        let state = moved(hello_box_world(), &["l", "j", "l"]);
+    fn l_on_an_empty_inner_box_leaves_the_state_unchanged() {
+        let before = moved(hello_box_world(), &["l", "j"]);
+        assert_eq!(reduce(before.clone(), "l"), (before, None));
+    }
+
+    #[test]
+    fn l_on_an_inner_box_holding_a_text_selects_that_text() {
+        let inner = moved(hello_box_world(), &["l", "j"]);
+        let state = moved(inner.clone(), &["s", "\r", "h", "l"]);
         assert_eq!(selected_node(&state), &FlexNode::Text(String::new()));
-        assert_eq!(state.selected.len(), 3);
+        assert_eq!(state.selected, [inner.selected.as_slice(), &[0]].concat());
     }
 
     #[test]
@@ -1022,8 +1029,8 @@ mod tests {
     #[test]
     fn h_from_inside_an_inner_box_selects_the_inner_box() {
         let inner = moved(hello_box_world(), &["l", "j"]);
-        let state = moved(inner.clone(), &["l", "h"]);
-        assert_eq!(state, inner);
+        let state = moved(inner.clone(), &["s", "\r", "h"]);
+        assert_eq!(state.selected, inner.selected);
     }
 
     #[test]
