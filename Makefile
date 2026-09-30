@@ -1,4 +1,4 @@
-.PHONY: build test fmt clippy install wasm serve
+.PHONY: build test fmt clippy install run wasm serve
 
 build:
 	nix develop --command cargo build
@@ -14,6 +14,9 @@ clippy:
 
 install:
 	nix develop --command cargo install --path . --debug --force --root $(HOME)/.local
+
+run:
+	nix develop --command cargo run -- $(ARGS)
 
 PROFILE_DIR = $(if $(RELEASE),release,debug)
 
