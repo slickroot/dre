@@ -27,10 +27,13 @@ pub(crate) const CACHE_LIMIT: usize = 512;
 
 const TRANSPARENT: (u8, u8, u8, u8) = (0, 0, 0, 0);
 
-const BOX_Z: i32 = -3;
-const BRACKETS_Z: i32 = -2;
-const CONTENT_Z: i32 = -1;
+const BRACKETS_Z: i32 = u8::MAX as i32 + 1;
+const CONTENT_Z: i32 = BRACKETS_Z + 1;
 const INK_Z: i32 = CONTENT_Z;
+
+fn depth_z(depth: u8) -> i32 {
+    i32::from(depth)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct BoxStyle {
@@ -490,6 +493,7 @@ impl TerminalRenderer {
                     frame,
                     geometry,
                     area,
+                    placement.depth,
                     BoxStyle {
                         colour: *colour,
                         fill: *fill,
@@ -516,6 +520,7 @@ impl TerminalRenderer {
                     frame,
                     geometry,
                     area,
+                    placement.depth,
                     LabelStyle {
                         text: label.text.to_string(),
                         colour: label.colour,
@@ -596,12 +601,20 @@ impl TerminalRenderer {
         true
     }
 
-    fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
-        if self.place_tiles(frame, style, geometry, area, BOX_Z) {
+    fn draw_box(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        depth: u8,
+        style: BoxStyle,
+    ) {
+        let z = depth_z(depth);
+        if self.place_tiles(frame, style, geometry, area, z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
-        self.place_cached(frame, key, geometry, area, BOX_Z, |renderer| {
+        self.place_cached(frame, key, geometry, area, z, |renderer| {
             renderer.box_canvas(geometry.width, geometry.height, style)
         });
     }
@@ -652,7 +665,15 @@ impl TerminalRenderer {
         });
     }
 
-    fn draw_label(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LabelStyle) {
+    fn draw_label(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        depth: u8,
+        style: LabelStyle,
+    ) {
+        let z = depth_z(depth);
         for (offset, character) in style.text.chars().enumerate() {
             let char_placement = Placement {
                 node: PlacementNode::Label(Label {
@@ -664,6 +685,7 @@ impl TerminalRenderer {
                 y: geometry.y,
                 width: 1,
                 height: 1,
+                depth,
             };
             if !frame.shows(&char_placement, area) {
                 continue;
@@ -674,12 +696,12 @@ impl TerminalRenderer {
                 bold: style.bold,
             };
             if let Some(id) = self.glyph_images.get(&key).copied() {
-                frame.place_cached(id, &char_placement, area, CONTENT_Z);
+                frame.place_cached(id, &char_placement, area, z);
             } else {
                 let id = self.image_ids.allocate();
                 self.glyph_images.insert(key, id);
                 let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
-                frame.place_fresh(id, glyph, &char_placement, area, CONTENT_Z);
+                frame.place_fresh(id, glyph, &char_placement, area, z);
             }
         }
     }
@@ -1136,6 +1158,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -1153,6 +1176,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -1312,24 +1336,64 @@ mod tests {
             &[
                 box_placement(&box_node(Some(1), None, false), 4, 4, 4, 4),
                 box_placement(&node, 3, 3, 6, 6),
-                label_placement("x", 5, 5, 1, 1),
+                caret_placement(5, 5, 1, 1),
             ],
         );
         let layers: std::collections::BTreeSet<i32> = images.iter().map(|image| image.z).collect();
         let brackets = composed(&images, BRACKETS_Z, r.window);
-        let boxed = composed(&images, BOX_Z, r.window);
+        let boxed = composed(&images, depth_z(0), r.window);
         let content = images
             .iter()
             .find(|image| {
-                (image.col, image.row) == (5, 5) && ![BOX_Z, BRACKETS_Z].contains(&image.z)
+                (image.col, image.row) == (5, 5) && ![depth_z(0), BRACKETS_Z].contains(&image.z)
             })
             .unwrap();
         assert_eq!((boxed.col, boxed.row), (4, 4));
         assert_eq!((brackets.col, brackets.row), (3, 3));
         assert_eq!(
             layers.into_iter().collect::<Vec<_>>(),
-            vec![BOX_Z, BRACKETS_Z, content.z]
+            vec![depth_z(0), BRACKETS_Z, content.z]
         );
+    }
+
+    fn z_at(images: &[Placed], cell: (i64, i64)) -> i32 {
+        images
+            .iter()
+            .find(|image| (image.col, image.row) == cell)
+            .unwrap()
+            .z
+    }
+
+    #[test]
+    fn a_deeper_box_is_placed_above_a_shallower_one() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let deeper = crate::view::Placement {
+            depth: 1,
+            ..box_placement(&box_node(None, None, false), 12, 12, 3, 3)
+        };
+        let images = sprites(
+            &mut r,
+            &[
+                box_placement(&box_node(Some(1), None, false), 2, 2, 3, 3),
+                deeper,
+            ],
+        );
+        assert!(z_at(&images, (12, 12)) > z_at(&images, (2, 2)));
+    }
+
+    #[test]
+    fn a_deeper_box_is_placed_above_a_shallower_label() {
+        let mut r = renderer_on(window(20, 20, 2, 2));
+        let label = crate::view::Placement {
+            depth: 0,
+            ..label_placement("x", 2, 2, 1, 1)
+        };
+        let deeper = crate::view::Placement {
+            depth: 1,
+            ..box_placement(&box_node(None, None, false), 12, 12, 3, 3)
+        };
+        let images = sprites(&mut r, &[label, deeper]);
+        assert!(z_at(&images, (12, 12)) > z_at(&images, (2, 2)));
     }
 
     #[test]
@@ -1571,6 +1635,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 1,
         }
     }
 
@@ -1581,6 +1646,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -2064,6 +2130,7 @@ mod tests {
                 y: 0,
                 width: 1,
                 height: 1,
+                depth: 1,
             },
             bold_label_placement("a", 3, 0, 1, 1, true),
         ];
@@ -2178,7 +2245,7 @@ mod tests {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = framed(&mut r, &empty_state());
-        let footer = composed(&frame.images, BOX_Z, r.window);
+        let footer = composed(&frame.images, depth_z(0), r.window);
         let (er, eg, eb, ea) = fill_colour(
             Some(crate::style::FOREGROUND),
             quantized_alpha(Some(FOOTER_FILL_OPACITY)),
@@ -2261,6 +2328,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 1,
         }
     }
 
@@ -2495,7 +2563,7 @@ mod tests {
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, 2, 4, 3)],
         );
-        let boxed = composed(&images, BOX_Z, r.window);
+        let boxed = composed(&images, depth_z(0), r.window);
         assert_eq!((boxed.col, boxed.row), (1, 2));
         assert_eq!((boxed.canvas.width, boxed.canvas.height), (24, 36));
     }
@@ -3209,7 +3277,7 @@ mod tests {
             .collect();
         let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
             .into_iter()
-            .map(|(col, row)| (col, row, BOX_Z))
+            .map(|(col, row)| (col, row, depth_z(0)))
             .chain(CORNERS.into_iter().map(|corner| {
                 let (col, row) =
                     corner_offset(corner, brackets.width, brackets.height, r.cell_size());

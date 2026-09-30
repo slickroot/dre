@@ -95,6 +95,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -125,6 +126,7 @@ mod tests {
             y,
             width: text.chars().count() as i64,
             height: 1,
+            depth: 1,
         }
     }
 
@@ -139,6 +141,7 @@ mod tests {
             y,
             width: text.chars().count() as i64,
             height: 1,
+            depth: 1,
         }
     }
 
@@ -224,6 +227,7 @@ mod tests {
             y,
             width,
             height,
+            depth: 0,
         }
     }
 
@@ -234,6 +238,7 @@ mod tests {
             y,
             width: 1,
             height: 1,
+            depth: 0,
         }
     }
 
@@ -484,7 +489,8 @@ mod tests {
                 x,
                 y: box_y + BOX_HEIGHT / 2,
                 width: 1,
-                height: 1
+                height: 1,
+                depth: 1,
             }
         );
         assert_eq!(

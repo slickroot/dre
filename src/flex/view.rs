@@ -241,6 +241,7 @@ fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) 
         y: rect.y,
         width: rect.width,
         height: rect.height,
+        depth: (path.len() - 1) as u8,
     }
 }
 
@@ -1352,5 +1353,44 @@ mod tests {
         let outer = &placements[0];
         assert_eq!((outer.x, outer.width), (WINDOW.col, WINDOW.cols));
         assert_centred_across(outer, &row_of(&placements, &state));
+    }
+
+    fn pressed(keys: &[&str]) -> FlexState {
+        keys.iter()
+            .fold(FlexState::default(), |state, key| reduce(state, key).0)
+    }
+
+    fn outer_hello_and_inner_depths(placements: &[Placement<'_>]) -> (u8, u8, u8) {
+        let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
+        (
+            outer.depth,
+            label_showing(placements, "Hello").depth,
+            inner.depth,
+        )
+    }
+
+    const HELLO_WITH_AN_INNER_BOX: [&str; 8] = ["i", "H", "e", "l", "l", "o", "\r", "A"];
+
+    #[test]
+    fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
+        let state = pressed(&HELLO_WITH_AN_INNER_BOX);
+        let placements = placements(&state);
+        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+    }
+
+    #[test]
+    fn filling_the_outer_box_keeps_its_texts_and_inner_box_one_deeper() {
+        let state = pressed(&[&HELLO_WITH_AN_INNER_BOX[..], &["f"]].concat());
+        let placements = placements(&state);
+        assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
+        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+    }
+
+    #[test]
+    fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
+        let state = pressed(&["i", "H", "e", "l", "l", "o", "\r", "f", "A"]);
+        let placements = placements(&state);
+        assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
+        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
     }
 }

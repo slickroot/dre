@@ -101,6 +101,7 @@ fn place<'a>(
             y,
             width,
             height: BOX_HEIGHT,
+            depth: 0,
         }];
 
         if selected {
@@ -110,6 +111,7 @@ fn place<'a>(
                 y: y - BRACKET_MARGIN,
                 width: width + 2 * BRACKET_MARGIN,
                 height: BOX_HEIGHT + 2 * BRACKET_MARGIN,
+                depth: 0,
             });
         }
 
@@ -125,6 +127,7 @@ fn place<'a>(
             y: middle,
             width: view::interior(node.label()),
             height: 1,
+            depth: 1,
         });
 
         if let Some(index) = caret_index {
@@ -134,6 +137,7 @@ fn place<'a>(
                 y: middle,
                 width: 1,
                 height: 1,
+                depth: 0,
             });
         }
 
@@ -157,6 +161,7 @@ fn place<'a>(
                 y: origin,
                 width: GAP_WIDTH,
                 height: stops[stops.len() - 1] - stops[0] + 1,
+                depth: 0,
             });
         }
 
@@ -800,6 +805,7 @@ mod tests {
             y: 0,
             width: 3,
             height: 3,
+            depth: 0,
         };
         match box_placement.node {
             PlacementNode::Box {
@@ -824,6 +830,7 @@ mod tests {
             y: 0,
             width: 1,
             height: 1,
+            depth: 1,
         };
         match label_placement.node {
             PlacementNode::Label(label) => {
@@ -848,6 +855,7 @@ mod tests {
             y: 0,
             width: 1,
             height: 1,
+            depth: 0,
         };
         match arrow_placement.node {
             PlacementNode::Arrow(arrow) => assert_eq!(
@@ -866,6 +874,7 @@ mod tests {
             y: 0,
             width: 1,
             height: 1,
+            depth: 0,
         };
         assert!(matches!(caret_placement.node, PlacementNode::Caret(_)));
     }

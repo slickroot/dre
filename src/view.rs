@@ -82,6 +82,7 @@ pub struct Placement<'a> {
     pub y: i64,
     pub width: i64,
     pub height: i64,
+    pub depth: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -143,6 +144,7 @@ fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64)
             y,
             width: column.width,
             height: 1,
+            depth: 1,
         });
         if let Some(offset) = column.cursor {
             placements.push(Placement {
@@ -151,6 +153,7 @@ fn stack_columns(columns: Vec<Column>, y: i64) -> (Vec<Placement<'static>>, i64)
                 y,
                 width: 1,
                 height: 1,
+                depth: 1,
             });
         }
         x += column.width + column.padding as i64;
@@ -252,6 +255,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
             y: 0,
             width,
             height: BOX_HEIGHT,
+            depth: 0,
         },
     );
     placements
@@ -275,6 +279,7 @@ pub(crate) fn command_status(status: &Option<CommandStatus>) -> Vec<Placement<'s
             colour: style::rgb(None),
             bold: false,
         }),
+        depth: 1,
     }]
 }
 
@@ -645,6 +650,7 @@ mod tests {
             y: 0,
             width: 6,
             height: 1,
+            depth: 1,
         }];
         let result = align_center(placements, area);
         assert_eq!(result[0].x, area.col + (area.cols - 6) / 2);
