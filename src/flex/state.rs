@@ -195,6 +195,8 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         }
         "j" => state.selected = state.boxes.next(&state.selected),
         "k" => state.selected = state.boxes.previous(&state.selected),
+        "l" => state.selected = state.boxes.child(&state.selected),
+        "h" => state.selected = state.boxes.parent(&state.selected),
         "s" => {
             state
                 .boxes
@@ -942,5 +944,90 @@ mod tests {
         assert_eq!(texts(&state), [vec!["Hello"], vec![]]);
         assert_eq!(state.selected, [1]);
         assert_eq!(inner_boxes_of(&state, 1), 0);
+    }
+
+    fn text(text: &str) -> Tree<FlexNode> {
+        Tree::leaf(FlexNode::Text(text.to_string()))
+    }
+
+    fn hello_box_world() -> FlexState {
+        FlexState {
+            boxes: Tree::root(vec![Tree::new(
+                FlexNode::Box(FlexBox::default()),
+                vec![text("Hello"), new_box(), text("World")],
+            )]),
+            selected: vec![0],
+            mode: FlexMode::Move,
+        }
+    }
+
+    fn selected_node(state: &FlexState) -> &FlexNode {
+        state.boxes.value(&state.selected)
+    }
+
+    #[test]
+    fn l_in_move_mode_selects_the_first_child() {
+        let before = hello_box_world();
+        let (state, effect) = reduce(before.clone(), "l");
+        assert_eq!(selected_node(&state), &FlexNode::Text("Hello".to_string()));
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn l_on_a_text_leaves_the_state_unchanged() {
+        let before = moved(hello_box_world(), &["l"]);
+        assert_eq!(reduce(before.clone(), "l"), (before, None));
+    }
+
+    #[test]
+    fn l_on_an_inner_box_selects_its_text() {
+        let state = moved(hello_box_world(), &["l", "j", "l"]);
+        assert_eq!(selected_node(&state), &FlexNode::Text(String::new()));
+        assert_eq!(state.selected.len(), 3);
+    }
+
+    #[test]
+    fn h_in_move_mode_selects_the_parent() {
+        let before = hello_box_world();
+        let (state, effect) = reduce(moved(before.clone(), &["l", "j", "j"]), "h");
+        assert_eq!(state, before);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn h_on_an_outer_box_leaves_the_state_unchanged() {
+        let before = hello_box_world();
+        assert_eq!(reduce(before.clone(), "h"), (before, None));
+    }
+
+    #[test]
+    fn h_from_inside_an_inner_box_selects_the_inner_box() {
+        let inner = moved(hello_box_world(), &["l", "j"]);
+        let state = moved(inner.clone(), &["l", "h"]);
+        assert_eq!(state, inner);
+    }
+
+    #[test]
+    fn j_and_k_move_between_texts_and_boxes_and_stop_at_the_ends() {
+        let first = moved(hello_box_world(), &["l"]);
+        let inner = moved(first.clone(), &["j"]);
+        assert_eq!(selected_node(&inner), &FlexNode::Box(FlexBox::default()));
+        let last = moved(inner.clone(), &["j"]);
+        assert_eq!(selected_node(&last), &FlexNode::Text("World".to_string()));
+        assert_eq!(moved(last.clone(), &["j"]), last);
+        assert_eq!(moved(last, &["k"]), inner);
+        assert_eq!(moved(inner, &["k"]), first);
+        assert_eq!(moved(first.clone(), &["k"]), first);
+    }
+
+    #[test]
+    fn h_and_l_in_write_mode_are_typed_into_the_box() {
+        let before = hello_in(FlexMode::Write);
+        let state = moved(before.clone(), &["h", "l"]);
+        assert_eq!(state.texts_of(&state.selected), ["Hellohl"]);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Write);
     }
 }
