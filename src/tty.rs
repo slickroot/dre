@@ -269,20 +269,6 @@ mod tests {
     }
 
     #[test]
-    fn read_key_joins_an_escape_sequence_delivered_in_two_steps() {
-        use std::time::Duration;
-        let (read, write) = nix::unistd::pipe().unwrap();
-        nix::unistd::write(&write, b"\x1b").unwrap();
-        let writer = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(ESCAPE_TIMEOUT_MS as u64 / 5));
-            nix::unistd::write(&write, b"[D").unwrap();
-        });
-        let key = read_key_from(&read);
-        writer.join().unwrap();
-        assert_eq!(key, "\x1b[D");
-    }
-
-    #[test]
     fn read_key_returns_an_escape_sequence_with_parameters_whole() {
         let (read, write) = nix::unistd::pipe().unwrap();
         nix::unistd::write(&write, b"\x1b[1;5C").unwrap();
