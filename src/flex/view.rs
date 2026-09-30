@@ -73,7 +73,15 @@ fn place_outer_box<'a>(
         }
         FlexWidth::Full => window.cols,
     };
-    let offsets = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
+    let packed = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
+    let centring_shift = match flex_box.width {
+        FlexWidth::Fit => (width - 2 - texts_width_end(&flex_box.texts, &packed)).div_euclid(2),
+        FlexWidth::Full => 0,
+    };
+    let offsets: Vec<i64> = packed
+        .iter()
+        .map(|offset| offset + centring_shift)
+        .collect();
     let x = -width.div_euclid(2);
     let colour = if state.mode == FlexMode::Move && state.selected == [index] {
         FLEX_SELECTED_COLOUR
@@ -111,7 +119,8 @@ fn place_outer_box<'a>(
     let text_row = y + BOX_HEIGHT / 2;
     let texts_start = x + 1 + offsets[0];
     let texts_end = x + 1 + texts_width_end(&flex_box.texts, &offsets);
-    let inner_x = texts_start + (texts_end - texts_start - inner_box_width()).div_euclid(2);
+    let centred_x = texts_start + (texts_end - texts_start - inner_box_width()).div_euclid(2);
+    let inner_x = centred_x.min(x + width - 1 - inner_box_width()).max(x + 1);
     for inner in 0..inner_boxes {
         placements.push(Placement {
             node: PlacementNode::Box {
@@ -831,6 +840,50 @@ mod tests {
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         assert_eq!(boxes[0].width, inner_box_width() + 2);
+        assert!(boxes[1].x > boxes[0].x);
+        assert!(boxes[1].x + boxes[1].width < boxes[0].x + boxes[0].width);
+    }
+
+    fn assert_inner_box_strictly_inside(state: &FlexState) {
+        let placements = placements(state);
+        let boxes = all_boxes(&placements);
+        let (outer, inner) = (boxes[0], boxes[1]);
+        assert!(inner.x > outer.x);
+        assert!(inner.x + inner.width < outer.x + outer.width);
+    }
+
+    #[test]
+    fn an_inner_box_in_a_fit_box_with_empty_text_stays_inside_the_outer_edges() {
+        assert_inner_box_strictly_inside(&with_inner_boxes("", 1));
+    }
+
+    #[test]
+    fn an_inner_box_in_a_fit_box_with_short_text_stays_inside_the_outer_edges() {
+        assert_inner_box_strictly_inside(&with_inner_boxes("a", 1));
+    }
+
+    #[test]
+    fn an_inner_box_in_a_full_start_box_with_short_text_stays_inside_the_outer_edges() {
+        for text in ["", "a"] {
+            let mut state = with_inner_boxes(text, 1);
+            let outer = state.boxes.value_mut(&[0]);
+            outer.width = FlexWidth::Full;
+            outer.justify = Justify::Start;
+            assert_inner_box_strictly_inside(&state);
+        }
+    }
+
+    #[test]
+    fn the_texts_are_centred_in_a_widened_fit_box() {
+        for text in ["", "a"] {
+            let state = with_inner_boxes(text, 1);
+            let placements = placements(&state);
+            let outer = all_boxes(&placements)[0];
+            let label = the_label(&placements);
+            let left = label.x - (outer.x + 1);
+            let right = outer.x + outer.width - 1 - (label.x + label.width);
+            assert!((left - right).abs() <= 1);
+        }
     }
 
     #[test]
