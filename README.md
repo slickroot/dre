@@ -19,6 +19,18 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Demo of dre: building and styling a diagram with a few keystrokes" width="720">
+</p>
+
+## Try it without installing
+
+```
+ssh dre.elaich.com
+```
+
+Visitors get their own canvas, remembered between sessions.
+
 ## About
 
 **dre** is a keyboard-driven diagram editor that runs in your terminal. Build
@@ -33,7 +45,7 @@ export it to a crisp SVG when it is ready to share.
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/slickroot/dre/main/install.sh | bash
+curl -fsSL https://dre.elaich.com/install.sh | bash
 ```
 
 ## Getting started
@@ -41,47 +53,26 @@ curl -fsSL https://raw.githubusercontent.com/slickroot/dre/main/install.sh | bas
 Run `dre` to open an empty canvas. `dre plans.dre` opens `plans.dre`, or
 starts a new diagram under that name if the file doesn't exist.
 
+<p align="center">
+  <img src="docs/assets/first-box.png" alt="A first box on an empty dre canvas" width="720">
+</p>
+
 `dre` has three modes: command mode (the default), insert mode, and a save
 prompt. In command mode, every key runs a command (see the table below);
 `i` edits the selected box's label and `I` renames it, which enters insert
 mode.
 
+<p align="center">
+  <img src="docs/assets/selection.png" alt="Selecting boxes in command mode" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/assets/styling.png" alt="A diagram with coloured and filled boxes" width="720">
+</p>
+
 To quit, press `q`. With a filename, `q` saves to that file and quits. Without
 a filename, `q` asks for one, and `Enter` saves and quits, `Esc` quits
 without saving. `Ctrl-C` quits without saving.
-
-## Example
-
-`docs/example.dre` shows off rounded corners, border colours, translucent
-fills, and arrows:
-
-```xml
-<dre>
-  <box label="API gateway" colour="2" fill="1" rounded="true">
-    <box label="Auth" colour="1" fill="1"/>
-    <box label="Orders" colour="1" fill="1">
-      <box label="Postgres" colour="4" fill="1">
-        <box label="Replica" colour="4" fill="1"/>
-        <box label="Archive" colour="4" fill="1"/>
-      </box>
-    </box>
-    <box label="Payments" colour="1" fill="1"/>
-  </box>
-</dre>
-```
-
-Each colour names a layer — pink the edge, orange the services, blue the
-data — and the rounded corners mark the single entry point.
-
-`dre --svg docs/example.dre` renders it as `docs/example.svg`:
-
-![The example diagram rendered by dre](docs/example.svg)
-
-## Export to SVG
-
-`dre --svg diagram.dre` writes `diagram.svg` next to your `.dre` file and
-exits — a crisp, vector copy with the same boxes, labels, colours, fills,
-rounded corners, and arrows, but no cursor or selection.
 
 ## Command mode
 
@@ -125,12 +116,39 @@ rounded corners, and arrows, but no cursor or selection.
 
 Any printable character appends to the label.
 
-## Other keys
-
 Save prompt: `Enter` saves and quits, `Esc` quits without saving, `Backspace`
 removes a character from the name.
 
 `Ctrl-C` quits without saving.
+
+## Files and export
+
+A diagram is saved as a `.dre` file, plain XML that nests boxes the way the
+diagram does. `docs/example.dre` shows off rounded corners, border colours,
+translucent fills, and arrows:
+
+```xml
+<dre>
+  <box label="API gateway" colour="2" fill="1" rounded="true">
+    <box label="Auth" colour="1" fill="1"/>
+    <box label="Orders" colour="1" fill="1">
+      <box label="Postgres" colour="4" fill="1">
+        <box label="Replica" colour="4" fill="1"/>
+        <box label="Archive" colour="4" fill="1"/>
+      </box>
+    </box>
+    <box label="Payments" colour="1" fill="1"/>
+  </box>
+</dre>
+```
+
+Each colour names a layer — pink the edge, orange the services, blue the
+data — and the rounded corners mark the single entry point.
+
+`dre --svg docs/example.dre` writes `docs/example.svg` next to it and exits — a
+crisp, vector copy with no cursor or selection:
+
+![The example diagram rendered by dre](docs/example.svg)
 
 ## How dre is built
 
@@ -139,18 +157,33 @@ itself a dre diagram — `docs/architecture.dre`:
 
 ```xml
 <dre>
-  <box label="state" rounded="true">
-    <box label="layout">
-      <box label="tui" colour="3"/>
-      <box label="svg" colour="3"/>
+  <box label="editor" colour="0" rounded="true">
+    <box label="store" colour="7"/>
+    <box label="state" colour="1">
+      <box label="layout" colour="1">
+        <box label="render" colour="1">
+          <box label="tui" colour="2"/>
+          <box label="svg" colour="2"/>
+        </box>
+      </box>
     </box>
   </box>
+  <box label="serve" colour="0" rounded="true"/>
+  <box label="web" colour="0" rounded="true"/>
 </dre>
 ```
 
-`state` holds the tree of boxes and is where everything starts. `layout` turns
-that tree into placements, and two renderers draw the same placements in their
-own way: `tui` (`src/render.rs`) paints sprites in the editor, and `svg`
-(`src/svg.rs`) writes `<rect>`s and `<text>`s. Purple marks the renderers.
+Three entry points share one core: `editor` is the terminal app, `serve` hosts
+it over SSH and `web` runs it in the browser as wasm. A tree of boxes only has
+arrows from parent to child, so the figure draws the core under `editor`;
+`serve` and `web` sit beside it and drive the same core. `store` reads and
+writes the `.dre` files for `editor`. In the core, `state` holds the tree of
+boxes, `layout` turns it into placements and `render` hands those placements to
+two renderers: `tui` (`src/render/terminal.rs`) paints sprites in the terminal
+and `svg` (`src/render/svg.rs`) writes `<rect>`s and `<text>`s. Colour marks
+the layers: lime for entry points, mint for the core, violet for the renderers.
+`store` is grey.
 
 ![The architecture of dre rendered by dre](docs/architecture.svg)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.
