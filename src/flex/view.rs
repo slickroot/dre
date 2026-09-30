@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
-use super::state::{FlexState, FlexWidth};
+use super::state::{FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
@@ -11,13 +11,24 @@ const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
-fn text_offsets(texts: &[String]) -> Vec<i64> {
+fn text_offsets(texts: &[String], justify: Justify, inner_width: i64) -> Vec<i64> {
+    let gaps = texts.len() as i64 - 1;
+    let free = inner_width - texts.iter().map(|text| view::interior(text)).sum::<i64>();
+    let gap_after = |index: i64| match justify {
+        Justify::Start => TEXT_GAP,
+        Justify::SpaceBetween => {
+            let widened_from = gaps - free.rem_euclid(gaps);
+            free.div_euclid(gaps) + i64::from(index >= widened_from)
+        }
+    };
     let mut next = 0;
-    texts
-        .iter()
-        .map(|text| {
+    (0..)
+        .zip(texts)
+        .map(|(index, text)| {
             let offset = next;
-            next += view::interior(text) + TEXT_GAP;
+            if index < gaps {
+                next += view::interior(text) + gap_after(index);
+            }
             offset
         })
         .collect()
@@ -26,7 +37,6 @@ fn text_offsets(texts: &[String]) -> Vec<i64> {
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let mut placements = Vec::with_capacity(state.boxes.len() * 2);
     for (i, flex_box) in (0..).zip(&state.boxes) {
-        let offsets = text_offsets(&flex_box.texts);
         let width = match flex_box.width {
             FlexWidth::Fit => {
                 let interiors: i64 = flex_box.texts.iter().map(|text| view::interior(text)).sum();
@@ -34,6 +44,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
             }
             FlexWidth::Full => window.cols,
         };
+        let offsets = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
         let x = -width.div_euclid(2);
         let y = i * (BOX_HEIGHT + FLEX_GAP);
         placements.push(Placement {
@@ -80,7 +91,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flex::state::{reduce, FlexBox};
+    use crate::flex::state::{reduce, FlexBox, Justify};
 
     const WINDOW: Area = Area {
         col: 0,
@@ -429,7 +440,10 @@ mod tests {
         let texts = owned(&["Hello", "World", ""]);
         let first = view::interior("Hello") + TEXT_GAP;
         let second = first + view::interior("World") + TEXT_GAP;
-        assert_eq!(text_offsets(&texts), vec![0, first, second]);
+        assert_eq!(
+            text_offsets(&texts, Justify::Start, 0),
+            vec![0, first, second]
+        );
     }
 
     #[test]
@@ -497,5 +511,98 @@ mod tests {
         let the_box = the_box(&placements);
         assert_eq!(the_box.width, WINDOW.cols);
         assert_eq!(all_labels(&placements)[0].x, the_box.x + 1);
+    }
+
+    #[test]
+    fn start_ignores_the_inner_width() {
+        let texts = owned(&["Hello", "World"]);
+        assert_eq!(text_offsets(&texts, Justify::Start, 78), vec![0, 6]);
+    }
+
+    #[test]
+    fn space_between_puts_the_last_text_at_the_inner_right_edge() {
+        let texts = owned(&["Hello", "World"]);
+        assert_eq!(text_offsets(&texts, Justify::SpaceBetween, 78), vec![0, 73]);
+    }
+
+    #[test]
+    fn space_between_splits_the_free_space_evenly() {
+        let texts = owned(&["a", "b", "c"]);
+        assert_eq!(
+            text_offsets(&texts, Justify::SpaceBetween, 9),
+            vec![0, 4, 8]
+        );
+    }
+
+    #[test]
+    fn space_between_gives_the_extra_cells_to_the_right_gaps() {
+        assert_eq!(
+            text_offsets(&owned(&["a", "b", "c"]), Justify::SpaceBetween, 10),
+            vec![0, 4, 9]
+        );
+        assert_eq!(
+            text_offsets(&owned(&["a", "b", "c", "d"]), Justify::SpaceBetween, 12),
+            vec![0, 3, 7, 11]
+        );
+    }
+
+    #[test]
+    fn space_between_with_one_text_sits_at_the_start() {
+        assert_eq!(
+            text_offsets(&owned(&["Hello"]), Justify::SpaceBetween, 78),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn space_between_in_the_packed_width_matches_start() {
+        let texts = owned(&["Hello", "World", ""]);
+        let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
+        let packed = interiors + TEXT_GAP * (texts.len() as i64 - 1);
+        assert_eq!(
+            text_offsets(&texts, Justify::SpaceBetween, packed),
+            text_offsets(&texts, Justify::Start, packed)
+        );
+    }
+
+    fn full_beside(texts: &[&str], justify: Justify) -> FlexState {
+        holding(FlexBox {
+            width: FlexWidth::Full,
+            justify,
+            texts: owned(texts),
+            ..FlexBox::default()
+        })
+    }
+
+    #[test]
+    fn a_full_space_between_box_spreads_its_texts_to_the_borders() {
+        let state = full_beside(&["Hello", "World"], Justify::SpaceBetween);
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        let labels = all_labels(&placements);
+        let last = labels.last().unwrap();
+        assert_eq!(labels[0].x, the_box.x + 1);
+        assert_eq!(last.x + last.width, the_box.x + the_box.width - 1);
+    }
+
+    #[test]
+    fn a_fit_space_between_box_places_the_same_as_a_fit_start_box() {
+        let texts = &["Hello", "World"];
+        let start = beside(texts);
+        let spread = holding(FlexBox {
+            justify: Justify::SpaceBetween,
+            ..start.boxes[0].clone()
+        });
+        assert_eq!(placements(&spread), placements(&start));
+    }
+
+    #[test]
+    fn a_full_start_box_keeps_its_texts_one_gap_apart() {
+        let state = full_beside(&["Hello", "World"], Justify::Start);
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        let labels = all_labels(&placements);
+        assert_eq!(labels[0].x, the_box.x + 1);
+        assert_eq!(labels[1].x, labels[0].x + labels[0].width + TEXT_GAP);
     }
 }
