@@ -10,6 +10,7 @@ Noor runs `dre-flex`, types "Hello" and presses Enter, so they're in MOVE. They 
 - After `A`, `dre-flex` stays in MOVE.
 - There is a 1-cell gap between the text and the inner box.
 - The inner box is centred under the text.
+- The inner box never touches the outer box's left or right padding: there is always at least 1 cell of padding between them.
 - The outer box grows to fit the inner box.
 - The outer box stays centred on the screen.
 - Each additional `A` adds another inner box inside the same outer box, below the last inner box.
@@ -45,7 +46,8 @@ Noor runs `dre-flex`, types "Hello" and presses Enter, so they're in MOVE. They 
 - **Text row:** stays on the first interior row, `y + BOX_HEIGHT / 2`, as now.
 - **Inner box width:** `view::interior("") + 2`, the same as an empty box from `a`.
 - **Outer Fit width:** `max(texts row width, inner box width) + 2`. Full width is still the window width.
-- **Inner box x:** centred on the span of the texts row, from the start of the first text to the end of the last text, using the offsets from `text_offsets`. `w` and `g` therefore move the inner box together with the text.
+- **Texts row in a widened Fit box:** when the inner box is wider than the texts row, the texts row is centred in the content area (the outer interior, `width - 2`), so the text and the inner box line up.
+- **Inner box x:** centred on the span of the texts row, from the start of the first text to the end of the last text, using the offsets from `text_offsets`, then kept inside the content area so it never reaches the outer box's padding cells. `w` and `g` therefore move the inner box together with the text.
 - **Inner box look:** `PlacementNode::Box` with `FLEX_BORDER_COLOUR`, `FLEX_BORDER`, no fill, `rounded: false`, `ALL_SIDES`. It is never drawn as selected, and it never wears the outer box's `filled`.
 - **Centring on screen:** the existing shift by the leftmost `x` and `view::centre` are unchanged. The outer box is at least as wide as its inner boxes, so they never change the leftmost `x`.
 
@@ -67,5 +69,6 @@ Noor runs `dre-flex`, types "Hello" and presses Enter, so they're in MOVE. They 
   - The outer Fit width grows to `inner width + 2` when the text is shorter than that.
   - A following outer box starts `FLEX_GAP` below the taller outer box.
   - In Full width and with `g`, the inner box stays centred on the text span.
+  - With a short or empty text, in Fit and in Full width with Start justify, the inner box stays inside the content area and never overlaps the outer padding cells.
   - The whole scene stays centred on the screen.
   - In MOVE, the inner box border stays `FLEX_BORDER_COLOUR` even when its outer box is selected.
