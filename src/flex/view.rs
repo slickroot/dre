@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 
-use crate::view::{
-    self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BORDER, BOX_HEIGHT,
-};
+use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
 use super::state::FlexState;
 
+const FLEX_BORDER: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 
@@ -20,7 +19,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
                 opacity: None,
                 rounded: false,
                 sides: ALL_SIDES,
-                border: BORDER,
+                border: FLEX_BORDER,
             },
             x: 0,
             y: 0,
@@ -167,6 +166,23 @@ mod tests {
         );
     }
 
+    fn sides_and_border(placement: &Placement<'_>) -> (view::Sides, i64) {
+        let PlacementNode::Box { sides, border, .. } = placement.node else {
+            unreachable!()
+        };
+        (sides, border)
+    }
+
+    #[test]
+    fn an_empty_box_has_a_thin_border_on_all_sides() {
+        let state = with_text("");
+        let placements = placements(&state);
+        assert_eq!(
+            sides_and_border(the_box(&placements)),
+            (ALL_SIDES, FLEX_BORDER)
+        );
+    }
+
     #[test]
     fn the_colours_stay_while_the_box_grows_and_shrinks() {
         let grown = with_text("Hello");
@@ -177,5 +193,21 @@ mod tests {
                 ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
             );
         }
+    }
+
+    #[test]
+    fn the_border_stays_thin_as_the_box_grows() {
+        let state = with_text("Hello");
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.width, 7);
+        assert_eq!(sides_and_border(the_box).1, FLEX_BORDER);
+    }
+
+    #[test]
+    fn the_border_stays_thin_after_backspace() {
+        let after = reduce(with_text("Hellp"), "\x7f");
+        let placements = placements(&after);
+        assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
     }
 }
