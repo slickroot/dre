@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::tiles::CellSize;
 use crate::canvas::{Canvas, Rgba, Shape};
 use crate::view::BRACKET_MARGIN;
@@ -11,6 +9,13 @@ pub(super) enum Corner {
     BottomLeft,
     BottomRight,
 }
+
+pub(super) const CORNERS: [Corner; 4] = [
+    Corner::TopLeft,
+    Corner::TopRight,
+    Corner::BottomLeft,
+    Corner::BottomRight,
+];
 
 impl Corner {
     fn is_right(self) -> bool {
@@ -118,12 +123,6 @@ mod tests {
         height: 23,
     };
     const CELLS: [CellSize; 2] = [CELL, ODD_CELL];
-    const CORNERS: [Corner; 4] = [
-        Corner::TopLeft,
-        Corner::TopRight,
-        Corner::BottomLeft,
-        Corner::BottomRight,
-    ];
     const COLOUR: Rgba = [40, 50, 60, OPAQUE];
     const THICKNESS: i64 = 2;
     const SPARE_CELLS: i64 = 4;

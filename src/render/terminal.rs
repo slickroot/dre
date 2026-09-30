@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 use std::num::NonZeroU32;
 
+use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, BracketsShape, LedShape};
 use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
@@ -176,6 +177,7 @@ enum SpriteKey {
         stops: Vec<i64>,
         shaft: i64,
     },
+    #[cfg_attr(not(test), allow(dead_code))]
     Brackets {
         width: i64,
         height: i64,
@@ -211,6 +213,7 @@ fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn brackets_key(width: i64, height: i64, style: BracketStyle) -> SpriteKey {
     SpriteKey::Brackets {
         width,
@@ -434,6 +437,7 @@ pub(crate) struct TerminalRenderer {
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
     tile_canvases: std::collections::HashMap<TileKey, Canvas>,
     tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
+    bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
 }
 
@@ -481,6 +485,7 @@ impl TerminalRenderer {
             glyph_images: std::collections::HashMap::new(),
             tile_canvases: std::collections::HashMap::new(),
             tile_images: std::collections::HashMap::new(),
+            bracket_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
         }
     }
@@ -639,19 +644,35 @@ impl TerminalRenderer {
         area: Area,
         style: BracketStyle,
     ) {
-        if self.place_tiles(
-            frame,
-            TileStyle::Brackets(style),
-            geometry,
-            area,
-            BRACKETS_Z,
-        ) {
-            return;
+        let cell = self.cell_size();
+        let blocks = corner_cells(cell);
+        for corner in CORNERS {
+            let (col, row) = corner_offset(corner, geometry.width, geometry.height, cell);
+            let block = Geometry {
+                x: geometry.x + col,
+                y: geometry.y + row,
+                width: blocks,
+                height: blocks,
+            };
+            if !frame.shows(block, area) {
+                continue;
+            }
+            let key = BracketKey {
+                corner,
+                border: style.border,
+                cell,
+            };
+            place_sprite(
+                &mut self.bracket_images,
+                &mut self.image_ids,
+                frame,
+                key,
+                block,
+                area,
+                BRACKETS_Z,
+                || key.canvas(),
+            );
         }
-        let key = brackets_key(geometry.width, geometry.height, style);
-        self.place_cached(frame, key, geometry, area, BRACKETS_Z, |renderer| {
-            renderer.brackets_canvas(geometry.width, geometry.height, style)
-        });
     }
 
     fn draw_led(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LedStyle) {
@@ -746,6 +767,7 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     fn brackets_canvas(&self, cell_width: i64, cell_height: i64, style: BracketStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
@@ -1393,6 +1415,66 @@ mod tests {
         }));
     }
 
+    const BRACKET_CELLS: [(i64, i64); 2] = [(CELL_WIDTH, CELL_HEIGHT), (11, 23)];
+
+    fn bracket_sizes(blocks: i64) -> Vec<(i64, i64)> {
+        vec![
+            (blocks, blocks),
+            (blocks + 1, blocks),
+            (blocks, blocks + 1),
+            (2 * blocks - 1, 2 * blocks - 1),
+            (2 * blocks, 2 * blocks),
+            (3 * blocks + 1, 2 * blocks + 3),
+        ]
+    }
+
+    #[test]
+    fn corner_sprites_add_up_to_the_whole_placement_brackets_at_every_size() {
+        for (cell_width, cell_height) in BRACKET_CELLS {
+            let blocks = corner_cells(CellSize {
+                width: cell_width,
+                height: cell_height,
+            });
+            for (cols, rows) in bracket_sizes(blocks) {
+                let mut r = renderer_on(window(80, 80, cell_width, cell_height));
+                let node = selected_box_node();
+                let images = sprites(&mut r, &[box_placement(&node, 3, 5, cols, rows)]);
+                let drawn = composed(&images, BRACKETS_Z, r.window);
+                let whole = r.brackets_canvas(cols, rows, BracketStyle { border: BORDER });
+                assert_eq!((drawn.col, drawn.row), (3, 5));
+                assert_eq!(
+                    (drawn.canvas.width, drawn.canvas.height),
+                    (whole.width, whole.height)
+                );
+                assert_eq!(
+                    drawn.canvas.pixels, whole.pixels,
+                    "{cell_width}x{cell_height} {cols}x{rows}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_or_resizing_brackets_uploads_no_new_image_after_the_first_frame() {
+        let mut r = renderer_on(window(80, 80, CELL_WIDTH, CELL_HEIGHT));
+        let node = selected_box_node();
+        let blocks = corner_cells(r.cell_size());
+        let first = rendered_placements(
+            &mut r,
+            &[box_placement(&node, 2, 2, blocks + 3, blocks + 3)],
+        );
+        assert_eq!(shown_ids(&first).len(), CORNERS.len());
+        for (x, y, width, height) in [
+            (5, 6, blocks + 3, blocks + 3),
+            (5, 6, blocks + 9, blocks + 4),
+            (1, 1, 2 * blocks - 1, 2 * blocks - 1),
+        ] {
+            let next = rendered_placements(&mut r, &[box_placement(&node, x, y, width, height)]);
+            assert!(shown_ids(&next).is_empty());
+            assert_eq!(placed_ids(&next).len(), CORNERS.len());
+        }
+    }
+
     impl Placed {
         fn canvas(&self) -> &Canvas {
             match &self.image {
@@ -1446,11 +1528,14 @@ mod tests {
         for image in &layer {
             let (x, y) = origin(image);
             let canvas = canvas_of(image);
-            let span = (canvas.width * channels) as usize;
             for line in 0..canvas.height {
-                let from = (line * canvas.width * channels) as usize;
-                let to = (((y + line) * width + x) * channels) as usize;
-                pixels[to..to + span].copy_from_slice(&canvas.pixels[from..from + span]);
+                for column in 0..canvas.width {
+                    let from = ((line * canvas.width + column) * channels) as usize;
+                    let to = (((y + line) * width + x + column) * channels) as usize;
+                    if canvas.pixels[from + 3] != 0 {
+                        pixels[to..to + 4].copy_from_slice(&canvas.pixels[from..from + 4]);
+                    }
+                }
             }
         }
         Sprite {
@@ -3036,12 +3121,7 @@ mod tests {
     }
 
     fn smallest_tiled_selected_box(r: &TerminalRenderer, colour: Option<u8>) -> (i64, i64) {
-        let (box_cols, box_rows) = smallest_tiled(r, &outlined_node(colour));
-        let (brackets_cols, brackets_rows) = smallest_tiled(r, &brackets_node());
-        (
-            box_cols.max(brackets_cols - 2 * BRACKET_MARGIN),
-            box_rows.max(brackets_rows - 2 * BRACKET_MARGIN),
-        )
+        smallest_tiled(r, &outlined_node(colour))
     }
 
     fn selected_box(
@@ -3088,7 +3168,7 @@ mod tests {
         let first = rendered_placements(&mut r, &narrow);
         let second = rendered_placements(&mut r, &wide);
 
-        let tiled_rows: i64 = narrow.iter().map(|placement| placement.height).sum();
+        let tiled_rows = narrow[0].height;
         let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
         assert!(shown_ids(&second).is_empty());
         assert!(deleted_ids(&second).is_empty());
@@ -3192,11 +3272,11 @@ mod tests {
         let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
             .into_iter()
             .map(|(col, row)| (col, row, BOX_Z))
-            .chain(
-                cells_of(&brackets)
-                    .into_iter()
-                    .map(|(col, row)| (col, row, BRACKETS_Z)),
-            )
+            .chain(CORNERS.into_iter().map(|corner| {
+                let (col, row) =
+                    corner_offset(corner, brackets.width, brackets.height, r.cell_size());
+                (brackets.x + col, brackets.y + row, BRACKETS_Z)
+            }))
             .collect();
         assert_eq!(queued, expected);
     }

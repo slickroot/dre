@@ -10,6 +10,7 @@ pub(super) struct CellSize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum TileStyle {
     Box(BoxStyle),
+    #[cfg_attr(not(test), allow(dead_code))]
     Brackets(BracketStyle),
 }
 
