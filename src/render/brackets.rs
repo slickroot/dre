@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::tiles::CellSize;
-use crate::canvas::{Rgba, Shape};
+use crate::canvas::{Canvas, Rgba, Shape};
 use crate::view::BRACKET_MARGIN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,6 +30,41 @@ pub(super) fn corner_cells(cell: CellSize) -> i64 {
     let reach_x = BRACKET_MARGIN * cell.width + super::BRACKET_ARM - super::BRACKET_OFFSET;
     let reach_y = BRACKET_MARGIN * cell.height + super::BRACKET_ARM - super::BRACKET_OFFSET;
     cells_to_hold(reach_x, cell.width).max(cells_to_hold(reach_y, cell.height))
+}
+
+pub(super) fn corner_offset(corner: Corner, cols: i64, rows: i64, cell: CellSize) -> (i64, i64) {
+    let blocks = corner_cells(cell);
+    (
+        if corner.is_right() { cols - blocks } else { 0 },
+        if corner.is_bottom() { rows - blocks } else { 0 },
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct BracketKey {
+    pub(super) corner: Corner,
+    pub(super) border: i64,
+    pub(super) cell: CellSize,
+}
+
+impl BracketKey {
+    pub(super) fn canvas(&self) -> Canvas {
+        let (r, g, b) = super::colour(None);
+        let width = corner_cells(self.cell) * self.cell.width;
+        let height = corner_cells(self.cell) * self.cell.height;
+        let shape = BracketCornerShape {
+            corner: self.corner,
+            block_width: width,
+            block_height: height,
+            margin_x: BRACKET_MARGIN * self.cell.width,
+            margin_y: BRACKET_MARGIN * self.cell.height,
+            offset: super::BRACKET_OFFSET,
+            arm: super::BRACKET_ARM,
+            thickness: self.border,
+            colour: [r, g, b, super::OPAQUE],
+        };
+        Canvas::fill(width, height, &shape)
+    }
 }
 
 pub(super) struct BracketCornerShape {
@@ -305,5 +340,88 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn key(corner: Corner, border: i64, cell: CellSize) -> BracketKey {
+        BracketKey {
+            corner,
+            border,
+            cell,
+        }
+    }
+
+    #[test]
+    fn a_key_canvas_is_the_size_of_a_corner_block() {
+        for cell in CELLS {
+            let canvas = key(Corner::TopLeft, THICKNESS, cell).canvas();
+            assert_eq!(canvas.width, corner_cells(cell) * cell.width);
+            assert_eq!(canvas.height, corner_cells(cell) * cell.height);
+        }
+    }
+
+    #[test]
+    fn a_key_canvas_is_the_corner_shape_in_the_foreground_colour() {
+        let (r, g, b) = crate::render::colour(None);
+        let ink = [r, g, b, OPAQUE];
+        for cell in CELLS {
+            for corner in CORNERS {
+                let canvas = key(corner, THICKNESS, cell).canvas();
+                let expected = Canvas::fill(
+                    canvas.width,
+                    canvas.height,
+                    &BracketCornerShape {
+                        colour: ink,
+                        ..corner_shape(corner, cell)
+                    },
+                );
+                assert_eq!(canvas.pixels, expected.pixels, "{corner:?} {cell:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn keys_differ_by_corner_border_and_cell_only() {
+        let base = key(Corner::TopLeft, THICKNESS, CELL);
+        assert_eq!(base, key(Corner::TopLeft, THICKNESS, CELL));
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(base);
+        seen.insert(key(Corner::TopLeft, THICKNESS, CELL));
+        assert_eq!(seen.len(), 1);
+        for corner in CORNERS.into_iter().filter(|c| *c != Corner::TopLeft) {
+            assert_ne!(base, key(corner, THICKNESS, CELL));
+        }
+        assert_ne!(base, key(Corner::TopLeft, THICKNESS + 1, CELL));
+        assert_ne!(base, key(Corner::TopLeft, THICKNESS, ODD_CELL));
+    }
+
+    #[test]
+    fn corner_offsets_sit_at_the_corners_of_a_large_placement() {
+        let cell = CELL;
+        let blocks = corner_cells(cell);
+        let (cols, rows) = (blocks + SPARE_CELLS, blocks + SPARE_CELLS + 1);
+        assert_eq!(corner_offset(Corner::TopLeft, cols, rows, cell), (0, 0));
+        assert_eq!(
+            corner_offset(Corner::TopRight, cols, rows, cell),
+            (cols - blocks, 0)
+        );
+        assert_eq!(
+            corner_offset(Corner::BottomLeft, cols, rows, cell),
+            (0, rows - blocks)
+        );
+        assert_eq!(
+            corner_offset(Corner::BottomRight, cols, rows, cell),
+            (cols - blocks, rows - blocks)
+        );
+    }
+
+    #[test]
+    fn corner_offsets_go_negative_for_a_placement_smaller_than_a_block() {
+        let cell = CELL;
+        let blocks = corner_cells(cell);
+        assert_eq!(
+            corner_offset(Corner::BottomRight, 1, 1, cell),
+            (1 - blocks, 1 - blocks)
+        );
+        assert_eq!(corner_offset(Corner::TopLeft, 1, 1, cell), (0, 0));
     }
 }

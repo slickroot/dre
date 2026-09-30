@@ -2608,6 +2608,50 @@ mod tests {
     }
 
     #[test]
+    fn a_block_poking_out_of_the_placement_is_cropped_to_the_screen() {
+        let frame = Frame::new(window(20, 10, 4, 8));
+        let area = whole(frame.window);
+        let poking = Geometry {
+            x: -1,
+            y: -1,
+            width: 2,
+            height: 2,
+        };
+        let crop = frame.crop(poking, area).unwrap();
+        assert_eq!((crop.col, crop.row), (0, 0));
+        assert_eq!((crop.first_x, crop.first_y), (4, 8));
+        assert_eq!((crop.last_x, crop.last_y), (8, 16));
+        let outside = Geometry {
+            x: -2,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        assert!(!frame.shows(outside, area));
+    }
+
+    #[test]
+    fn a_block_beyond_the_area_is_clipped_to_the_area() {
+        let frame = Frame::new(window(20, 10, 4, 8));
+        let area = Area {
+            col: 2,
+            row: 2,
+            cols: 3,
+            rows: 3,
+        };
+        let block = Geometry {
+            x: 4,
+            y: 0,
+            width: 4,
+            height: 4,
+        };
+        let crop = frame.crop(block, area).unwrap();
+        assert_eq!((crop.col, crop.row), (4, 2));
+        assert_eq!((crop.first_x, crop.last_x), (0, 4));
+        assert_eq!((crop.first_y, crop.last_y), (16, 32));
+    }
+
+    #[test]
     fn arrows_with_different_stops_are_redrawn() {
         let mut r = renderer_on(window(40, 20, 2, 4));
         let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
