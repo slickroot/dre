@@ -2,12 +2,13 @@ use std::borrow::Cow;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, BOX_HEIGHT};
 
-use super::state::{FlexState, FlexWidth, Justify};
+use super::state::{FlexMode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_GAP: i64 = 1;
 const TEXT_GAP: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
+const FLEX_SELECTED_COLOUR: Rgb = (0x8A, 0xB4, 0xF8);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
@@ -47,9 +48,14 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
         let offsets = text_offsets(&flex_box.texts, flex_box.justify, width - 2);
         let x = -width.div_euclid(2);
         let y = i * (BOX_HEIGHT + FLEX_GAP);
+        let colour = if state.mode == FlexMode::Move && i == state.selected as i64 {
+            FLEX_SELECTED_COLOUR
+        } else {
+            FLEX_BORDER_COLOUR
+        };
         placements.push(Placement {
             node: PlacementNode::Box {
-                colour: FLEX_BORDER_COLOUR,
+                colour,
                 fill: None,
                 opacity: None,
                 solid_fill: flex_box.filled.then_some(FLEX_FILL_COLOUR),
@@ -604,5 +610,40 @@ mod tests {
         let labels = all_labels(&placements);
         assert_eq!(labels[0].x, the_box.x + 1);
         assert_eq!(labels[1].x, labels[0].x + labels[0].width + TEXT_GAP);
+    }
+
+    fn borders(placements: &[Placement<'_>]) -> Vec<Rgb> {
+        all_boxes(placements)
+            .iter()
+            .map(|placement| {
+                let PlacementNode::Box { colour, .. } = placement.node else {
+                    unreachable!()
+                };
+                colour
+            })
+            .collect()
+    }
+
+    fn selecting(mode: FlexMode, selected: usize) -> FlexState {
+        FlexState {
+            mode,
+            selected,
+            ..stacked(&["Hello", "Hi", ""])
+        }
+    }
+
+    #[test]
+    fn in_move_the_selected_box_has_the_selected_border() {
+        let state = selecting(FlexMode::Move, 1);
+        assert_eq!(
+            borders(&placements(&state)),
+            vec![FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
+        );
+    }
+
+    #[test]
+    fn in_write_no_box_has_the_selected_border() {
+        let state = selecting(FlexMode::Write, 1);
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 }
