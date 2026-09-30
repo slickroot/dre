@@ -17,6 +17,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
                 colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
+                solid_fill: None,
                 rounded: false,
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,

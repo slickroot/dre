@@ -36,6 +36,7 @@ pub(super) struct BoxStyle {
     pub(super) colour: Rgb,
     pub(super) fill: Option<u8>,
     pub(super) fill_alpha: Option<u8>,
+    pub(super) solid_fill: Option<Rgb>,
     pub(super) rounded: bool,
     pub(super) sides: Sides,
     pub(super) border: i64,
@@ -94,7 +95,10 @@ fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
 
 pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     let (r, g, b) = style.colour;
-    let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.fill_alpha);
+    let (fill_r, fill_g, fill_b, fill_a) = match style.solid_fill {
+        Some((r, g, b)) => (r, g, b, OPAQUE),
+        None => fill_colour(style.fill, style.fill_alpha),
+    };
     BoxShape {
         width,
         height,
@@ -166,6 +170,7 @@ enum SpriteKey {
         colour: Rgb,
         fill: Option<u8>,
         fill_alpha: Option<u8>,
+        solid_fill: Option<Rgb>,
         rounded: bool,
         sides: Sides,
         border: i64,
@@ -196,6 +201,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         colour: style.colour,
         fill: style.fill,
         fill_alpha: style.fill_alpha,
+        solid_fill: style.solid_fill,
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
@@ -487,6 +493,7 @@ impl TerminalRenderer {
                     colour,
                     fill,
                     opacity,
+                    solid_fill,
                     rounded,
                     sides,
                     border,
@@ -498,6 +505,7 @@ impl TerminalRenderer {
                         colour: *colour,
                         fill: *fill,
                         fill_alpha: quantized_alpha(*opacity),
+                        solid_fill: *solid_fill,
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
@@ -816,6 +824,25 @@ mod tests {
         assert_eq!(footer_fill, box_fill);
     }
 
+    #[test]
+    fn box_shape_with_a_solid_fill_is_filled_with_that_colour_opaque() {
+        let (r, g, b) = (12, 34, 56);
+        let shape = box_shape(
+            30,
+            30,
+            BoxStyle {
+                colour: colour(None),
+                fill: None,
+                fill_alpha: None,
+                solid_fill: Some((r, g, b)),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: BORDER,
+            },
+        );
+        assert_eq!(shape.fill, [r, g, b, OPAQUE]);
+    }
+
     fn edge_rgba(index: Option<u8>) -> (u8, u8, u8, u8) {
         let (r, g, b) = colour(index);
         (r, g, b, OPAQUE)
@@ -1047,6 +1074,7 @@ mod tests {
             colour: crate::style::rgb(colour),
             fill,
             opacity: fill.map(|_| BOX_FILL_OPACITY),
+            solid_fill: None,
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
@@ -1059,6 +1087,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 border,
                 ..
@@ -1066,6 +1095,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides: new_sides,
                 border,
@@ -1080,6 +1110,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 ..
@@ -1087,6 +1118,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border: new_border,
@@ -1138,6 +1170,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border,
@@ -1148,6 +1181,7 @@ mod tests {
                     colour: *colour,
                     fill: *fill,
                     fill_alpha: quantized_alpha(*opacity),
+                    solid_fill: *solid_fill,
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
@@ -2645,6 +2679,7 @@ mod tests {
             colour,
             fill,
             opacity,
+            solid_fill,
             rounded,
             sides,
             border,
@@ -2659,6 +2694,7 @@ mod tests {
                 colour: *colour,
                 fill: *fill,
                 fill_alpha: quantized_alpha(*opacity),
+                solid_fill: *solid_fill,
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
@@ -2933,6 +2969,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border,
@@ -2940,6 +2977,7 @@ mod tests {
                 colour: *colour,
                 fill: *fill,
                 fill_alpha: quantized_alpha(*opacity),
+                solid_fill: *solid_fill,
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
