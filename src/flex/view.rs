@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn the_box_shrinks_after_backspace() {
         let before = with_text("Hellp");
-        let after = reduce(before.clone(), "\x7f");
+        let (after, _) = reduce(before.clone(), "\x7f");
         let before_width = the_box(&placements(&before)).width;
         let after_width = the_box(&placements(&after)).width;
         assert!(after_width < before_width);

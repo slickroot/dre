@@ -9,7 +9,7 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
-use state::FlexState;
+use state::{FlexEffect, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
@@ -37,16 +37,19 @@ impl FlexScreen for TerminalFlexScreen {
 
 pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
     let mut state = FlexState::default();
-    while state.running {
+    loop {
         screen.render(&state)?;
         let key = keys.next_key()?;
         if key == tty::RESIZE {
             screen.resize()?;
-        } else {
-            state = state::reduce(state, &key);
+            continue;
+        }
+        let effect;
+        (state, effect) = state::reduce(state, &key);
+        if effect == Some(FlexEffect::Quit) {
+            return Ok(());
         }
     }
-    Ok(())
 }
 
 pub fn run() -> ExitCode {
@@ -164,6 +167,26 @@ mod tests {
             .times(1)
             .in_sequence(&mut seq)
             .return_once(|| Ok("\x03".to_string()));
+
+        run_loop(&mut keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn renders_before_each_key_and_stops_after_q_in_move_mode() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        for key in ["\r", "q"] {
+            screen
+                .expect_render()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(|_| Ok(()));
+            keys.expect_next_key()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_once(move || Ok(key.to_string()));
+        }
 
         run_loop(&mut keys, &mut screen).unwrap();
     }
