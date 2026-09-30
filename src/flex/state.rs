@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FlexMode {
     Write,
+    Move,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,9 +22,20 @@ impl Default for FlexState {
 }
 
 pub(crate) fn reduce(state: FlexState, key: &str) -> FlexState {
-    match key {
-        "\x03" => FlexState {
+    match (key, state.mode) {
+        ("\x03", _) => FlexState {
             running: false,
+            ..state
+        },
+        (_, FlexMode::Write) => write_key(state, key),
+        (_, FlexMode::Move) => move_key(state, key),
+    }
+}
+
+fn write_key(state: FlexState, key: &str) -> FlexState {
+    match key {
+        "\r" => FlexState {
+            mode: FlexMode::Move,
             ..state
         },
         "\x7f" => {
@@ -40,6 +52,10 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> FlexState {
             None => state,
         },
     }
+}
+
+fn move_key(state: FlexState, _key: &str) -> FlexState {
+    state
 }
 
 fn printable_char(key: &str) -> Option<char> {
@@ -116,8 +132,48 @@ mod tests {
             text: "Hi".to_string(),
             ..FlexState::default()
         };
-        for key in ["\x1b[A", "\x01", "\x1b", "\t", "\r", "", "ab", tty::RESIZE] {
+        for key in ["\x1b[A", "\x01", "\x1b", "\t", "", "ab", tty::RESIZE] {
             assert_eq!(reduce(before.clone(), key), before, "key {key:?}");
         }
+    }
+
+    fn hello_in(mode: FlexMode) -> FlexState {
+        FlexState {
+            text: "Hello".to_string(),
+            mode,
+            ..FlexState::default()
+        }
+    }
+
+    #[test]
+    fn enter_in_write_mode_switches_to_move_and_keeps_the_text() {
+        let state = reduce(hello_in(FlexMode::Write), "\r");
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.text, "Hello");
+    }
+
+    #[test]
+    fn line_feed_in_write_mode_leaves_the_state_unchanged() {
+        let before = hello_in(FlexMode::Write);
+        assert_eq!(reduce(before.clone(), "\n"), before);
+    }
+
+    #[test]
+    fn typing_in_move_mode_leaves_the_text_and_mode_unchanged() {
+        let state = reduce(hello_in(FlexMode::Move), "x");
+        assert_eq!(state.text, "Hello");
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn backspace_in_move_mode_leaves_the_text_unchanged() {
+        let state = reduce(hello_in(FlexMode::Move), "\x7f");
+        assert_eq!(state.text, "Hello");
+    }
+
+    #[test]
+    fn ctrl_c_in_move_mode_stops_running() {
+        let state = reduce(hello_in(FlexMode::Move), "\x03");
+        assert!(!state.running);
     }
 }
