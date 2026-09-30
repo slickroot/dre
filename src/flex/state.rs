@@ -13,6 +13,7 @@ pub(crate) enum FlexEffect {
 pub(crate) struct FlexState {
     pub(crate) text: String,
     pub(crate) mode: FlexMode,
+    pub(crate) filled: bool,
 }
 
 impl Default for FlexState {
@@ -20,6 +21,7 @@ impl Default for FlexState {
         Self {
             text: String::new(),
             mode: FlexMode::Write,
+            filled: false,
         }
     }
 }
@@ -64,6 +66,13 @@ fn move_key(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
             },
             None,
         ),
+        "f" => (
+            FlexState {
+                filled: !state.filled,
+                ..state
+            },
+            None,
+        ),
         "q" => (state, Some(FlexEffect::Quit)),
         _ => (state, None),
     }
@@ -89,10 +98,16 @@ mod tests {
         assert_eq!(state.text, "");
     }
 
+    #[test]
+    fn starts_unfilled() {
+        assert!(!FlexState::default().filled);
+    }
+
     fn hello_in(mode: FlexMode) -> FlexState {
         FlexState {
             text: "Hello".to_string(),
             mode,
+            ..FlexState::default()
         }
     }
 
@@ -222,5 +237,38 @@ mod tests {
         assert_eq!(state.text, "Helloq");
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn f_in_move_mode_fills_the_box_and_keeps_the_text_and_mode() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "f");
+        assert!(state.filled);
+        assert_eq!(state.text, "Hello");
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn f_twice_in_move_mode_unfills_the_box() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "f");
+        let (state, effect) = reduce(state, "f");
+        assert_eq!(state, hello_in(FlexMode::Move));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn f_in_write_mode_is_typed_into_the_box_and_leaves_the_fill_alone() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "f");
+        assert_eq!(state.text, "Hellof");
+        assert!(!state.filled);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn the_fill_survives_switching_back_to_write_mode() {
+        let (state, effects) = typed(&["\r", "f", "i"]);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert!(state.filled);
+        assert!(effects.is_empty());
     }
 }
