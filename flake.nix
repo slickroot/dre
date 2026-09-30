@@ -28,5 +28,15 @@
             pkgs.wasm-bindgen-cli
           ];
         };
+
+        packages.default =
+          let cargoToml = pkgs.lib.importTOML ./Cargo.toml;
+          in pkgs.rustPlatform.buildRustPackage {
+            pname = cargoToml.package.name;
+            version = cargoToml.package.version;
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            meta.mainProgram = "dre";
+          };
       });
 }
