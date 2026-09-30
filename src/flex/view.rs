@@ -316,12 +316,12 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_box_is_three_cells_wide() {
-        let state = with_text("");
+    fn an_empty_box_is_two_cells_wide_and_two_high() {
+        let state = FlexState::default();
         let placements = placements(&state);
         let the_box = the_box(&placements);
-        assert_eq!(the_box.width, 3);
-        assert_eq!(the_box.height, BOX_HEIGHT);
+        assert_eq!(the_box.width, 2 * FLEX_BORDER);
+        assert_eq!(the_box.height, 2 * FLEX_BORDER);
     }
 
     #[test]
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn the_box_shrinks_after_backspace() {
-        let before = with_text("Hellp");
+        let (before, _) = reduce(with_text("Hellp"), "i");
         let (after, _) = reduce(before.clone(), "\x7f");
         let before_width = the_box(&placements(&before)).width;
         let after_width = the_box(&placements(&after)).width;
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn an_empty_box_wears_its_own_colours() {
-        let state = with_text("");
+        let (state, _) = reduce(FlexState::default(), "i");
         assert_eq!(
             colours(&placements(&state)),
             ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
@@ -420,8 +420,8 @@ mod tests {
 
     #[test]
     fn the_colours_stay_while_the_box_grows_and_shrinks() {
-        let grown = with_text("Hello");
-        let (shrunk, _) = reduce(with_text("Hellp"), "\x7f");
+        let (grown, _) = reduce(with_text("Hello"), "i");
+        let (shrunk, _) = reduce(reduce(with_text("Hellp"), "i").0, "\x7f");
         for state in [&grown, &shrunk] {
             assert_eq!(
                 colours(&placements(state)),
@@ -795,13 +795,13 @@ mod tests {
 
     #[test]
     fn an_inner_box_is_as_wide_as_an_empty_box() {
-        let empty_state = with_text("");
+        let empty_state = FlexState::default();
         let empty = placements(&empty_state);
         let state = with_inner_boxes("Hello", 1);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         assert_eq!(boxes[1].width, the_box(&empty).width);
-        assert_eq!(boxes[1].height, BOX_HEIGHT);
+        assert_eq!(boxes[1].height, the_box(&empty).height);
     }
 
     #[test]
@@ -955,12 +955,12 @@ mod tests {
     }
 
     #[test]
-    fn a_new_box_measures_around_its_empty_text() {
+    fn a_new_box_measures_2_by_2() {
         assert_eq!(
             measure(&Tree::root(vec![new_box()]), &[0]),
             Size {
-                width: view::interior("") + 2 * FLEX_BORDER,
-                height: 1 + 2 * FLEX_BORDER,
+                width: 2 * FLEX_BORDER,
+                height: 2 * FLEX_BORDER,
             }
         );
     }
@@ -978,7 +978,7 @@ mod tests {
                     + FLEX_GAP
                     + view::interior("World")
                     + 2 * FLEX_BORDER,
-                height: BOX_HEIGHT + 2 * FLEX_BORDER,
+                height: empty_box.height + 2 * FLEX_BORDER,
             }
         );
     }
@@ -1089,9 +1089,10 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let inner = all_boxes(&placements)[1];
-        let middle = inner.y + inner.height / 2;
-        assert_eq!(label_showing(&placements, "Hello").y, middle);
-        assert_eq!(label_showing(&placements, "World").y, middle);
+        for shown in ["Hello", "World"] {
+            let label = label_showing(&placements, shown);
+            assert_eq!(label.y, inner.y + (inner.height - label.height) / 2);
+        }
     }
 
     #[test]
@@ -1125,7 +1126,73 @@ mod tests {
         assert_eq!(world.x, inner.x + inner.width + FLEX_GAP);
     }
 
-    const EVEN_SPREAD_WINDOW: Area = Area { cols: 81, ..WINDOW };
+    fn from_default_after(keys: &[&str]) -> FlexState {
+        keys.iter()
+            .fold(FlexState::default(), |state, key| reduce(state, key).0)
+    }
+
+    fn empty_box_size() -> Size {
+        measure(&Tree::root(vec![new_box()]), &[0])
+    }
+
+    #[test]
+    fn one_a_centres_an_empty_inner_box_with_one_cell_of_space_on_every_side() {
+        let state = from_default_after(&["A"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (outer, inner) = (boxes[0], boxes[1]);
+        let empty = empty_box_size();
+        assert_eq!(
+            (outer.width, outer.height),
+            (
+                empty.width + 2 * FLEX_BORDER,
+                empty.height + 2 * FLEX_BORDER
+            )
+        );
+        assert_eq!((outer.width, outer.height), (4, 4));
+        assert_eq!(
+            (inner.x, inner.y),
+            (outer.x + FLEX_BORDER, outer.y + FLEX_BORDER)
+        );
+        assert_eq!(
+            (inner.x + inner.width, inner.y + inner.height),
+            (
+                outer.x + outer.width - FLEX_BORDER,
+                outer.y + outer.height - FLEX_BORDER
+            )
+        );
+    }
+
+    #[test]
+    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_and_stays_centred() {
+        let state = from_default_after(&["A", "A"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
+        let empty = empty_box_size();
+        assert_eq!(
+            (outer.width, outer.height),
+            (
+                2 * empty.width + FLEX_GAP + 2 * FLEX_BORDER,
+                empty.height + 2 * FLEX_BORDER
+            )
+        );
+        assert_eq!((outer.width, outer.height), (7, 4));
+        assert_eq!(
+            (second.x, second.y),
+            (first.x + empty.width + FLEX_GAP, first.y)
+        );
+        assert_eq!(second.x, first.x + 3);
+        let left = outer.x - WINDOW.col;
+        let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
+        let top = outer.y - WINDOW.row;
+        let bottom = WINDOW.row + WINDOW.rows - (outer.y + outer.height);
+        assert!((left - right).abs() <= 1);
+        assert!((top - bottom).abs() <= 1);
+    }
+
+    const EVEN_SPREAD_WINDOW: Area = Area { cols: 82, ..WINDOW };
+    const UNEVEN_SPREAD_WINDOW: Area = Area { cols: 81, ..WINDOW };
 
     fn spread(children: Vec<Tree<FlexNode>>) -> FlexState {
         FlexState {
@@ -1180,17 +1247,17 @@ mod tests {
     #[test]
     fn a_full_space_between_box_gives_the_extra_cells_to_the_last_gaps() {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
-        let placements = placements(&state);
+        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, UNEVEN_SPREAD_WINDOW)).unwrap();
         let row = row_of(&placements, &state);
         assert_spread_edge_to_edge(&placements, &row);
-        let base = free_space(WINDOW, &row).div_euclid(2);
+        let base = free_space(UNEVEN_SPREAD_WINDOW, &row).div_euclid(2);
         assert_eq!(gaps_between(&row), vec![base, base + 1]);
     }
 
     #[test]
     fn a_full_space_between_box_widens_the_last_gaps_first() {
         let state = spread(vec![text("a"), new_box(), text("b"), new_box()]);
-        for (window, widened) in [(WINDOW, 1), (EVEN_SPREAD_WINDOW, 2)] {
+        for (window, widened) in [(UNEVEN_SPREAD_WINDOW, 1), (EVEN_SPREAD_WINDOW, 2)] {
             let [(_, placements)] = <[_; 1]>::try_from(scene(&state, window)).unwrap();
             let row = row_of(&placements, &state);
             assert_spread_edge_to_edge(&placements, &row);
@@ -1204,7 +1271,7 @@ mod tests {
     #[test]
     fn full_and_g_spread_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "H", "e", "l", "l", "o", "\r", "A", "s", "W", "o", "r", "l", "d", "\r", "w", "g",
+            "i", "H", "e", "l", "l", "o", "\r", "A", "s", "W", "o", "r", "l", "d", "\r", "w", "g",
         ];
         let state = keys
             .into_iter()
