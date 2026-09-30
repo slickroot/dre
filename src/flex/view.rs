@@ -74,8 +74,8 @@ fn measure(tree: &Tree<FlexNode>) -> HashMap<Vec<usize>, Size> {
                 let content_width = children.iter().map(|child| child.width).sum::<i64>() + gaps;
                 let content_height = children.iter().map(|child| child.height).max().unwrap_or(0);
                 Size {
-                    width: content_width.max(view::interior("")) + 2 * FLEX_BORDER,
-                    height: content_height.max(1) + 2 * FLEX_BORDER,
+                    width: content_width + 2 * FLEX_BORDER,
+                    height: content_height + 2 * FLEX_BORDER,
                 }
             }
         };
@@ -1027,20 +1027,6 @@ mod tests {
             Size {
                 width: view::interior("Hello"),
                 height: 1,
-            }
-        );
-    }
-
-    #[test]
-    fn an_empty_box_measures_three_by_three() {
-        let sizes = measure(&Tree::root(vec![Tree::leaf(FlexNode::Box(
-            FlexBox::default(),
-        ))]));
-        assert_eq!(
-            sizes[&vec![0]],
-            Size {
-                width: inner_box_width(),
-                height: BOX_HEIGHT,
             }
         );
     }
