@@ -1,4 +1,4 @@
-use super::terminal::{box_shape, brackets_shape, BoxStyle, BracketStyle};
+use super::terminal::{box_shape, BoxStyle};
 use crate::canvas::{Canvas, Rgba, Shape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -10,8 +10,6 @@ pub(super) struct CellSize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum TileStyle {
     Box(BoxStyle),
-    #[cfg_attr(not(test), allow(dead_code))]
-    Brackets(BracketStyle),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,7 +77,6 @@ impl TileShape {
     fn edge_extents(&self) -> (i64, i64) {
         match self.style {
             TileStyle::Box(style) => box_shape(0, 0, style).edge_extents(),
-            TileStyle::Brackets(style) => brackets_shape(0, 0, self.cell, style).edge_extents(),
         }
     }
 
@@ -117,9 +114,6 @@ impl TileShape {
         let (width, height) = (cols * self.cell.width, rows * self.cell.height);
         match self.style {
             TileStyle::Box(style) => self.cell_of(&box_shape(width, height, style), col, row),
-            TileStyle::Brackets(style) => {
-                self.cell_of(&brackets_shape(width, height, self.cell, style), col, row)
-            }
         }
     }
 
@@ -208,7 +202,6 @@ mod tests {
                     TileStyle::Box(outlined(colour, true, TOP_AND_LEFT)),
                     TileStyle::Box(outlined(colour, false, RIGHT_AND_BOTTOM)),
                     TileStyle::Box(borderless(colour)),
-                    TileStyle::Brackets(BracketStyle { border: BORDER }),
                 ]
             })
             .collect()
@@ -218,11 +211,6 @@ mod tests {
         let (width, height) = (cols * shape.cell.width, rows * shape.cell.height);
         match shape.style {
             TileStyle::Box(style) => Canvas::fill(width, height, &box_shape(width, height, style)),
-            TileStyle::Brackets(style) => Canvas::fill(
-                width,
-                height,
-                &brackets_shape(width, height, shape.cell, style),
-            ),
         }
     }
 
@@ -317,7 +305,6 @@ mod tests {
                 let (column_band, row_band) = shape.bands();
                 let (extent_x, extent_y) = match style {
                     TileStyle::Box(style) => box_shape(0, 0, style).edge_extents(),
-                    TileStyle::Brackets(style) => brackets_shape(0, 0, cell, style).edge_extents(),
                 };
                 assert!(column_band * cell.width > extent_x);
                 assert!((column_band - 1) * cell.width <= extent_x);

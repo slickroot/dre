@@ -110,41 +110,6 @@ impl Shape for BoxShape {
     }
 }
 
-pub(super) struct BracketsShape {
-    pub(super) width: i64,
-    pub(super) height: i64,
-    pub(super) margin_x: i64,
-    pub(super) margin_y: i64,
-    pub(super) offset: i64,
-    pub(super) arm: i64,
-    pub(super) thickness: i64,
-    pub(super) colour: Rgba,
-}
-
-impl BracketsShape {
-    pub(super) fn edge_extents(&self) -> (i64, i64) {
-        (
-            self.margin_x + self.arm - self.offset,
-            self.margin_y + self.arm - self.offset,
-        )
-    }
-}
-
-impl Shape for BracketsShape {
-    fn colour_at(&self, x: i64, y: i64) -> Option<Rgba> {
-        let from_corner_x = (x - (self.margin_x - self.offset))
-            .min(self.width - 1 - (self.margin_x - self.offset) - x);
-        let from_corner_y = (y - (self.margin_y - self.offset))
-            .min(self.height - 1 - (self.margin_y - self.offset) - y);
-        if from_corner_x < 0 || from_corner_y < 0 {
-            return None;
-        }
-        let in_horizontal_arm = from_corner_x < self.arm && from_corner_y < self.thickness;
-        let in_vertical_arm = from_corner_y < self.arm && from_corner_x < self.thickness;
-        (in_horizontal_arm || in_vertical_arm).then_some(self.colour)
-    }
-}
-
 pub(super) struct ArrowShape {
     pub(super) width: i64,
     pub(super) stop_rows: Vec<i64>,
@@ -242,7 +207,7 @@ impl Shape for LedShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::{BRACKET_ARM, BRACKET_OFFSET, OPAQUE};
+    use crate::render::OPAQUE;
     use crate::view::BORDER;
 
     const EDGE: Rgba = [10, 20, 30, OPAQUE];
@@ -384,121 +349,5 @@ mod tests {
             ..box_shape(30, 30, 0)
         };
         assert_eq!(shape.colour_at(0, 15), Some(FILL));
-    }
-
-    const BRACKETS_COLOUR: Rgba = [40, 50, 60, OPAQUE];
-    const BRACKETS_THICKNESS: i64 = 2;
-    const BRACKETS_MARGIN: i64 = 12;
-    const BRACKETS_BOX: i64 = 40;
-
-    fn brackets_shape() -> BracketsShape {
-        BracketsShape {
-            width: BRACKETS_BOX + 2 * BRACKETS_MARGIN,
-            height: BRACKETS_BOX + 2 * BRACKETS_MARGIN,
-            margin_x: BRACKETS_MARGIN,
-            margin_y: BRACKETS_MARGIN,
-            offset: BRACKET_OFFSET,
-            arm: BRACKET_ARM,
-            thickness: BRACKETS_THICKNESS,
-            colour: BRACKETS_COLOUR,
-        }
-    }
-
-    fn corner(shape: &BracketsShape) -> i64 {
-        shape.margin_x - shape.offset
-    }
-
-    fn painted_rows(shape: &BracketsShape, x: i64) -> Vec<i64> {
-        (0..shape.height)
-            .filter(|&y| shape.colour_at(x, y).is_some())
-            .collect()
-    }
-
-    #[test]
-    fn a_bracket_is_an_l_of_two_arms_meeting_at_the_outer_corner() {
-        let shape = brackets_shape();
-        let start = corner(&shape);
-        let arm_end = start + shape.arm - 1;
-        assert_eq!(shape.colour_at(start, start), Some(BRACKETS_COLOUR));
-        assert_eq!(shape.colour_at(arm_end, start), Some(BRACKETS_COLOUR));
-        assert_eq!(shape.colour_at(start, arm_end), Some(BRACKETS_COLOUR));
-        assert_eq!(shape.colour_at(arm_end + 1, start), None);
-        assert_eq!(shape.colour_at(start, arm_end + 1), None);
-    }
-
-    #[test]
-    fn an_arm_is_as_thick_as_the_border() {
-        let shape = brackets_shape();
-        let start = corner(&shape);
-        let arm_middle = start + shape.arm - 1;
-        assert_eq!(
-            shape.colour_at(arm_middle, start + shape.thickness - 1),
-            Some(BRACKETS_COLOUR)
-        );
-        assert_eq!(shape.colour_at(arm_middle, start + shape.thickness), None);
-        assert_eq!(
-            shape.colour_at(start + shape.thickness - 1, arm_middle),
-            Some(BRACKETS_COLOUR)
-        );
-        assert_eq!(shape.colour_at(start + shape.thickness, arm_middle), None);
-    }
-
-    #[test]
-    fn the_four_brackets_mirror_each_other() {
-        let shape = brackets_shape();
-        for x in 0..shape.width {
-            for y in 0..shape.height {
-                assert_eq!(
-                    shape.colour_at(x, y),
-                    shape.colour_at(shape.width - 1 - x, y)
-                );
-                assert_eq!(
-                    shape.colour_at(x, y),
-                    shape.colour_at(x, shape.height - 1 - y)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_bracket_sits_offset_out_from_the_box_edge() {
-        let shape = brackets_shape();
-        let box_edge = shape.margin_x;
-        assert_eq!(corner(&shape), box_edge - BRACKET_OFFSET);
-        assert_eq!(shape.colour_at(corner(&shape) - 1, corner(&shape)), None);
-        assert_eq!(
-            painted_rows(&shape, corner(&shape)).first(),
-            Some(&corner(&shape))
-        );
-    }
-
-    #[test]
-    fn the_box_interior_and_the_edges_between_brackets_are_transparent() {
-        let shape = brackets_shape();
-        let middle = shape.width / 2;
-        assert_eq!(shape.colour_at(middle, middle), None);
-        assert_eq!(shape.colour_at(middle, corner(&shape)), None);
-        assert_eq!(shape.colour_at(corner(&shape), middle), None);
-    }
-
-    #[test]
-    fn brackets_are_solid_with_no_antialiasing() {
-        let shape = brackets_shape();
-        for x in 0..shape.width {
-            for y in 0..shape.height {
-                if let Some(pixel) = shape.colour_at(x, y) {
-                    assert_eq!(pixel, BRACKETS_COLOUR);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_edge_extents_hold_a_whole_bracket_in_the_corner_tiles() {
-        let shape = brackets_shape();
-        let (extent_x, extent_y) = shape.edge_extents();
-        assert_eq!(extent_x, shape.margin_x + shape.arm - shape.offset);
-        assert_eq!(extent_y, shape.margin_y + shape.arm - shape.offset);
-        assert!(extent_x >= corner(&shape) + shape.arm);
     }
 }

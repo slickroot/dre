@@ -109,7 +109,6 @@ impl Shape for BracketCornerShape {
 mod tests {
     use super::*;
     use crate::canvas::Canvas;
-    use crate::render::shapes::BracketsShape;
     use crate::render::{BRACKET_ARM, BRACKET_OFFSET, OPAQUE};
     use crate::style::{CELL_HEIGHT, CELL_WIDTH};
     use crate::view::BRACKET_MARGIN;
@@ -149,35 +148,11 @@ mod tests {
         )
     }
 
-    fn whole_canvas(cols: i64, rows: i64, cell: CellSize) -> Canvas {
-        let shape = BracketsShape {
-            width: cols * cell.width,
-            height: rows * cell.height,
-            margin_x: BRACKET_MARGIN * cell.width,
-            margin_y: BRACKET_MARGIN * cell.height,
-            offset: BRACKET_OFFSET,
-            arm: BRACKET_ARM,
-            thickness: THICKNESS,
-            colour: COLOUR,
-        };
-        Canvas::fill(shape.width, shape.height, &shape)
-    }
-
     fn block_origin(corner: Corner, cols: i64, rows: i64, cell: CellSize) -> (i64, i64) {
         let blocks = corner_cells(cell);
         let col = if corner.is_right() { cols - blocks } else { 0 };
         let row = if corner.is_bottom() { rows - blocks } else { 0 };
         (col * cell.width, row * cell.height)
-    }
-
-    fn crop_block(whole: &Canvas, corner: Corner, cols: i64, rows: i64, cell: CellSize) -> Canvas {
-        let (x, y) = block_origin(corner, cols, rows, cell);
-        whole.crop(
-            x,
-            x + corner_cells(cell) * cell.width,
-            y,
-            y + corner_cells(cell) * cell.height,
-        )
     }
 
     #[test]
@@ -195,47 +170,35 @@ mod tests {
     }
 
     #[test]
-    fn each_corner_matches_the_whole_placement_pixels_in_its_block() {
+    fn the_four_corner_blocks_form_a_bracket_at_each_corner_of_the_placement() {
         for cell in CELLS {
             let blocks = corner_cells(cell);
-            for (cols, rows) in [
-                (blocks + SPARE_CELLS, blocks + SPARE_CELLS),
-                (2 * blocks, 2 * blocks),
-                (3 * blocks + SPARE_CELLS, 2 * blocks + 1),
-            ] {
-                let whole = whole_canvas(cols, rows, cell);
-                for corner in CORNERS {
-                    assert_eq!(
-                        corner_canvas(corner, cell).pixels,
-                        crop_block(&whole, corner, cols, rows, cell).pixels,
-                        "{corner:?} {cell:?} {cols}x{rows}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn overlapping_corners_add_up_to_the_whole_placement_pixels() {
-        for cell in CELLS {
-            let blocks = corner_cells(cell);
-            for (cols, rows) in [(blocks, blocks), (blocks + 1, blocks), (blocks, blocks + 1)] {
-                let whole = whole_canvas(cols, rows, cell);
-                let mut union = vec![0u8; whole.pixels.len()];
-                for corner in CORNERS {
-                    let (origin_x, origin_y) = block_origin(corner, cols, rows, cell);
-                    let block = corner_canvas(corner, cell);
-                    for y in 0..block.height {
-                        for x in 0..block.width {
-                            let from = ((y * block.width + x) * 4) as usize;
-                            let to = (((origin_y + y) * whole.width + origin_x + x) * 4) as usize;
-                            if block.pixels[from + 3] != 0 {
-                                union[to..to + 4].copy_from_slice(&block.pixels[from..from + 4]);
-                            }
+            let (cols, rows) = (2 * blocks + SPARE_CELLS, 2 * blocks + SPARE_CELLS);
+            let (width, height) = (cols * cell.width, rows * cell.height);
+            let mut ink = vec![false; (width * height) as usize];
+            for corner in CORNERS {
+                let (origin_x, origin_y) = block_origin(corner, cols, rows, cell);
+                let block = corner_canvas(corner, cell);
+                for y in 0..block.height {
+                    for x in 0..block.width {
+                        if block.pixels[((y * block.width + x) * 4 + 3) as usize] != 0 {
+                            ink[((origin_y + y) * width + origin_x + x) as usize] = true;
                         }
                     }
                 }
-                assert_eq!(union, whole.pixels, "{cell:?} {cols}x{rows}");
+            }
+            let start_x = BRACKET_MARGIN * cell.width - BRACKET_OFFSET;
+            let start_y = BRACKET_MARGIN * cell.height - BRACKET_OFFSET;
+            for y in 0..height {
+                for x in 0..width {
+                    let from_x = x.min(width - 1 - x) - start_x;
+                    let from_y = y.min(height - 1 - y) - start_y;
+                    let expected = from_x >= 0
+                        && from_y >= 0
+                        && ((from_x < BRACKET_ARM && from_y < THICKNESS)
+                            || (from_y < BRACKET_ARM && from_x < THICKNESS));
+                    assert_eq!(ink[(y * width + x) as usize], expected, "{cell:?} {x},{y}");
+                }
             }
         }
     }

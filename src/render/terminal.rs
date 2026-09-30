@@ -3,9 +3,9 @@ use std::num::NonZeroU32;
 
 use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape, BracketsShape, LedShape};
+use super::shapes::{ArrowShape, BoxShape, LedShape};
 use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
-use super::{colour, Renderer, ARROW_OPACITY, BRACKET_ARM, BRACKET_OFFSET, OPAQUE, ROUNDED_RADIUS};
+use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
@@ -13,7 +13,7 @@ use crate::kitty;
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
-use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides, BRACKET_MARGIN};
+use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides};
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -39,11 +39,6 @@ pub(super) struct BoxStyle {
     pub(super) fill_alpha: Option<u8>,
     pub(super) rounded: bool,
     pub(super) sides: Sides,
-    pub(super) border: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct BracketStyle {
     pub(super) border: i64,
 }
 
@@ -107,25 +102,6 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
-pub(super) fn brackets_shape(
-    width: i64,
-    height: i64,
-    cell: CellSize,
-    style: BracketStyle,
-) -> BracketsShape {
-    let (r, g, b) = colour(None);
-    BracketsShape {
-        width,
-        height,
-        margin_x: BRACKET_MARGIN * cell.width,
-        margin_y: BRACKET_MARGIN * cell.height,
-        offset: BRACKET_OFFSET,
-        arm: BRACKET_ARM,
-        thickness: style.border,
-        colour: [r, g, b, OPAQUE],
-    }
-}
-
 fn whole(window: Window) -> Area {
     Area {
         col: 0,
@@ -177,12 +153,6 @@ enum SpriteKey {
         stops: Vec<i64>,
         shaft: i64,
     },
-    #[cfg_attr(not(test), allow(dead_code))]
-    Brackets {
-        width: i64,
-        height: i64,
-        border: i64,
-    },
     Led {
         width: i64,
         height: i64,
@@ -210,15 +180,6 @@ fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
         height,
         stops: style.stops.clone(),
         shaft: style.shaft,
-    }
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn brackets_key(width: i64, height: i64, style: BracketStyle) -> SpriteKey {
-    SpriteKey::Brackets {
-        width,
-        height,
-        border: style.border,
     }
 }
 
@@ -532,7 +493,7 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Brackets { border } => {
-                    self.draw_brackets(frame, geometry, area, BracketStyle { border: *border })
+                    self.draw_brackets(frame, geometry, area, *border)
                 }
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
                     frame,
@@ -637,13 +598,7 @@ impl TerminalRenderer {
         });
     }
 
-    fn draw_brackets(
-        &mut self,
-        frame: &mut Frame,
-        geometry: Geometry,
-        area: Area,
-        style: BracketStyle,
-    ) {
+    fn draw_brackets(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, border: i64) {
         let cell = self.cell_size();
         let blocks = corner_cells(cell);
         for corner in CORNERS {
@@ -659,7 +614,7 @@ impl TerminalRenderer {
             }
             let key = BracketKey {
                 corner,
-                border: style.border,
+                border,
                 cell,
             };
             place_sprite(
@@ -767,14 +722,6 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    fn brackets_canvas(&self, cell_width: i64, cell_height: i64, style: BracketStyle) -> Canvas {
-        let width = self.cells_to_pixels_x(cell_width);
-        let height = self.cells_to_pixels_y(cell_height);
-        let shape = brackets_shape(width, height, self.cell_size(), style);
-        Canvas::fill(width, height, &shape)
-    }
-
     fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
@@ -827,7 +774,7 @@ mod tests {
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
     use crate::view::editor;
-    use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
+    use crate::view::{ALL_SIDES, BORDER, BRACKET_MARGIN, FOOTER_ROWS};
     use crate::State;
 
     #[test]
@@ -1214,11 +1161,6 @@ mod tests {
                     lit: *lit,
                 },
             ),
-            PlacementNode::Brackets { border } => brackets_key(
-                placement.width,
-                placement.height,
-                BracketStyle { border: *border },
-            ),
             _ => panic!("expected a cached placement"),
         }
     }
@@ -1413,45 +1355,6 @@ mod tests {
             (pixel[0], pixel[1], pixel[2], pixel[3])
                 == (foreground_r, foreground_g, foreground_b, OPAQUE)
         }));
-    }
-
-    const BRACKET_CELLS: [(i64, i64); 2] = [(CELL_WIDTH, CELL_HEIGHT), (11, 23)];
-
-    fn bracket_sizes(blocks: i64) -> Vec<(i64, i64)> {
-        vec![
-            (blocks, blocks),
-            (blocks + 1, blocks),
-            (blocks, blocks + 1),
-            (2 * blocks - 1, 2 * blocks - 1),
-            (2 * blocks, 2 * blocks),
-            (3 * blocks + 1, 2 * blocks + 3),
-        ]
-    }
-
-    #[test]
-    fn corner_sprites_add_up_to_the_whole_placement_brackets_at_every_size() {
-        for (cell_width, cell_height) in BRACKET_CELLS {
-            let blocks = corner_cells(CellSize {
-                width: cell_width,
-                height: cell_height,
-            });
-            for (cols, rows) in bracket_sizes(blocks) {
-                let mut r = renderer_on(window(80, 80, cell_width, cell_height));
-                let node = selected_box_node();
-                let images = sprites(&mut r, &[box_placement(&node, 3, 5, cols, rows)]);
-                let drawn = composed(&images, BRACKETS_Z, r.window);
-                let whole = r.brackets_canvas(cols, rows, BracketStyle { border: BORDER });
-                assert_eq!((drawn.col, drawn.row), (3, 5));
-                assert_eq!(
-                    (drawn.canvas.width, drawn.canvas.height),
-                    (whole.width, whole.height)
-                );
-                assert_eq!(
-                    drawn.canvas.pixels, whole.pixels,
-                    "{cell_width}x{cell_height} {cols}x{rows}"
-                );
-            }
-        }
     }
 
     #[test]
@@ -3096,9 +2999,6 @@ mod tests {
                 sides: *sides,
                 border: *border,
             }),
-            PlacementNode::Brackets { border } => {
-                TileStyle::Brackets(BracketStyle { border: *border })
-            }
             _ => panic!("expected a box or brackets"),
         };
         TileShape {
