@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use types::Tree;
 
@@ -18,19 +17,6 @@ const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 struct Size {
     width: i64,
     height: i64,
-}
-
-#[allow(dead_code)]
-fn child_sizes(
-    tree: &Tree<FlexNode>,
-    sizes: &HashMap<Vec<usize>, Size>,
-    path: &[usize],
-) -> Vec<Size> {
-    (0..)
-        .map(|index| [path, &[index]].concat())
-        .take_while(|child| tree.contains(child))
-        .map(|child| sizes[&child])
-        .collect()
 }
 
 fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
@@ -75,54 +61,6 @@ fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
             offset
         })
         .collect()
-}
-
-#[allow(dead_code)]
-struct Frame {
-    y: i64,
-    inner_height: i64,
-    cursor: i64,
-    gap: i64,
-    widened_from: i64,
-}
-
-#[allow(dead_code)]
-impl Frame {
-    fn new(
-        width: FlexWidth,
-        justify: Justify,
-        x: i64,
-        y: i64,
-        size: Size,
-        children: &[Size],
-    ) -> Self {
-        let inner_width = size.width - 2 * FLEX_BORDER;
-        let gaps = children.len().saturating_sub(1) as i64;
-        let children_width: i64 = children.iter().map(|child| child.width).sum();
-        let (gap, widened_from) = match justify {
-            Justify::SpaceBetween if gaps > 0 => {
-                let free = inner_width - children_width;
-                (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
-            }
-            _ => (FLEX_GAP, gaps),
-        };
-        let row_width = children_width + gap * gaps + (gaps - widened_from);
-        let row_shift = match width {
-            FlexWidth::Fit => (inner_width - row_width).div_euclid(2),
-            FlexWidth::Full => 0,
-        };
-        Frame {
-            y,
-            inner_height: size.height - 2 * FLEX_BORDER,
-            cursor: x + FLEX_BORDER + row_shift,
-            gap,
-            widened_from,
-        }
-    }
-
-    fn gap_after(&self, index: usize) -> i64 {
-        self.gap + i64::from(index as i64 >= self.widened_from)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
