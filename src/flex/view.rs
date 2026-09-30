@@ -7,6 +7,7 @@ use super::state::{FlexState, FlexWidth};
 const FLEX_BORDER: i64 = 1;
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
+const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
     let text = state.text.as_str();
@@ -23,6 +24,7 @@ pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
                 colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
+                solid_fill: state.filled.then_some(FLEX_FILL_COLOUR),
                 rounded: false,
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
@@ -246,5 +248,29 @@ mod tests {
         let state = full("Hello");
         let [(_, placements)] = <[_; 1]>::try_from(scene(&state, narrow)).unwrap();
         assert_eq!(the_box(&placements).width, narrow.cols);
+    }
+
+    fn solid_fill(placement: &Placement<'_>) -> Option<Rgb> {
+        let PlacementNode::Box { solid_fill, .. } = placement.node else {
+            unreachable!()
+        };
+        solid_fill
+    }
+
+    #[test]
+    fn an_unfilled_box_has_no_solid_fill() {
+        let state = with_text("Hello");
+        let placements = placements(&state);
+        assert_eq!(solid_fill(the_box(&placements)), None);
+    }
+
+    #[test]
+    fn a_filled_box_is_solid_with_the_flex_fill_colour() {
+        let state = FlexState {
+            filled: true,
+            ..with_text("Hello")
+        };
+        let placements = placements(&state);
+        assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
     }
 }

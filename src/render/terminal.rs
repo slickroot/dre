@@ -1,10 +1,11 @@
 use std::io::{self, Write};
 use std::num::NonZeroU32;
 
+use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
-use super::shapes::{ArrowShape, BoxShape, BracketsShape, LedShape};
-use super::tiles::{CellSize, TileKey, TileShape, TileStyle};
-use super::{colour, Renderer, ARROW_OPACITY, BRACKET_ARM, BRACKET_OFFSET, OPAQUE, ROUNDED_RADIUS};
+use super::shapes::{ArrowShape, BoxShape, LedShape};
+use super::tiles::{CellSize, TileKey, TileShape};
+use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
 use crate::kitty;
@@ -12,7 +13,7 @@ use crate::kitty;
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
-use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides, BRACKET_MARGIN};
+use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides};
 
 const BLANK: char = ' ';
 const HOME_CURSOR: &str = "\x1b[H";
@@ -36,13 +37,9 @@ pub(super) struct BoxStyle {
     pub(super) colour: Rgb,
     pub(super) fill: Option<u8>,
     pub(super) fill_alpha: Option<u8>,
+    pub(super) solid_fill: Option<Rgb>,
     pub(super) rounded: bool,
     pub(super) sides: Sides,
-    pub(super) border: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct BracketStyle {
     pub(super) border: i64,
 }
 
@@ -94,7 +91,10 @@ fn fill_colour(fill: Option<u8>, alpha: Option<u8>) -> (u8, u8, u8, u8) {
 
 pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     let (r, g, b) = style.colour;
-    let (fill_r, fill_g, fill_b, fill_a) = fill_colour(style.fill, style.fill_alpha);
+    let (fill_r, fill_g, fill_b, fill_a) = match style.solid_fill {
+        Some((r, g, b)) => (r, g, b, OPAQUE),
+        None => fill_colour(style.fill, style.fill_alpha),
+    };
     BoxShape {
         width,
         height,
@@ -103,25 +103,6 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
         sides: style.sides,
         edge: [r, g, b, OPAQUE],
         fill: [fill_r, fill_g, fill_b, fill_a],
-    }
-}
-
-pub(super) fn brackets_shape(
-    width: i64,
-    height: i64,
-    cell: CellSize,
-    style: BracketStyle,
-) -> BracketsShape {
-    let (r, g, b) = colour(None);
-    BracketsShape {
-        width,
-        height,
-        margin_x: BRACKET_MARGIN * cell.width,
-        margin_y: BRACKET_MARGIN * cell.height,
-        offset: BRACKET_OFFSET,
-        arm: BRACKET_ARM,
-        thickness: style.border,
-        colour: [r, g, b, OPAQUE],
     }
 }
 
@@ -166,6 +147,7 @@ enum SpriteKey {
         colour: Rgb,
         fill: Option<u8>,
         fill_alpha: Option<u8>,
+        solid_fill: Option<Rgb>,
         rounded: bool,
         sides: Sides,
         border: i64,
@@ -175,11 +157,6 @@ enum SpriteKey {
         height: i64,
         stops: Vec<i64>,
         shaft: i64,
-    },
-    Brackets {
-        width: i64,
-        height: i64,
-        border: i64,
     },
     Led {
         width: i64,
@@ -196,6 +173,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         colour: style.colour,
         fill: style.fill,
         fill_alpha: style.fill_alpha,
+        solid_fill: style.solid_fill,
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
@@ -208,14 +186,6 @@ fn arrow_key(width: i64, height: i64, style: &ArrowStyle) -> SpriteKey {
         height,
         stops: style.stops.clone(),
         shaft: style.shaft,
-    }
-}
-
-fn brackets_key(width: i64, height: i64, style: BracketStyle) -> SpriteKey {
-    SpriteKey::Brackets {
-        width,
-        height,
-        border: style.border,
     }
 }
 
@@ -434,7 +404,31 @@ pub(crate) struct TerminalRenderer {
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
     tile_canvases: std::collections::HashMap<TileKey, Canvas>,
     tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
+    bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_sprite<K, C>(
+    images: &mut std::collections::HashMap<K, kitty::ImageId>,
+    image_ids: &mut ImageIds,
+    frame: &mut Frame,
+    key: K,
+    geometry: Geometry,
+    area: Area,
+    z: i32,
+    canvas: impl FnOnce() -> C,
+) where
+    K: std::hash::Hash + Eq,
+    C: std::borrow::Borrow<Canvas>,
+{
+    if let Some(id) = images.get(&key).copied() {
+        frame.place_cached(id, geometry, area, z);
+    } else {
+        let id = image_ids.allocate();
+        images.insert(key, id);
+        frame.place_fresh(id, canvas().borrow(), geometry, area, z);
+    }
 }
 
 impl Renderer for TerminalRenderer {
@@ -458,6 +452,7 @@ impl TerminalRenderer {
             glyph_images: std::collections::HashMap::new(),
             tile_canvases: std::collections::HashMap::new(),
             tile_images: std::collections::HashMap::new(),
+            bracket_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
         }
     }
@@ -487,6 +482,7 @@ impl TerminalRenderer {
                     colour,
                     fill,
                     opacity,
+                    solid_fill,
                     rounded,
                     sides,
                     border,
@@ -498,13 +494,14 @@ impl TerminalRenderer {
                         colour: *colour,
                         fill: *fill,
                         fill_alpha: quantized_alpha(*opacity),
+                        solid_fill: *solid_fill,
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
                     },
                 ),
                 PlacementNode::Brackets { border } => {
-                    self.draw_brackets(frame, geometry, area, BracketStyle { border: *border })
+                    self.draw_brackets(frame, geometry, area, *border)
                 }
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
                     frame,
@@ -562,7 +559,7 @@ impl TerminalRenderer {
     fn place_tiles(
         &mut self,
         frame: &mut Frame,
-        style: TileStyle,
+        style: BoxStyle,
         geometry: Geometry,
         area: Area,
         z: i32,
@@ -584,23 +581,23 @@ impl TerminalRenderer {
             if !frame.shows(cell, area) {
                 continue;
             }
-            if let Some(id) = self.tile_images.get(&key).copied() {
-                frame.place_cached(id, cell, area, z);
-            } else {
-                let id = self.image_ids.allocate();
-                self.tile_images.insert(key, id);
-                let tile = self
-                    .tile_canvases
-                    .entry(key)
-                    .or_insert_with(|| key.canvas());
-                frame.place_fresh(id, tile, cell, area, z);
-            }
+            let tile_canvases = &mut self.tile_canvases;
+            place_sprite(
+                &mut self.tile_images,
+                &mut self.image_ids,
+                frame,
+                key,
+                cell,
+                area,
+                z,
+                || &*tile_canvases.entry(key).or_insert_with(|| key.canvas()),
+            );
         }
         true
     }
 
     fn draw_box(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: BoxStyle) {
-        if self.place_tiles(frame, TileStyle::Box(style), geometry, area, BOX_Z) {
+        if self.place_tiles(frame, style, geometry, area, BOX_Z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
@@ -609,26 +606,36 @@ impl TerminalRenderer {
         });
     }
 
-    fn draw_brackets(
-        &mut self,
-        frame: &mut Frame,
-        geometry: Geometry,
-        area: Area,
-        style: BracketStyle,
-    ) {
-        if self.place_tiles(
-            frame,
-            TileStyle::Brackets(style),
-            geometry,
-            area,
-            BRACKETS_Z,
-        ) {
-            return;
+    fn draw_brackets(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, border: i64) {
+        let cell = self.cell_size();
+        let blocks = corner_cells(cell);
+        for corner in CORNERS {
+            let (col, row) = corner_offset(corner, geometry.width, geometry.height, cell);
+            let block = Geometry {
+                x: geometry.x + col,
+                y: geometry.y + row,
+                width: blocks,
+                height: blocks,
+            };
+            if !frame.shows(block, area) {
+                continue;
+            }
+            let key = BracketKey {
+                corner,
+                border,
+                cell,
+            };
+            place_sprite(
+                &mut self.bracket_images,
+                &mut self.image_ids,
+                frame,
+                key,
+                block,
+                area,
+                BRACKETS_Z,
+                || key.canvas(),
+            );
         }
-        let key = brackets_key(geometry.width, geometry.height, style);
-        self.place_cached(frame, key, geometry, area, BRACKETS_Z, |renderer| {
-            renderer.brackets_canvas(geometry.width, geometry.height, style)
-        });
     }
 
     fn draw_led(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LedStyle) {
@@ -723,13 +730,6 @@ impl TerminalRenderer {
         Canvas::fill(width, height, &box_shape(width, height, style))
     }
 
-    fn brackets_canvas(&self, cell_width: i64, cell_height: i64, style: BracketStyle) -> Canvas {
-        let width = self.cells_to_pixels_x(cell_width);
-        let height = self.cells_to_pixels_y(cell_height);
-        let shape = brackets_shape(width, height, self.cell_size(), style);
-        Canvas::fill(width, height, &shape)
-    }
-
     fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
@@ -777,12 +777,12 @@ impl TerminalRenderer {
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
-    use super::super::tiles::{cells_with_middle, TileShape, TileStyle};
+    use super::super::tiles::{cells_with_middle, TileShape};
     use super::*;
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
     use crate::view::editor;
-    use crate::view::{ALL_SIDES, BORDER, FOOTER_ROWS};
+    use crate::view::{ALL_SIDES, BORDER, BRACKET_MARGIN, FOOTER_ROWS};
     use crate::State;
 
     #[test]
@@ -814,6 +814,25 @@ mod tests {
         );
         assert!(box_fill.0 > 0);
         assert_eq!(footer_fill, box_fill);
+    }
+
+    #[test]
+    fn box_shape_with_a_solid_fill_is_filled_with_that_colour_opaque() {
+        let (r, g, b) = (12, 34, 56);
+        let shape = box_shape(
+            30,
+            30,
+            BoxStyle {
+                colour: colour(None),
+                fill: None,
+                fill_alpha: None,
+                solid_fill: Some((r, g, b)),
+                rounded: false,
+                sides: ALL_SIDES,
+                border: BORDER,
+            },
+        );
+        assert_eq!(shape.fill, [r, g, b, OPAQUE]);
     }
 
     fn edge_rgba(index: Option<u8>) -> (u8, u8, u8, u8) {
@@ -1047,6 +1066,7 @@ mod tests {
             colour: crate::style::rgb(colour),
             fill,
             opacity: fill.map(|_| BOX_FILL_OPACITY),
+            solid_fill: None,
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
@@ -1059,6 +1079,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 border,
                 ..
@@ -1066,6 +1087,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides: new_sides,
                 border,
@@ -1080,6 +1102,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 ..
@@ -1087,6 +1110,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border: new_border,
@@ -1138,6 +1162,7 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border,
@@ -1148,6 +1173,7 @@ mod tests {
                     colour: *colour,
                     fill: *fill,
                     fill_alpha: quantized_alpha(*opacity),
+                    solid_fill: *solid_fill,
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
@@ -1168,11 +1194,6 @@ mod tests {
                     colour: *colour,
                     lit: *lit,
                 },
-            ),
-            PlacementNode::Brackets { border } => brackets_key(
-                placement.width,
-                placement.height,
-                BracketStyle { border: *border },
             ),
             _ => panic!("expected a cached placement"),
         }
@@ -1370,6 +1391,27 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn moving_or_resizing_brackets_uploads_no_new_image_after_the_first_frame() {
+        let mut r = renderer_on(window(80, 80, CELL_WIDTH, CELL_HEIGHT));
+        let node = selected_box_node();
+        let blocks = corner_cells(r.cell_size());
+        let first = rendered_placements(
+            &mut r,
+            &[box_placement(&node, 2, 2, blocks + 3, blocks + 3)],
+        );
+        assert_eq!(shown_ids(&first).len(), CORNERS.len());
+        for (x, y, width, height) in [
+            (5, 6, blocks + 3, blocks + 3),
+            (5, 6, blocks + 9, blocks + 4),
+            (1, 1, 2 * blocks - 1, 2 * blocks - 1),
+        ] {
+            let next = rendered_placements(&mut r, &[box_placement(&node, x, y, width, height)]);
+            assert!(shown_ids(&next).is_empty());
+            assert_eq!(placed_ids(&next).len(), CORNERS.len());
+        }
+    }
+
     impl Placed {
         fn canvas(&self) -> &Canvas {
             match &self.image {
@@ -1423,11 +1465,14 @@ mod tests {
         for image in &layer {
             let (x, y) = origin(image);
             let canvas = canvas_of(image);
-            let span = (canvas.width * channels) as usize;
             for line in 0..canvas.height {
-                let from = (line * canvas.width * channels) as usize;
-                let to = (((y + line) * width + x) * channels) as usize;
-                pixels[to..to + span].copy_from_slice(&canvas.pixels[from..from + span]);
+                for column in 0..canvas.width {
+                    let from = ((line * canvas.width + column) * channels) as usize;
+                    let to = (((y + line) * width + x + column) * channels) as usize;
+                    if canvas.pixels[from + 3] != 0 {
+                        pixels[to..to + 4].copy_from_slice(&canvas.pixels[from..from + 4]);
+                    }
+                }
             }
         }
         Sprite {
@@ -2608,6 +2653,50 @@ mod tests {
     }
 
     #[test]
+    fn a_block_poking_out_of_the_placement_is_cropped_to_the_screen() {
+        let frame = Frame::new(window(20, 10, 4, 8));
+        let area = whole(frame.window);
+        let poking = Geometry {
+            x: -1,
+            y: -1,
+            width: 2,
+            height: 2,
+        };
+        let crop = frame.crop(poking, area).unwrap();
+        assert_eq!((crop.col, crop.row), (0, 0));
+        assert_eq!((crop.first_x, crop.first_y), (4, 8));
+        assert_eq!((crop.last_x, crop.last_y), (8, 16));
+        let outside = Geometry {
+            x: -2,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        assert!(!frame.shows(outside, area));
+    }
+
+    #[test]
+    fn a_block_beyond_the_area_is_clipped_to_the_area() {
+        let frame = Frame::new(window(20, 10, 4, 8));
+        let area = Area {
+            col: 2,
+            row: 2,
+            cols: 3,
+            rows: 3,
+        };
+        let block = Geometry {
+            x: 4,
+            y: 0,
+            width: 4,
+            height: 4,
+        };
+        let crop = frame.crop(block, area).unwrap();
+        assert_eq!((crop.col, crop.row), (4, 2));
+        assert_eq!((crop.first_x, crop.last_x), (0, 4));
+        assert_eq!((crop.first_y, crop.last_y), (16, 32));
+    }
+
+    #[test]
     fn arrows_with_different_stops_are_redrawn() {
         let mut r = renderer_on(window(40, 20, 2, 4));
         let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
@@ -2645,6 +2734,7 @@ mod tests {
             colour,
             fill,
             opacity,
+            solid_fill,
             rounded,
             sides,
             border,
@@ -2659,6 +2749,7 @@ mod tests {
                 colour: *colour,
                 fill: *fill,
                 fill_alpha: quantized_alpha(*opacity),
+                solid_fill: *solid_fill,
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
@@ -2933,20 +3024,19 @@ mod tests {
                 colour,
                 fill,
                 opacity,
+                solid_fill,
                 rounded,
                 sides,
                 border,
-            } => TileStyle::Box(BoxStyle {
+            } => BoxStyle {
                 colour: *colour,
                 fill: *fill,
                 fill_alpha: quantized_alpha(*opacity),
+                solid_fill: *solid_fill,
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
-            }),
-            PlacementNode::Brackets { border } => {
-                TileStyle::Brackets(BracketStyle { border: *border })
-            }
+            },
             _ => panic!("expected a box or brackets"),
         };
         TileShape {
@@ -2969,12 +3059,7 @@ mod tests {
     }
 
     fn smallest_tiled_selected_box(r: &TerminalRenderer, colour: Option<u8>) -> (i64, i64) {
-        let (box_cols, box_rows) = smallest_tiled(r, &outlined_node(colour));
-        let (brackets_cols, brackets_rows) = smallest_tiled(r, &brackets_node());
-        (
-            box_cols.max(brackets_cols - 2 * BRACKET_MARGIN),
-            box_rows.max(brackets_rows - 2 * BRACKET_MARGIN),
-        )
+        smallest_tiled(r, &outlined_node(colour))
     }
 
     fn selected_box(
@@ -3021,7 +3106,7 @@ mod tests {
         let first = rendered_placements(&mut r, &narrow);
         let second = rendered_placements(&mut r, &wide);
 
-        let tiled_rows: i64 = narrow.iter().map(|placement| placement.height).sum();
+        let tiled_rows = narrow[0].height;
         let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
         assert!(shown_ids(&second).is_empty());
         assert!(deleted_ids(&second).is_empty());
@@ -3125,11 +3210,11 @@ mod tests {
         let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
             .into_iter()
             .map(|(col, row)| (col, row, BOX_Z))
-            .chain(
-                cells_of(&brackets)
-                    .into_iter()
-                    .map(|(col, row)| (col, row, BRACKETS_Z)),
-            )
+            .chain(CORNERS.into_iter().map(|corner| {
+                let (col, row) =
+                    corner_offset(corner, brackets.width, brackets.height, r.cell_size());
+                (brackets.x + col, brackets.y + row, BRACKETS_Z)
+            }))
             .collect();
         assert_eq!(queued, expected);
     }

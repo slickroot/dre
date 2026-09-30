@@ -44,6 +44,7 @@ pub enum PlacementNode<'a> {
         colour: Rgb,
         fill: Option<u8>,
         opacity: Option<f64>,
+        solid_fill: Option<Rgb>,
         rounded: bool,
         sides: Sides,
         border: i64,
@@ -238,6 +239,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                 colour: style::rgb(None),
                 fill: Some(FOREGROUND),
                 opacity: Some(FOOTER_FILL_OPACITY),
+                solid_fill: None,
                 rounded: false,
                 sides: if model.mode == FooterMode::Naming {
                     ALL_SIDES

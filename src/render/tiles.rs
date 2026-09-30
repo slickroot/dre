@@ -1,4 +1,4 @@
-use super::terminal::{box_shape, brackets_shape, BoxStyle, BracketStyle};
+use super::terminal::{box_shape, BoxStyle};
 use crate::canvas::{Canvas, Rgba, Shape};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -8,14 +8,8 @@ pub(super) struct CellSize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum TileStyle {
-    Box(BoxStyle),
-    Brackets(BracketStyle),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct TileShape {
-    pub(super) style: TileStyle,
+    pub(super) style: BoxStyle,
     pub(super) cell: CellSize,
 }
 
@@ -76,10 +70,7 @@ impl<S: Shape> Shape for Offset<'_, S> {
 
 impl TileShape {
     fn edge_extents(&self) -> (i64, i64) {
-        match self.style {
-            TileStyle::Box(style) => box_shape(0, 0, style).edge_extents(),
-            TileStyle::Brackets(style) => brackets_shape(0, 0, self.cell, style).edge_extents(),
-        }
+        box_shape(0, 0, self.style).edge_extents()
     }
 
     pub(super) fn bands(&self) -> (i64, i64) {
@@ -114,12 +105,7 @@ impl TileShape {
 
     fn cell_canvas(&self, cols: i64, rows: i64, col: i64, row: i64) -> Canvas {
         let (width, height) = (cols * self.cell.width, rows * self.cell.height);
-        match self.style {
-            TileStyle::Box(style) => self.cell_of(&box_shape(width, height, style), col, row),
-            TileStyle::Brackets(style) => {
-                self.cell_of(&brackets_shape(width, height, self.cell, style), col, row)
-            }
-        }
+        self.cell_of(&box_shape(width, height, self.style), col, row)
     }
 
     fn cell_of(&self, shape: &impl Shape, col: i64, row: i64) -> Canvas {
@@ -180,6 +166,7 @@ mod tests {
             colour: crate::style::rgb(colour),
             fill: colour,
             fill_alpha: quantized_alpha(colour.map(|_| BOX_FILL_OPACITY)),
+            solid_fill: None,
             rounded,
             sides,
             border: BORDER,
@@ -191,23 +178,23 @@ mod tests {
             colour: crate::style::rgb(None),
             fill: colour,
             fill_alpha: quantized_alpha(Some(FOOTER_FILL_OPACITY)),
+            solid_fill: None,
             rounded: false,
             sides: NO_SIDES,
             border: 1,
         }
     }
 
-    fn styles() -> Vec<TileStyle> {
+    fn styles() -> Vec<BoxStyle> {
         colours()
             .into_iter()
             .flat_map(|colour| {
                 [
-                    TileStyle::Box(outlined(colour, true, ALL_SIDES)),
-                    TileStyle::Box(outlined(colour, false, ALL_SIDES)),
-                    TileStyle::Box(outlined(colour, true, TOP_AND_LEFT)),
-                    TileStyle::Box(outlined(colour, false, RIGHT_AND_BOTTOM)),
-                    TileStyle::Box(borderless(colour)),
-                    TileStyle::Brackets(BracketStyle { border: BORDER }),
+                    outlined(colour, true, ALL_SIDES),
+                    outlined(colour, false, ALL_SIDES),
+                    outlined(colour, true, TOP_AND_LEFT),
+                    outlined(colour, false, RIGHT_AND_BOTTOM),
+                    borderless(colour),
                 ]
             })
             .collect()
@@ -215,14 +202,7 @@ mod tests {
 
     fn whole_sprite(shape: TileShape, cols: i64, rows: i64) -> Canvas {
         let (width, height) = (cols * shape.cell.width, rows * shape.cell.height);
-        match shape.style {
-            TileStyle::Box(style) => Canvas::fill(width, height, &box_shape(width, height, style)),
-            TileStyle::Brackets(style) => Canvas::fill(
-                width,
-                height,
-                &brackets_shape(width, height, shape.cell, style),
-            ),
-        }
+        Canvas::fill(width, height, &box_shape(width, height, shape.style))
     }
 
     const CHANNELS: usize = 4;
@@ -254,7 +234,7 @@ mod tests {
     #[test]
     fn composing_the_tiles_gives_exactly_the_whole_sprite() {
         let shape = TileShape {
-            style: TileStyle::Box(outlined(Some(0), true, ALL_SIDES)),
+            style: outlined(Some(0), true, ALL_SIDES),
             cell: ODD_CELL,
         };
         let (column_band, row_band) = shape.bands();
@@ -270,7 +250,7 @@ mod tests {
 
     fn rounded_box() -> TileShape {
         TileShape {
-            style: TileStyle::Box(outlined(Some(0), true, ALL_SIDES)),
+            style: outlined(Some(0), true, ALL_SIDES),
             cell: CELL,
         }
     }
@@ -314,10 +294,7 @@ mod tests {
             for cell in CELLS {
                 let shape = TileShape { style, cell };
                 let (column_band, row_band) = shape.bands();
-                let (extent_x, extent_y) = match style {
-                    TileStyle::Box(style) => box_shape(0, 0, style).edge_extents(),
-                    TileStyle::Brackets(style) => brackets_shape(0, 0, cell, style).edge_extents(),
-                };
+                let (extent_x, extent_y) = box_shape(0, 0, style).edge_extents();
                 assert!(column_band * cell.width > extent_x);
                 assert!((column_band - 1) * cell.width <= extent_x);
                 assert!(row_band * cell.height > extent_y);

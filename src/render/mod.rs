@@ -5,6 +5,8 @@ use crate::style::palette;
 use crate::view::Scene;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod brackets;
+#[cfg(not(target_arch = "wasm32"))]
 mod font;
 #[cfg(not(target_arch = "wasm32"))]
 mod shapes;
@@ -79,6 +81,7 @@ mod tests {
             colour: crate::style::rgb(None),
             fill: None,
             opacity: None,
+            solid_fill: None,
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
