@@ -57,6 +57,28 @@ fn measure(tree: &Tree<FlexNode>) -> HashMap<Vec<usize>, Size> {
     sizes
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+fn distribute(widths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
+    let gaps = widths.len().saturating_sub(1) as i64;
+    let (gap, widened_from) = match justify {
+        Justify::SpaceBetween if gaps > 0 => {
+            let free = room - widths.iter().sum::<i64>();
+            (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
+        }
+        _ => (FLEX_GAP, gaps),
+    };
+    let mut x = 0;
+    widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| {
+            let offset = x;
+            x += width + gap + i64::from(index as i64 >= widened_from);
+            offset
+        })
+        .collect()
+}
+
 struct Frame {
     y: i64,
     inner_height: i64,
@@ -929,6 +951,54 @@ mod tests {
                 height: BOX_HEIGHT + 2 * FLEX_BORDER,
             }
         );
+    }
+
+    #[test]
+    fn start_places_no_children_for_an_empty_row() {
+        assert_eq!(distribute(&[], 10, Justify::Start), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn start_places_a_single_child_at_the_row_start() {
+        assert_eq!(distribute(&[5], 10, Justify::Start), vec![0]);
+    }
+
+    #[test]
+    fn start_places_children_a_gap_apart() {
+        assert_eq!(
+            distribute(&[2, 3, 4], 20, Justify::Start),
+            vec![0, 2 + FLEX_GAP, 2 + FLEX_GAP + 3 + FLEX_GAP]
+        );
+    }
+
+    #[test]
+    fn space_between_splits_free_space_evenly_between_children() {
+        let gap = 4;
+        let room = 2 + gap + 3 + gap + 4;
+        assert_eq!(
+            distribute(&[2, 3, 4], room, Justify::SpaceBetween),
+            vec![0, 2 + gap, 2 + gap + 3 + gap]
+        );
+    }
+
+    #[test]
+    fn space_between_gives_the_remainder_to_the_last_gaps() {
+        let gap = 2;
+        let room = 2 + gap + 3 + (gap + 1) + 4 + (gap + 1) + 5;
+        assert_eq!(
+            distribute(&[2, 3, 4, 5], room, Justify::SpaceBetween),
+            vec![
+                0,
+                2 + gap,
+                2 + gap + 3 + gap + 1,
+                2 + gap + 3 + gap + 1 + 4 + gap + 1
+            ]
+        );
+    }
+
+    #[test]
+    fn space_between_places_a_single_child_at_the_row_start() {
+        assert_eq!(distribute(&[5], 10, Justify::SpaceBetween), vec![0]);
     }
 
     fn hello_box_world() -> FlexState {
