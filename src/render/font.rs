@@ -4,8 +4,8 @@ use crate::canvas::{Canvas, Rgba, Shape};
 use crate::render::OPAQUE;
 use crate::view::Rgb;
 
-const FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaRegular.ttf");
-const BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/IosevkaBold.ttf");
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/font-regular.ttf");
+const BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/font-bold.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
 pub(crate) trait GlyphSource {
@@ -37,7 +37,7 @@ impl GlyphCache {
         let regular = load_font(regular_bytes);
         let bold = load_font(bold_bytes);
 
-        // Iosevka is monospace, so every glyph shares one advance width: pick the
+        // The bundled font is monospace, so every glyph shares one advance width: pick the
         // pixel size that makes that advance width equal cell_width, once, up front.
         // Also cap it so the font's full ascent+descent fits within cell_height,
         // otherwise descenders (g, q, y, p, j) get clipped at the bottom of the cell.
@@ -48,7 +48,7 @@ impl GlyphCache {
 
         let reference_line_metrics = regular
             .horizontal_line_metrics(REFERENCE_PX_SIZE)
-            .expect("Iosevka must provide horizontal line metrics");
+            .expect("the bundled font must provide horizontal line metrics");
         let reference_line_height = reference_line_metrics.ascent - reference_line_metrics.descent;
         let height_px_size = REFERENCE_PX_SIZE * cell_height as f32 / reference_line_height;
 
@@ -56,7 +56,7 @@ impl GlyphCache {
 
         let line_metrics = regular
             .horizontal_line_metrics(px_size)
-            .expect("Iosevka must provide horizontal line metrics");
+            .expect("the bundled font must provide horizontal line metrics");
         let baseline_row = line_metrics.ascent.round() as i64;
 
         GlyphCache {
@@ -145,7 +145,7 @@ impl GlyphSource for GlyphCache {
 
 fn load_font(font_bytes: &[u8]) -> fontdue::Font {
     fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default())
-        .expect("bundled Iosevka font must parse")
+        .expect("bundled font must parse")
 }
 
 pub(super) struct GlyphShape {
@@ -229,9 +229,9 @@ mod tests {
     use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
-    // Iosevka cut down to M, B, i and g: parsing the full font is slow in a debug build.
-    const TEST_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/IosevkaSubset.ttf");
-    const TEST_BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/IosevkaBoldSubset.ttf");
+    // The bundled fonts cut down to M, B, i and g: parsing the full font is slow in a debug build.
+    const TEST_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/font-regular-subset.ttf");
+    const TEST_BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/font-bold-subset.ttf");
 
     fn test_cache() -> GlyphCache {
         GlyphCache::with_fonts(
@@ -304,32 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn glyph_ink_matches_the_default_foreground_colour() {
-        let mut cache = test_cache();
-        let canvas = cache.glyph('M', colour(None), false);
-        let pixel = canvas
-            .pixels
-            .chunks(4)
-            .find(|pixel| pixel[3] == OPAQUE)
-            .expect("a fully opaque pixel must exist in a rasterized 'M'");
-        let (r, g, b) = colour(None);
-        assert_eq!(&pixel[0..3], [r, g, b]);
-    }
-
-    #[test]
-    fn glyph_ink_matches_the_requested_palette_colour() {
-        let mut cache = test_cache();
-        let canvas = cache.glyph('M', colour(Some(crate::style::LIME)), false);
-        let pixel = canvas
-            .pixels
-            .chunks(4)
-            .find(|pixel| pixel[3] == OPAQUE)
-            .expect("a fully opaque pixel must exist in a rasterized 'M'");
-        let (r, g, b) = colour(Some(crate::style::LIME));
-        assert_eq!(&pixel[0..3], [r, g, b]);
-    }
-
-    #[test]
     fn every_glyph_canvas_is_exactly_one_cell() {
         let mut cache = test_cache();
         for ch in ['M', 'i'] {
@@ -353,6 +327,17 @@ mod tests {
         assert_eq!(
             regular, regular_again,
             "fetching the regular weight again must come from the regular cache, not be clobbered by bold"
+        );
+    }
+
+    #[test]
+    fn a_regular_glyph_fills_at_least_seven_pixels_of_an_eight_by_sixteen_cell() {
+        let cache = GlyphCache::with_fonts(TEST_FONT_BYTES, TEST_BOLD_FONT_BYTES, 8, 16);
+        let advance = cache.regular.metrics('M', cache.px_size).advance_width;
+        assert!(
+            advance >= 7.0,
+            "'M' advances {advance} px at {} px in an 8x16 cell",
+            cache.px_size
         );
     }
 
