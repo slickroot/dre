@@ -11,7 +11,7 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
-use state::{FlexEffect, FlexState};
+use state::{FlexBox, FlexEffect, FlexNode, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
@@ -22,12 +22,14 @@ pub(crate) trait FlexScreen {
 pub(crate) struct TerminalFlexScreen {
     pub(crate) renderer: TerminalRenderer,
     pub(crate) out: Stdout,
+    pub(crate) drawn: Option<HashSet<Vec<usize>>>,
 }
 
 impl FlexScreen for TerminalFlexScreen {
     fn render(&mut self, state: &FlexState) -> io::Result<()> {
+        let new = new_boxes(&mut self.drawn, state);
         self.renderer.render(
-            &view::scene(state, self.renderer.area(), &HashSet::new()),
+            &view::scene(state, self.renderer.area(), &new),
             &mut self.out,
         )?;
         self.out.flush()
@@ -37,6 +39,21 @@ impl FlexScreen for TerminalFlexScreen {
         self.renderer.on_resize(tty::probe()?);
         Ok(())
     }
+}
+
+fn new_boxes(drawn: &mut Option<HashSet<Vec<usize>>>, state: &FlexState) -> HashSet<Vec<usize>> {
+    let paths: HashSet<Vec<usize>> = state
+        .boxes
+        .walk()
+        .filter(|(_, node)| matches!(node, FlexNode::Box(FlexBox { bare: false, .. })))
+        .map(|(path, _)| path)
+        .collect();
+    let new = match drawn {
+        Some(drawn) => paths.difference(drawn).cloned().collect(),
+        None => HashSet::new(),
+    };
+    *drawn = Some(paths);
+    new
 }
 
 pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
@@ -80,6 +97,7 @@ fn start() -> io::Result<()> {
         &mut TerminalFlexScreen {
             renderer,
             out: stdout,
+            drawn: None,
         },
     )
 }
@@ -89,6 +107,62 @@ mod tests {
     use super::*;
     use crate::key_source::MockKeySource;
     use mockall::Sequence;
+
+    fn after(state: FlexState, key: &str) -> FlexState {
+        state::reduce(state, key).0
+    }
+
+    #[test]
+    fn the_first_render_marks_no_box_as_new() {
+        let mut drawn = None;
+
+        assert!(new_boxes(&mut drawn, &FlexState::default()).is_empty());
+    }
+
+    #[test]
+    fn a_marks_the_added_box_as_new_once() {
+        let mut drawn = None;
+        let state = FlexState::default();
+        new_boxes(&mut drawn, &state);
+
+        let state = after(state, "a");
+
+        assert_eq!(
+            new_boxes(&mut drawn, &state),
+            HashSet::from([state.selected.clone()])
+        );
+        assert!(new_boxes(&mut drawn, &state).is_empty());
+    }
+
+    #[test]
+    fn capital_a_marks_the_added_inner_box_as_new() {
+        let mut drawn = None;
+        let state = FlexState::default();
+        new_boxes(&mut drawn, &state);
+
+        let state = after(state, "A");
+
+        let inner = state.boxes.children(&state.selected).pop().unwrap();
+        assert_eq!(new_boxes(&mut drawn, &state), HashSet::from([inner]));
+    }
+
+    #[test]
+    fn a_box_added_again_after_undo_is_new_again() {
+        let mut drawn = None;
+        let state = FlexState::default();
+        new_boxes(&mut drawn, &state);
+        let state = after(state, "a");
+        new_boxes(&mut drawn, &state);
+        let state = after(state, "u");
+        new_boxes(&mut drawn, &state);
+
+        let state = after(state, "a");
+
+        assert_eq!(
+            new_boxes(&mut drawn, &state),
+            HashSet::from([state.selected.clone()])
+        );
+    }
 
     #[test]
     fn renders_before_each_key_and_stops_after_ctrl_c() {
