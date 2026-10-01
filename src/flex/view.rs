@@ -7,7 +7,6 @@ use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_S
 use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
 
 const FLEX_BORDER: i64 = 1;
-const FLEX_GAP: i64 = 1;
 const FLEX_SPACE: Size = Size {
     width: 2,
     height: 1,
@@ -65,7 +64,7 @@ fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
                 .iter()
                 .map(|child| measure(tree, child))
                 .collect();
-            let gaps = FLEX_GAP * children.len().saturating_sub(1) as i64;
+            let gaps = FLEX_SPACE.main(direction) * children.len().saturating_sub(1) as i64;
             let main = children
                 .iter()
                 .map(|child| child.main(direction))
@@ -85,14 +84,14 @@ fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
     }
 }
 
-fn distribute(lengths: &[i64], room: i64, justify: Justify) -> Vec<i64> {
+fn distribute(lengths: &[i64], room: i64, justify: Justify, gap: i64) -> Vec<i64> {
     let gaps = lengths.len().saturating_sub(1) as i64;
     let (gap, widened_from) = match justify {
         Justify::SpaceBetween if gaps > 0 => {
             let free = room - lengths.iter().sum::<i64>();
             (free.div_euclid(gaps), gaps - free.rem_euclid(gaps))
         }
-        _ => (FLEX_GAP, gaps),
+        _ => (gap, gaps),
     };
     let mut cursor = 0;
     lengths
@@ -170,7 +169,12 @@ fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec
     let mains: Vec<i64> = sizes.iter().map(|size| size.main(direction)).collect();
     let inner = rect.inner();
     let inner_cross = inner.size().cross(direction);
-    let offsets = distribute(&mains, inner.size().main(direction), flex_box.justify);
+    let offsets = distribute(
+        &mains,
+        inner.size().main(direction),
+        flex_box.justify,
+        FLEX_SPACE.main(direction),
+    );
     for ((child, size), offset) in children.iter().zip(sizes).zip(offsets) {
         let child_rect = Rect::along(
             direction,
@@ -200,7 +204,7 @@ fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
         })
         .collect();
     let widest = outers.iter().map(|(_, size)| size.width).max().unwrap_or(0);
-    let gaps = FLEX_GAP * outers.len().saturating_sub(1) as i64;
+    let gaps = FLEX_SPACE.height * outers.len().saturating_sub(1) as i64;
     let stack_height = outers.iter().map(|(_, size)| size.height).sum::<i64>() + gaps;
     let left = window.col + (window.cols - widest).div_euclid(2) + widest.div_euclid(2);
     let mut y = window.row + (window.rows - stack_height).div_euclid(2);
@@ -213,7 +217,7 @@ fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
             height: size.height,
         };
         arrange(&state.boxes, &path, rect, &mut out);
-        y += size.height + FLEX_GAP;
+        y += size.height + FLEX_SPACE.height;
     }
     out
 }
@@ -569,7 +573,7 @@ mod tests {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
-        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_GAP);
+        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
     }
 
     #[test]
@@ -682,7 +686,7 @@ mod tests {
             let state = beside(texts);
             let placements = placements(&state);
             let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
-            let gaps = FLEX_GAP * (texts.len() as i64 - 1);
+            let gaps = FLEX_SPACE.width * (texts.len() as i64 - 1);
             assert_eq!(
                 the_box(&placements).width,
                 interiors + gaps + 2 * FLEX_SPACE.width
@@ -713,7 +717,7 @@ mod tests {
         let labels = all_labels(&placements);
         assert_eq!(
             labels[1].x,
-            labels[0].x + view::interior("Hello") + FLEX_GAP
+            labels[0].x + view::interior("Hello") + FLEX_SPACE.width
         );
     }
 
@@ -802,7 +806,10 @@ mod tests {
         let the_box = the_box(&placements);
         let labels = all_labels(&placements);
         assert_eq!(labels[0].x, the_box.x + FLEX_SPACE.width);
-        assert_eq!(labels[1].x, labels[0].x + labels[0].width + FLEX_GAP);
+        assert_eq!(
+            labels[1].x,
+            labels[0].x + labels[0].width + FLEX_SPACE.width
+        );
     }
 
     fn borders(placements: &[Placement<'_>]) -> Vec<Rgb> {
@@ -949,7 +956,7 @@ mod tests {
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (first, second) = (boxes[0], boxes[3]);
-        assert_eq!(second.y, first.y + first.height + FLEX_GAP);
+        assert_eq!(second.y, first.y + first.height + FLEX_SPACE.height);
     }
 
     #[test]
@@ -1039,9 +1046,9 @@ mod tests {
             measure(&tree, &[0]),
             Size {
                 width: view::interior("Hello")
-                    + FLEX_GAP
+                    + FLEX_SPACE.width
                     + empty_box.width
-                    + FLEX_GAP
+                    + FLEX_SPACE.width
                     + view::interior("World")
                     + 2 * FLEX_SPACE.width,
                 height: empty_box.height + 2 * FLEX_SPACE.height,
@@ -1051,19 +1058,29 @@ mod tests {
 
     #[test]
     fn start_places_no_children_for_an_empty_row() {
-        assert_eq!(distribute(&[], 10, Justify::Start), Vec::<i64>::new());
+        assert_eq!(
+            distribute(&[], 10, Justify::Start, FLEX_SPACE.width),
+            Vec::<i64>::new()
+        );
     }
 
     #[test]
     fn start_places_a_single_child_at_the_row_start() {
-        assert_eq!(distribute(&[5], 10, Justify::Start), vec![0]);
+        assert_eq!(
+            distribute(&[5], 10, Justify::Start, FLEX_SPACE.width),
+            vec![0]
+        );
     }
 
     #[test]
     fn start_places_children_a_gap_apart() {
         assert_eq!(
-            distribute(&[2, 3, 4], 20, Justify::Start),
-            vec![0, 2 + FLEX_GAP, 2 + FLEX_GAP + 3 + FLEX_GAP]
+            distribute(&[2, 3, 4], 20, Justify::Start, FLEX_SPACE.width),
+            vec![
+                0,
+                2 + FLEX_SPACE.width,
+                2 + FLEX_SPACE.width + 3 + FLEX_SPACE.width
+            ]
         );
     }
 
@@ -1072,7 +1089,7 @@ mod tests {
         let gap = 4;
         let room = 2 + gap + 3 + gap + 4;
         assert_eq!(
-            distribute(&[2, 3, 4], room, Justify::SpaceBetween),
+            distribute(&[2, 3, 4], room, Justify::SpaceBetween, FLEX_SPACE.width),
             vec![0, 2 + gap, 2 + gap + 3 + gap]
         );
     }
@@ -1082,7 +1099,7 @@ mod tests {
         let gap = 2;
         let room = 2 + gap + 3 + (gap + 1) + 4 + (gap + 1) + 5;
         assert_eq!(
-            distribute(&[2, 3, 4, 5], room, Justify::SpaceBetween),
+            distribute(&[2, 3, 4, 5], room, Justify::SpaceBetween, FLEX_SPACE.width),
             vec![
                 0,
                 2 + gap,
@@ -1094,7 +1111,10 @@ mod tests {
 
     #[test]
     fn space_between_places_a_single_child_at_the_row_start() {
-        assert_eq!(distribute(&[5], 10, Justify::SpaceBetween), vec![0]);
+        assert_eq!(
+            distribute(&[5], 10, Justify::SpaceBetween, FLEX_SPACE.width),
+            vec![0]
+        );
     }
 
     fn hello_box_world() -> FlexState {
@@ -1125,7 +1145,9 @@ mod tests {
             measure(&state.boxes, &[0]),
             Size {
                 width: widest + 2 * FLEX_SPACE.width,
-                height: heights + FLEX_GAP * (children.len() as i64 - 1) + 2 * FLEX_SPACE.height,
+                height: heights
+                    + FLEX_SPACE.height * (children.len() as i64 - 1)
+                    + 2 * FLEX_SPACE.height,
             }
         );
     }
@@ -1146,8 +1168,8 @@ mod tests {
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
-        assert_eq!(inner.x, hello.x + hello.width + FLEX_GAP);
-        assert_eq!(world.x, inner.x + inner.width + FLEX_GAP);
+        assert_eq!(inner.x, hello.x + hello.width + FLEX_SPACE.width);
+        assert_eq!(world.x, inner.x + inner.width + FLEX_SPACE.width);
     }
 
     #[test]
@@ -1188,8 +1210,8 @@ mod tests {
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
-        assert_eq!(inner.x, hello.x + hello.width + FLEX_GAP);
-        assert_eq!(world.x, inner.x + inner.width + FLEX_GAP);
+        assert_eq!(inner.x, hello.x + hello.width + FLEX_SPACE.width);
+        assert_eq!(world.x, inner.x + inner.width + FLEX_SPACE.width);
     }
 
     fn from_default_after(keys: &[&str]) -> FlexState {
@@ -1238,13 +1260,13 @@ mod tests {
         assert_eq!(
             (outer.width, outer.height),
             (
-                2 * empty.width + FLEX_GAP + 2 * FLEX_SPACE.width,
+                2 * empty.width + FLEX_SPACE.width + 2 * FLEX_SPACE.width,
                 empty.height + 2 * FLEX_SPACE.height
             )
         );
         assert_eq!(
             (second.x, second.y),
-            (first.x + empty.width + FLEX_GAP, first.y)
+            (first.x + empty.width + FLEX_SPACE.width, first.y)
         );
         let left = outer.x - WINDOW.col;
         let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
@@ -1388,12 +1410,44 @@ mod tests {
         let inner = all_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(hello.y, outer.y + FLEX_SPACE.height);
-        assert_eq!(inner.y, hello.y + hello.height + FLEX_GAP);
-        assert_eq!(world.y, inner.y + inner.height + FLEX_GAP);
+        assert_eq!(inner.y, hello.y + hello.height + FLEX_SPACE.height);
+        assert_eq!(world.y, inner.y + inner.height + FLEX_SPACE.height);
         assert_eq!(
             world.y + world.height,
             outer.y + outer.height - FLEX_SPACE.height
         );
+    }
+
+    #[test]
+    fn siblings_in_a_row_are_the_space_width_apart() {
+        let state = hello_box_world();
+        let placements = placements(&state);
+        let row = row_of(&placements, &state);
+        assert_eq!(gaps_between(&row), vec![FLEX_SPACE.width; 2]);
+    }
+
+    #[test]
+    fn siblings_in_a_column_are_the_space_height_apart() {
+        let state = in_column(hello_box_world());
+        let placements = placements(&state);
+        let column = row_of(&placements, &state);
+        let gaps: Vec<i64> = column
+            .windows(2)
+            .map(|pair| pair[1].y - (pair[0].y + pair[0].height))
+            .collect();
+        assert_eq!(gaps, vec![FLEX_SPACE.height; 2]);
+    }
+
+    #[test]
+    fn stacked_outer_boxes_are_the_space_height_apart() {
+        let state = stacked(&["Hello", "", "Hi"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let gaps: Vec<i64> = boxes
+            .windows(2)
+            .map(|pair| pair[1].y - (pair[0].y + pair[0].height))
+            .collect();
+        assert_eq!(gaps, vec![FLEX_SPACE.height; 2]);
     }
 
     #[test]
