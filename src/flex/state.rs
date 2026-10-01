@@ -1,3 +1,4 @@
+use super::history::{self, Snapshot};
 use types::Tree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,11 +84,18 @@ pub(crate) fn new_box() -> Tree<FlexNode> {
     Tree::new(FlexNode::Box(FlexBox::default()), vec![])
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) struct FlexState {
     pub(crate) boxes: Tree<FlexNode>,
     pub(crate) selected: Vec<usize>,
     pub(crate) mode: FlexMode,
+    pub(crate) history: Vec<Snapshot>,
+}
+
+impl PartialEq for FlexState {
+    fn eq(&self, other: &Self) -> bool {
+        self.boxes == other.boxes && self.selected == other.selected && self.mode == other.mode
+    }
 }
 
 impl Default for FlexState {
@@ -96,6 +104,7 @@ impl Default for FlexState {
             boxes: Tree::root(vec![new_box()]),
             selected: vec![0],
             mode: FlexMode::Move,
+            history: Vec::new(),
         }
     }
 }
@@ -175,7 +184,7 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
     match (key, state.mode) {
         ("\x03", _) => (state, Some(FlexEffect::Quit)),
         (_, FlexMode::Write) => write_key(state, key),
-        (_, FlexMode::Move) => move_key(state, key),
+        (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
 }
 
@@ -235,6 +244,7 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             let selected = state.selected_box();
             selected.filled = !selected.filled;
         }
+        "u" => state = history::undo(state),
         "q" => return (state, Some(FlexEffect::Quit)),
         _ => {}
     }
@@ -594,6 +604,7 @@ mod tests {
             boxes: Tree::root(texts.iter().map(|text| box_with(text)).collect()),
             selected: vec![texts.len() - 1],
             mode,
+            ..FlexState::default()
         }
     }
 
@@ -973,8 +984,7 @@ mod tests {
                 FlexNode::Box(FlexBox::default()),
                 vec![text("Hello"), new_box(), text("World")],
             )]),
-            selected: vec![0],
-            mode: FlexMode::Move,
+            ..FlexState::default()
         }
     }
 
@@ -1129,5 +1139,46 @@ mod tests {
         let (state, _) = reduce(before.clone(), "s");
         assert_eq!(state.boxes.parent(&state.selected), before.selected);
         assert_eq!(selected_node(&state), &FlexNode::Text(String::new()));
+    }
+
+    #[test]
+    fn u_after_a_or_capital_a_brings_back_the_state_before_the_key() {
+        for key in ["a", "A"] {
+            let before = middle_selected();
+            assert_eq!(moved(before.clone(), &[key, "u"]), before, "{key}");
+        }
+    }
+
+    #[test]
+    fn u_after_a_toggle_brings_back_the_state_before_the_key() {
+        for key in ["w", "g", "d", "f"] {
+            let before = world_selected();
+            assert_eq!(moved(before.clone(), &[key, "u"]), before, "{key}");
+        }
+    }
+
+    #[test]
+    fn u_goes_back_one_change_at_a_time_to_the_start() {
+        let (state, _) = typed(&["a", "w", "f", "u", "u", "u"]);
+        assert_eq!(state, FlexState::default());
+        assert_eq!(moved(state.clone(), &["u"]), state);
+    }
+
+    #[test]
+    fn u_skips_selection_moves_and_undoes_the_last_change() {
+        let before = world_selected();
+        let state = moved(before.clone(), &["w", "j", "k", "l", "u"]);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(
+            box_at(&state, &state.boxes.parent(&state.selected)).width,
+            FlexWidth::Fit
+        );
+    }
+
+    #[test]
+    fn u_with_nothing_to_undo_leaves_the_state_unchanged() {
+        let (state, effects) = typed(&["u"]);
+        assert_eq!(state, FlexState::default());
+        assert!(effects.is_empty());
     }
 }
