@@ -135,22 +135,26 @@ fn grow_frames(width: i64, height: i64, style: BoxStyle) -> Vec<Canvas> {
 // computed once at `a=T` (ImageData::with_data, wezterm-cell/src/image.rs) and
 // cached by the GUI (cached_image, wezterm-gui/src/glyphcache.rs). Two grows
 // with the same root would share one state and the second would show at full
-// size, so the stamp makes every root unique: it goes into the RGB bytes of
-// the first two pixels, whose alpha stays 0. WezTerm skips a root frame with a
-// gap of 0, so the transparent root never shows.
-fn grow_root(width: i64, height: i64, stamp: u64) -> Canvas {
-    let mut pixels = vec![0; (width * height * 4) as usize];
-    let bytes = &stamp.to_be_bytes()[2..];
-    for (index, byte) in [0, 1, 2, 4, 5, 6].into_iter().zip(bytes) {
-        if let Some(pixel) = pixels.get_mut(index) {
-            *pixel = *byte;
-        }
+// size, so the stamp makes every root unique: its 48 low bits go into the
+// lowest bit of the R, G and B bytes of the first 16 pixels. The root is the
+// full box because some terminals (Ghostty before August 2026) don't play the
+// frames and show only the root. WezTerm and Ghostty create the root gapless
+// and skip it during the grow.
+fn grow_root(full: &Canvas, stamp: u64) -> Canvas {
+    let mut root = Canvas {
+        pixels: full.pixels.clone(),
+        width: full.width,
+        height: full.height,
+    };
+    let colour_bytes = root
+        .pixels
+        .iter_mut()
+        .enumerate()
+        .filter(|(index, _)| index % 4 != 3);
+    for (bit, (_, byte)) in colour_bytes.take(48).enumerate() {
+        *byte = (*byte & !1) | ((stamp >> bit) & 1) as u8;
     }
-    Canvas {
-        pixels,
-        width,
-        height,
-    }
+    root
 }
 
 fn whole(window: Window) -> Area {
@@ -719,10 +723,11 @@ impl TerminalRenderer {
             return false;
         }
         self.grow_stamp = self.grow_stamp.wrapping_add(1);
+        let frames = grow_frames(width, height, style);
         let image = Image::Growing {
             id: self.image_ids.allocate_transient(),
-            root: grow_root(width, height, self.grow_stamp),
-            frames: grow_frames(width, height, style),
+            root: grow_root(&frames[GROW_FRAMES - 1], self.grow_stamp),
+            frames,
             wezterm: self.wezterm,
         };
         frame.push(image, crop, z);
@@ -3558,6 +3563,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn grow_root_is_the_full_box_with_the_stamp_in_the_lowest_colour_bits() {
+        let full = Canvas::fill(90, 60, &box_shape(90, 60, grow_style()));
+        let stamp = 0xABCD_1234_5678_9EF0;
+
+        let root = grow_root(&full, stamp);
+
+        assert_eq!((root.width, root.height), (90, 60));
+        assert_eq!(root.pixels.len(), full.pixels.len());
+        let mut bits = 0u64;
+        let mut colour_byte = 0;
+        for (index, (root_byte, full_byte)) in root.pixels.iter().zip(&full.pixels).enumerate() {
+            if index % 4 == 3 {
+                assert_eq!(root_byte, full_byte);
+                continue;
+            }
+            assert_eq!(root_byte & !1, full_byte & !1);
+            if colour_byte < 48 {
+                bits |= u64::from(root_byte & 1) << colour_byte;
+                colour_byte += 1;
+            }
+        }
+        assert_eq!(bits, stamp & 0xFFFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn grow_root_of_a_canvas_smaller_than_the_stamp_keeps_its_size() {
+        let full = Canvas::fill(2, 2, &box_shape(2, 2, grow_style()));
+
+        let root = grow_root(&full, u64::MAX);
+
+        assert_eq!(root.pixels.len(), full.pixels.len());
     }
 
     fn growing_node() -> PlacementNode<'static> {
