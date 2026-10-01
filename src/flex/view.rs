@@ -58,7 +58,10 @@ fn padding(flex_box: &FlexBox) -> Size {
             height: 0,
         }
     } else {
-        FLEX_SPACE
+        Size {
+            width: FLEX_SPACE.width * (1 + i64::from(flex_box.padding)),
+            height: FLEX_SPACE.height,
+        }
     }
 }
 
@@ -1690,5 +1693,67 @@ mod tests {
             inner.x + inner.width,
             outer.x + outer.width - FLEX_SPACE.width
         );
+    }
+
+    #[test]
+    fn p_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
+        let before = with_text("Hello");
+        let state = after(before.clone(), &["\r", "p"]);
+        let before_placements = placements(&before);
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        let label = the_label(&placements);
+        assert_eq!(label.x, the_box.x + 2 * FLEX_SPACE.width);
+        assert_eq!(
+            label.x + label.width,
+            the_box.x + the_box.width - 2 * FLEX_SPACE.width
+        );
+        assert_eq!(
+            the_box.width,
+            the_box_width(&before_placements) + 2 * FLEX_SPACE.width
+        );
+        assert_eq!(label.y, the_box.y + FLEX_SPACE.height);
+        assert_eq!(
+            label.y + label.height,
+            the_box.y + the_box.height - FLEX_SPACE.height
+        );
+    }
+
+    fn the_box_width(placements: &[Placement<'_>]) -> i64 {
+        the_box(placements).width
+    }
+
+    #[test]
+    fn p_twice_adds_two_space_widths_of_padding_on_each_side() {
+        let before = with_text("Hello");
+        let state = after(before.clone(), &["\r", "p", "p"]);
+        assert_eq!(
+            the_box_width(&placements(&state)),
+            the_box_width(&placements(&before)) + 4 * FLEX_SPACE.width
+        );
+    }
+
+    #[test]
+    fn p_on_an_inner_box_widens_it_and_its_parent() {
+        let mut before = title_and_hi_in(Direction::Row);
+        outer_box_mut(&mut before, 0).width = FlexSize::Fit;
+        let state = after(before.clone(), &["p"]);
+        let before_placements = placements(&before);
+        let placements = placements(&state);
+        let (outer_before, inner_before) = outer_and_inner(&before_placements);
+        let (outer, inner) = outer_and_inner(&placements);
+        assert_eq!(inner.width, inner_before.width + 2 * FLEX_SPACE.width);
+        assert_eq!(outer.width, outer_before.width + 2 * FLEX_SPACE.width);
+    }
+
+    #[test]
+    fn p_on_a_full_box_keeps_its_width_and_moves_its_text_in() {
+        let before = full("Hello");
+        let state = after(before.clone(), &["\r", "p"]);
+        let before_width = the_box_width(&placements(&before));
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.width, before_width);
+        assert_eq!(the_label(&placements).x, the_box.x + 2 * FLEX_SPACE.width);
     }
 }

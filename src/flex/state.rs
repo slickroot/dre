@@ -69,6 +69,7 @@ pub(crate) struct FlexBox {
     pub(crate) direction: Direction,
     pub(crate) bare: bool,
     pub(crate) filled: bool,
+    pub(crate) padding: u16,
 }
 
 impl FlexBox {
@@ -259,6 +260,11 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         "f" => {
             let selected = state.selected_box();
             selected.filled = !selected.filled;
+        }
+        "p" => {
+            if let FlexNode::Box(selected) = state.boxes.value_mut(&state.selected) {
+                selected.padding = selected.padding.saturating_add(1);
+            }
         }
         "u" => state = history::undo(state),
         "q" => return (state, Some(FlexEffect::Quit)),
@@ -706,6 +712,7 @@ mod tests {
                 justify: Justify::Center,
                 bare: true,
                 filled: false,
+                padding: 0,
             })
         );
     }
@@ -1256,5 +1263,44 @@ mod tests {
         assert_eq!(state.texts_of(&[0]), ["Hellou"]);
         assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn p_on_a_selected_box_adds_one_unit_of_padding_each_time() {
+        let before = hello_in(FlexMode::Move);
+        let (once, effect) = reduce(before.clone(), "p");
+        assert_eq!(
+            selected_box(&once).padding,
+            selected_box(&before).padding + 1
+        );
+        assert_eq!(once.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+        let twice = moved(once.clone(), &["p"]);
+        assert_eq!(
+            selected_box(&twice).padding,
+            selected_box(&once).padding + 1
+        );
+    }
+
+    #[test]
+    fn p_on_a_selected_text_leaves_the_boxes_unchanged() {
+        let before = world_selected();
+        let (state, effect) = reduce(before.clone(), "p");
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn p_in_write_mode_is_typed_into_the_box_and_leaves_the_padding_alone() {
+        let (state, _) = reduce(hello_in(FlexMode::Write), "p");
+        assert_eq!(state.texts_of(&state.selected), ["Hellop"]);
+        assert_eq!(selected_box(&state).padding, FlexBox::default().padding);
+    }
+
+    #[test]
+    fn u_after_p_brings_back_the_boxes_before_the_key() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["p", "u"]);
+        assert_eq!(state.boxes, before.boxes);
     }
 }
