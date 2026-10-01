@@ -13,17 +13,17 @@ pub(crate) enum FlexEffect {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum FlexWidth {
+pub(crate) enum FlexSize {
     #[default]
     Fit,
     Full,
 }
 
-impl FlexWidth {
+impl FlexSize {
     pub(crate) fn toggle(self) -> Self {
         match self {
-            FlexWidth::Fit => FlexWidth::Full,
-            FlexWidth::Full => FlexWidth::Fit,
+            FlexSize::Fit => FlexSize::Full,
+            FlexSize::Full => FlexSize::Fit,
         }
     }
 }
@@ -33,13 +33,14 @@ pub(crate) enum Justify {
     #[default]
     Start,
     SpaceBetween,
+    Center,
 }
 
 impl Justify {
     pub(crate) fn toggle(self) -> Self {
         match self {
             Justify::Start => Justify::SpaceBetween,
-            Justify::SpaceBetween => Justify::Start,
+            Justify::SpaceBetween | Justify::Center => Justify::Start,
         }
     }
 }
@@ -62,10 +63,25 @@ impl Direction {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FlexBox {
-    pub(crate) width: FlexWidth,
+    pub(crate) width: FlexSize,
+    pub(crate) height: FlexSize,
     pub(crate) justify: Justify,
     pub(crate) direction: Direction,
+    pub(crate) bare: bool,
     pub(crate) filled: bool,
+}
+
+impl FlexBox {
+    pub(crate) fn window() -> Self {
+        Self {
+            width: FlexSize::Full,
+            height: FlexSize::Full,
+            direction: Direction::Column,
+            justify: Justify::Center,
+            bare: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +92,7 @@ pub(crate) enum FlexNode {
 
 impl Default for FlexNode {
     fn default() -> Self {
-        FlexNode::Box(FlexBox::default())
+        FlexNode::Box(FlexBox::window())
     }
 }
 
@@ -522,13 +538,13 @@ mod tests {
 
     #[test]
     fn starts_with_a_fit_width() {
-        assert_eq!(selected_box(&FlexState::default()).width, FlexWidth::Fit);
+        assert_eq!(selected_box(&FlexState::default()).width, FlexSize::Fit);
     }
 
     #[test]
     fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
-        assert_eq!(selected_box(&state).width, FlexWidth::Full);
+        assert_eq!(selected_box(&state).width, FlexSize::Full);
         assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -563,7 +579,7 @@ mod tests {
     fn w_in_write_mode_is_typed_into_the_box() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
         assert_eq!(state.texts_of(&state.selected), ["Hellow"]);
-        assert_eq!(selected_box(&state).width, FlexWidth::Fit);
+        assert_eq!(selected_box(&state).width, FlexSize::Fit);
         assert_eq!(effect, None);
     }
 
@@ -580,15 +596,15 @@ mod tests {
         let (state, _) = reduce(hello_in(FlexMode::Move), "w");
         let (state, _) = reduce(state, "i");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(selected_box(&state).width, FlexWidth::Full);
+        assert_eq!(selected_box(&state).width, FlexSize::Full);
         let (state, _) = reduce(state, "x");
-        assert_eq!(selected_box(&state).width, FlexWidth::Full);
+        assert_eq!(selected_box(&state).width, FlexSize::Full);
     }
 
     #[test]
     fn toggling_the_width_flips_between_fit_and_full() {
-        assert_eq!(FlexWidth::Fit.toggle(), FlexWidth::Full);
-        assert_eq!(FlexWidth::Full.toggle(), FlexWidth::Fit);
+        assert_eq!(FlexSize::Fit.toggle(), FlexSize::Full);
+        assert_eq!(FlexSize::Full.toggle(), FlexSize::Fit);
     }
 
     #[test]
@@ -672,6 +688,34 @@ mod tests {
     fn toggling_the_justify_flips_between_start_and_space_between() {
         assert_eq!(Justify::Start.toggle(), Justify::SpaceBetween);
         assert_eq!(Justify::SpaceBetween.toggle(), Justify::Start);
+    }
+
+    #[test]
+    fn toggling_a_centred_justify_returns_to_start() {
+        assert_eq!(Justify::Center.toggle(), Justify::Start);
+    }
+
+    #[test]
+    fn the_default_node_is_the_window_a_bare_centred_column_full_both_ways() {
+        assert_eq!(
+            FlexNode::default(),
+            FlexNode::Box(FlexBox {
+                width: FlexSize::Full,
+                height: FlexSize::Full,
+                direction: Direction::Column,
+                justify: Justify::Center,
+                bare: true,
+                filled: false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_default_box_fits_both_ways_and_is_not_bare() {
+        let flex_box = FlexBox::default();
+        assert_eq!(flex_box.width, FlexSize::Fit);
+        assert_eq!(flex_box.height, FlexSize::Fit);
+        assert!(!flex_box.bare);
     }
 
     #[test]
@@ -842,7 +886,7 @@ mod tests {
     fn w_only_toggles_the_width_of_the_selected_box() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "w");
-        assert_eq!(box_at(&state, &[1]).width, FlexWidth::Full);
+        assert_eq!(box_at(&state, &[1]).width, FlexSize::Full);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1073,7 +1117,7 @@ mod tests {
     fn w_on_a_selected_text_makes_its_parent_box_full_width() {
         let before = world_selected();
         let (state, effect) = reduce(before.clone(), "w");
-        assert_eq!(box_at(&state, &[0]).width, FlexWidth::Full);
+        assert_eq!(box_at(&state, &[0]).width, FlexSize::Full);
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -1171,7 +1215,7 @@ mod tests {
         assert_eq!(state.selected, before.selected);
         assert_eq!(
             box_at(&state, &state.boxes.parent(&state.selected)).width,
-            FlexWidth::Fit
+            FlexSize::Fit
         );
     }
 
