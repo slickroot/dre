@@ -109,15 +109,17 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 const GROW_FRAMES: usize = 9;
+const GROW_MS: u32 = 150;
+const GROW_GAP_MS: u32 = (GROW_MS + (GROW_FRAMES as u32 - 1) / 2) / (GROW_FRAMES as u32 - 1);
+// WezTerm ignores `a=a` and loops the frames, so the last frame is held for
+// about 23 days instead of relying on `v=2` to stop after one play.
+const GROW_HOLD_MS: u32 = 2_000_000_000;
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn eased(t: f64) -> f64 {
     1.0 - (1.0 - t).powi(3)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn grow_frames(width: i64, height: i64, style: BoxStyle) -> Vec<Canvas> {
     (1..=GROW_FRAMES)
         .map(|k| {
@@ -127,6 +129,28 @@ fn grow_frames(width: i64, height: i64, style: BoxStyle) -> Vec<Canvas> {
             Canvas::fill(width, height, &box_shape(box_width, box_height, style))
         })
         .collect()
+}
+
+// WezTerm keys an animation's playback state by the hash of its root frame,
+// computed once at `a=T` (ImageData::with_data, wezterm-cell/src/image.rs) and
+// cached by the GUI (cached_image, wezterm-gui/src/glyphcache.rs). Two grows
+// with the same root would share one state and the second would show at full
+// size, so the stamp makes every root unique: it goes into the RGB bytes of
+// the first two pixels, whose alpha stays 0. WezTerm skips a root frame with a
+// gap of 0, so the transparent root never shows.
+fn grow_root(width: i64, height: i64, stamp: u64) -> Canvas {
+    let mut pixels = vec![0; (width * height * 4) as usize];
+    let bytes = &stamp.to_be_bytes()[2..];
+    for (index, byte) in [0, 1, 2, 4, 5, 6].into_iter().zip(bytes) {
+        if let Some(pixel) = pixels.get_mut(index) {
+            *pixel = *byte;
+        }
+    }
+    Canvas {
+        pixels,
+        width,
+        height,
+    }
 }
 
 fn whole(window: Window) -> Area {
@@ -222,8 +246,18 @@ fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
 }
 
 enum Image {
-    Fresh { id: kitty::ImageId, canvas: Canvas },
-    Cached { id: kitty::ImageId },
+    Fresh {
+        id: kitty::ImageId,
+        canvas: Canvas,
+    },
+    Cached {
+        id: kitty::ImageId,
+    },
+    Growing {
+        id: kitty::ImageId,
+        root: Canvas,
+        frames: Vec<Canvas>,
+    },
 }
 
 struct Placed {
@@ -238,6 +272,16 @@ impl Placed {
         match &self.image {
             Image::Fresh { id, canvas } => kitty::show(canvas, *id, self.col, self.row, self.z),
             Image::Cached { id } => kitty::place(*id, placement, self.col, self.row, self.z),
+            Image::Growing { id, root, frames } => kitty::grow(
+                root,
+                frames,
+                *id,
+                self.col,
+                self.row,
+                self.z,
+                GROW_GAP_MS,
+                GROW_HOLD_MS,
+            ),
         }
     }
 }
@@ -429,6 +473,7 @@ pub(crate) struct TerminalRenderer {
     tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
     bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
+    grow_stamp: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -477,6 +522,9 @@ impl TerminalRenderer {
             tile_images: std::collections::HashMap::new(),
             bracket_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
+            grow_stamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_nanos() as u64),
         }
     }
 
@@ -509,12 +557,13 @@ impl TerminalRenderer {
                     rounded,
                     sides,
                     border,
-                    ..
+                    grow,
                 } => self.draw_box(
                     frame,
                     geometry,
                     area,
                     placement.depth,
+                    *grow,
                     BoxStyle {
                         colour: *colour,
                         fill: *fill,
@@ -628,9 +677,13 @@ impl TerminalRenderer {
         geometry: Geometry,
         area: Area,
         depth: u8,
+        grow: bool,
         style: BoxStyle,
     ) {
         let z = depth_z(depth);
+        if grow && self.place_growing(frame, geometry, area, z, style) {
+            return;
+        }
         if self.place_tiles(frame, style, geometry, area, z) {
             return;
         }
@@ -638,6 +691,32 @@ impl TerminalRenderer {
         self.place_cached(frame, key, geometry, area, z, |renderer| {
             renderer.box_canvas(geometry.width, geometry.height, style)
         });
+    }
+
+    fn place_growing(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+        style: BoxStyle,
+    ) -> bool {
+        let width = self.cells_to_pixels_x(geometry.width);
+        let height = self.cells_to_pixels_y(geometry.height);
+        let Some(crop) = frame.crop(geometry, area) else {
+            return false;
+        };
+        if (crop.first_x, crop.first_y, crop.last_x, crop.last_y) != (0, 0, width, height) {
+            return false;
+        }
+        self.grow_stamp = self.grow_stamp.wrapping_add(1);
+        let image = Image::Growing {
+            id: self.image_ids.allocate_transient(),
+            root: grow_root(width, height, self.grow_stamp),
+            frames: grow_frames(width, height, style),
+        };
+        frame.push(image, crop, z);
+        true
     }
 
     fn draw_brackets(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, border: i64) {
@@ -1508,6 +1587,7 @@ mod tests {
             match &self.image {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
+                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
             }
         }
     }
@@ -1524,13 +1604,14 @@ mod tests {
             .iter()
             .filter_map(|image| match &image.image {
                 Image::Fresh { id, canvas } => Some((*id, canvas)),
-                Image::Cached { .. } => None,
+                Image::Cached { .. } | Image::Growing { .. } => None,
             })
             .collect();
         let canvas_of = |image: &'a Placed| -> &'a Canvas {
             match &image.image {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { id } => fresh[id],
+                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
             }
         };
         let col = layer.iter().map(|image| image.col).min().expect("a layer");
@@ -1851,6 +1932,7 @@ mod tests {
                         Image::Cached { id } => {
                             kitty::place(*id, placement, image.col, image.row, image.z)
                         }
+                        Image::Growing { .. } => panic!("no box in this frame grows"),
                     }),
             )
             .map(|command| command.to_string())
@@ -3466,5 +3548,108 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn growing_node() -> PlacementNode<'static> {
+        match box_node(Some(1), Some(1), true) {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow: true,
+            },
+            _ => panic!("expected a Box"),
+        }
+    }
+
+    fn growing_box(r: &TerminalRenderer, x: i64, y: i64) -> [Placement<'static>; 1] {
+        let node = growing_node();
+        let (width, height) = smallest_tiled(r, &node);
+        [box_placement(&node, x, y, width + EXTRA_CELLS, height + 1)]
+    }
+
+    fn root_payload(output: &str) -> String {
+        output
+            .split("\x1b_G")
+            .skip_while(|command| !command.starts_with("a=T,"))
+            .enumerate()
+            .take_while(|(index, command)| *index == 0 || command.starts_with("m="))
+            .map(|(_, command)| command)
+            .map(|command| {
+                let (_, rest) = command.split_once(';').unwrap();
+                rest.split("\x1b\\").next().unwrap().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_growing_box_that_fits_is_one_image_with_every_grow_frame_and_no_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        assert_eq!(output.matches("a=T").count(), 1);
+        assert_eq!(output.matches("a=f").count(), GROW_FRAMES);
+        assert!(output.find("a=T").unwrap() < output.find("a=f").unwrap());
+        assert!(placed_ids(&output).is_empty());
+        assert!(r.tile_images.is_empty());
+    }
+
+    #[test]
+    fn a_cropped_growing_box_pops_in_as_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let [placement] = growing_box(&r, 0, 0);
+        let cropped = Placement {
+            x: tiled_window().cols - placement.width + 1,
+            ..placement
+        };
+
+        let output = rendered_placements(&mut r, &[cropped]);
+
+        assert_eq!(output.matches("a=f").count(), 0);
+        assert!(!r.tile_images.is_empty());
+    }
+
+    #[test]
+    fn two_grows_of_the_same_size_have_different_roots() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        assert!(!root_payload(&first).is_empty());
+        assert_ne!(root_payload(&first), root_payload(&second));
+    }
+
+    #[test]
+    fn the_frame_after_a_grow_deletes_it_and_draws_the_box_with_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let [growing] = growing_box(&r, 1, 1);
+        let settled = Placement {
+            node: box_node(Some(1), Some(1), true),
+            ..growing.clone()
+        };
+
+        let first = rendered_placements(&mut r, &[growing]);
+        let second = rendered_placements(&mut r, &[settled]);
+
+        assert_eq!(deleted_ids(&second), shown_ids(&first));
+        assert_eq!(second.matches("a=f").count(), 0);
+        assert!(!r.tile_images.is_empty());
     }
 }

@@ -63,7 +63,6 @@ pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn grow(
     root: &Canvas,
     frames: &[Canvas],
@@ -198,7 +197,6 @@ fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> 
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn frame(canvas: &Canvas, id: ImageId, gap_ms: u32) -> String {
     // WezTerm reads a frame's gap from `Z` and kitty from `z`; without `Z`, WezTerm
     // uses 40 ms (wezterm-escape-parser/src/apc.rs, KittyImageFrame::from_keys).
