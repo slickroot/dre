@@ -13,22 +13,6 @@ pub(crate) enum FlexEffect {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum FlexSize {
-    #[default]
-    Fit,
-    Full,
-}
-
-impl FlexSize {
-    pub(crate) fn toggle(self) -> Self {
-        match self {
-            FlexSize::Fit => FlexSize::Full,
-            FlexSize::Full => FlexSize::Fit,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Justify {
     #[default]
     Start,
@@ -63,8 +47,6 @@ impl Direction {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FlexBox {
-    pub(crate) width: FlexSize,
-    pub(crate) height: FlexSize,
     pub(crate) justify: Justify,
     pub(crate) direction: Direction,
     pub(crate) bare: bool,
@@ -75,8 +57,6 @@ pub(crate) struct FlexBox {
 impl FlexBox {
     pub(crate) fn window() -> Self {
         Self {
-            width: FlexSize::Full,
-            height: FlexSize::Full,
             direction: Direction::Column,
             justify: Justify::Center,
             bare: true,
@@ -244,10 +224,6 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
                 Tree::leaf(FlexNode::Text(String::new())),
             );
             state.mode = FlexMode::Write;
-        }
-        "w" => {
-            let selected = state.selected_box();
-            selected.width = selected.width.toggle();
         }
         "g" => {
             let selected = state.selected_box();
@@ -543,16 +519,11 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_a_fit_width() {
-        assert_eq!(selected_box(&FlexState::default()).width, FlexSize::Fit);
-    }
-
-    #[test]
-    fn w_in_move_mode_toggles_the_width_to_full_and_keeps_the_rest() {
-        let (state, effect) = reduce(hello_in(FlexMode::Move), "w");
-        assert_eq!(selected_box(&state).width, FlexSize::Full);
-        assert_eq!(state.texts_of(&state.selected), ["Hello"]);
-        assert_eq!(state.mode, FlexMode::Move);
+    fn w_in_move_mode_leaves_the_boxes_and_selection_unchanged() {
+        let before = hello_in(FlexMode::Move);
+        let (state, effect) = reduce(before.clone(), "w");
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
         assert_eq!(effect, None);
     }
 
@@ -566,26 +537,10 @@ mod tests {
     }
 
     #[test]
-    fn w_twice_in_move_mode_toggles_the_width_back_to_fit() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "w");
-        let (state, effect) = reduce(state, "w");
-        assert_eq!(state, hello_in(FlexMode::Move));
-        assert_eq!(effect, None);
-    }
-
-    #[test]
     fn f_twice_in_move_mode_unfills_the_box() {
         let (state, _) = reduce(hello_in(FlexMode::Move), "f");
         let (state, effect) = reduce(state, "f");
         assert_eq!(state, hello_in(FlexMode::Move));
-        assert_eq!(effect, None);
-    }
-
-    #[test]
-    fn w_in_write_mode_is_typed_into_the_box() {
-        let (state, effect) = reduce(hello_in(FlexMode::Write), "w");
-        assert_eq!(state.texts_of(&state.selected), ["Hellow"]);
-        assert_eq!(selected_box(&state).width, FlexSize::Fit);
         assert_eq!(effect, None);
     }
 
@@ -595,22 +550,6 @@ mod tests {
         assert_eq!(state.texts_of(&state.selected), ["Hellof"]);
         assert!(!selected_box(&state).filled);
         assert_eq!(effect, None);
-    }
-
-    #[test]
-    fn the_width_carries_over_into_write_mode() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "w");
-        let (state, _) = reduce(state, "i");
-        assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(selected_box(&state).width, FlexSize::Full);
-        let (state, _) = reduce(state, "x");
-        assert_eq!(selected_box(&state).width, FlexSize::Full);
-    }
-
-    #[test]
-    fn toggling_the_width_flips_between_fit_and_full() {
-        assert_eq!(FlexSize::Fit.toggle(), FlexSize::Full);
-        assert_eq!(FlexSize::Full.toggle(), FlexSize::Fit);
     }
 
     #[test]
@@ -702,12 +641,10 @@ mod tests {
     }
 
     #[test]
-    fn the_default_node_is_the_window_a_bare_centred_column_full_both_ways() {
+    fn the_default_node_is_the_window_a_bare_centred_column() {
         assert_eq!(
             FlexNode::default(),
             FlexNode::Box(FlexBox {
-                width: FlexSize::Full,
-                height: FlexSize::Full,
                 direction: Direction::Column,
                 justify: Justify::Center,
                 bare: true,
@@ -718,11 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn a_default_box_fits_both_ways_and_is_not_bare() {
-        let flex_box = FlexBox::default();
-        assert_eq!(flex_box.width, FlexSize::Fit);
-        assert_eq!(flex_box.height, FlexSize::Fit);
-        assert!(!flex_box.bare);
+    fn a_default_box_is_not_bare() {
+        assert!(!FlexBox::default().bare);
     }
 
     #[test]
@@ -887,14 +821,6 @@ mod tests {
         assert_ne!(subtree(after, 1), subtree(before, 1));
         assert_eq!(subtree(after, 0), subtree(before, 0));
         assert_eq!(subtree(after, 2), subtree(before, 2));
-    }
-
-    #[test]
-    fn w_only_toggles_the_width_of_the_selected_box() {
-        let before = middle_selected();
-        let (state, _) = reduce(before.clone(), "w");
-        assert_eq!(box_at(&state, &[1]).width, FlexSize::Full);
-        only_the_middle_box_changed(&before, &state);
     }
 
     #[test]
@@ -1121,16 +1047,6 @@ mod tests {
     }
 
     #[test]
-    fn w_on_a_selected_text_makes_its_parent_box_full_width() {
-        let before = world_selected();
-        let (state, effect) = reduce(before.clone(), "w");
-        assert_eq!(box_at(&state, &[0]).width, FlexSize::Full);
-        assert_eq!(state.selected, before.selected);
-        assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(effect, None);
-    }
-
-    #[test]
     fn g_on_a_selected_text_spreads_its_parent_box() {
         let state = moved(world_selected(), &["g"]);
         assert_eq!(box_at(&state, &[0]).justify, Justify::SpaceBetween);
@@ -1202,7 +1118,7 @@ mod tests {
 
     #[test]
     fn u_after_a_toggle_brings_back_the_state_before_the_key() {
-        for key in ["w", "g", "d", "f"] {
+        for key in ["g", "d", "f"] {
             let before = world_selected();
             assert_eq!(moved(before.clone(), &[key, "u"]), before, "{key}");
         }
@@ -1210,7 +1126,7 @@ mod tests {
 
     #[test]
     fn u_goes_back_one_change_at_a_time_to_the_start() {
-        let (state, _) = typed(&["a", "w", "f", "u", "u", "u"]);
+        let (state, _) = typed(&["a", "f", "u", "u"]);
         assert_eq!(state, FlexState::default());
         assert_eq!(moved(state.clone(), &["u"]), state);
     }
@@ -1218,12 +1134,9 @@ mod tests {
     #[test]
     fn u_skips_selection_moves_and_undoes_the_last_change() {
         let before = world_selected();
-        let state = moved(before.clone(), &["w", "j", "k", "l", "u"]);
+        let state = moved(before.clone(), &["f", "j", "k", "l", "u"]);
         assert_eq!(state.selected, before.selected);
-        assert_eq!(
-            box_at(&state, &state.boxes.parent(&state.selected)).width,
-            FlexSize::Fit
-        );
+        assert!(!box_at(&state, &state.boxes.parent(&state.selected)).filled);
     }
 
     #[test]
