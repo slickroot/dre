@@ -4,7 +4,7 @@ use types::Tree;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES};
 
-use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexState, FlexWidth, Justify};
+use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexSize, FlexState, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_SPACE: Size = Size {
@@ -93,7 +93,13 @@ fn distribute(lengths: &[i64], room: i64, justify: Justify, gap: i64) -> Vec<i64
         }
         _ => (gap, gaps),
     };
-    let mut cursor = 0;
+    let mut cursor = match justify {
+        Justify::Center => {
+            let total = lengths.iter().sum::<i64>() + gap * gaps;
+            (room - total).div_euclid(2)
+        }
+        _ => 0,
+    };
     lengths
         .iter()
         .enumerate()
@@ -195,7 +201,7 @@ fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
             let measured = measure(&state.boxes, &path);
             let width = match state.boxes.value(&path) {
                 FlexNode::Box(FlexBox {
-                    width: FlexWidth::Full,
+                    width: FlexSize::Full,
                     ..
                 }) => window.cols,
                 _ => measured.width,
@@ -498,7 +504,7 @@ mod tests {
     fn full(text: &str) -> FlexState {
         holding(
             FlexBox {
-                width: FlexWidth::Full,
+                width: FlexSize::Full,
                 ..FlexBox::default()
             },
             &[text],
@@ -739,7 +745,7 @@ mod tests {
     fn a_full_box_with_two_texts_spans_the_window() {
         let state = holding(
             FlexBox {
-                width: FlexWidth::Full,
+                width: FlexSize::Full,
                 ..FlexBox::default()
             },
             &["Hello", "World"],
@@ -753,7 +759,7 @@ mod tests {
     fn full_beside(texts: &[&str], justify: Justify) -> FlexState {
         holding(
             FlexBox {
-                width: FlexWidth::Full,
+                width: FlexSize::Full,
                 justify,
                 ..FlexBox::default()
             },
@@ -944,7 +950,7 @@ mod tests {
         for text in ["", "a"] {
             let mut state = with_inner_boxes(text, 1);
             let outer = outer_box_mut(&mut state, 0);
-            outer.width = FlexWidth::Full;
+            outer.width = FlexSize::Full;
             outer.justify = Justify::Start;
             assert_inner_box_strictly_inside(&state);
         }
@@ -1106,6 +1112,31 @@ mod tests {
                 2 + gap + 3 + gap + 1,
                 2 + gap + 3 + gap + 1 + 4 + gap + 1
             ]
+        );
+    }
+
+    #[test]
+    fn center_splits_the_free_room_evenly_before_and_after_the_children() {
+        let lengths = [2, 3];
+        let total = 2 + FLEX_SPACE.width + 3;
+        let side = 4;
+        assert_eq!(
+            distribute(
+                &lengths,
+                side + total + side,
+                Justify::Center,
+                FLEX_SPACE.width
+            ),
+            vec![side, side + 2 + FLEX_SPACE.width]
+        );
+    }
+
+    #[test]
+    fn center_leans_odd_leftovers_left() {
+        let side = 4;
+        assert_eq!(
+            distribute(&[5], side + 5 + side + 1, Justify::Center, FLEX_SPACE.width),
+            vec![side]
         );
     }
 
@@ -1283,7 +1314,7 @@ mod tests {
         FlexState {
             boxes: Tree::root(vec![Tree::new(
                 FlexNode::Box(FlexBox {
-                    width: FlexWidth::Full,
+                    width: FlexSize::Full,
                     justify: Justify::SpaceBetween,
                     ..FlexBox::default()
                 }),
