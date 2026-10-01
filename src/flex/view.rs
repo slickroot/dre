@@ -51,6 +51,28 @@ impl Size {
     }
 }
 
+fn padding(flex_box: &FlexBox) -> Size {
+    if flex_box.bare {
+        Size {
+            width: 0,
+            height: 0,
+        }
+    } else {
+        FLEX_SPACE
+    }
+}
+
+fn is_full_across(node: &FlexNode, direction: Direction) -> bool {
+    let FlexNode::Box(flex_box) = node else {
+        return false;
+    };
+    let size = match direction {
+        Direction::Row => flex_box.height,
+        Direction::Column => flex_box.width,
+    };
+    size == FlexSize::Full
+}
+
 fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
     match tree.value(path) {
         FlexNode::Text(text) => Size {
@@ -76,9 +98,10 @@ fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
                 .max()
                 .unwrap_or(0);
             let content = Size::along(direction, main, cross);
+            let padding = padding(flex_box);
             Size {
-                width: content.width + 2 * FLEX_SPACE.width,
-                height: content.height + 2 * FLEX_SPACE.height,
+                width: content.width + 2 * padding.width,
+                height: content.height + 2 * padding.height,
             }
         }
     }
@@ -120,12 +143,12 @@ struct Rect {
 }
 
 impl Rect {
-    fn inner(self) -> Rect {
+    fn inner(self, padding: Size) -> Rect {
         Rect {
-            x: self.x + FLEX_SPACE.width,
-            y: self.y + FLEX_SPACE.height,
-            width: self.width - 2 * FLEX_SPACE.width,
-            height: self.height - 2 * FLEX_SPACE.height,
+            x: self.x + padding.width,
+            y: self.y + padding.height,
+            width: self.width - 2 * padding.width,
+            height: self.height - 2 * padding.height,
         }
     }
 
@@ -173,7 +196,7 @@ fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec
     let children = tree.children(path);
     let sizes: Vec<Size> = children.iter().map(|child| measure(tree, child)).collect();
     let mains: Vec<i64> = sizes.iter().map(|size| size.main(direction)).collect();
-    let inner = rect.inner();
+    let inner = rect.inner(padding(flex_box));
     let inner_cross = inner.size().cross(direction);
     let offsets = distribute(
         &mains,
@@ -182,50 +205,20 @@ fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec
         FLEX_SPACE.main(direction),
     );
     for ((child, size), offset) in children.iter().zip(sizes).zip(offsets) {
+        let (cross, cross_offset) = if is_full_across(tree.value(child), direction) {
+            (inner_cross, 0)
+        } else {
+            let cross = size.cross(direction);
+            (cross, (inner_cross - cross) / 2)
+        };
         let child_rect = Rect::along(
             direction,
             inner.main_start(direction) + offset,
-            inner.cross_start(direction) + (inner_cross - size.cross(direction)) / 2,
-            size,
+            inner.cross_start(direction) + cross_offset,
+            Size::along(direction, size.main(direction), cross),
         );
         arrange(tree, child, child_rect, out);
     }
-}
-
-fn lay_out_window(state: &FlexState, window: Area) -> Vec<(Vec<usize>, Rect)> {
-    let outers: Vec<(Vec<usize>, Size)> = state
-        .boxes
-        .children(&[])
-        .into_iter()
-        .map(|path| {
-            let measured = measure(&state.boxes, &path);
-            let width = match state.boxes.value(&path) {
-                FlexNode::Box(FlexBox {
-                    width: FlexSize::Full,
-                    ..
-                }) => window.cols,
-                _ => measured.width,
-            };
-            (path, Size { width, ..measured })
-        })
-        .collect();
-    let widest = outers.iter().map(|(_, size)| size.width).max().unwrap_or(0);
-    let gaps = FLEX_SPACE.height * outers.len().saturating_sub(1) as i64;
-    let stack_height = outers.iter().map(|(_, size)| size.height).sum::<i64>() + gaps;
-    let left = window.col + (window.cols - widest).div_euclid(2) + widest.div_euclid(2);
-    let mut y = window.row + (window.rows - stack_height).div_euclid(2);
-    let mut out = Vec::new();
-    for (path, size) in outers {
-        let rect = Rect {
-            x: left - size.width.div_euclid(2),
-            y,
-            width: size.width,
-            height: size.height,
-        };
-        arrange(&state.boxes, &path, rect, &mut out);
-        y += size.height + FLEX_SPACE.height;
-    }
-    out
 }
 
 fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) -> Placement<'a> {
@@ -268,9 +261,20 @@ fn paint<'a>(state: &FlexState, path: &[usize], node: &'a FlexNode, rect: Rect) 
 }
 
 pub(crate) fn scene(state: &FlexState, window: Area) -> Scene<'_> {
-    let placements = lay_out_window(state, window)
+    let window_rect = Rect {
+        x: window.col,
+        y: window.row,
+        width: window.cols,
+        height: window.rows,
+    };
+    let mut rects = Vec::new();
+    arrange(&state.boxes, &[], window_rect, &mut rects);
+    let placements = rects
         .into_iter()
-        .map(|(path, rect)| paint(state, &path, state.boxes.value(&path), rect))
+        .filter_map(|(path, rect)| match state.boxes.value(&path) {
+            FlexNode::Box(FlexBox { bare: true, .. }) => None,
+            node => Some(paint(state, &path, node, rect)),
+        })
         .collect();
     vec![(window, placements)]
 }
@@ -601,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn odd_widths_lean_right() {
+    fn odd_widths_lean_left() {
         let state = stacked(&["Hi", ""]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
@@ -612,7 +616,14 @@ mod tests {
                 view::interior("") + 2 * FLEX_SPACE.width
             )
         );
-        assert_eq!(boxes[1].x, boxes[0].x + 1);
+        for the_box in boxes {
+            let left_margin = the_box.x - WINDOW.col;
+            let right_margin = WINDOW.col + WINDOW.cols - (the_box.x + the_box.width);
+            assert!(
+                (0..=1).contains(&(right_margin - left_margin)),
+                "{left_margin} {right_margin}"
+            );
+        }
     }
 
     #[test]
