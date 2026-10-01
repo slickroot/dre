@@ -257,6 +257,7 @@ enum Image {
         id: kitty::ImageId,
         root: Canvas,
         frames: Vec<Canvas>,
+        wezterm: bool,
     },
 }
 
@@ -272,7 +273,12 @@ impl Placed {
         match &self.image {
             Image::Fresh { id, canvas } => kitty::show(canvas, *id, self.col, self.row, self.z),
             Image::Cached { id } => kitty::place(*id, placement, self.col, self.row, self.z),
-            Image::Growing { id, root, frames } => kitty::grow(
+            Image::Growing {
+                id,
+                root,
+                frames,
+                wezterm,
+            } => kitty::grow(
                 root,
                 frames,
                 *id,
@@ -281,6 +287,7 @@ impl Placed {
                 self.z,
                 GROW_GAP_MS,
                 GROW_HOLD_MS,
+                *wezterm,
             ),
         }
     }
@@ -474,6 +481,7 @@ pub(crate) struct TerminalRenderer {
     bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
     grow_stamp: u64,
+    pub(crate) wezterm: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -525,6 +533,7 @@ impl TerminalRenderer {
             grow_stamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos() as u64),
+            wezterm: false,
         }
     }
 
@@ -714,6 +723,7 @@ impl TerminalRenderer {
             id: self.image_ids.allocate_transient(),
             root: grow_root(width, height, self.grow_stamp),
             frames: grow_frames(width, height, style),
+            wezterm: self.wezterm,
         };
         frame.push(image, crop, z);
         true
@@ -3607,6 +3617,43 @@ mod tests {
         assert!(output.find("a=T").unwrap() < output.find("a=f").unwrap());
         assert!(placed_ids(&output).is_empty());
         assert!(r.tile_images.is_empty());
+    }
+
+    fn grow_frame_keys(output: &str) -> Vec<&str> {
+        output
+            .split("\x1b_G")
+            .filter(|command| command.starts_with("a=f,"))
+            .map(|command| command.split_once(';').unwrap().0)
+            .collect()
+    }
+
+    #[test]
+    fn a_growing_box_outside_wezterm_sends_frames_without_capital_z() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        let keys = grow_frame_keys(&output);
+        assert_eq!(keys.len(), GROW_FRAMES);
+        assert!(keys
+            .iter()
+            .all(|keys| !keys.split(',').any(|pair| pair.starts_with("Z="))));
+    }
+
+    #[test]
+    fn a_growing_box_in_wezterm_sends_frames_with_capital_z() {
+        let mut r = renderer_on(tiled_window());
+        r.wezterm = true;
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        let keys = grow_frame_keys(&output);
+        assert_eq!(keys.len(), GROW_FRAMES);
+        assert!(keys
+            .iter()
+            .all(|keys| keys.split(',').any(|pair| pair.starts_with("Z="))));
     }
 
     #[test]

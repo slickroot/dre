@@ -72,6 +72,7 @@ pub(crate) fn grow(
     z: i32,
     gap_ms: u32,
     hold_ms: u32,
+    wezterm: bool,
 ) -> Command {
     let mut output = show(root, id, col, row, z).0;
     for (index, canvas) in frames.iter().enumerate() {
@@ -81,7 +82,7 @@ pub(crate) fn grow(
         } else {
             gap_ms
         };
-        output.push_str(&frame(canvas, id, gap));
+        output.push_str(&frame(canvas, id, gap, wezterm));
     }
     output.push_str(&escape(&format!("a=a,i={},s=3,v=2,q=2", id.value()), ""));
     Command(output)
@@ -197,18 +198,21 @@ fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> 
     )
 }
 
-fn frame(canvas: &Canvas, id: ImageId, gap_ms: u32) -> String {
+fn frame(canvas: &Canvas, id: ImageId, gap_ms: u32, wezterm: bool) -> String {
     // WezTerm reads a frame's gap from `Z` and kitty from `z`; without `Z`, WezTerm
     // uses 40 ms (wezterm-escape-parser/src/apc.rs, KittyImageFrame::from_keys).
-    chunked(
-        &format!(
-            "a=f,f=32,s={},v={},o=z,q=2,i={},z={gap_ms},Z={gap_ms}",
-            canvas.width,
-            canvas.height,
-            id.value()
-        ),
-        &canvas.pixels,
-    )
+    // Kitty rejects the unknown `Z` key and drops the whole command
+    // (kitty/parse-graphics-command.h), so `Z` goes to WezTerm only.
+    let mut keys = format!(
+        "a=f,f=32,s={},v={},o=z,q=2,i={},z={gap_ms}",
+        canvas.width,
+        canvas.height,
+        id.value()
+    );
+    if wezterm {
+        keys.push_str(&format!(",Z={gap_ms}"));
+    }
+    chunked(&keys, &canvas.pixels)
 }
 
 fn chunked(keys: &str, pixels: &[u8]) -> String {
@@ -394,6 +398,10 @@ mod tests {
     }
 
     fn grown(frames: &[Canvas], gap_ms: u32, hold_ms: u32) -> String {
+        grown_in(frames, gap_ms, hold_ms, false)
+    }
+
+    fn grown_in(frames: &[Canvas], gap_ms: u32, hold_ms: u32, wezterm: bool) -> String {
         grow(
             &grow_canvas(0),
             frames,
@@ -403,8 +411,15 @@ mod tests {
             -1,
             gap_ms,
             hold_ms,
+            wezterm,
         )
         .to_string()
+    }
+
+    fn frame_key<'a>(frame: &'a str, key: &str) -> Option<&'a str> {
+        let (keys, _) = frame.split_once(';').unwrap();
+        keys.split(',')
+            .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
     }
 
     fn frame_escapes(output: &str) -> Vec<&str> {
@@ -442,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn grow_writes_z_and_capital_z_with_the_same_gap_and_holds_the_last_frame() {
+    fn grow_writes_the_gap_in_z_and_holds_the_last_frame() {
         let gap_ms = 17;
         let hold_ms = 2_000_000_000;
         let output = grown(
@@ -453,9 +468,28 @@ mod tests {
         let frames = frame_escapes(&output);
         let (last, rest) = frames.split_last().unwrap();
         for frame in rest {
-            assert!(frame.contains(&format!(",z={gap_ms},Z={gap_ms},")));
+            assert_eq!(frame_key(frame, "z"), Some(gap_ms.to_string().as_str()));
         }
-        assert!(last.contains(&format!(",z={hold_ms},Z={hold_ms},")));
+        assert_eq!(frame_key(last, "z"), Some(hold_ms.to_string().as_str()));
+    }
+
+    #[test]
+    fn grow_frames_have_no_capital_z_outside_wezterm() {
+        let output = grown(&[grow_canvas(1), grow_canvas(2)], 17, 1000);
+        for frame in frame_escapes(&output) {
+            assert_eq!(frame_key(frame, "Z"), None);
+        }
+    }
+
+    #[test]
+    fn grow_frames_in_wezterm_have_capital_z_equal_to_z() {
+        let output = grown_in(&[grow_canvas(1), grow_canvas(2)], 17, 1000, true);
+        let frames = frame_escapes(&output);
+        assert!(!frames.is_empty());
+        for frame in frames {
+            assert!(frame_key(frame, "Z").is_some());
+            assert_eq!(frame_key(frame, "Z"), frame_key(frame, "z"));
+        }
     }
 
     #[test]

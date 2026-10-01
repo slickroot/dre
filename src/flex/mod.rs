@@ -89,7 +89,8 @@ fn start() -> io::Result<()> {
     kitty::require(&mut stdout, fd)?;
     let window = tty::probe()?;
     let glyph_source = Box::new(GlyphCache::new(window.cell_width, window.cell_height));
-    let renderer = TerminalRenderer::new(window, glyph_source, CACHE_LIMIT);
+    let mut renderer = TerminalRenderer::new(window, glyph_source, CACHE_LIMIT);
+    renderer.wezterm = std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "WezTerm");
     let _raw = tty::RawMode::enter(fd)?;
     let resize_fd = tty::install_resize_pipe()?;
     run_loop(
