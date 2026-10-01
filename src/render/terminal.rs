@@ -109,6 +109,26 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+const GROW_FRAMES: usize = 9;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn eased(t: f64) -> f64 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn grow_frames(width: i64, height: i64, style: BoxStyle) -> Vec<Canvas> {
+    (1..=GROW_FRAMES)
+        .map(|k| {
+            let e = eased(k as f64 / GROW_FRAMES as f64);
+            let box_width = ((width as f64 * e).round() as i64).clamp(1, width);
+            let box_height = ((height as f64 * e).round() as i64).clamp(1, height);
+            Canvas::fill(width, height, &box_shape(box_width, box_height, style))
+        })
+        .collect()
+}
+
 fn whole(window: Window) -> Area {
     Area {
         col: 0,
@@ -3357,5 +3377,94 @@ mod tests {
             .tile_images
             .keys()
             .any(|key| key.shape.cell == r.cell_size()));
+    }
+
+    #[test]
+    fn eased_starts_at_zero_and_ends_at_one() {
+        assert_eq!(eased(0.0), 0.0);
+        assert_eq!(eased(1.0), 1.0);
+    }
+
+    #[test]
+    fn eased_is_an_ease_out_cubic() {
+        assert_eq!(eased(0.5), 0.875);
+    }
+
+    #[test]
+    fn eased_never_decreases() {
+        let samples: Vec<f64> = (0..=1000).map(|i| eased(i as f64 / 1000.0)).collect();
+        assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    fn grow_style() -> BoxStyle {
+        BoxStyle {
+            colour: colour(None),
+            fill: None,
+            fill_alpha: None,
+            solid_fill: Some((12, 34, 56)),
+            rounded: false,
+            sides: ALL_SIDES,
+            border: BORDER,
+        }
+    }
+
+    fn drawn_size(canvas: &Canvas) -> (i64, i64) {
+        let mut size = (0, 0);
+        for y in 0..canvas.height {
+            for x in 0..canvas.width {
+                if canvas.pixels[((y * canvas.width + x) * 4 + 3) as usize] != 0 {
+                    size = (size.0.max(x + 1), size.1.max(y + 1));
+                }
+            }
+        }
+        size
+    }
+
+    #[test]
+    fn grow_frames_are_all_full_size() {
+        let frames = grow_frames(90, 60, grow_style());
+        assert_eq!(frames.len(), GROW_FRAMES);
+        for frame in &frames {
+            assert_eq!((frame.width, frame.height), (90, 60));
+            assert_eq!(frame.pixels.len(), 90 * 60 * 4);
+        }
+    }
+
+    #[test]
+    fn grow_frames_drawn_size_never_decreases() {
+        let sizes: Vec<(i64, i64)> = grow_frames(90, 60, grow_style())
+            .iter()
+            .map(drawn_size)
+            .collect();
+        assert!(sizes
+            .windows(2)
+            .all(|pair| pair[0].0 <= pair[1].0 && pair[0].1 <= pair[1].1));
+        assert!(sizes[0] < sizes[GROW_FRAMES - 1]);
+    }
+
+    #[test]
+    fn grow_frames_last_frame_is_the_full_box() {
+        let style = grow_style();
+        let frames = grow_frames(90, 60, style);
+        let full = Canvas::fill(90, 60, &box_shape(90, 60, style));
+        assert_eq!(frames[GROW_FRAMES - 1].pixels, full.pixels);
+    }
+
+    #[test]
+    fn grow_frames_are_transparent_outside_each_eased_box() {
+        let (width, height) = (90, 60);
+        for (index, frame) in grow_frames(width, height, grow_style()).iter().enumerate() {
+            let e = eased((index + 1) as f64 / GROW_FRAMES as f64);
+            let box_width = ((width as f64 * e).round() as i64).clamp(1, width);
+            let box_height = ((height as f64 * e).round() as i64).clamp(1, height);
+            assert_eq!(drawn_size(frame), (box_width, box_height));
+            for y in 0..height {
+                for x in 0..width {
+                    if x >= box_width || y >= box_height {
+                        assert_eq!(frame.pixels[((y * width + x) * 4 + 3) as usize], 0);
+                    }
+                }
+            }
+        }
     }
 }
