@@ -48,6 +48,7 @@ pub enum PlacementNode<'a> {
         rounded: bool,
         sides: Sides,
         border: i64,
+        grow: bool,
     },
     Label(Label<'a>),
     Arrow(Arrow),
@@ -250,6 +251,7 @@ pub(crate) fn footer(model: &FooterModel) -> Vec<Placement<'static>> {
                     NO_SIDES
                 },
                 border: 1,
+                grow: false,
             },
             x: 0,
             y: 0,

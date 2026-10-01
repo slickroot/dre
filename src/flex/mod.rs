@@ -2,6 +2,7 @@ mod history;
 mod state;
 mod view;
 
+use std::collections::HashSet;
 use std::io::{self, Stdout, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
@@ -25,8 +26,10 @@ pub(crate) struct TerminalFlexScreen {
 
 impl FlexScreen for TerminalFlexScreen {
     fn render(&mut self, state: &FlexState) -> io::Result<()> {
-        self.renderer
-            .render(&view::scene(state, self.renderer.area()), &mut self.out)?;
+        self.renderer.render(
+            &view::scene(state, self.renderer.area(), &HashSet::new()),
+            &mut self.out,
+        )?;
         self.out.flush()
     }
 

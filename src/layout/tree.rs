@@ -96,6 +96,7 @@ fn place<'a>(
                 rounded,
                 sides: ALL_SIDES,
                 border: BORDER,
+                grow: false,
             },
             x,
             y,
@@ -507,6 +508,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                grow,
             } => PlacementNode::Box {
                 colour,
                 fill,
@@ -515,6 +517,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                grow,
             },
             _ => panic!("the first placement is the box"),
         }
@@ -539,6 +542,7 @@ mod tests {
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,
+                grow: false,
             }
         );
     }
@@ -800,6 +804,7 @@ mod tests {
                 rounded: true,
                 sides: ALL_SIDES,
                 border: BORDER,
+                grow: false,
             },
             x: 0,
             y: 0,

@@ -489,6 +489,7 @@ impl TerminalRenderer {
                     rounded,
                     sides,
                     border,
+                    ..
                 } => self.draw_box(
                     frame,
                     geometry,
@@ -1092,6 +1093,7 @@ mod tests {
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
+            grow: false,
         }
     }
 
@@ -1104,6 +1106,7 @@ mod tests {
                 solid_fill,
                 rounded,
                 border,
+                grow,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1113,6 +1116,7 @@ mod tests {
                 rounded,
                 sides: new_sides,
                 border,
+                grow,
             },
             _ => panic!("expected a Box"),
         }
@@ -1127,6 +1131,7 @@ mod tests {
                 solid_fill,
                 rounded,
                 sides,
+                grow,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1136,6 +1141,7 @@ mod tests {
                 rounded,
                 sides,
                 border: new_border,
+                grow,
             },
             _ => panic!("expected a Box"),
         }
@@ -1190,6 +1196,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                ..
             } => box_key(
                 placement.width,
                 placement.height,
@@ -2806,6 +2813,7 @@ mod tests {
             rounded,
             sides,
             border,
+            ..
         } = node
         else {
             panic!("expected a Box")
@@ -3096,6 +3104,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                ..
             } => BoxStyle {
                 colour: *colour,
                 fill: *fill,
