@@ -4,8 +4,8 @@ use crate::canvas::{Canvas, Rgba, Shape};
 use crate::render::OPAQUE;
 use crate::view::Rgb;
 
-const FONT_BYTES: &[u8] = include_bytes!("../../assets/JetBrainsMono-Regular.ttf");
-const BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/JetBrainsMono-Bold.ttf");
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/font-regular.ttf");
+const BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/font-bold.ttf");
 const REFERENCE_PX_SIZE: f32 = 100.0;
 
 pub(crate) trait GlyphSource {
@@ -37,7 +37,7 @@ impl GlyphCache {
         let regular = load_font(regular_bytes);
         let bold = load_font(bold_bytes);
 
-        // JetBrains Mono is monospace, so every glyph shares one advance width: pick the
+        // The bundled font is monospace, so every glyph shares one advance width: pick the
         // pixel size that makes that advance width equal cell_width, once, up front.
         // Also cap it so the font's full ascent+descent fits within cell_height,
         // otherwise descenders (g, q, y, p, j) get clipped at the bottom of the cell.
@@ -48,7 +48,7 @@ impl GlyphCache {
 
         let reference_line_metrics = regular
             .horizontal_line_metrics(REFERENCE_PX_SIZE)
-            .expect("JetBrains Mono must provide horizontal line metrics");
+            .expect("the bundled font must provide horizontal line metrics");
         let reference_line_height = reference_line_metrics.ascent - reference_line_metrics.descent;
         let height_px_size = REFERENCE_PX_SIZE * cell_height as f32 / reference_line_height;
 
@@ -56,7 +56,7 @@ impl GlyphCache {
 
         let line_metrics = regular
             .horizontal_line_metrics(px_size)
-            .expect("JetBrains Mono must provide horizontal line metrics");
+            .expect("the bundled font must provide horizontal line metrics");
         let baseline_row = line_metrics.ascent.round() as i64;
 
         GlyphCache {
@@ -145,7 +145,7 @@ impl GlyphSource for GlyphCache {
 
 fn load_font(font_bytes: &[u8]) -> fontdue::Font {
     fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default())
-        .expect("bundled JetBrains Mono font must parse")
+        .expect("bundled font must parse")
 }
 
 pub(super) struct GlyphShape {
@@ -229,10 +229,9 @@ mod tests {
     use crate::style::{CELL_HEIGHT, CELL_WIDTH};
 
     const INK: Rgba = [10, 20, 30, OPAQUE];
-    // JetBrains Mono cut down to M, B, i and g: parsing the full font is slow in a debug build.
-    const TEST_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/JetBrainsMonoSubset.ttf");
-    const TEST_BOLD_FONT_BYTES: &[u8] =
-        include_bytes!("../../assets/test/JetBrainsMonoBoldSubset.ttf");
+    // The bundled fonts cut down to M, B, i and g: parsing the full font is slow in a debug build.
+    const TEST_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/font-regular-subset.ttf");
+    const TEST_BOLD_FONT_BYTES: &[u8] = include_bytes!("../../assets/test/font-bold-subset.ttf");
 
     fn test_cache() -> GlyphCache {
         GlyphCache::with_fonts(
