@@ -73,7 +73,6 @@ impl<T> Tree<T> {
     }
 
     pub fn value(&self, path: &[usize]) -> &T {
-        assert!(!path.is_empty(), "the root has no value to read");
         &self.get(path).value
     }
 
@@ -459,9 +458,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn value_panics_on_the_root_path() {
-        sample().value(&[]);
+    fn value_of_the_root_path_is_the_root_value() {
+        let tree = Tree::new("root", vec![Tree::leaf("a")]);
+        assert_eq!(*tree.value(&[]), "root");
     }
 
     #[test]
