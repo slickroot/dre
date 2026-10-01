@@ -1624,4 +1624,71 @@ mod tests {
             vec![FLEX_TEXT_COLOUR; 2]
         );
     }
+
+    fn title_and_hi_in(direction: Direction) -> FlexState {
+        let parent = FlexBox {
+            width: FlexSize::Full,
+            direction,
+            ..FlexBox::default()
+        };
+        let inner = Tree::new(FlexNode::Box(FlexBox::default()), vec![text("Hi")]);
+        FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0, 1],
+            boxes: Tree::root(vec![Tree::new(
+                FlexNode::Box(parent),
+                vec![text("Title"), inner],
+            )]),
+            ..FlexState::default()
+        }
+    }
+
+    fn after(state: FlexState, keys: &[&str]) -> FlexState {
+        keys.iter().fold(state, |state, key| reduce(state, key).0)
+    }
+
+    fn outer_and_inner<'a>(
+        placements: &'a [Placement<'a>],
+    ) -> (&'a Placement<'a>, &'a Placement<'a>) {
+        let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
+        (outer, inner)
+    }
+
+    #[test]
+    fn w_on_an_inner_box_in_a_column_stretches_it_to_the_parent_padding() {
+        let state = after(title_and_hi_in(Direction::Column), &["w"]);
+        let placements = placements(&state);
+        let (outer, inner) = outer_and_inner(&placements);
+        assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
+        assert_eq!(
+            inner.x + inner.width,
+            outer.x + outer.width - FLEX_SPACE.width
+        );
+    }
+
+    #[test]
+    fn w_twice_on_an_inner_box_in_a_column_shrinks_it_back_to_fit() {
+        let before = title_and_hi_in(Direction::Column);
+        let state = after(before.clone(), &["w", "w"]);
+        assert_eq!(placements(&state), placements(&before));
+    }
+
+    #[test]
+    fn w_on_an_inner_box_in_a_row_changes_nothing() {
+        let before = title_and_hi_in(Direction::Row);
+        let state = after(before.clone(), &["w"]);
+        assert_eq!(placements(&state), placements(&before));
+    }
+
+    #[test]
+    fn w_in_a_row_then_d_on_the_parent_shows_the_inner_box_full_width() {
+        let state = after(title_and_hi_in(Direction::Row), &["w", "h", "d"]);
+        let placements = placements(&state);
+        let (outer, inner) = outer_and_inner(&placements);
+        assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
+        assert_eq!(
+            inner.x + inner.width,
+            outer.x + outer.width - FLEX_SPACE.width
+        );
+    }
 }
