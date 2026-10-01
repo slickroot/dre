@@ -62,6 +62,32 @@ pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> 
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grow(
+    root: &Canvas,
+    frames: &[Canvas],
+    id: ImageId,
+    col: i64,
+    row: i64,
+    z: i32,
+    gap_ms: u32,
+    hold_ms: u32,
+    wezterm: bool,
+) -> Command {
+    let mut output = show(root, id, col, row, z).0;
+    for (index, canvas) in frames.iter().enumerate() {
+        // WezTerm ignores `a=a` and loops the frames, so callers hold the last one long.
+        let gap = if index == frames.len() - 1 {
+            hold_ms
+        } else {
+            gap_ms
+        };
+        output.push_str(&frame(canvas, id, gap, wezterm));
+    }
+    output.push_str(&escape(&format!("a=a,i={},s=3,v=2,q=2", id.value()), ""));
+    Command(output)
+}
+
 pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
         "\x1b[{};{}H\x1b_Ga=p,i={},p={},q=2,z={};\x1b\\",
@@ -163,13 +189,36 @@ fn escape(keys: &str, payload: &str) -> String {
 }
 
 fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> String {
+    chunked(
+        &format!(
+            "a=T,f=32,s={width},v={height},o=z,q=2,i={},z={z}",
+            id.value()
+        ),
+        pixels,
+    )
+}
+
+fn frame(canvas: &Canvas, id: ImageId, gap_ms: u32, wezterm: bool) -> String {
+    // WezTerm reads a frame's gap from `Z` and kitty from `z`; without `Z`, WezTerm
+    // uses 40 ms (wezterm-escape-parser/src/apc.rs, KittyImageFrame::from_keys).
+    // Kitty rejects the unknown `Z` key and drops the whole command
+    // (kitty/parse-graphics-command.h), so `Z` goes to WezTerm only.
+    let mut keys = format!(
+        "a=f,f=32,s={},v={},o=z,q=2,i={},z={gap_ms}",
+        canvas.width,
+        canvas.height,
+        id.value()
+    );
+    if wezterm {
+        keys.push_str(&format!(",Z={gap_ms}"));
+    }
+    chunked(&keys, &canvas.pixels)
+}
+
+fn chunked(keys: &str, pixels: &[u8]) -> String {
     let payload = encode(pixels);
     let chunk_list = chunks(&payload, CHUNK_SIZE);
-    let header = format!(
-        "a=T,f=32,s={width},v={height},o=z,q=2,i={},z={z},m={}",
-        id.value(),
-        more(&chunk_list, 0)
-    );
+    let header = format!("{keys},m={}", more(&chunk_list, 0));
     let mut escapes = vec![escape(&header, &chunk_list[0])];
     for (index, chunk) in chunk_list.iter().enumerate().skip(1) {
         let keys = format!("m={}", more(&chunk_list, index));
@@ -338,6 +387,137 @@ mod tests {
         assert!(place(image_id(7), placement_id(9), 0, 0, 0)
             .to_string()
             .contains(",p=9,"));
+    }
+
+    fn grow_canvas(fill: u8) -> Canvas {
+        Canvas {
+            pixels: vec![fill; 16],
+            width: 2,
+            height: 2,
+        }
+    }
+
+    fn grown(frames: &[Canvas], gap_ms: u32, hold_ms: u32) -> String {
+        grown_in(frames, gap_ms, hold_ms, false)
+    }
+
+    fn grown_in(frames: &[Canvas], gap_ms: u32, hold_ms: u32, wezterm: bool) -> String {
+        grow(
+            &grow_canvas(0),
+            frames,
+            image_id(7),
+            3,
+            5,
+            -1,
+            gap_ms,
+            hold_ms,
+            wezterm,
+        )
+        .to_string()
+    }
+
+    fn frame_key<'a>(frame: &'a str, key: &str) -> Option<&'a str> {
+        let (keys, _) = frame.split_once(';').unwrap();
+        keys.split(',')
+            .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
+    }
+
+    fn frame_escapes(output: &str) -> Vec<&str> {
+        output
+            .split("\x1b_G")
+            .filter(|escape| escape.starts_with("a=f,"))
+            .collect()
+    }
+
+    #[test]
+    fn grow_moves_the_cursor_then_transmits_the_root() {
+        let root = grow_canvas(0);
+        let output = grown(&[grow_canvas(1)], 10, 1000);
+        assert!(output.starts_with(&format!(
+            "\x1b[6;4H{}",
+            transmission(&root.pixels, root.width, root.height, image_id(7), -1)
+        )));
+        assert_eq!(output.matches("a=T,").count(), 1);
+    }
+
+    #[test]
+    fn grow_sends_one_frame_per_canvas() {
+        let frames = vec![grow_canvas(1), grow_canvas(2), grow_canvas(3)];
+        assert_eq!(frame_escapes(&grown(&frames, 10, 1000)).len(), frames.len());
+    }
+
+    #[test]
+    fn grow_frames_are_rgba_composited_over_the_root() {
+        let output = grown(&[grow_canvas(1), grow_canvas(2)], 10, 1000);
+        for frame in frame_escapes(&output) {
+            assert!(frame.contains(",f=32,"));
+            assert!(frame.contains(",o=z,"));
+            assert!(frame.contains(",i=7,"));
+        }
+    }
+
+    #[test]
+    fn grow_writes_the_gap_in_z_and_holds_the_last_frame() {
+        let gap_ms = 17;
+        let hold_ms = 2_000_000_000;
+        let output = grown(
+            &[grow_canvas(1), grow_canvas(2), grow_canvas(3)],
+            gap_ms,
+            hold_ms,
+        );
+        let frames = frame_escapes(&output);
+        let (last, rest) = frames.split_last().unwrap();
+        for frame in rest {
+            assert_eq!(frame_key(frame, "z"), Some(gap_ms.to_string().as_str()));
+        }
+        assert_eq!(frame_key(last, "z"), Some(hold_ms.to_string().as_str()));
+    }
+
+    #[test]
+    fn grow_frames_have_no_capital_z_outside_wezterm() {
+        let output = grown(&[grow_canvas(1), grow_canvas(2)], 17, 1000);
+        for frame in frame_escapes(&output) {
+            assert_eq!(frame_key(frame, "Z"), None);
+        }
+    }
+
+    #[test]
+    fn grow_frames_in_wezterm_have_capital_z_equal_to_z() {
+        let output = grown_in(&[grow_canvas(1), grow_canvas(2)], 17, 1000, true);
+        let frames = frame_escapes(&output);
+        assert!(!frames.is_empty());
+        for frame in frames {
+            assert!(frame_key(frame, "Z").is_some());
+            assert_eq!(frame_key(frame, "Z"), frame_key(frame, "z"));
+        }
+    }
+
+    #[test]
+    fn grow_frames_are_chunked_like_transmission() {
+        let mut state: u32 = 0x9E3779B9;
+        let pixels: Vec<u8> = (0..40_000u32)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                (state >> 16) as u8
+            })
+            .collect();
+        let frame = Canvas {
+            pixels,
+            width: 100,
+            height: 100,
+        };
+        let output = grown(&[frame], 10, 1000);
+        let first = frame_escapes(&output)[0];
+        assert!(first.contains(",m=1;"));
+        assert!(output.contains("\x1b_Gm=0;"));
+    }
+
+    #[test]
+    fn grow_ends_by_playing_the_frames_once() {
+        let output = grown(&[grow_canvas(1)], 10, 1000);
+        let last = output.rsplit("\x1b_G").next().unwrap();
+        assert!(last.starts_with("a=a,i=7,s=3,v=2"));
+        assert!(output.ends_with("\x1b\\"));
     }
 
     #[test]

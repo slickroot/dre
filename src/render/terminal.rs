@@ -109,6 +109,54 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
+const GROW_FRAMES: usize = 9;
+const GROW_MS: u32 = 150;
+const GROW_GAP_MS: u32 = (GROW_MS + (GROW_FRAMES as u32 - 1) / 2) / (GROW_FRAMES as u32 - 1);
+// WezTerm ignores `a=a` and loops the frames, so the last frame is held for
+// about 23 days instead of relying on `v=2` to stop after one play.
+const GROW_HOLD_MS: u32 = 2_000_000_000;
+
+fn eased(t: f64) -> f64 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn grow_frames(width: i64, height: i64, style: BoxStyle) -> Vec<Canvas> {
+    (1..=GROW_FRAMES)
+        .map(|k| {
+            let e = eased(k as f64 / GROW_FRAMES as f64);
+            let box_width = ((width as f64 * e).round() as i64).clamp(1, width);
+            let box_height = ((height as f64 * e).round() as i64).clamp(1, height);
+            Canvas::fill(width, height, &box_shape(box_width, box_height, style))
+        })
+        .collect()
+}
+
+// WezTerm keys an animation's playback state by the hash of its root frame,
+// computed once at `a=T` (ImageData::with_data, wezterm-cell/src/image.rs) and
+// cached by the GUI (cached_image, wezterm-gui/src/glyphcache.rs). Two grows
+// with the same root would share one state and the second would show at full
+// size, so the stamp makes every root unique: its 48 low bits go into the
+// lowest bit of the R, G and B bytes of the first 16 pixels. The root is the
+// full box because some terminals (Ghostty before August 2026) don't play the
+// frames and show only the root. WezTerm and Ghostty create the root gapless
+// and skip it during the grow.
+fn grow_root(full: &Canvas, stamp: u64) -> Canvas {
+    let mut root = Canvas {
+        pixels: full.pixels.clone(),
+        width: full.width,
+        height: full.height,
+    };
+    let colour_bytes = root
+        .pixels
+        .iter_mut()
+        .enumerate()
+        .filter(|(index, _)| index % 4 != 3);
+    for (bit, (_, byte)) in colour_bytes.take(48).enumerate() {
+        *byte = (*byte & !1) | ((stamp >> bit) & 1) as u8;
+    }
+    root
+}
+
 fn whole(window: Window) -> Area {
     Area {
         col: 0,
@@ -202,8 +250,19 @@ fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
 }
 
 enum Image {
-    Fresh { id: kitty::ImageId, canvas: Canvas },
-    Cached { id: kitty::ImageId },
+    Fresh {
+        id: kitty::ImageId,
+        canvas: Canvas,
+    },
+    Cached {
+        id: kitty::ImageId,
+    },
+    Growing {
+        id: kitty::ImageId,
+        root: Canvas,
+        frames: Vec<Canvas>,
+        wezterm: bool,
+    },
 }
 
 struct Placed {
@@ -218,6 +277,22 @@ impl Placed {
         match &self.image {
             Image::Fresh { id, canvas } => kitty::show(canvas, *id, self.col, self.row, self.z),
             Image::Cached { id } => kitty::place(*id, placement, self.col, self.row, self.z),
+            Image::Growing {
+                id,
+                root,
+                frames,
+                wezterm,
+            } => kitty::grow(
+                root,
+                frames,
+                *id,
+                self.col,
+                self.row,
+                self.z,
+                GROW_GAP_MS,
+                GROW_HOLD_MS,
+                *wezterm,
+            ),
         }
     }
 }
@@ -409,6 +484,8 @@ pub(crate) struct TerminalRenderer {
     tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
     bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
+    grow_stamp: u64,
+    pub(crate) wezterm: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -457,6 +534,10 @@ impl TerminalRenderer {
             tile_images: std::collections::HashMap::new(),
             bracket_images: std::collections::HashMap::new(),
             image_ids: ImageIds::new(),
+            grow_stamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_nanos() as u64),
+            wezterm: false,
         }
     }
 
@@ -489,11 +570,13 @@ impl TerminalRenderer {
                     rounded,
                     sides,
                     border,
+                    grow,
                 } => self.draw_box(
                     frame,
                     geometry,
                     area,
                     placement.depth,
+                    *grow,
                     BoxStyle {
                         colour: *colour,
                         fill: *fill,
@@ -607,9 +690,13 @@ impl TerminalRenderer {
         geometry: Geometry,
         area: Area,
         depth: u8,
+        grow: bool,
         style: BoxStyle,
     ) {
         let z = depth_z(depth);
+        if grow && self.place_growing(frame, geometry, area, z, style) {
+            return;
+        }
         if self.place_tiles(frame, style, geometry, area, z) {
             return;
         }
@@ -617,6 +704,34 @@ impl TerminalRenderer {
         self.place_cached(frame, key, geometry, area, z, |renderer| {
             renderer.box_canvas(geometry.width, geometry.height, style)
         });
+    }
+
+    fn place_growing(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        z: i32,
+        style: BoxStyle,
+    ) -> bool {
+        let width = self.cells_to_pixels_x(geometry.width);
+        let height = self.cells_to_pixels_y(geometry.height);
+        let Some(crop) = frame.crop(geometry, area) else {
+            return false;
+        };
+        if (crop.first_x, crop.first_y, crop.last_x, crop.last_y) != (0, 0, width, height) {
+            return false;
+        }
+        self.grow_stamp = self.grow_stamp.wrapping_add(1);
+        let frames = grow_frames(width, height, style);
+        let image = Image::Growing {
+            id: self.image_ids.allocate_transient(),
+            root: grow_root(&frames[GROW_FRAMES - 1], self.grow_stamp),
+            frames,
+            wezterm: self.wezterm,
+        };
+        frame.push(image, crop, z);
+        true
     }
 
     fn draw_brackets(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, border: i64) {
@@ -1092,6 +1207,7 @@ mod tests {
             rounded,
             sides: ALL_SIDES,
             border: BORDER,
+            grow: false,
         }
     }
 
@@ -1104,6 +1220,7 @@ mod tests {
                 solid_fill,
                 rounded,
                 border,
+                grow,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1113,6 +1230,7 @@ mod tests {
                 rounded,
                 sides: new_sides,
                 border,
+                grow,
             },
             _ => panic!("expected a Box"),
         }
@@ -1127,6 +1245,7 @@ mod tests {
                 solid_fill,
                 rounded,
                 sides,
+                grow,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1136,6 +1255,7 @@ mod tests {
                 rounded,
                 sides,
                 border: new_border,
+                grow,
             },
             _ => panic!("expected a Box"),
         }
@@ -1190,6 +1310,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                ..
             } => box_key(
                 placement.width,
                 placement.height,
@@ -1481,6 +1602,7 @@ mod tests {
             match &self.image {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
+                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
             }
         }
     }
@@ -1497,13 +1619,14 @@ mod tests {
             .iter()
             .filter_map(|image| match &image.image {
                 Image::Fresh { id, canvas } => Some((*id, canvas)),
-                Image::Cached { .. } => None,
+                Image::Cached { .. } | Image::Growing { .. } => None,
             })
             .collect();
         let canvas_of = |image: &'a Placed| -> &'a Canvas {
             match &image.image {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { id } => fresh[id],
+                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
             }
         };
         let col = layer.iter().map(|image| image.col).min().expect("a layer");
@@ -1824,6 +1947,7 @@ mod tests {
                         Image::Cached { id } => {
                             kitty::place(*id, placement, image.col, image.row, image.z)
                         }
+                        Image::Growing { .. } => panic!("no box in this frame grows"),
                     }),
             )
             .map(|command| command.to_string())
@@ -2806,6 +2930,7 @@ mod tests {
             rounded,
             sides,
             border,
+            ..
         } = node
         else {
             panic!("expected a Box")
@@ -3096,6 +3221,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                ..
             } => BoxStyle {
                 colour: *colour,
                 fill: *fill,
@@ -3348,5 +3474,268 @@ mod tests {
             .tile_images
             .keys()
             .any(|key| key.shape.cell == r.cell_size()));
+    }
+
+    #[test]
+    fn eased_starts_at_zero_and_ends_at_one() {
+        assert_eq!(eased(0.0), 0.0);
+        assert_eq!(eased(1.0), 1.0);
+    }
+
+    #[test]
+    fn eased_is_an_ease_out_cubic() {
+        assert_eq!(eased(0.5), 0.875);
+    }
+
+    #[test]
+    fn eased_never_decreases() {
+        let samples: Vec<f64> = (0..=1000).map(|i| eased(i as f64 / 1000.0)).collect();
+        assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    fn grow_style() -> BoxStyle {
+        BoxStyle {
+            colour: colour(None),
+            fill: None,
+            fill_alpha: None,
+            solid_fill: Some((12, 34, 56)),
+            rounded: false,
+            sides: ALL_SIDES,
+            border: BORDER,
+        }
+    }
+
+    fn drawn_size(canvas: &Canvas) -> (i64, i64) {
+        let mut size = (0, 0);
+        for y in 0..canvas.height {
+            for x in 0..canvas.width {
+                if canvas.pixels[((y * canvas.width + x) * 4 + 3) as usize] != 0 {
+                    size = (size.0.max(x + 1), size.1.max(y + 1));
+                }
+            }
+        }
+        size
+    }
+
+    #[test]
+    fn grow_frames_are_all_full_size() {
+        let frames = grow_frames(90, 60, grow_style());
+        assert_eq!(frames.len(), GROW_FRAMES);
+        for frame in &frames {
+            assert_eq!((frame.width, frame.height), (90, 60));
+            assert_eq!(frame.pixels.len(), 90 * 60 * 4);
+        }
+    }
+
+    #[test]
+    fn grow_frames_drawn_size_never_decreases() {
+        let sizes: Vec<(i64, i64)> = grow_frames(90, 60, grow_style())
+            .iter()
+            .map(drawn_size)
+            .collect();
+        assert!(sizes
+            .windows(2)
+            .all(|pair| pair[0].0 <= pair[1].0 && pair[0].1 <= pair[1].1));
+        assert!(sizes[0] < sizes[GROW_FRAMES - 1]);
+    }
+
+    #[test]
+    fn grow_frames_last_frame_is_the_full_box() {
+        let style = grow_style();
+        let frames = grow_frames(90, 60, style);
+        let full = Canvas::fill(90, 60, &box_shape(90, 60, style));
+        assert_eq!(frames[GROW_FRAMES - 1].pixels, full.pixels);
+    }
+
+    #[test]
+    fn grow_frames_are_transparent_outside_each_eased_box() {
+        let (width, height) = (90, 60);
+        for (index, frame) in grow_frames(width, height, grow_style()).iter().enumerate() {
+            let e = eased((index + 1) as f64 / GROW_FRAMES as f64);
+            let box_width = ((width as f64 * e).round() as i64).clamp(1, width);
+            let box_height = ((height as f64 * e).round() as i64).clamp(1, height);
+            assert_eq!(drawn_size(frame), (box_width, box_height));
+            for y in 0..height {
+                for x in 0..width {
+                    if x >= box_width || y >= box_height {
+                        assert_eq!(frame.pixels[((y * width + x) * 4 + 3) as usize], 0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grow_root_is_the_full_box_with_the_stamp_in_the_lowest_colour_bits() {
+        let full = Canvas::fill(90, 60, &box_shape(90, 60, grow_style()));
+        let stamp = 0xABCD_1234_5678_9EF0;
+
+        let root = grow_root(&full, stamp);
+
+        assert_eq!((root.width, root.height), (90, 60));
+        assert_eq!(root.pixels.len(), full.pixels.len());
+        let mut bits = 0u64;
+        let mut colour_byte = 0;
+        for (index, (root_byte, full_byte)) in root.pixels.iter().zip(&full.pixels).enumerate() {
+            if index % 4 == 3 {
+                assert_eq!(root_byte, full_byte);
+                continue;
+            }
+            assert_eq!(root_byte & !1, full_byte & !1);
+            if colour_byte < 48 {
+                bits |= u64::from(root_byte & 1) << colour_byte;
+                colour_byte += 1;
+            }
+        }
+        assert_eq!(bits, stamp & 0xFFFF_FFFF_FFFF);
+    }
+
+    #[test]
+    fn grow_root_of_a_canvas_smaller_than_the_stamp_keeps_its_size() {
+        let full = Canvas::fill(2, 2, &box_shape(2, 2, grow_style()));
+
+        let root = grow_root(&full, u64::MAX);
+
+        assert_eq!(root.pixels.len(), full.pixels.len());
+    }
+
+    fn growing_node() -> PlacementNode<'static> {
+        match box_node(Some(1), Some(1), true) {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow: true,
+            },
+            _ => panic!("expected a Box"),
+        }
+    }
+
+    fn growing_box(r: &TerminalRenderer, x: i64, y: i64) -> [Placement<'static>; 1] {
+        let node = growing_node();
+        let (width, height) = smallest_tiled(r, &node);
+        [box_placement(&node, x, y, width + EXTRA_CELLS, height + 1)]
+    }
+
+    fn root_payload(output: &str) -> String {
+        output
+            .split("\x1b_G")
+            .skip_while(|command| !command.starts_with("a=T,"))
+            .enumerate()
+            .take_while(|(index, command)| *index == 0 || command.starts_with("m="))
+            .map(|(_, command)| command)
+            .map(|command| {
+                let (_, rest) = command.split_once(';').unwrap();
+                rest.split("\x1b\\").next().unwrap().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_growing_box_that_fits_is_one_image_with_every_grow_frame_and_no_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        assert_eq!(output.matches("a=T").count(), 1);
+        assert_eq!(output.matches("a=f").count(), GROW_FRAMES);
+        assert!(output.find("a=T").unwrap() < output.find("a=f").unwrap());
+        assert!(placed_ids(&output).is_empty());
+        assert!(r.tile_images.is_empty());
+    }
+
+    fn grow_frame_keys(output: &str) -> Vec<&str> {
+        output
+            .split("\x1b_G")
+            .filter(|command| command.starts_with("a=f,"))
+            .map(|command| command.split_once(';').unwrap().0)
+            .collect()
+    }
+
+    #[test]
+    fn a_growing_box_outside_wezterm_sends_frames_without_capital_z() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        let keys = grow_frame_keys(&output);
+        assert_eq!(keys.len(), GROW_FRAMES);
+        assert!(keys
+            .iter()
+            .all(|keys| !keys.split(',').any(|pair| pair.starts_with("Z="))));
+    }
+
+    #[test]
+    fn a_growing_box_in_wezterm_sends_frames_with_capital_z() {
+        let mut r = renderer_on(tiled_window());
+        r.wezterm = true;
+        let placements = growing_box(&r, 1, 1);
+
+        let output = rendered_placements(&mut r, &placements);
+
+        let keys = grow_frame_keys(&output);
+        assert_eq!(keys.len(), GROW_FRAMES);
+        assert!(keys
+            .iter()
+            .all(|keys| keys.split(',').any(|pair| pair.starts_with("Z="))));
+    }
+
+    #[test]
+    fn a_cropped_growing_box_pops_in_as_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let [placement] = growing_box(&r, 0, 0);
+        let cropped = Placement {
+            x: tiled_window().cols - placement.width + 1,
+            ..placement
+        };
+
+        let output = rendered_placements(&mut r, &[cropped]);
+
+        assert_eq!(output.matches("a=f").count(), 0);
+        assert!(!r.tile_images.is_empty());
+    }
+
+    #[test]
+    fn two_grows_of_the_same_size_have_different_roots() {
+        let mut r = renderer_on(tiled_window());
+        let placements = growing_box(&r, 1, 1);
+
+        let first = rendered_placements(&mut r, &placements);
+        let second = rendered_placements(&mut r, &placements);
+
+        assert!(!root_payload(&first).is_empty());
+        assert_ne!(root_payload(&first), root_payload(&second));
+    }
+
+    #[test]
+    fn the_frame_after_a_grow_deletes_it_and_draws_the_box_with_tiles() {
+        let mut r = renderer_on(tiled_window());
+        let [growing] = growing_box(&r, 1, 1);
+        let settled = Placement {
+            node: box_node(Some(1), Some(1), true),
+            ..growing.clone()
+        };
+
+        let first = rendered_placements(&mut r, &[growing]);
+        let second = rendered_placements(&mut r, &[settled]);
+
+        assert_eq!(deleted_ids(&second), shown_ids(&first));
+        assert_eq!(second.matches("a=f").count(), 0);
+        assert!(!r.tile_images.is_empty());
     }
 }

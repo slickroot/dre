@@ -85,6 +85,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            grow: false,
         }
     }
 
