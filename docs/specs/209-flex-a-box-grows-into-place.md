@@ -26,6 +26,7 @@ The grow is a one-shot. The render right after the box appears sends the animati
 - **First render:** `drawn` is `None`, so nothing grows.
 - This works because `Tree::push` always appends, so a path that was already drawn still means the same box. That covers `a` (outer boxes) and `A` (inner boxes). Undo followed by `a` gives a path that wasn't drawn last time, so that box grows again.
 - A resize doesn't change the boxes, so no box is new and nothing grows.
+- **`start` tells the renderer whether it runs in WezTerm:** it sets `renderer.wezterm` when the `TERM_PROGRAM` environment variable is `WezTerm`.
 
 ### View (`view.rs`, `flex/view.rs`)
 
@@ -40,23 +41,27 @@ The grow is a one-shot. The render right after the box appears sends the animati
 - **Frames are shrunk boxes:** `grow_frames(width_px, height_px, style) -> Vec<Canvas>`. All frames are full-size transparent canvases. Frame `k` of `GROW_FRAMES = 9` draws a complete outline with `box_shape` at `eased(k / 9)` of the full width and height, anchored at the top-left. The last frame is exactly the full-size box.
 - **Ease-out cubic:** `eased(t) = 1 - (1 - t)^3`, in a pure function.
 - **Timing:** `GROW_MS = 150`. Each growing frame's gap is `GROW_MS / (GROW_FRAMES - 1)`, rounded, which is 19 ms. The last frame gets `GROW_HOLD_MS = 2_000_000_000`, about 23 days, so it stays on screen.
-- **The root frame is unique per grow.** `TerminalRenderer` keeps a `grow_stamp: u64` counter, seeded at startup from the system time so that runs in the same terminal window differ. The root frame is fully transparent, with the stamp written into the RGB bytes of the first two pixels; their alpha stays 0.
+- **The root frame is the full-size box,** the same as the last frame. A terminal that doesn't play the frames shows the root, so the box pops in instead of staying invisible until the next render. Terminals that play the frames skip it, because the root is gapless.
+- **The root frame is unique per grow.** `TerminalRenderer` keeps a `grow_stamp: u64` counter, seeded at startup from the system time so that runs in the same terminal window differ. The 48 low bits of the stamp are written into the lowest bit of the R, G and B bytes of the root's first 16 pixels. A change of 1 in a colour channel can't be seen, and this works whether the box is filled or not.
+- **`TerminalRenderer` gains `wezterm: bool`,** `false` from `new`. It is passed to `kitty::grow`.
 - `Image` gains a `Growing { id, root: Canvas, frames: Vec<Canvas> }` variant. Its `command` uses `kitty::grow`.
 
 ### Kitty (`kitty.rs`)
 
-- **`grow(root, frames, id, col, row, z, gap_ms, hold_ms) -> Command`**: moves the cursor, transmits and places the root (`a=T`, as `transmission` does), then sends one `a=f` per frame. Each frame is `f=32`, `o=z`, chunked like `transmission`, and has gap `z=` and `Z=` set to the same value. Finally it sends `a=a,s=3,v=2` so that kitty plays the frames once.
+- **`grow(root, frames, id, col, row, z, gap_ms, hold_ms, wezterm) -> Command`**: moves the cursor, transmits and places the root (`a=T`, as `transmission` does), then sends one `a=f` per frame. Each frame is `f=32`, `o=z`, chunked like `transmission`, and has its gap in `z=`. Only when `wezterm` is true does each frame also get `Z=` with the same value. Finally it sends `a=a,s=3,v=2` so that kitty plays the frames once.
 
-### Terminal quirks (WezTerm)
+### Terminal quirks
 
 Write these down in comments where they apply, because they aren't obvious:
 
 1. **WezTerm reads a frame's gap from `Z`, kitty from `z`.** That's `wezterm-escape-parser/src/apc.rs`, `KittyImageFrame::from_keys`. Without `Z`, WezTerm uses 40 ms for every frame.
 2. **WezTerm ignores `a=a`, so it loops.** That's why the last frame has a gap of about 23 days instead of relying on `v=2`.
-3. **WezTerm keys its playback state by the hash of the root frame.** The hash is computed once at `a=T` (`ImageData::with_data`, `wezterm-cell/src/image.rs`) and the GUI caches the animation state under it (`wezterm-gui/src/glyphcache.rs`, `cached_image`). Two grows with the same root share one state, and the second grow shows up already at full size. Hence the unique stamp in the root's transparent pixels.
-4. **WezTerm skips a root frame with a gap of 0,** so the transparent root never shows.
+3. **WezTerm keys its playback state by the hash of the root frame.** The hash is computed once at `a=T` (`ImageData::with_data`, `wezterm-cell/src/image.rs`) and the GUI caches the animation state under it (`wezterm-gui/src/glyphcache.rs`, `cached_image`). Two grows with the same root share one state, and the second grow shows up already at full size. Hence the unique stamp in the root's lowest colour bits.
+4. **WezTerm skips a root frame with a gap of 0,** so the root never shows during the grow. Ghostty creates the root gapless too (`controlAnimation`, `src/terminal/kitty/graphics_exec.zig`).
+5. **Kitty rejects a command with a key it doesn't know, and `Z` is one of them.** It reports `invalid key character` and drops the whole command (`kitty/parse-graphics-command.h`), and `q=2` hides the error. That's why `Z` is only sent to WezTerm.
+6. **Some terminals don't play animation frames.** Ghostty only gained them in August 2026. Those terminals show only the root, which is why the root is the full box.
 
-These were verified in WezTerm with the prototype below: shrunk frames, ease-out, 150 ms, repeated `a` presses in one window.
+Quirks 1 to 4 were verified in WezTerm with the prototype below: shrunk frames, ease-out, 150 ms, repeated `a` presses in one window. Quirks 5 and 6 come from kitty's and Ghostty's sources.
 
 ### Tests
 
@@ -74,10 +79,13 @@ Renderer:
 - `grow_frames` returns 9 canvases of the full size. The drawn width and height never decrease. The last frame equals `box_canvas` for the same size and style. Pixels outside each frame's box are transparent.
 - A `grow: true` box that fits produces one `a=T` followed by 9 `a=f` commands, and no tiles for that box. A `grow: true` box that is cropped produces tiles.
 - Two grows of the same size have different root payloads.
+- The root differs from the full-size box only in the lowest bit of its colour bytes.
+- `wezterm` is passed through to the grow command: with it, frames carry `Z`. Without it, they don't.
 - The frame after a grow deletes the grow image and draws the box with tiles.
 
 Kitty:
-- `grow` writes `z` and `Z` with the same value on every frame, writes the hold on the last frame, and ends with `a=a,i=<id>,s=3,v=2`.
+- `grow` writes the gap in `z` on every frame, writes the hold on the last frame, and ends with `a=a,i=<id>,s=3,v=2`.
+- Without `wezterm`, no frame has a `Z` key. With `wezterm`, every frame has `Z` equal to its `z`.
 
 ### Prototype
 
