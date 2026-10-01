@@ -1181,4 +1181,36 @@ mod tests {
         assert_eq!(state, FlexState::default());
         assert!(effects.is_empty());
     }
+
+    #[test]
+    fn u_after_s_and_typing_removes_the_whole_text_and_restores_the_selection() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["s", "H", "e", "l", "l", "o", "\r", "u"]);
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn u_after_editing_a_text_brings_back_the_text_before_the_edit() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(
+            before.clone(),
+            &["i", " ", "W", "o", "r", "l", "d", "\r", "u"],
+        );
+        assert_eq!(state.texts_of(&[0]), ["Hello"]);
+    }
+
+    #[test]
+    fn u_after_i_and_typing_on_an_empty_box_removes_the_text() {
+        let state = moved(FlexState::default(), &["i", "H", "i", "\r", "u"]);
+        assert_eq!(state.texts_of(&state.selected), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn u_in_write_mode_is_typed_and_leaves_the_history_alone() {
+        let before = moved(hello_in(FlexMode::Move), &["i"]);
+        let (state, effect) = reduce(before.clone(), "u");
+        assert_eq!(state.texts_of(&[0]), ["Hellou"]);
+        assert_eq!(state.history.len(), before.history.len());
+        assert_eq!(effect, None);
+    }
 }
