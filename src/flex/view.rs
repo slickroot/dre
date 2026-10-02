@@ -855,7 +855,7 @@ mod tests {
             boxes: new_window(vec![outer(
                 FlexBox {
                     justify: Justify::SpaceBetween,
-                    ..FlexBox::default()
+                    ..row()
                 },
                 &[],
                 2,
@@ -872,6 +872,10 @@ mod tests {
     }
 
     fn row_of_boxes(row: FlexBox, own_text: &[&str], box_texts: &[&str]) -> FlexState {
+        let row = FlexBox {
+            direction: Direction::Row,
+            ..row
+        };
         let boxes: Vec<_> = box_texts
             .iter()
             .map(|label| outer(FlexBox::default(), &[label], 0))
