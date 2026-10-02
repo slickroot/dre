@@ -3,7 +3,8 @@ use std::collections::HashSet;
 
 use types::Tree;
 
-use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES};
+use crate::style::FOREGROUND;
+use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, NO_SIDES};
 
 use super::state::{Direction, FlexBox, FlexMode, FlexState, Justify};
 
@@ -16,6 +17,7 @@ const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
 const FLEX_SELECTED_COLOUR: Rgb = (0x8A, 0xB4, 0xF8);
 const FLEX_TEXT_COLOUR: Rgb = (0xC9, 0xC9, 0xCF);
 const FLEX_FILL_COLOUR: Rgb = (0x14, 0x14, 0x16);
+const FLEX_REPLACE_OPACITY: f64 = 0.55;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Size {
@@ -291,11 +293,11 @@ fn paint<'a>(
                 placement(
                     PlacementNode::Box {
                         colour: FLEX_SELECTED_COLOUR,
-                        fill: None,
-                        opacity: None,
-                        solid_fill: Some(FLEX_SELECTED_COLOUR),
+                        fill: Some(FOREGROUND),
+                        opacity: Some(FLEX_REPLACE_OPACITY),
+                        solid_fill: None,
                         rounded: false,
-                        sides: ALL_SIDES,
+                        sides: NO_SIDES,
                         border: FLEX_BORDER,
                         grow: false,
                     },
@@ -2139,10 +2141,25 @@ mod tests {
         after(with_selected_text(text), &["i"])
     }
 
+    fn fill(placement: &Placement<'_>) -> Option<u8> {
+        let PlacementNode::Box { fill, .. } = placement.node else {
+            unreachable!()
+        };
+        fill
+    }
+
+    fn opacity(placement: &Placement<'_>) -> Option<f64> {
+        let PlacementNode::Box { opacity, .. } = placement.node else {
+            unreachable!()
+        };
+        opacity
+    }
+
     fn is_highlight(placement: &Placement<'_>) -> bool {
         matches!(
             &placement.node,
-            PlacementNode::Box { solid_fill: Some(colour), .. } if *colour == FLEX_SELECTED_COLOUR
+            PlacementNode::Box { fill: Some(colour), opacity, .. }
+                if *colour == FOREGROUND && *opacity == Some(FLEX_REPLACE_OPACITY)
         )
     }
 
@@ -2156,7 +2173,10 @@ mod tests {
         let placements = placements(&state);
         let highlight = highlight(&placements).unwrap();
         let label = the_label(&placements);
-        assert_eq!(solid_fill(highlight), Some(FLEX_SELECTED_COLOUR));
+        assert_eq!(
+            (fill(highlight), opacity(highlight)),
+            (Some(FOREGROUND), Some(FLEX_REPLACE_OPACITY))
+        );
         assert_eq!(
             (highlight.x, highlight.y, highlight.width, highlight.height),
             (label.x, label.y, "Hello".chars().count() as i64, 1)
