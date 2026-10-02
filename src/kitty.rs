@@ -88,7 +88,6 @@ pub(crate) fn grow(
     Command(output)
 }
 
-#[allow(dead_code)]
 pub(crate) fn blink(
     root: &Canvas,
     lit: &Canvas,

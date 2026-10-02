@@ -58,9 +58,21 @@ struct LabelStyle {
     bold: bool,
 }
 
+#[derive(Clone, Copy)]
+struct CaretStyle {
+    colour: Rgb,
+    bold: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphKey {
     character: char,
+    colour: Rgb,
+    bold: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CaretKey {
     colour: Rgb,
     bold: bool,
 }
@@ -108,6 +120,8 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
         fill: [fill_r, fill_g, fill_b, fill_a],
     }
 }
+
+const BLINK_GAP_MS: u32 = 500;
 
 const GROW_FRAMES: usize = 9;
 const GROW_MS: u32 = 150;
@@ -263,6 +277,12 @@ enum Image {
         frames: Vec<Canvas>,
         wezterm: bool,
     },
+    Blinking {
+        id: kitty::ImageId,
+        root: Canvas,
+        lit: Canvas,
+        wezterm: bool,
+    },
 }
 
 struct Placed {
@@ -293,6 +313,12 @@ impl Placed {
                 GROW_HOLD_MS,
                 *wezterm,
             ),
+            Image::Blinking {
+                id,
+                root,
+                lit,
+                wezterm,
+            } => kitty::blink(root, lit, *id, self.z, BLINK_GAP_MS, *wezterm),
         }
     }
 }
@@ -421,6 +447,33 @@ impl Frame {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn place_blinking<G: Into<Geometry>>(
+        &mut self,
+        id: kitty::ImageId,
+        root: &Canvas,
+        lit: &Canvas,
+        geometry: G,
+        area: Area,
+        z: i32,
+        wezterm: bool,
+    ) {
+        if let Some(crop) = self.crop(geometry, area) {
+            let cropped =
+                |canvas: &Canvas| canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
+            self.push(
+                Image::Blinking {
+                    id,
+                    root: cropped(root),
+                    lit: cropped(lit),
+                    wezterm,
+                },
+                crop,
+                z,
+            );
+        }
+    }
+
     fn push_fresh(&mut self, id: kitty::ImageId, canvas: &Canvas, crop: Crop, z: i32) {
         let canvas = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
         self.push(Image::Fresh { id, canvas }, crop, z);
@@ -480,6 +533,7 @@ pub(crate) struct TerminalRenderer {
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
     glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
+    caret_images: std::collections::HashMap<CaretKey, kitty::ImageId>,
     tile_canvases: std::collections::HashMap<TileKey, Canvas>,
     tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
     bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
@@ -530,6 +584,7 @@ impl TerminalRenderer {
             cache_limit,
             glyph_source,
             glyph_images: std::collections::HashMap::new(),
+            caret_images: std::collections::HashMap::new(),
             tile_canvases: std::collections::HashMap::new(),
             tile_images: std::collections::HashMap::new(),
             bracket_images: std::collections::HashMap::new(),
@@ -610,7 +665,16 @@ impl TerminalRenderer {
                         bold: label.bold,
                     },
                 ),
-                PlacementNode::TypingCaret { .. } => {}
+                PlacementNode::TypingCaret { colour, bold } => self.draw_typing_caret(
+                    frame,
+                    geometry,
+                    area,
+                    placement.depth,
+                    CaretStyle {
+                        colour: *colour,
+                        bold: *bold,
+                    },
+                ),
                 PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
                 PlacementNode::Cursor(_) => self.draw_cursor(frame, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
@@ -819,6 +883,34 @@ impl TerminalRenderer {
                 let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
                 frame.place_fresh(id, glyph, &char_placement, area, z);
             }
+        }
+    }
+
+    fn draw_typing_caret(
+        &mut self,
+        frame: &mut Frame,
+        geometry: Geometry,
+        area: Area,
+        depth: u8,
+        style: CaretStyle,
+    ) {
+        let z = depth_z(depth);
+        let key = CaretKey {
+            colour: style.colour,
+            bold: style.bold,
+        };
+        if let Some(id) = self.caret_images.get(&key).copied() {
+            frame.place_cached(id, geometry, area, z);
+        } else {
+            let id = self.image_ids.allocate();
+            self.caret_images.insert(key, id);
+            let lit = self.glyph_source.glyph('|', style.colour, style.bold);
+            let root = Canvas {
+                pixels: vec![0; lit.pixels.len()],
+                width: lit.width,
+                height: lit.height,
+            };
+            frame.place_blinking(id, &root, lit, geometry, area, z, self.wezterm);
         }
     }
 
@@ -1604,6 +1696,9 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
                 Image::Growing { .. } => panic!("a growing image carries no single canvas"),
+                Image::Blinking { .. } => {
+                    panic!("a blinking image carries no single canvas")
+                }
             }
         }
     }
@@ -1620,7 +1715,7 @@ mod tests {
             .iter()
             .filter_map(|image| match &image.image {
                 Image::Fresh { id, canvas } => Some((*id, canvas)),
-                Image::Cached { .. } | Image::Growing { .. } => None,
+                Image::Cached { .. } | Image::Growing { .. } | Image::Blinking { .. } => None,
             })
             .collect();
         let canvas_of = |image: &'a Placed| -> &'a Canvas {
@@ -1628,6 +1723,9 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { id } => fresh[id],
                 Image::Growing { .. } => panic!("a growing image carries no single canvas"),
+                Image::Blinking { .. } => {
+                    panic!("a blinking image carries no single canvas")
+                }
             }
         };
         let col = layer.iter().map(|image| image.col).min().expect("a layer");
@@ -1771,6 +1869,31 @@ mod tests {
             width,
             height,
             depth: 0,
+        }
+    }
+
+    fn typing_caret_colour() -> Rgb {
+        crate::style::rgb(Some(crate::style::DIM))
+    }
+
+    fn typing_caret_placement(x: i64, y: i64) -> crate::view::Placement<'static> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::TypingCaret {
+                colour: typing_caret_colour(),
+                bold: false,
+            },
+            x,
+            y,
+            width: 1,
+            height: 1,
+            depth: 0,
+        }
+    }
+
+    fn blinking(image: &Placed) -> (&Canvas, &Canvas) {
+        match &image.image {
+            Image::Blinking { root, lit, .. } => (root, lit),
+            _ => panic!("a blinking image carries a root frame and a lit frame"),
         }
     }
 
@@ -1949,6 +2072,9 @@ mod tests {
                             kitty::place(*id, placement, image.col, image.row, image.z)
                         }
                         Image::Growing { .. } => panic!("no box in this frame grows"),
+                        Image::Blinking { .. } => {
+                            panic!("nothing in this frame is a typing caret")
+                        }
                     }),
             )
             .map(|command| command.to_string())
@@ -2352,6 +2478,86 @@ mod tests {
             .pixels
             .chunks(4)
             .all(|pixel| pixel == solid));
+    }
+
+    #[test]
+    fn the_legacy_caret_is_still_a_solid_block() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let caret = &sprites(&mut r, &[caret_placement(3, 2, 1, 1)])[0];
+        let (cr, cg, cb) = colour(None);
+        let solid = [cr, cg, cb, OPAQUE];
+        assert!(caret.canvas().pixels.chunks(4).all(|pixel| pixel == solid));
+    }
+
+    #[test]
+    fn the_typing_caret_root_frame_is_transparent() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let caret = &sprites(&mut r, &[typing_caret_placement(3, 2)])[0];
+        let (root, lit) = blinking(caret);
+        assert_eq!((root.width, root.height), (lit.width, lit.height));
+        assert!(root.pixels.chunks(4).all(|pixel| pixel[3] == 0));
+    }
+
+    #[test]
+    fn the_typing_caret_lit_frame_is_the_bar_glyph() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let caret = &sprites(&mut r, &[typing_caret_placement(3, 2)])[0];
+        let (_, lit) = blinking(caret);
+        let glyph = r.glyph_source.glyph('|', typing_caret_colour(), false);
+        assert_eq!(lit.pixels, glyph.pixels);
+        let (r, g, b) = typing_caret_colour();
+        assert!(lit
+            .pixels
+            .chunks(4)
+            .all(|pixel| *pixel == [r, g, b, OPAQUE]));
+    }
+
+    #[test]
+    fn the_typing_caret_is_transmitted_once() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let output = rendered_placements(&mut r, &[typing_caret_placement(3, 2)]);
+
+        assert_eq!(output.matches("a=T,").count(), 1);
+        assert_eq!(output.matches("a=f,").count(), 1);
+        assert_eq!(output.matches("a=a,").count(), 1);
+        let animation = output
+            .split("\x1b_G")
+            .find(|command| command.starts_with("a=a,"))
+            .expect("the caret animation loops forever");
+        assert_eq!(command_fields(animation, "a=a,", "r="), vec!["1"]);
+        assert_eq!(
+            command_fields(animation, "a=a,", "z="),
+            vec![BLINK_GAP_MS.to_string()]
+        );
+        assert_eq!(command_fields(animation, "a=a,", "s="), vec!["3"]);
+        assert_eq!(command_fields(animation, "a=a,", "v="), vec!["1"]);
+        assert_eq!(
+            command_fields(&output, "a=T,", "z="),
+            vec![depth_z(0).to_string()]
+        );
+    }
+
+    #[test]
+    fn the_typing_caret_is_re_placed_and_not_re_transmitted() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let first = rendered_placements(&mut r, &[typing_caret_placement(3, 2)]);
+        let second = rendered_placements(&mut r, &[typing_caret_placement(4, 2)]);
+
+        assert!(!second.contains("a=T,"));
+        assert!(!second.contains("a=f,"));
+        assert!(!second.contains("a=a,"));
+        assert_eq!(placed_ids(&second), shown_ids(&first));
+    }
+
+    #[test]
+    fn the_typing_caret_is_the_same_image_for_the_same_colour() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        let placements = [typing_caret_placement(2, 2), typing_caret_placement(6, 2)];
+        let output = rendered_placements(&mut r, &placements);
+
+        let shown = shown_ids(&output);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(placed_ids(&output), shown);
     }
 
     #[test]
