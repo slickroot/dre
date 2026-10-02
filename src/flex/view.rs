@@ -337,6 +337,13 @@ mod tests {
         rows: 24,
     };
 
+    fn row() -> FlexBox {
+        FlexBox {
+            direction: Direction::Row,
+            ..FlexBox::default()
+        }
+    }
+
     fn outer(the_box: FlexBox, texts: &[&str], inner_boxes: usize) -> Tree<FlexBox> {
         Tree::new(
             the_box,
@@ -357,6 +364,10 @@ mod tests {
 
     fn with_text(text: &str) -> FlexState {
         holding(FlexBox::default(), &[text])
+    }
+
+    fn with_text_row(text: &str) -> FlexState {
+        holding(row(), &[text])
     }
 
     fn outer_box_mut(state: &mut FlexState, index: usize) -> &mut FlexBox {
@@ -725,6 +736,10 @@ mod tests {
         holding(FlexBox::default(), texts)
     }
 
+    fn beside_row(texts: &[&str]) -> FlexState {
+        holding(row(), texts)
+    }
+
     fn margins(placements: &[Placement<'_>]) -> (i64, i64) {
         let the_box = the_box(placements);
         (
@@ -736,7 +751,7 @@ mod tests {
     #[test]
     fn a_box_measures_as_wide_as_its_texts_and_gaps() {
         for texts in [&["Hello", ""][..], &["Hello", "World"][..]] {
-            let state = beside(texts);
+            let state = beside_row(texts);
             let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
             let gaps = FLEX_SPACE.width * (texts.len() as i64 - 1);
             assert_eq!(
@@ -748,7 +763,7 @@ mod tests {
 
     #[test]
     fn a_box_with_two_texts_places_one_box_and_two_labels() {
-        let state = beside(&["Hello", "World"]);
+        let state = beside_row(&["Hello", "World"]);
         let placements = placements(&state);
         assert_eq!(
             (all_boxes(&placements).len(), all_labels(&placements).len()),
@@ -764,7 +779,7 @@ mod tests {
 
     #[test]
     fn the_second_label_is_one_gap_after_the_first() {
-        let state = beside(&["Hello", "World"]);
+        let state = beside_row(&["Hello", "World"]);
         let placements = placements(&state);
         let labels = all_labels(&placements);
         assert_eq!(
@@ -804,6 +819,10 @@ mod tests {
             },
             texts,
         )
+    }
+
+    fn justified_beside_row(texts: &[&str], justify: Justify) -> FlexState {
+        holding(FlexBox { justify, ..row() }, texts)
     }
 
     #[test]
@@ -853,7 +872,7 @@ mod tests {
 
     #[test]
     fn a_start_outer_box_keeps_its_texts_one_gap_apart() {
-        let state = justified_beside(&["Hello", "World"], Justify::Start);
+        let state = justified_beside_row(&["Hello", "World"], Justify::Start);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let labels = all_labels(&placements);
@@ -902,6 +921,13 @@ mod tests {
     fn with_inner_boxes(text: &str, count: usize) -> FlexState {
         FlexState {
             boxes: new_window(vec![outer(FlexBox::default(), &[text], count)]),
+            ..FlexState::default()
+        }
+    }
+
+    fn with_inner_boxes_row(text: &str, count: usize) -> FlexState {
+        FlexState {
+            boxes: new_window(vec![outer(row(), &[text], count)]),
             ..FlexState::default()
         }
     }
@@ -1042,6 +1068,10 @@ mod tests {
         new_window(vec![Tree::new(FlexBox::default(), children)])
     }
 
+    fn row_box_of(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
+        new_window(vec![Tree::new(row(), children)])
+    }
+
     fn text(text: &str) -> Tree<FlexBox> {
         Tree::leaf(FlexBox {
             border: false,
@@ -1084,7 +1114,7 @@ mod tests {
 
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
-        let tree = box_of(vec![text("Hello"), new_box(), text("World")]);
+        let tree = row_box_of(vec![text("Hello"), new_box(), text("World")]);
         let empty_box = measure(&new_window(vec![new_box()]), &[0]);
         assert_eq!(
             measure(&tree, &[0]),
@@ -1189,7 +1219,7 @@ mod tests {
     fn hello_box_world() -> FlexState {
         FlexState {
             boxes: new_window(vec![Tree::new(
-                FlexBox::default(),
+                row(),
                 vec![text("Hello"), new_box(), text("World")],
             )]),
             ..FlexState::default()
@@ -1269,7 +1299,7 @@ mod tests {
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
         let state = ["\r", "A", "o", "W", "o", "r", "l", "d"]
             .into_iter()
-            .fold(with_text("Hello"), |state, key| reduce(state, key).0);
+            .fold(with_text_row("Hello"), |state, key| reduce(state, key).0);
         let placements = placements(&state);
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
@@ -1281,6 +1311,14 @@ mod tests {
     fn from_default_after(keys: &[&str]) -> FlexState {
         keys.iter()
             .fold(FlexState::default(), |state, key| reduce(state, key).0)
+    }
+
+    fn from_row_after(keys: &[&str]) -> FlexState {
+        let state = FlexState {
+            boxes: new_window(vec![Tree::new(row(), vec![])]),
+            ..FlexState::default()
+        };
+        keys.iter().fold(state, |state, key| reduce(state, key).0)
     }
 
     fn empty_box_size() -> Size {
@@ -1311,7 +1349,7 @@ mod tests {
 
     #[test]
     fn a_second_a_adds_an_inner_box_one_gap_to_the_right_and_stays_centred() {
-        let state = from_default_after(&["A", "A"]);
+        let state = from_row_after(&["A", "A"]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
@@ -1765,7 +1803,7 @@ mod tests {
 
     #[test]
     fn in_a_row_the_leftover_columns_go_to_the_leftmost_children_one_each() {
-        let state = with_inner_boxes("Hello", 3);
+        let state = with_inner_boxes_row("Hello", 3);
         let placements = placements(&state);
         let row = row_of(&placements, &state);
         let (share, remainder) = shared_widths(inside_width(&placements[0]), row.len() as i64);

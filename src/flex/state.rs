@@ -31,8 +31,8 @@ impl Justify {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Direction {
-    #[default]
     Row,
+    #[default]
     Column,
 }
 
@@ -72,7 +72,6 @@ impl FlexBox {
     pub(crate) fn window() -> Self {
         Self {
             border: false,
-            direction: Direction::Column,
             justify: Justify::Center,
             text: None,
             ..Self::default()
@@ -734,10 +733,10 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_a_row_direction() {
+    fn starts_with_a_column_direction() {
         assert_eq!(
             selected_box(&FlexState::default()).direction,
-            Direction::Row
+            Direction::Column
         );
     }
 
@@ -748,9 +747,9 @@ mod tests {
     }
 
     #[test]
-    fn r_in_move_mode_turns_the_box_into_a_column_and_keeps_the_rest() {
+    fn r_in_move_mode_turns_the_box_into_a_row_and_keeps_the_rest() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "r");
-        assert_eq!(selected_box(&state).direction, Direction::Column);
+        assert_eq!(selected_box(&state).direction, Direction::Row);
         assert_eq!(text_of(&state, &state.selected), Some("Hello"));
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -768,7 +767,7 @@ mod tests {
     fn r_in_write_mode_is_typed_into_the_box_and_leaves_the_direction_alone() {
         let (state, effect) = reduce(hello_in(FlexMode::Write), "r");
         assert_eq!(text_of(&state, &state.selected), Some("Hellor"));
-        assert_eq!(selected_box(&state).direction, Direction::Row);
+        assert_eq!(selected_box(&state).direction, Direction::Column);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -776,16 +775,23 @@ mod tests {
     #[test]
     fn r_only_changes_the_direction_of_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "r");
-        assert_eq!(box_at(&state, &[0]).direction, Direction::Row);
-        assert_eq!(box_at(&state, &[1]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[0]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
     }
 
     #[test]
-    fn new_outer_and_inner_boxes_start_as_rows() {
-        let state = moved(hello_in(FlexMode::Move), &["r", "a", "A", "A"]);
-        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
-        assert_eq!(box_at(&state, &[1, 0]).direction, Direction::Row);
-        assert_eq!(box_at(&state, &[1, 1]).direction, Direction::Row);
+    fn new_outer_and_inner_boxes_start_as_columns() {
+        let state = moved(hello_in(FlexMode::Move), &["a", "A", "A"]);
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[1, 0]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[1, 1]).direction, Direction::Column);
+    }
+
+    #[test]
+    fn pressing_capital_a_twice_from_launch_stacks_two_inner_boxes_in_a_column() {
+        let state = moved(FlexState::default(), &["A", "A"]);
+        assert_eq!(selected_box(&state).direction, Direction::Column);
+        assert_eq!(inner_boxes_of(&state, 0), 2);
     }
 
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
@@ -885,7 +891,7 @@ mod tests {
     fn r_only_changes_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "r");
-        assert_eq!(box_at(&state, &[1]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1104,8 +1110,7 @@ mod tests {
     #[test]
     fn r_on_a_selected_text_toggles_the_direction_of_that_text() {
         let state = moved(world_selected(), &["r"]);
-        assert_eq!(box_at(&state, &[0, 2]).direction, Direction::Column);
-        assert_eq!(box_at(&state, &[0]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[0, 2]).direction, Direction::Row);
     }
 
     #[test]
