@@ -22,7 +22,7 @@ pub use svg::{SvgRenderer, FULL_HD_HEIGHT, FULL_HD_WIDTH};
 pub(crate) use terminal::{TerminalRenderer, CACHE_LIMIT};
 
 pub trait Renderer {
-    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()>;
+    fn render(&mut self, scene: &Scene<'_>, lit: bool, out: &mut impl Write) -> io::Result<()>;
 }
 
 const ARROWHEAD_ANGLE_DEG: f64 = 30.0;

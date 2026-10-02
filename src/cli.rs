@@ -92,6 +92,7 @@ pub(crate) fn export(input: String) -> io::Result<ExitCode> {
     };
     SvgRenderer::default().render(
         &view::body(&state, window),
+        true,
         &mut File::create(output_path(&input))?,
     )?;
     Ok(ExitCode::SUCCESS)

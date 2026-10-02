@@ -494,7 +494,6 @@ impl crate::canvas::Shape for SolidShape {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy)]
 struct TypingCaretCell {
     image: kitty::ImageId,
@@ -546,8 +545,8 @@ fn place_sprite<K, C>(
 }
 
 impl Renderer for TerminalRenderer {
-    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
-        let frame = self.frame(scene);
+    fn render(&mut self, scene: &Scene<'_>, lit: bool, out: &mut impl Write) -> io::Result<()> {
+        let frame = self.frame(scene, lit);
         out.write_all(&frame.into_bytes())
     }
 }
@@ -587,7 +586,6 @@ impl TerminalRenderer {
         whole(self.window)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn blink(&mut self, lit: bool, out: &mut impl Write) -> io::Result<()> {
         let Some(caret) = self.typing_caret else {
             return Ok(());
@@ -613,17 +611,17 @@ impl TerminalRenderer {
         out.write_all(&bytes)
     }
 
-    fn frame(&mut self, scene: &Scene<'_>) -> Frame {
+    fn frame(&mut self, scene: &Scene<'_>, lit: bool) -> Frame {
         let mut frame = Frame::with_previous(self.window, self.image_ids.take_transient());
         self.typing_caret = None;
         for (area, placements) in scene {
-            self.paint(&mut frame, placements, *area);
+            self.paint(&mut frame, placements, *area, lit);
         }
-        self.typing_caret_lit = true;
+        self.typing_caret_lit = lit;
         frame
     }
 
-    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
+    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area, lit: bool) {
         for placement in placements {
             let geometry = Geometry::from(placement);
             match &placement.node {
@@ -680,6 +678,7 @@ impl TerminalRenderer {
                     geometry,
                     area,
                     placement.depth,
+                    lit,
                     CaretStyle {
                         colour: *colour,
                         bold: *bold,
@@ -902,8 +901,12 @@ impl TerminalRenderer {
         geometry: Geometry,
         area: Area,
         depth: u8,
+        lit: bool,
         style: CaretStyle,
     ) {
+        if !lit {
+            return;
+        }
         let z = depth_z(depth);
         let key = CaretKey {
             colour: style.colour,
@@ -1805,7 +1808,7 @@ mod tests {
     fn drawn_frame(r: &mut TerminalRenderer, placements: &[Placement]) -> Frame {
         let mut frame = Frame::new(r.window);
         let area = whole(r.window);
-        r.paint(&mut frame, placements, area);
+        r.paint(&mut frame, placements, area, true);
         frame
     }
 
@@ -2151,18 +2154,27 @@ mod tests {
 
     fn rendered(r: &mut TerminalRenderer, state: &State) -> String {
         let mut out = Vec::new();
-        r.render(&editor(state, whole(r.window)), &mut out).unwrap();
+        r.render(&editor(state, whole(r.window)), true, &mut out)
+            .unwrap();
         String::from_utf8(out).unwrap()
     }
 
     fn rendered_placements(r: &mut TerminalRenderer, placements: &[Placement<'static>]) -> String {
-        let scene = vec![(whole(r.window), placements.to_vec())];
-        String::from_utf8(r.frame(&scene).into_bytes()).unwrap()
+        rendered_placements_in_phase(r, placements, true)
+    }
+
+    fn rendered_placements_in_phase(
+        r: &mut TerminalRenderer,
+        placements: &[Placement<'static>],
+        lit: bool,
+    ) -> String {
+        let scene = vec![(r.area(), placements.to_vec())];
+        String::from_utf8(r.frame(&scene, lit).into_bytes()).unwrap()
     }
 
     fn framed(r: &mut TerminalRenderer, state: &State) -> Frame {
         let scene = editor(state, whole(r.window));
-        r.frame(&scene)
+        r.frame(&scene, true)
     }
 
     fn empty_state() -> State {
@@ -2201,7 +2213,7 @@ mod tests {
             caret_placement(2, 0, 1, 1),
         ];
         rendered_placements(r, &first);
-        r.frame(&vec![(whole(r.window), second.to_vec())])
+        r.frame(&vec![(whole(r.window), second.to_vec())], true)
     }
 
     fn assert_one_synchronized_update_ending_after_the_images(frame: Frame) {
@@ -2530,6 +2542,22 @@ mod tests {
         let shown = shown_ids(&output);
         assert_eq!(shown.len(), 1);
         assert_eq!(placed_ids(&output), shown);
+    }
+
+    #[test]
+    fn a_lit_render_places_the_caret_and_a_dark_one_does_not() {
+        let placements = [typing_caret_placement(3, 2)];
+        let mut lit = renderer_on(window(20, 10, 2, 4));
+
+        let lit_output = rendered_placements(&mut lit, &placements);
+
+        let mut dark = renderer_on(window(20, 10, 2, 4));
+        let dark_output = rendered_placements_in_phase(&mut dark, &placements, false);
+        assert_eq!(shown_ids(&lit_output).len(), 1);
+        assert!(shown_ids(&dark_output).is_empty());
+        assert!(placed_ids(&dark_output).is_empty());
+        assert!(dark.typing_caret.is_none());
+        assert_eq!(blinked(&mut dark, true), "");
     }
 
     fn blinked(r: &mut TerminalRenderer, lit: bool) -> String {
@@ -3658,7 +3686,7 @@ mod tests {
         let placement = box_placement(&node, area.col - 1, area.row + 1, width, height);
         let mut frame = Frame::new(r.window);
 
-        r.paint(&mut frame, std::slice::from_ref(&placement), area);
+        r.paint(&mut frame, std::slice::from_ref(&placement), area, true);
 
         let inside = |&(col, row): &(i64, i64)| {
             (area.col..area.col + area.cols).contains(&col)

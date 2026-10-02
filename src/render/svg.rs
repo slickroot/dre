@@ -35,7 +35,7 @@ impl SvgRenderer {
 }
 
 impl Renderer for SvgRenderer {
-    fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
+    fn render(&mut self, scene: &Scene<'_>, _lit: bool, out: &mut impl Write) -> io::Result<()> {
         out.write_all(document(self.canvas, scene).as_bytes())
     }
 }
@@ -1477,7 +1477,7 @@ mod tests {
         let state = crate::state::new_state(boxes, mode, selected);
         let mut out = Vec::new();
         SvgRenderer::with_canvas(100, 40)
-            .render(&view::editor(&state, CANVAS), &mut out)
+            .render(&view::editor(&state, CANVAS), true, &mut out)
             .unwrap();
         String::from_utf8(out).unwrap()
     }
@@ -1620,7 +1620,7 @@ mod tests {
             Some(_) => view::editor(state, window),
             None => view::body(state, window),
         };
-        renderer.render(&scene, &mut out).unwrap();
+        renderer.render(&scene, true, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 

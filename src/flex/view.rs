@@ -248,6 +248,7 @@ fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mut Vec<Arran
 fn paint<'a>(
     state: &FlexState,
     new: &HashSet<Vec<usize>>,
+    lit: bool,
     flex_box: &'a FlexBox,
     arranged: &Arranged,
 ) -> Vec<Placement<'a>> {
@@ -300,7 +301,7 @@ fn paint<'a>(
                 rect,
             )
         });
-    let typing = (state.mode == FlexMode::Write && &state.selected == path)
+    let typing = (lit && state.mode == FlexMode::Write && &state.selected == path)
         .then(|| flex_box.text.as_ref().zip(arranged.text))
         .flatten()
         .map(|(text, rect)| {
@@ -323,6 +324,7 @@ pub(crate) fn scene<'a>(
     state: &'a FlexState,
     window: Area,
     new: &HashSet<Vec<usize>>,
+    lit: bool,
 ) -> Scene<'a> {
     let window_rect = Rect {
         x: window.col,
@@ -334,7 +336,7 @@ pub(crate) fn scene<'a>(
     arrange(&state.boxes, &[], window_rect, &mut rects);
     let placements = rects
         .iter()
-        .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
+        .flat_map(|arranged| paint(state, new, lit, state.boxes.value(&arranged.path), arranged))
         .collect();
     vec![(window, placements)]
 }
@@ -391,14 +393,15 @@ mod tests {
     }
 
     fn placements(state: &FlexState) -> Vec<Placement<'_>> {
-        placements_with_new(state, &HashSet::new())
+        placements_with_new(state, &HashSet::new(), true)
     }
 
     fn placements_with_new<'a>(
         state: &'a FlexState,
         new: &HashSet<Vec<usize>>,
+        lit: bool,
     ) -> Vec<Placement<'a>> {
-        let [(area, placements)] = <[_; 1]>::try_from(scene(state, WINDOW, new)).unwrap();
+        let [(area, placements)] = <[_; 1]>::try_from(scene(state, WINDOW, new, lit)).unwrap();
         assert_eq!(area, WINDOW);
         placements
     }
@@ -608,7 +611,8 @@ mod tests {
     fn an_outer_box_follows_the_window() {
         let narrow = Area { cols: 40, ..WINDOW };
         let state = with_text("Hello");
-        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, narrow, &HashSet::new())).unwrap();
+        let [(_, placements)] =
+            <[_; 1]>::try_from(scene(&state, narrow, &HashSet::new(), true)).unwrap();
         assert_eq!(the_box(&placements).width, narrow.cols);
     }
 
@@ -626,7 +630,7 @@ mod tests {
             ..FlexState::default()
         };
         let new = HashSet::from([vec![0, 1]]);
-        let grown: Vec<bool> = placements_with_new(&state, &new)
+        let grown: Vec<bool> = placements_with_new(&state, &new, true)
             .iter()
             .map(grows)
             .collect();
@@ -1567,7 +1571,7 @@ mod tests {
     fn a_space_between_outer_box_spreads_mixed_siblings_edge_to_edge_with_equal_gaps() {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
         let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new(), true)).unwrap();
         let row = row_of(&placements, &state);
         assert_spread_edge_to_edge(&placements, &row);
         let gap = free_space(EVEN_SPREAD_WINDOW, &row) / 2;
@@ -1584,7 +1588,7 @@ mod tests {
             .into_iter()
             .fold(FlexState::default(), |state, key| reduce(state, key).0);
         let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new(), true)).unwrap();
         let outer = &placements[0];
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
@@ -2171,6 +2175,18 @@ mod tests {
             ..with_text("Hello")
         };
         assert!(typing_carets(&placements(&state)).is_empty());
+    }
+
+    #[test]
+    fn the_dark_phase_draws_no_typing_caret() {
+        let state = writing("Hello");
+        let new = HashSet::new();
+
+        let lit = placements_with_new(&state, &new, true);
+        let dark = placements_with_new(&state, &new, false);
+
+        assert_eq!(typing_carets(&lit).len(), 1);
+        assert!(typing_carets(&dark).is_empty());
     }
 
     #[test]

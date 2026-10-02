@@ -30,7 +30,7 @@ impl WebSession {
         };
         let scene = view::editor(self.session.state(), window);
         renderer
-            .render(&scene, &mut out)
+            .render(&scene, true, &mut out)
             .expect("rendering SVG to an in-memory buffer succeeds");
         String::from_utf8(out).expect("SvgRenderer writes UTF-8")
     }

@@ -11,11 +11,14 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
-use state::{FlexEffect, FlexState};
+use state::{FlexEffect, FlexMode, FlexState};
+
+pub(crate) const BLINK_HALF_MS: u32 = 500;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
-    fn render(&mut self, state: &FlexState) -> io::Result<()>;
+    fn render(&mut self, state: &FlexState, lit: bool) -> io::Result<()>;
+    fn blink(&mut self, lit: bool) -> io::Result<()>;
     fn resize(&mut self) -> io::Result<()>;
 }
 
@@ -26,12 +29,18 @@ pub(crate) struct TerminalFlexScreen {
 }
 
 impl FlexScreen for TerminalFlexScreen {
-    fn render(&mut self, state: &FlexState) -> io::Result<()> {
+    fn render(&mut self, state: &FlexState, lit: bool) -> io::Result<()> {
         let new = new_boxes(&mut self.drawn, state);
         self.renderer.render(
-            &view::scene(state, self.renderer.area(), &new),
+            &view::scene(state, self.renderer.area(), &new, lit),
+            lit,
             &mut self.out,
         )?;
+        self.out.flush()
+    }
+
+    fn blink(&mut self, lit: bool) -> io::Result<()> {
+        self.renderer.blink(lit, &mut self.out)?;
         self.out.flush()
     }
 
@@ -58,9 +67,20 @@ fn new_boxes(drawn: &mut Option<HashSet<Vec<usize>>>, state: &FlexState) -> Hash
 
 pub(crate) fn run_loop(keys: &dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
     let mut state = FlexState::default();
+    let mut lit = true;
     loop {
-        screen.render(&state)?;
-        let key = keys.next_key(None)?;
+        screen.render(&state, lit)?;
+        // A tick moves one placement, so it waits for the next key here instead
+        // of coming back around to the full render above.
+        let key = loop {
+            let timeout = (state.mode == FlexMode::Write).then_some(BLINK_HALF_MS);
+            let key = keys.next_key(timeout)?;
+            if key != tty::TICK {
+                break key;
+            }
+            lit = !lit;
+            screen.blink(lit)?;
+        };
         if key == tty::RESIZE {
             screen.resize()?;
             continue;
@@ -175,7 +195,7 @@ mod tests {
                 .expect_render()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_, _| Ok(()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
@@ -200,10 +220,10 @@ mod tests {
         for (key, shown) in [("i", ""), ("H", ""), ("i", "H"), ("\x03", "Hi")] {
             screen
                 .expect_render()
-                .withf(move |state| last_text(state).unwrap_or_default() == shown)
+                .withf(move |state, _| last_text(state).unwrap_or_default() == shown)
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_, _| Ok(()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
@@ -220,30 +240,30 @@ mod tests {
         let mut seq = Sequence::new();
         screen
             .expect_render()
-            .withf(|state| last_text(state).is_none())
+            .withf(|state, _| last_text(state).is_none())
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_, _| Ok(()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
             .return_once(|_| Ok("i".to_string()));
         screen
             .expect_render()
-            .withf(|state| last_text(state) == Some(""))
+            .withf(|state, _| last_text(state) == Some(""))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_, _| Ok(()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
             .return_once(|_| Ok("a".to_string()));
         screen
             .expect_render()
-            .withf(|state| last_text(state) == Some("a"))
+            .withf(|state, _| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_, _| Ok(()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -255,10 +275,10 @@ mod tests {
             .returning(|| Ok(()));
         screen
             .expect_render()
-            .withf(|state| last_text(state) == Some("a"))
+            .withf(|state, _| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_, _| Ok(()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -277,12 +297,158 @@ mod tests {
                 .expect_render()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_, _| Ok(()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
                 .return_once(move |_| Ok(key.to_string()));
         }
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn entering_write_mode_renders_with_the_caret_lit() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        screen
+            .expect_render()
+            .withf(|_, lit| *lit)
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("i".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, lit| *lit && last_text(state) == Some(""))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\x03".to_string()));
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn a_tick_flips_the_phase_without_re_rendering() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        for key in ["i", tty::TICK] {
+            screen
+                .expect_render()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(|_, _| Ok(()));
+            keys.expect_next_key()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_once(move |_| Ok(key.to_string()));
+        }
+        screen
+            .expect_blink()
+            .withf(|lit| !*lit)
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\x03".to_string()));
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn a_tick_is_not_reduced_as_a_keystroke() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        screen
+            .expect_render()
+            .withf(|state, _| last_text(state).is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("i".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, _| last_text(state) == Some(""))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("H".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, _| last_text(state) == Some("H"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok(tty::TICK.to_string()));
+        screen
+            .expect_blink()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("o".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, _| last_text(state) == Some("Ho"))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\x03".to_string()));
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn a_timeout_is_asked_for_in_write_mode_only() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .withf(|timeout| timeout.is_none())
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("i".to_string()));
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .withf(|timeout| *timeout == Some(BLINK_HALF_MS))
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\x03".to_string()));
 
         run_loop(&keys, &mut screen).unwrap();
     }
