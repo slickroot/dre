@@ -855,7 +855,7 @@ mod tests {
             boxes: new_window(vec![outer(
                 FlexBox {
                     justify: Justify::SpaceBetween,
-                    ..FlexBox::default()
+                    ..row()
                 },
                 &[],
                 2,
@@ -872,6 +872,10 @@ mod tests {
     }
 
     fn row_of_boxes(row: FlexBox, own_text: &[&str], box_texts: &[&str]) -> FlexState {
+        let row = FlexBox {
+            direction: Direction::Row,
+            ..row
+        };
         let boxes: Vec<_> = box_texts
             .iter()
             .map(|label| outer(FlexBox::default(), &[label], 0))
@@ -1557,8 +1561,8 @@ mod tests {
     #[test]
     fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "o", "H", "e", "l", "l", "o", "\r", "h", "A", "o", "W", "o", "r", "l", "d", "\r", "h",
-            "s",
+            "o", "H", "e", "l", "l", "o", "\r", "\r", "A", "o", "W", "o", "r", "l", "d", "\r",
+            "\r", "s",
         ];
         let state = keys
             .into_iter()
@@ -1698,7 +1702,7 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "h", "A"];
+    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "\r", "A"];
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
@@ -1717,7 +1721,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "h", "f", "A"]);
+        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "\r", "f", "A"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
