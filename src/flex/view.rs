@@ -200,9 +200,9 @@ fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mut Vec<Arran
     let sizes = item_sizes(tree, path);
     let inner = rect.inner(padding(flex_box));
     let inner_cross = inner.size().cross(direction);
-    let mains: Vec<i64> = match direction {
-        Direction::Column => sizes.iter().map(|size| size.main(direction)).collect(),
-        Direction::Row => share(inner.width, sizes.len(), FLEX_SPACE.width),
+    let mains: Vec<i64> = match (direction, flex_box.justify) {
+        (Direction::Row, Justify::Start) => share(inner.width, sizes.len(), FLEX_SPACE.width),
+        _ => sizes.iter().map(|size| size.main(direction)).collect(),
     };
     let offsets = distribute(
         &mains,
@@ -831,24 +831,25 @@ mod tests {
     }
 
     #[test]
-    fn a_space_between_box_in_a_row_places_the_same_as_a_start_box() {
-        let in_a_row = |justify| FlexState {
-            boxes: new_window(vec![Tree::new(
-                FlexBox::default(),
-                vec![Tree::new(
-                    FlexBox {
-                        justify,
-                        ..FlexBox::default()
-                    },
-                    vec![text("Hello"), text("World")],
-                )],
+    fn a_space_between_row_spreads_two_boxes_to_its_inner_edges() {
+        let state = FlexState {
+            boxes: new_window(vec![outer(
+                FlexBox {
+                    justify: Justify::SpaceBetween,
+                    ..FlexBox::default()
+                },
+                &[],
+                2,
             )]),
             ..FlexState::default()
         };
-        assert_eq!(
-            placements(&in_a_row(Justify::SpaceBetween)),
-            placements(&in_a_row(Justify::Start))
-        );
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (row, first, last) = (boxes[0], boxes[1], boxes[2]);
+        assert_eq!(first.x, row.x + FLEX_SPACE.width);
+        assert_eq!(last.x + last.width, row.x + row.width - FLEX_SPACE.width);
+        assert_eq!(first.width, measure(&state.boxes, &[0, 0]).width);
+        assert_eq!(last.width, measure(&state.boxes, &[0, 1]).width);
     }
 
     #[test]
