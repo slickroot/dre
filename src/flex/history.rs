@@ -17,12 +17,17 @@ pub(super) fn recorded(
     reduce: impl FnOnce(FlexState) -> (FlexState, Option<FlexEffect>),
 ) -> (FlexState, Option<FlexEffect>) {
     if undoable(state.mode, key) {
-        state.history.push(Snapshot {
-            boxes: state.boxes.clone(),
-            selected: state.selected.clone(),
-        });
+        record(&mut state);
     }
     reduce(state)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn record(state: &mut FlexState) {
+    state.history.push(Snapshot {
+        boxes: state.boxes.clone(),
+        selected: state.selected.clone(),
+    });
 }
 
 pub(super) fn undo(mut state: FlexState) -> FlexState {
@@ -59,6 +64,16 @@ mod tests {
         ] {
             assert!(!undoable(FlexMode::Write, key), "{key}");
         }
+    }
+
+    #[test]
+    fn record_snapshots_the_state_so_undo_restores_it() {
+        let original = FlexState::default();
+        let mut state = original.clone();
+        record(&mut state);
+        state.selected = vec![0];
+        let undone = undo(state);
+        assert_eq!(undone, original);
     }
 
     #[test]
