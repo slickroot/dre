@@ -22,7 +22,6 @@ pub(super) fn recorded(
     reduce(state)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn record(state: &mut FlexState) {
     state.history.push(Snapshot {
         boxes: state.boxes.clone(),

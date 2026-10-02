@@ -146,7 +146,6 @@ fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
     !b.border && children.is_empty()
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn sibling_or_else_parent(boxes: &Tree<FlexBox>, path: &[usize]) -> Vec<usize> {
     if path.last() == Some(&0) {
         boxes.parent(path)
@@ -176,7 +175,15 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
             state.mode = FlexMode::Move;
         }
         "\x7f" => {
-            if let Some(text) = state.selected_mut().text.as_mut() {
+            let empty = state.selected_mut().text.as_deref() == Some("");
+            let children = state.boxes.children(&state.selected);
+            if empty && is_droppable(state.selected_mut(), &children) {
+                history::record(&mut state);
+                let next = sibling_or_else_parent(&state.boxes, &state.selected);
+                state.boxes.remove(&state.selected);
+                state.selected = next;
+                state.mode = FlexMode::Move;
+            } else if let Some(text) = state.selected_mut().text.as_mut() {
                 text.pop();
             }
         }
@@ -378,18 +385,45 @@ mod tests {
     }
 
     #[test]
-    fn backspace_on_an_empty_new_text_leaves_the_state_unchanged() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "o");
-        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+    fn backspace_on_an_empty_new_box_removes_it_and_selects_move_mode() {
+        let before = hello_in(FlexMode::Move);
+        let (state, _) = reduce(before.clone(), "o");
+        let (state, effect) = reduce(state, "\x7f");
+        assert_eq!(state, before);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
     }
 
     #[test]
-    fn backspace_empties_the_new_text_and_then_changes_nothing() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "o");
+    fn backspace_after_emptying_new_text_removes_the_box() {
+        let before = hello_in(FlexMode::Move);
+        let (state, _) = reduce(before.clone(), "o");
         let (state, _) = reduce(state, "W");
         let (state, _) = reduce(state, "\x7f");
         assert_eq!(text_of(&state, &state.selected), Some(""));
-        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+        let (state, effect) = reduce(state, "\x7f");
+        assert_eq!(state, before);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn backspace_on_an_empty_new_box_selects_the_previous_sibling() {
+        let (state, _) = typed(&["o", "H", "e", "l", "l", "o", "\r", "h", "o", "\x7f"]);
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
+        assert_eq!(state.boxes.children(&[0]).len(), 1);
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn backspace_on_an_empty_new_box_inside_an_inner_box_selects_that_inner_box() {
+        let before = moved(hello_box_world(), &["l", "j"]);
+        let (state, _) = reduce(before.clone(), "o");
+        let (state, effect) = reduce(state, "\x7f");
+        assert_eq!(state, before);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
     }
 
     #[test]
@@ -1273,6 +1307,19 @@ mod tests {
     fn u_after_i_and_typing_on_an_empty_box_removes_the_text() {
         let state = moved(FlexState::default(), &["i", "H", "i", "\r", "u"]);
         assert_eq!(text_of(&state, &state.selected), None);
+    }
+
+    #[test]
+    fn u_after_backspace_removes_an_empty_box_restores_it() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["o", "\x7f", "u"]);
+        assert_eq!(state.selected, [before.selected.as_slice(), &[0]].concat());
+        assert_eq!(text_of(&state, &state.selected), Some(""));
+        assert_eq!(state.boxes.children(&before.selected).len(), 1);
+        assert_eq!(
+            text_of(&state, &before.selected),
+            text_of(&before, &before.selected)
+        );
     }
 
     #[test]
