@@ -1207,7 +1207,7 @@ mod tests {
     fn close_bracket_in_write_mode_is_typed_into_the_box_and_leaves_the_padding_at_zero() {
         let (state, _) = reduce(hello_in(FlexMode::Write), "]");
         assert_eq!(state.texts_of(&state.selected), ["Hello]"]);
-        assert_eq!(selected_box(&state).padding, 0);
+        assert_eq!(selected_box(&state).padding, FlexBox::default().padding);
     }
 
     #[test]
