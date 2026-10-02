@@ -11,156 +11,151 @@ Doug is typing a label in dre-flex. As soon as he enters typing mode a `|` blink
 
 ## Technical Design
 
-### The clock belongs to the terminal
+### Why this replaced terminal-driven animation
 
-There is no timer anywhere in dre. `flex::run_loop` (`src/flex/mod.rs:59-74`) blocks on
-`tty::read_key`, which polls with `PollTimeout::NONE` (`src/tty.rs:124-150`), and the renderer
-redraws once per keystroke. A caret that blinks once a second needs something to decide twice a
-second whether it is lit.
+The first cut of this spec had the terminal drive the blink: transmit a transparent root frame and
+one opaque `|` frame, then let `a=a,i=<id>,r=1,z=500,s=3,v=1` loop them. **It was implemented, and
+it does not work.** In WezTerm the caret renders solid and never blinks; in Ghostty it never
+renders at all. The reason is already recorded in
+[`209-flex-a-box-grows-into-place.md`](archive/209-flex-a-box-grows-into-place.md), quirks 2 and 4,
+both verified by hand in WezTerm:
 
-The terminal decides. Kitty's graphics protocol has terminal-driven animations: frames are
-transmitted with `a=f` and millisecond gaps via `z`, and `a=a,i=<id>,s=3,v=1` starts an
-animation that loops forever. The app transmits the two frames once and never speaks about the
-caret again. There is no tick, no `Instant`, and no new field on `FlexState` — which also means
-`PartialEq for FlexState` (`src/flex/state.rs:106-110`) is untouched and the ~100 existing
-`assert_eq!`s on states keep passing.
+- **WezTerm ignores `a=a`**, so it just loops whatever frames exist.
+- **WezTerm skips a root frame with a gap of 0**, so the transparent root is skipped too.
 
-The alternative, a finite poll timeout on `read_key` plus a phase field, was rejected: it repaints
-the whole frame four times a second forever, and it needs the blink phase excluded from state
-equality.
+That leaves one surviving frame. A one-frame loop is a constant: lit, forever. And for Ghostty,
+whose animation support predates nothing usable, the spec's own trade was *"a terminal that never
+plays frames shows only the root, hence an invisible caret. That trade is accepted"* — which is
+precisely the wrong trade when the root frame is invisible.
 
-### The blink is two frames, and the root is the dark one
+The old spec rejected `X=1` replacement frames as *"unverified on WezTerm, which is the terminal
+this change is for."* That reasoning is now void: WezTerm does not render this animation at all, so
+WezTerm's opinion about `X=1` was never the deciding factor.
 
-Kitty composes each frame onto the root using a full alpha blend by default. An all-transparent
-"off" frame blended onto a root that *is* the `|` leaves the `|` fully visible — transparent over
-opaque is a no-op, not an erase. So a naive two-frame blink renders as a steady caret.
+So the terminal cannot be the clock here. dre draws the caret itself.
 
-Two escapes were considered. The first was `X=1`, which makes a frame a replacement of the
-background rather than a blend, letting a transparent frame erase a lit root. It was rejected
-because this repo has already been bitten by terminal divergence (`src/kitty.rs:79`,
-`src/kitty.rs:115`, the Ghostty note at `src/render/terminal.rs:141`) and `X` is exactly the kind
-of key WezTerm's implementation history here is unverified.
+### The tick lives in the run loop, not in a thread
 
-Instead the **root frame is transparent and the lit `|` is frame 2**. Blending an opaque glyph
-over a transparent root works with the default alpha, so no exotic key is needed. This costs one
-thing: a terminal that never plays frames shows only the root, hence an invisible caret. That
-trade is accepted — the alternative trades "invisible on old Ghostty" for "solid on WezTerm", and
-Doug is in WezTerm.
+`flex::run_loop` (`src/flex/mod.rs:59-74`) renders, then blocks on `keys.next_key()`, which is
+`tty::read_key`, which polls with `PollTimeout::NONE` (`src/tty.rs:124-150`). That poll is the only
+thing standing between the loop and a half-second timer, so that is where the timeout goes.
 
-The root frame is created gapless, so the dark half needs its own gap: the command ends
-`a=a,i=<id>,r=1,z=<gap>,s=3,v=1`. Without `r=1,z=` the cycle would be "500ms lit, 0ms dark".
+A **separate thread** was considered and rejected:
 
-```
-a=T  f=32  s=<cw>  v=<ch>  o=z  i=<id>   transparent root
-a=f  f=32  s=<cw>  v=<ch>  o=z  i=<id>  z=500   the `|` glyph
-a=a  i=<id>  r=1  z=500  s=3  v=1      loop forever, dark half included
-```
+- `Frame::into_bytes` wraps every frame in synchronized output (DEC 2026) and writes to `Stdout`.
+  A second thread writing escape sequences would interleave with a frame in flight and tear the
+  block.
+- `soft_clear` (`a=d,d=a`) runs at the top of every frame (`src/render/terminal.rs:500`), so the
+  thread's placement would be deleted by the very next keystroke. The app would be repainting
+  anyway, so the thread would have nothing to add.
+- The thread would need the terminal writer behind a lock to avoid the first problem. At that
+  point it is the same thing as waking the main loop, with more moving parts.
 
-### A new node, because `Caret` means something else
+The tick is the main loop's own work: it owns `state` and the renderer, and "redraw the frame with
+the caret on, then with it off" is already a single call it makes every keystroke.
 
-`PlacementNode::Caret(Caret)` exists and is a unit struct drawn by `draw_caret`
-(`src/render/terminal.rs:824-836`) as a **solid filled block**; it is the legacy editor's
-insert-mode caret, and its tests (`the_caret_is_drawn_last_as_a_solid_sprite`,
-`src/render/terminal.rs:2340`) pin that meaning.
+### A timeout only while typing
 
-The flex caret is a different thing: a glyph, in the label's colour, at the label's depth z, as a
-two-frame animation rather than a fresh solid canvas per frame. So `PlacementNode` gains
+The cost of an app-side tick is a whole-frame repaint twice a second. The old spec rejected this
+flatly because it *"repaints the whole frame 4×/sec forever."* Two refinements make it bounded:
 
-```rust
-TypingCaret { colour: Rgb, bold: bool }
-```
+- The poll timeout is **finite only in Write mode**. In every other mode `read_key` still blocks on
+  `PollTimeout::NONE` and dre is exactly as idle as it was before.
+- While in Write mode the loop **renders only when the phase flips**, and the phase flips on each
+  tick, so it is one repaint per half-second and no more.
 
-`Caret` is untouched, which keeps the legacy editor and its tests out of this change entirely.
+Leaving Write mode stops the ticking immediately, and the next render omits the caret.
 
-### Collaborators and responsibilities
+### The phase is a local, not a field
 
-`PlacementNode::TypingCaret` (`src/view.rs`) — knows only colour and bold. Carries no position
-logic; it is a 1×1 placement like any other. `is_decoration()` includes it, so it never affects
-measure.
+The old spec worried that an app-side phase *"would have to be excluded from state equality."* It
+does not: the phase is a `bool` local to `run_loop`, threaded into rendering as an argument. It is
+never stored on `FlexState`, so `PartialEq for FlexState` (`src/flex/state.rs:106-110`) is
+untouched and the ~100 existing `assert_eq!`s keep passing.
 
-`flex::view::paint` (`src/flex/view.rs:248-304`) — decides *whether* a caret exists. Emits the
-node only when `state.mode == FlexMode::Write` and `path == state.selected`, which is what
-satisfies criterion 5. It does not touch `text_size` or `measure`, so criterion 6 holds: nothing
-reflows, and no cell is reserved.
+`run_loop` reads it as: render, ask for a key with a timeout if in Write mode, toggle the phase and
+render again if the returned sentinel is a tick.
 
-`TerminalRenderer::draw_typing_caret` (`src/render/terminal.rs`) — owns the image id and the
-transmission. Looks the id up in a new `HashMap<CaretKey, ImageId>` where `CaretKey` is
-`{colour, bold}`, mirroring `GlyphKey` and the existing `glyph_images` cache
-(`src/render/terminal.rs:813-820`). First sight transmits the three-command animation above via
-`place_fresh`; every later frame is an `a=p` placement only, via `place_cached`. Moving the caret
-one cell right as Doug types therefore re-places a live animation rather than rebuilding it.
+### A tick is a sentinel key, like a resize
 
-`kitty` (`src/kitty.rs`) — gains a `blink` command builder next to `grow`, emitting the `a=T`,
-`a=f` and `a=a` sequence with a `gap_ms` parameter. Reuses the existing `chunked`, `transmission`
-and `wezterm`-aware `Z=` handling (`src/kitty.rs:201-216`).
+`tty::read_key` already signals a non-key by returning a sentinel string — `tty::RESIZE` comes back
+down the same `io::Result<String>` as any keystroke. The tick follows that precedent: `read_key`
+returns `tty::TICK` when `poll` times out.
 
-The glyph canvas comes from `glyph_source.glyph('|', colour, bold)`, exactly as `draw_label`
-obtains each character, so the caret is the same font and colour as the text it follows.
+This keeps the blast radius small. `KeySource::next_key(&self) -> io::Result<String>`
+(`src/key_source.rs:6-9`) does not change shape, so `#[automock]` and every existing mock
+expectation still compile. `run_loop` handles `TICK` the way it handles `RESIZE`: before
+`state::reduce`, so a tick is never reduced as a keystroke.
 
-### Position: `text.x + chars().count()`
+`read_key` gains a timeout parameter. `TtyKeySource` carries it.
 
-`text_size` (`src/flex/view.rs:69-74`) sizes the label rect with `view::interior(text)`, and
-`interior` is `(chars().count() as i64).max(1)` (`src/view.rs:114-116`). An **empty** label
-therefore still reserves one cell, so "the cell after the last typed character" has two readings
-that diverge exactly when the text is empty.
+### The caret is a plain glyph image again
 
-The caret uses `text.x + chars().count()`, not `text.x + text.width`. Consequences:
+With no animation there are no frames, so the whole two-frame apparatus goes away: `kitty::blink`,
+`Image::Blinking`, `Frame::place_blinking`, `BLINK_GAP_MS`, and the transparent-root construction.
+The caret reverts to what a glyph already is — a cached image, placed on lit frames and simply not
+emitted on dark ones. `soft_clear` guarantees that "not emitted" means "not on screen".
 
-- Empty text gives `x + 0`, the cell where the first character will actually be drawn, which is
-  what criterion 1 asks for ("before any character is typed") and what survives criterion 4
-  (backspace to empty).
-- Non-empty text gives `text.x + len`, one cell past the last glyph — and `draw_label` draws from
-  `text.x`, so typing advances the caret by exactly one cell with nothing else shifting.
+`TerminalRenderer::draw_typing_caret` keeps the `CaretKey` = `{colour, bold}` cache
+(`HashMap<CaretKey, ImageId>`, mirroring `GlyphKey` and `glyph_images`) and gets the glyph from
+`glyph_source.glyph('|', colour, bold)`, exactly as `draw_label` obtains each character.
 
-The `.max(1)` in `interior` stays a layout concern and is deliberately not reused for the caret;
-using `text.width` instead would put the caret one cell right of where typing lands, so it would
-jump left on the first keystroke.
+On first sight it goes through the ordinary `place_fresh` → `kitty::show` path. That matters: the
+old build went through `kitty::blink`, which transmits with no cursor positioning, so the image
+only became visible from the *next* frame's `a=p`. `kitty::show` moves the cursor, so the caret
+lands on the right cell on the very first render. Acceptance criterion 1 now holds literally.
 
-There is no clamp. If the box is full and the caret lands on or past the border, the placement is
-still emitted and `Frame::crop` (`src/render/terminal.rs:358-380`) decides visibility.
+### Where the node is decided
 
-### Lifetime: one image, for the session
+Unchanged from the first cut, and still correct:
 
-`soft_clear` is `a=d,d=a`, which deletes placements *without* freeing image data
-(`src/kitty.rs:48-50`). So once the caret image exists, the terminal keeps ticking its frames for
-the rest of the session regardless of what is placed — `soft_clear` runs at the top of every frame
-(`src/render/terminal.rs:447`).
+- `PlacementNode::TypingCaret { colour: Rgb, bold: bool }` (`src/view.rs`). Colour and bold only,
+  no position logic. `is_decoration()` includes it, so criterion 6 holds — it never affects measure
+  and never reserves a cell.
+- `flex::view::paint` (`src/flex/view.rs`) emits it only when `state.mode == FlexMode::Write` and
+  `path == state.selected`, which is criterion 5.
+- Position is `text.x + text.chars().count()`, not `text.x + text.width`. Empty text gives `x + 0`,
+  the cell where the first character lands, which is what criterion 1 asks for and what survives
+  criterion 4. `interior`'s `.max(1)` (`src/view.rs:114-116`) stays a layout concern. No clamp:
+  `Frame::crop` decides visibility.
 
-Rather than have the renderer notice the caret disappearing and emit a `delete`, the image id is
-**permanent**: transmitted once on first sight, cached for the session, never freed. Only one
-`{colour, bold}` pair is ever used, so the leak is bounded to a single image id — and skipping it
-means no lifecycle flag, no renderer-side diff against the previous frame, and nothing to
-re-transmit when Doug re-enters typing mode.
+The one addition: `flex::view::scene` takes the lit phase and `paint` emits the node only when it
+is lit. `scene` already takes `new: &HashSet<Vec<usize>>` for the grow animation, so a per-frame
+non-state parameter is the established shape here.
 
-The cost is honest and worth recording: a 2fps animation keeps running in the terminal after Doug
-leaves Write mode for the first time, until he quits. It is not visible, because the placement is
-simply not emitted.
+`FlexScreen::render` gains the same parameter, which is a mechanical change to the mock in
+`src/flex/mod.rs`'s tests.
 
-### SVG export is unreachable here
+### SVG export is still unreachable
 
-`SvgRenderer` is called from exactly one place, `cli::export`, and it renders
-`view::body(&state, window)` for a **legacy** `State` (`src/cli.rs:86-96`). `flex::view::scene` is
-never handed to it. So the `match` arm for `TypingCaret` in `src/render/svg.rs:103-127` exists
-only for exhaustiveness: it emits nothing, with a comment saying flex scenes are never exported.
-A blinking cursor has no meaning frozen in time, and emitting a static `|` would be
-indistinguishable from a literal pipe character in the label.
+`SvgRenderer` is called from exactly one place, `cli::export`, and it renders `view::body` for a
+**legacy** `State` (`src/cli.rs:86-96`). `flex::view::scene` is never handed to it. The arm for
+`TypingCaret` in `src/render/svg.rs` exists only for exhaustiveness and emits nothing. A frozen
+cursor has no meaning, and a static `|` would be indistinguishable from a pipe in the label.
+
+### Constants
+
+- The half-period, the value passed to `PollTimeout`, and the value the tests assert against:
+  one named constant in `src/flex/mod.rs`. Tests assert against the constant, never a literal.
 
 ### Tests
 
-Framework is inline `#[test]` with plain `assert!`/`assert_eq!`, no snapshots; existing tests use
-the private `composed` / `sprites` / `grid` helpers (`src/render/terminal.rs:1616-1715`) and
-`kitty.rs`'s string assertions on escape bytes (`src/kitty.rs:432-521`).
+Framework is inline `#[test]` with plain `assert!`/`assert_eq!`, no snapshots.
 
-The assertion target is the **frames plus the control bytes**, not the escape sequence alone.
+`src/flex/mod.rs` — the run loop and its mock:
 
-`FakeGlyphSource::glyph` (`src/render/font.rs:199-222`) returns fully transparent for
-`style::rgb(None)` = `palette(FOREGROUND)` = `(232, 234, 237)` (`src/style.rs:63`), and an opaque
-solid for any other colour. `FLEX_TEXT_COLOUR` is `(201, 201, 207)` (`src/flex/view.rs:17`) —
-different, so **the real flex colour is already non-default** and the fake yields an opaque lit
-frame against a transparent root. No test-only colour is needed, and neither `GlyphSource` nor the
-fake changes.
+- `a_tick_re_renders_without_reducing_a_key`
+- `the_phase_toggles_on_each_tick`
+- `no_tick_is_asked_for_outside_write_mode`
+- `entering_write_mode_renders_the_caret_lit_before_any_keystroke`
 
-In `src/flex/view.rs`:
+`src/tty.rs`:
+
+- `read_key_times_out_with_a_tick_when_no_byte_arrives`
+- `a_byte_arriving_before_the_timeout_is_read_as_a_key`
+
+`src/flex/view.rs` — unchanged from the first cut, all still valid:
+
 - `write_mode_puts_a_typing_caret_one_cell_past_the_label`
 - `an_empty_label_puts_the_caret_in_the_first_cell`
 - `typing_the_next_character_moves_the_caret_right_by_one_cell`
@@ -168,32 +163,37 @@ In `src/flex/view.rs`:
 - `move_mode_draws_no_typing_caret`
 - `the_caret_placement_is_one_cell_wide_and_does_not_widen_the_label`
 
-In `src/render/terminal.rs`:
-- `the_typing_caret_root_frame_is_transparent` — root canvas alpha is all zero
-- `the_typing_caret_lit_frame_is_the_bar_glyph` — frame 2 is opaque in the caret colour
-- `the_typing_caret_is_transmitted_once` — the first frame's bytes contain exactly one `a=T`, one
-  `a=f`, one `a=a`, with `z=500`, `r=1`, `s=3`, `v=1`
-- `the_typing_caret_is_re_placed_and_not_re_transmitted` — a second render at a new column emits
-  `a=p` and no `a=T`
-- `the_typing_caret_is_the_same_image_for_the_same_colour` — two placements in one frame share
-  one id
-- `the_legacy_caret_is_still_a_solid_block` — regression guard for
-  `draw_caret`, which this change must not disturb
+plus, for the new phase argument:
 
-In `src/kitty.rs`:
-- `blink_transmits_a_transparent_root_then_the_lit_frame`
-- `blink_holds_the_root_for_its_gap_and_loops_forever`
-- `blink_frames_carry_capital_z_in_wezterm`
+- `the_dark_phase_draws_no_typing_caret`
+
+`src/render/terminal.rs`:
+
+- `the_typing_caret_is_a_cached_glyph_image`
+- `the_typing_caret_is_placed_on_a_lit_frame_and_omitted_on_a_dark_one`
+- `the_typing_caret_is_re_placed_and_not_re_transmitted` — a second lit render at a new column
+  emits `a=p` and no `a=T`
+- `the_typing_caret_is_the_same_image_for_the_same_colour`
+- `the_legacy_caret_is_still_a_solid_block` — regression guard for `draw_caret`
+
+The tests that asserted on two-frame animation bytes and on canvas alpha are deleted with the
+apparatus they tested.
 
 ### Rejected
 
-- **App-side tick** (`PollTimeout` on `read_key`, phase on `FlexState`) — repaints the whole frame
-  4×/sec forever, and the phase field would have to be excluded from state equality.
-- **`X=1` replacement frames** — correct per spec, but unverified on WezTerm, which is the
-  terminal this change is for.
+- **Terminal-driven animation** (transparent root, one lit frame, `a=a,r=1,z=` loop) —
+  implemented and measured: steady on WezTerm, invisible on Ghostty. The failure mode is recorded
+  under "Why this replaced terminal-driven animation".
+- **`X=1` replacement frames** — would make a transparent off-frame erase a lit root, which is the
+  correct per-protocol way to express this. Still unverified on WezTerm, and no longer necessary
+  once the app draws the frame itself.
+- **A thread driving `kitty::blink`** — races the synchronized-update block, and `soft_clear`
+  deletes its placement on the next keystroke anyway. Reasons above.
+- **Storing the phase on `FlexState`** — would need excluding from `PartialEq`, breaking the ~100
+  existing state assertions. A `run_loop` local threaded through `render` avoids all of it.
+- **Ticking in every mode** — the old spec's objection to an app-side tick was that it repaints
+  "4×/sec forever". A finite timeout only in Write mode makes it twice a second only while typing.
 - **Reusing `PlacementNode::Caret`** with extra fields — drags the legacy solid block's meaning
   into flex and forces every legacy `Caret` construction site to change.
-- **Deleting the caret image when Write mode ends** — needs the renderer to diff against its own
-  previous frame; not worth it for one bounded image id.
 - **`text.x + text.width` as the caret origin** — puts the caret one cell right of where typing
   lands when the label is empty, so it jumps left on the first keystroke.
