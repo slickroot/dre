@@ -92,7 +92,23 @@ render created — the caret would never hide, and re-placing would add a duplic
 render emits the caret **at** the reserved constant, which is why `Placed` carries an optional
 placement id and every other image still takes a counter id. The constant is chosen out of reach of
 the counter.
-- A **tick** does nothing at all when `typing_caret` is `None`, or when the requested phase equals
+- `kitty::show` transmits and displays in one `a=T`, which is why the caret cannot use it: it carries
+no `p=`, so a first-sight caret placement lands on kitty's default placement id while every
+`delete_placement` and every tick names the reserved constant. The delete would then target a
+placement the terminal never created, the default-id placement would survive, and the caret would
+be stuck visibly lit. So the caret's first sight is **two** commands, `a=t` to transmit the glyph
+without displaying it, then `a=p,i=<caret>,p=<reserved>` to place it at the reserved id. From then
+on it is an ordinary cached placement, and **first sight looks exactly like every later frame**.
+
+`Image::Fresh` and `kitty::show` keep their current behaviour, because every other caller — the
+legacy caret, box fills, brackets — is unaffected by placement identity and changing them all
+would be a much wider change than this one needs. The caret gets its own path alongside them.
+
+The alternative, threading `p=` through `a=T`, was not used: whether a transmit-and-display accepts
+a placement id is not verified here, and this repo's rule is to avoid an unverified key rather than
+branch on it. `a=t` and `a=p` are both unambiguous in the protocol.
+
+A **tick** does nothing at all when `typing_caret` is `None`, or when the requested phase equals
   `typing_caret_lit`. Otherwise it emits the single delete or the single place, and updates
   `typing_caret_lit`.
 - Nothing else may touch either field. In particular there is no delete on leaving Write mode,
@@ -223,10 +239,7 @@ With no animation there are no frames, so `kitty::blink`, `Image::Blinking`,
 `draw_typing_caret` keeps the `CaretKey` = `{colour, bold}` cache
 (`HashMap<CaretKey, ImageId>`, mirroring `GlyphKey` and `glyph_images`) and gets the glyph from
 `glyph_source.glyph('|', colour, bold)`, exactly as `draw_label` obtains each character. First
-sight goes through the ordinary `place_fresh` → `kitty::show` path. That matters: the deleted
-`kitty::blink` transmitted with no cursor positioning, so the image only became visible from the
-*next* frame's `a=p`. `kitty::show` moves the cursor, so the caret lands on the right cell on the
-very first render and criterion 1 holds literally.
+sight transmits and places as two commands at the reserved placement id, described above.
 
 ### SVG export is still unreachable
 
@@ -271,6 +284,10 @@ Framework is inline `#[test]` with plain `assert!`/`assert_eq!`, no snapshots.
   this design shipped with: render lit, tick to dark, render dark, tick to lit, and the placement
   must come back.
 - `a_tick_that_cannot_find_a_cell_emits_nothing`
+  - `the_first_sight_placement_uses_the_reserved_placement_id` — first sight is `a=t` then
+    `a=p,…,p=<reserved>`, never a bare `a=T`, so a later `delete_placement` can name it
+  - `a_dark_first_sight_leaves_nothing_placed` — the delete must be able to name the placement that
+    first sight just created
 - `a_tick_emits_exactly_one_command_and_no_soft_clear_or_text`
 - `going_dark_deletes_the_placement_and_going_lit_re_places_it`
 - `a_tick_that_does_not_change_the_phase_emits_nothing`
