@@ -143,9 +143,13 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
     }
 }
 
+fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
+    !b.border && children.is_empty()
+}
+
 fn drop_empty_text(mut state: FlexState) -> FlexState {
-    let borderless = !state.selected_mut().border;
-    if borderless && state.boxes.children(&state.selected).is_empty() {
+    let children = state.boxes.children(&state.selected);
+    if is_droppable(state.boxes.value(&state.selected), &children) {
         let parent = state.boxes.parent(&state.selected);
         state.boxes.remove(&state.selected);
         state.selected = parent;
@@ -284,6 +288,30 @@ mod tests {
             boxes.walk().collect::<Vec<_>>(),
             [(vec![0], &FlexBox::default())]
         );
+    }
+
+    #[test]
+    fn is_droppable_when_borderless_with_no_children() {
+        let b = FlexBox {
+            border: false,
+            ..FlexBox::default()
+        };
+        assert!(is_droppable(&b, &[]));
+    }
+
+    #[test]
+    fn is_not_droppable_when_bordered() {
+        let b = FlexBox::default();
+        assert!(!is_droppable(&b, &[]));
+    }
+
+    #[test]
+    fn is_not_droppable_when_borderless_with_children() {
+        let b = FlexBox {
+            border: false,
+            ..FlexBox::default()
+        };
+        assert!(!is_droppable(&b, &[vec![0]]));
     }
 
     #[test]
