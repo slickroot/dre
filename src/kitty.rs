@@ -99,6 +99,59 @@ pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: 
     ))
 }
 
+pub(crate) fn transmit(canvas: &Canvas, id: ImageId) -> Command {
+    Command(transmit_only(&canvas.pixels, canvas.width, canvas.height, id))
+}
+
+pub(crate) fn place_ext(
+    id: ImageId,
+    placement: PlacementId,
+    col: i64,
+    row: i64,
+    z: i32,
+    source: Option<(i64, i64, i64, i64)>,
+    cells: Option<(i64, i64)>,
+) -> Command {
+    let mut keys = format!("a=p,i={},p={},q=2,z={}", id.value(), placement.value(), z);
+    if let Some((x, y, w, h)) = source {
+        keys.push_str(&format!(",x={x},y={y},w={w},h={h}"));
+    }
+    if let Some((c, r)) = cells {
+        keys.push_str(&format!(",c={c},r={r}"));
+    }
+    Command(format!("\x1b[{};{}H\x1b_G{};\x1b\\", row + 1, col + 1, keys))
+}
+
+pub(crate) fn delete_placement(image: ImageId, placement: PlacementId) -> Command {
+    Command(format!(
+        "\x1b_Ga=d,d=i,i={},p={},q=2;\x1b\\",
+        image.value(),
+        placement.value()
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn transmit_animation(
+    root: &Canvas,
+    frames: &[Canvas],
+    id: ImageId,
+    gap_ms: u32,
+    hold_ms: u32,
+    wezterm: bool,
+) -> Command {
+    let mut output = transmit_only(&root.pixels, root.width, root.height, id);
+    for (index, canvas) in frames.iter().enumerate() {
+        let gap = if index == frames.len() - 1 {
+            hold_ms
+        } else {
+            gap_ms
+        };
+        output.push_str(&frame(canvas, id, gap, wezterm));
+    }
+    output.push_str(&escape(&format!("a=a,i={},s=3,v=2,q=2", id.value()), ""));
+    Command(output)
+}
+
 pub(crate) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
     let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
     let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
@@ -194,6 +247,13 @@ fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> 
             "a=T,f=32,s={width},v={height},o=z,q=2,i={},z={z}",
             id.value()
         ),
+        pixels,
+    )
+}
+
+fn transmit_only(pixels: &[u8], width: i64, height: i64, id: ImageId) -> String {
+    chunked(
+        &format!("a=t,f=32,s={width},v={height},o=z,q=2,i={}", id.value()),
         pixels,
     )
 }
