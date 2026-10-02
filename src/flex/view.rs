@@ -282,6 +282,34 @@ fn paint<'a>(
             arranged.rect,
         )
     });
+    let highlight = if state.mode == FlexMode::Replace && &state.selected == path {
+        flex_box
+            .text
+            .as_ref()
+            .zip(arranged.text)
+            .map(|(text, rect)| {
+                placement(
+                    PlacementNode::Box {
+                        colour: FLEX_SELECTED_COLOUR,
+                        fill: None,
+                        opacity: None,
+                        solid_fill: Some(FLEX_SELECTED_COLOUR),
+                        rounded: false,
+                        sides: ALL_SIDES,
+                        border: FLEX_BORDER,
+                        grow: false,
+                    },
+                    Rect {
+                        x: rect.x,
+                        y: rect.y,
+                        width: text.chars().count() as i64,
+                        height: 1,
+                    },
+                )
+            })
+    } else {
+        None
+    };
     let label = flex_box
         .text
         .as_ref()
@@ -300,7 +328,7 @@ fn paint<'a>(
                 rect,
             )
         });
-    border.into_iter().chain(label).collect()
+    border.into_iter().chain(highlight).chain(label).collect()
 }
 
 pub(crate) fn scene<'a>(
@@ -2098,5 +2126,105 @@ mod tests {
         let empty = measure(&titled(Direction::Column, Some("")).boxes, &[0]);
         let none = measure(&titled(Direction::Column, None).boxes, &[0]);
         assert_eq!(empty.height, none.height + 1 + FLEX_SPACE.height);
+    }
+
+    fn with_selected_text(text: &str) -> FlexState {
+        FlexState {
+            selected: vec![0, 0],
+            ..with_text(text)
+        }
+    }
+
+    fn in_replace(text: &str) -> FlexState {
+        after(with_selected_text(text), &["i"])
+    }
+
+    fn is_highlight(placement: &Placement<'_>) -> bool {
+        matches!(
+            &placement.node,
+            PlacementNode::Box { solid_fill: Some(colour), .. } if *colour == FLEX_SELECTED_COLOUR
+        )
+    }
+
+    fn highlight<'a>(placements: &'a [Placement<'a>]) -> Option<&'a Placement<'a>> {
+        placements.iter().find(|placement| is_highlight(placement))
+    }
+
+    #[test]
+    fn pressing_i_on_a_box_with_text_highlights_the_label() {
+        let state = in_replace("Hello");
+        let placements = placements(&state);
+        let highlight = highlight(&placements).unwrap();
+        let label = the_label(&placements);
+        assert_eq!(solid_fill(highlight), Some(FLEX_SELECTED_COLOUR));
+        assert_eq!(
+            (highlight.x, highlight.y, highlight.width, highlight.height),
+            (label.x, label.y, "Hello".chars().count() as i64, 1)
+        );
+    }
+
+    #[test]
+    fn the_replace_highlight_comes_before_the_label() {
+        let state = in_replace("Hello");
+        let placements = placements(&state);
+        let highlight = placements
+            .iter()
+            .position(|placement| is_highlight(placement))
+            .unwrap();
+        let label = placements
+            .iter()
+            .position(|placement| matches!(placement.node, PlacementNode::Label(_)))
+            .unwrap();
+        assert!(highlight < label);
+    }
+
+    #[test]
+    fn the_replace_highlight_width_counts_characters_not_bytes() {
+        let state = in_replace("café");
+        let placements = placements(&state);
+        let highlight = highlight(&placements).unwrap();
+        assert_eq!(highlight.width, "café".chars().count() as i64);
+        assert_ne!(highlight.width, "café".len() as i64);
+    }
+
+    #[test]
+    fn pressing_i_on_a_box_with_no_text_leaves_no_highlight() {
+        let state = after(with_text(""), &["i"]);
+        assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn the_o_flow_leaves_no_replace_highlight() {
+        let state = after(with_text("Hello"), &["o"]);
+        assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn the_enter_adds_a_box_flow_leaves_no_replace_highlight() {
+        let state = FlexState {
+            mode: FlexMode::Write,
+            selected: vec![0, 0],
+            ..with_text("Hello")
+        };
+        let state = after(state, &["\r"]);
+        assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn after_the_first_replace_key_there_is_no_highlight() {
+        let state = after(with_selected_text("Hello"), &["i", "W"]);
+        assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn backspace_as_the_first_replace_key_leaves_no_highlight() {
+        let state = after(with_selected_text("Hello"), &["i", "\x7f"]);
+        assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn enter_as_the_first_replace_key_leaves_no_highlight() {
+        let state = after(with_selected_text("Hello"), &["i", "\r"]);
+        assert!(highlight(&placements(&state)).is_none());
     }
 }
