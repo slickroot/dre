@@ -31,6 +31,11 @@ const BRACKETS_Z: i32 = u8::MAX as i32 + 1;
 const CONTENT_Z: i32 = BRACKETS_Z + 1;
 const INK_Z: i32 = CONTENT_Z;
 
+// The caret's own placement id, out of reach of the per-frame counter that
+// numbers every other placement, so a tick can name the caret alone.
+const TYPING_CARET_PLACEMENT: kitty::PlacementId =
+    kitty::PlacementId::new(NonZeroU32::new(u32::MAX).unwrap());
+
 fn depth_z(depth: u8) -> i32 {
     i32::from(depth)
 }
@@ -282,6 +287,7 @@ struct Placed {
     col: i64,
     row: i64,
     z: i32,
+    placement: Option<kitty::PlacementId>,
 }
 
 impl Placed {
@@ -444,6 +450,7 @@ impl Frame {
             col: crop.col,
             row: crop.row,
             z,
+            placement: None,
         });
     }
 
@@ -460,7 +467,8 @@ impl Frame {
         for id in &self.previous_transient_images {
             bytes.extend_from_slice(kitty::delete(*id).to_string().as_bytes());
         }
-        for (placement, image) in Self::placement_ids().zip(&self.images) {
+        for (numbered, image) in Self::placement_ids().zip(&self.images) {
+            let placement = image.placement.unwrap_or(numbered);
             bytes.extend_from_slice(image.command(placement).to_string().as_bytes());
         }
         bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
@@ -486,6 +494,15 @@ impl crate::canvas::Shape for SolidShape {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy)]
+struct TypingCaretCell {
+    image: kitty::ImageId,
+    col: i64,
+    row: i64,
+    z: i32,
+}
+
 pub(crate) struct TerminalRenderer {
     window: Window,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -498,6 +515,10 @@ pub(crate) struct TerminalRenderer {
     bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
     image_ids: ImageIds,
     grow_stamp: u64,
+    // Valid only between ticks: a full render's `soft_clear` has just wiped every
+    // placement, and that same full render is what resets both of these fields.
+    typing_caret: Option<TypingCaretCell>,
+    typing_caret_lit: bool,
     pub(crate) wezterm: bool,
 }
 
@@ -551,6 +572,8 @@ impl TerminalRenderer {
             grow_stamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos() as u64),
+            typing_caret: None,
+            typing_caret_lit: false,
             wezterm: false,
         }
     }
@@ -564,11 +587,39 @@ impl TerminalRenderer {
         whole(self.window)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn blink(&mut self, lit: bool, out: &mut impl Write) -> io::Result<()> {
+        let Some(caret) = self.typing_caret else {
+            return Ok(());
+        };
+        if lit == self.typing_caret_lit {
+            return Ok(());
+        }
+        let command = if lit {
+            kitty::place(
+                caret.image,
+                TYPING_CARET_PLACEMENT,
+                caret.col,
+                caret.row,
+                caret.z,
+            )
+        } else {
+            kitty::delete_placement(caret.image, TYPING_CARET_PLACEMENT)
+        };
+        self.typing_caret_lit = lit;
+        let mut bytes = BEGIN_SYNCHRONIZED_UPDATE.as_bytes().to_vec();
+        bytes.extend_from_slice(command.to_string().as_bytes());
+        bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
+        out.write_all(&bytes)
+    }
+
     fn frame(&mut self, scene: &Scene<'_>) -> Frame {
         let mut frame = Frame::with_previous(self.window, self.image_ids.take_transient());
+        self.typing_caret = None;
         for (area, placements) in scene {
             self.paint(&mut frame, placements, *area);
         }
+        self.typing_caret_lit = true;
         frame
     }
 
@@ -858,13 +909,26 @@ impl TerminalRenderer {
             colour: style.colour,
             bold: style.bold,
         };
-        if let Some(id) = self.caret_images.get(&key).copied() {
+        let id = if let Some(id) = self.caret_images.get(&key).copied() {
             frame.place_cached(id, geometry, area, z);
+            id
         } else {
             let id = self.image_ids.allocate();
             self.caret_images.insert(key, id);
             let glyph = self.glyph_source.glyph('|', style.colour, style.bold);
             frame.place_fresh(id, glyph, geometry, area, z);
+            id
+        };
+        if let Some(crop) = frame.crop(geometry, area) {
+            self.typing_caret = Some(TypingCaretCell {
+                image: id,
+                col: crop.col,
+                row: crop.row,
+                z,
+            });
+            if let Some(placed) = frame.images.last_mut() {
+                placed.placement = Some(TYPING_CARET_PLACEMENT);
+            }
         }
     }
 
@@ -2466,6 +2530,120 @@ mod tests {
         let shown = shown_ids(&output);
         assert_eq!(shown.len(), 1);
         assert_eq!(placed_ids(&output), shown);
+    }
+
+    fn blinked(r: &mut TerminalRenderer, lit: bool) -> String {
+        let mut out = Vec::new();
+        r.blink(lit, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn typing_caret_rendered(r: &mut TerminalRenderer, x: i64, y: i64) {
+        rendered_placements(r, &[typing_caret_placement(x, y)]);
+    }
+
+    #[test]
+    fn a_tick_emits_exactly_one_command_and_no_soft_clear_or_text() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        typing_caret_rendered(&mut r, 3, 2);
+
+        let tick = blinked(&mut r, false);
+
+        assert_eq!(tick.matches("\x1b_G").count(), 1);
+        assert!(!tick.contains(&kitty::soft_clear().to_string()));
+        assert!(!tick.contains(HOME_CURSOR));
+        assert!(!tick.contains('\r'));
+        assert!(!tick.contains(BLANK));
+        let body = unwrapped(&tick);
+        assert!(body
+            .chars()
+            .all(|byte| byte.is_ascii_graphic() || byte == '\x1b'));
+        assert_eq!(tick.matches(BEGIN_SYNCHRONIZED_UPDATE).count(), 1);
+        assert_eq!(tick.matches(END_SYNCHRONIZED_UPDATE).count(), 1);
+    }
+
+    #[test]
+    fn going_dark_deletes_the_placement_and_going_lit_re_places_it() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        typing_caret_rendered(&mut r, 3, 2);
+        let caret = r.typing_caret.expect("the rendered caret is remembered");
+
+        let dark = blinked(&mut r, false);
+        assert!(dark
+            .contains(&kitty::delete_placement(caret.image, TYPING_CARET_PLACEMENT).to_string()));
+
+        let lit = blinked(&mut r, true);
+        assert!(lit.contains(
+            &kitty::place(
+                caret.image,
+                TYPING_CARET_PLACEMENT,
+                caret.col,
+                caret.row,
+                caret.z
+            )
+            .to_string()
+        ));
+        assert!(!lit.contains("a=T,"));
+        assert!(!lit.contains("a=f,"));
+    }
+
+    #[test]
+    fn a_tick_that_does_not_change_the_phase_emits_nothing() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        typing_caret_rendered(&mut r, 3, 2);
+
+        assert_eq!(blinked(&mut r, true), "");
+        assert_eq!(blinked(&mut r, false).matches("\x1b_G").count(), 1);
+        assert_eq!(blinked(&mut r, false), "");
+    }
+
+    #[test]
+    fn a_tick_emits_nothing_when_the_scene_had_no_caret() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        typing_caret_rendered(&mut r, 3, 2);
+        rendered_placements(&mut r, &[label_placement("hi", 3, 2, 2, 1)]);
+
+        assert!(r.typing_caret.is_none());
+
+        assert_eq!(blinked(&mut r, false), "");
+        assert_eq!(blinked(&mut r, true), "");
+    }
+
+    #[test]
+    fn a_full_render_replaces_the_remembered_cell() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        typing_caret_rendered(&mut r, 3, 2);
+        let first = r.typing_caret.expect("the rendered caret is remembered");
+
+        typing_caret_rendered(&mut r, 4, 2);
+        let second = r.typing_caret.expect("the rendered caret is remembered");
+
+        assert_eq!((first.col, first.row), (3, 2));
+        assert_eq!((second.col, second.row), (4, 2));
+        assert_eq!(second.image, first.image);
+        let dark = blinked(&mut r, false);
+        assert!(dark
+            .contains(&kitty::delete_placement(second.image, TYPING_CARET_PLACEMENT).to_string()));
+        assert!(blinked(&mut r, true).contains(
+            &kitty::place(
+                second.image,
+                TYPING_CARET_PLACEMENT,
+                second.col,
+                second.row,
+                second.z
+            )
+            .to_string()
+        ));
+    }
+
+    #[test]
+    fn a_caret_cropped_off_screen_is_not_remembered() {
+        let mut r = renderer_on(window(4, 4, 2, 4));
+        typing_caret_rendered(&mut r, 9, 2);
+
+        assert!(r.typing_caret.is_none());
+        assert_eq!(blinked(&mut r, false), "");
+        assert_eq!(blinked(&mut r, true), "");
     }
 
     #[test]

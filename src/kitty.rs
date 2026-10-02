@@ -36,7 +36,7 @@ impl ImageId {
 pub(crate) struct PlacementId(NonZeroU32);
 
 impl PlacementId {
-    pub(crate) fn new(value: NonZeroU32) -> Self {
+    pub(crate) const fn new(value: NonZeroU32) -> Self {
         PlacementId(value)
     }
 
@@ -51,6 +51,15 @@ pub(crate) fn soft_clear() -> Command {
 
 pub(crate) fn delete(id: ImageId) -> Command {
     Command(format!("\x1b_Ga=d,d=I,i={},q=2;\x1b\\", id.value()))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn delete_placement(id: ImageId, placement: PlacementId) -> Command {
+    Command(format!(
+        "\x1b_Ga=d,d=i,i={},p={},q=2;\x1b\\",
+        id.value(),
+        placement.value()
+    ))
 }
 
 pub(crate) fn show(canvas: &Canvas, id: ImageId, col: i64, row: i64, z: i32) -> Command {
@@ -355,6 +364,14 @@ mod tests {
         assert_eq!(
             delete(image_id(7)).to_string(),
             "\x1b_Ga=d,d=I,i=7,q=2;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn delete_placement_removes_one_placement_and_keeps_the_image() {
+        assert_eq!(
+            delete_placement(image_id(7), placement_id(9)).to_string(),
+            "\x1b_Ga=d,d=i,i=7,p=9,q=2;\x1b\\"
         );
     }
 
