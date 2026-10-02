@@ -142,9 +142,13 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
     }
 }
 
+fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
+    !b.border && children.is_empty()
+}
+
 fn drop_empty_text(mut state: FlexState) -> FlexState {
-    let borderless = !state.selected_mut().border;
-    if borderless && state.boxes.children(&state.selected).is_empty() {
+    let children = state.boxes.children(&state.selected);
+    if is_droppable(state.selected_mut(), &children) {
         let parent = state.boxes.parent(&state.selected);
         state.boxes.remove(&state.selected);
         state.selected = parent;
@@ -230,6 +234,33 @@ fn printable_char(key: &str) -> Option<char> {
 mod tests {
     use super::*;
     use crate::tty;
+
+    #[test]
+    fn a_borderless_box_with_no_children_is_droppable() {
+        let b = FlexBox {
+            border: false,
+            ..FlexBox::default()
+        };
+        assert!(is_droppable(&b, &[]));
+    }
+
+    #[test]
+    fn a_bordered_box_with_no_children_is_not_droppable() {
+        let b = FlexBox {
+            border: true,
+            ..FlexBox::default()
+        };
+        assert!(!is_droppable(&b, &[]));
+    }
+
+    #[test]
+    fn a_borderless_box_with_children_is_not_droppable() {
+        let b = FlexBox {
+            border: false,
+            ..FlexBox::default()
+        };
+        assert!(!is_droppable(&b, &[vec![0]]));
+    }
 
     fn box_at<'a>(state: &'a FlexState, path: &[usize]) -> &'a FlexBox {
         state.boxes.value(path)
