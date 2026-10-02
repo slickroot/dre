@@ -451,6 +451,38 @@ mod tests {
     }
 
     #[test]
+    fn i_on_a_bordered_box_writes_into_its_own_text_and_creates_no_child() {
+        let before = FlexState::default();
+        let state = moved(before.clone(), &["i", "H", "i"]);
+        assert!(selected_box(&state).border);
+        assert_eq!(text_of(&state, &state.selected), Some("Hi"));
+        assert!(state.boxes.children(&state.selected).is_empty());
+        assert_eq!(state.selected, before.selected);
+    }
+
+    #[test]
+    fn s_adds_a_borderless_leaf_and_selects_it() {
+        let before = FlexState::default();
+        let state = moved(before.clone(), &["s"]);
+        assert_eq!(state.boxes.children(&before.selected).len(), 1);
+        assert_eq!(state.boxes.parent(&state.selected), before.selected);
+        assert!(!selected_box(&state).border);
+        assert!(state.boxes.children(&state.selected).is_empty());
+    }
+
+    #[test]
+    fn capital_a_on_a_text_leaf_nests_a_bordered_box_inside_the_leaf() {
+        let before = moved(FlexState::default(), &["s", "\r"]);
+        let state = moved(before.clone(), &["A"]);
+        let children = state.boxes.children(&before.selected);
+        assert_eq!(children.len(), 1);
+        let nested = box_at(&state, &children[0]);
+        assert!(nested.border);
+        assert_eq!(nested.text, None);
+        assert_eq!(text_of(&state, &before.selected), Some(""));
+    }
+
+    #[test]
     fn typing_after_i_on_a_box_with_no_text_goes_into_the_new_text() {
         let state = moved(FlexState::default(), &["i", "H", "i"]);
         assert_eq!(text_of(&state, &state.selected), Some("Hi"));
