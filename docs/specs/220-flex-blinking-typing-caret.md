@@ -74,30 +74,43 @@ frame can leave the remembered cell stale either, because a full render is exact
 The renderer therefore holds:
 
 - `typing_caret: Option<TypingCaretCell>` — the image id and the cropped `col`/`row` where the
-  caret belongs, or `None` when the scene has no caret in it.
+  caret belongs, or `None` when the scene has no caret in it. **Phase-independent:** it records
+  where the caret is, not whether it is currently lit.
 - `typing_caret_lit: bool` — the phase the renderer last emitted.
 
 Rules, and they are all of them:
 
-- A **full render** sets `typing_caret` from the scene (recording the cell only when the placement
-  survived `crop`, so an off-screen caret is `None`), and sets `typing_caret_lit` from the phase it
-  was handed. It emits the caret as an ordinary placement, or omits it when dark.
+- A **full render** always places the caret as an ordinary placement and always records
+  `typing_caret` from the scene, recording the cell only when the placement survived `crop`, so an
+  off-screen caret is `None`. It then sets `typing_caret_lit` from the phase it was handed, and
+  **when that phase is dark it appends the `delete_placement` into the same frame**.
 
 The caret's placement id is **reserved, not allocated**. `Frame::placement_ids()` numbers each
 frame's placements from a counter, so a full render would otherwise hand the caret a different id
-every time and the tick's `d=i,i=<caret>,p=<id>` would never name the placement a full render
-created — the caret would never hide, and re-placing would add a duplicate. So the full render
-emits the caret **at** the reserved constant, which is why `Placed` carries an optional placement id
-and every other image still takes a counter id. The constant is chosen out of reach of the counter.
+every time and the tick's `d=i,i=<caret>,p=<placement>` would never name the placement a full
+render created — the caret would never hide, and re-placing would add a duplicate. So the full
+render emits the caret **at** the reserved constant, which is why `Placed` carries an optional
+placement id and every other image still takes a counter id. The constant is chosen out of reach of
+the counter.
 - A **tick** does nothing at all when `typing_caret` is `None`, or when the requested phase equals
   `typing_caret_lit`. Otherwise it emits the single delete or the single place, and updates
   `typing_caret_lit`.
 - Nothing else may touch either field. In particular there is no delete on leaving Write mode,
-  because the full render that leaves Write mode already omitted the caret and `soft_clear` had
-  already wiped its placement.
+  because the scene there has no caret in it, so `typing_caret` is `None` and `soft_clear` has
+  already wiped the placement.
 
-The failure this rules out: a tick emitting a delete for a placement that a full render had already
-removed, which is how a one-frame flicker gets in.
+A dark full render therefore emits **two** commands, the place and the delete, against the tick's
+one. That is the price of the phase-independent cell, and it buys three things: `blink` always has
+a cell to restore, so the caret can never be lost; the image is always transmitted on first sight,
+so there is no fresh-versus-cached subtlety to track; and `draw_typing_caret` needs no phase at
+all. Both commands land inside the frame's single synchronized-output block, so the terminal applies
+them atomically and the caret never visibly appears. A full render already emits hundreds of
+commands, so two more is not a cost, and the one-command-per-tick property of criterion 7 is
+untouched.
+
+The alternative — record the cell without placing, and track whether the image has been transmitted
+so `blink` knows to use `place_fresh` — needs an extra field and a branch in `blink` for a case
+that only arises on a very first dark render. It was rejected as more state for the same result.
 
 ### The phase lives in the run loop, and nowhere else
 
@@ -114,10 +127,17 @@ The renderer is the single source of truth for what is *currently on screen*, vi
 `typing_caret_lit`. `run_loop` holds what it *wants* next. Passing the phase in and letting the
 renderer compare avoids the two-sources-of-truth bug that a duplicated `lit` flag would create.
 
+The phase is **reset to lit whenever the mode is not Write**. Outside typing mode there is no caret,
+so the phase carries no meaning and must not be allowed to survive into the next Write session:
+without the reset, a user who leaves write mode on a dark phase re-enters to no caret at all,
+because the render that enters write mode would use the stale `false`. That is acceptance criterion
+1 failing on the second visit rather than the first.
+
 The loop, with the `TICK` branch taking its own path so the top-of-loop render is skipped:
 
 ```
 loop {
+    if state.mode != Write { lit = true }
     render(state, lit)
     loop {
         key = next_key(timeout)
@@ -237,12 +257,20 @@ Framework is inline `#[test]` with plain `assert!`/`assert_eq!`, no snapshots.
 - `a_tick_flips_the_phase_without_re_rendering`
 - `a_tick_is_not_reduced_as_a_keystroke`
 - `a_timeout_is_asked_for_in_write_mode_only`
-- `entering_write_mode_renders_with_the_caret_lit`
+  - `entering_write_mode_renders_with_the_caret_lit`
+  - `re_entering_write_mode_on_a_dark_phase_renders_with_the_caret_lit` — leave write mode while
+    dark, re-enter, and the caret must be there on the first render
 - the five existing `run_loop` tests, updated for the `next_key` argument
 
 `src/render/terminal.rs`:
 
-- `a_lit_render_places_the_caret_and_a_dark_one_does_not`
+- `a_lit_render_places_the_caret_and_a_dark_one_leaves_nothing_placed` — the dark half asserts no
+  *surviving* placement, not the absence of a placement command: a dark render places and then
+  deletes, in one synchronized block.
+- `the_caret_survives_a_keystroke_that_lands_on_the_dark_phase` — the regression test for the bug
+  this design shipped with: render lit, tick to dark, render dark, tick to lit, and the placement
+  must come back.
+- `a_tick_that_cannot_find_a_cell_emits_nothing`
 - `a_tick_emits_exactly_one_command_and_no_soft_clear_or_text`
 - `going_dark_deletes_the_placement_and_going_lit_re_places_it`
 - `a_tick_that_does_not_change_the_phase_emits_nothing`
@@ -260,7 +288,9 @@ Framework is inline `#[test]` with plain `assert!`/`assert_eq!`, no snapshots.
 - `backspacing_to_empty_leaves_the_caret_in_the_first_cell`
 - `move_mode_draws_no_typing_caret`
 - `the_caret_placement_is_one_cell_wide_and_does_not_widen_the_label`
-- plus `the_dark_phase_draws_no_typing_caret`
+- `the_dark_phase_draws_no_typing_caret` — `view::scene` omits the node when dark, so a scene
+  rendered on a dark phase contains no `TypingCaret` at all. The renderer's own place-then-delete is
+  belt-and-braces against a scene that does carry one.
 
 `src/kitty.rs`:
 
