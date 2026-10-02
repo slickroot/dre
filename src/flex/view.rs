@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn the_box_is_centred_again_after_a_text_is_added() {
-        let (grown, _) = reduce(with_text("Hello"), "s");
+        let (grown, _) = reduce(with_text("Hello"), "o");
         let (left, right) = margins(&placements(&grown));
         assert!((left - right).abs() <= 1);
     }
@@ -1224,7 +1224,7 @@ mod tests {
 
     #[test]
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
-        let state = ["\r", "A", "s", "W", "o", "r", "l", "d"]
+        let state = ["\r", "A", "o", "W", "o", "r", "l", "d"]
             .into_iter()
             .fold(with_text("Hello"), |state, key| reduce(state, key).0);
         let placements = placements(&state);
@@ -1347,7 +1347,7 @@ mod tests {
     #[test]
     fn g_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "i", "H", "e", "l", "l", "o", "\r", "A", "s", "W", "o", "r", "l", "d", "\r", "g",
+            "i", "H", "e", "l", "l", "o", "\r", "A", "o", "W", "o", "r", "l", "d", "\r", "g",
         ];
         let state = keys
             .into_iter()
