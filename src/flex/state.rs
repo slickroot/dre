@@ -190,6 +190,7 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
             }
             state = exit_write_mode(state);
         }
+        "\x1b" => state = exit_write_mode(state),
         "\x7f" => {
             let children = state.boxes.children(&state.selected);
             if state.selected_mut().text.as_deref() == Some("")
@@ -520,7 +521,7 @@ mod tests {
     #[test]
     fn keys_that_are_not_a_single_printable_char_leave_the_state_unchanged() {
         let before = holding("Hi", FlexMode::Write);
-        for key in ["\x1b[A", "\x01", "\x1b", "\t", "", "ab", tty::RESIZE] {
+        for key in ["\x1b[A", "\x01", "\t", "", "ab", tty::RESIZE] {
             assert_eq!(
                 reduce(before.clone(), key),
                 (before.clone(), None),
@@ -667,6 +668,76 @@ mod tests {
         assert_eq!(state.selected, [0]);
         assert!(state.boxes.children(&[0]).is_empty());
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn esc_with_non_empty_text_returns_to_move_and_adds_no_sibling() {
+        let before = moved(middle_selected(), &["i", "!", "?"]);
+        assert_eq!(text_of(&before, &before.selected), Some("Middle!?"));
+        let (state, effect) = reduce(before.clone(), "\x1b");
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(
+            texts(&state),
+            [Some("Top"), Some("Middle!?"), Some("Bottom")]
+        );
+        assert_eq!(state.outer_boxes().count(), before.outer_boxes().count());
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn esc_with_empty_text_leaves_the_same_state_as_enter() {
+        let hello = hello_in(FlexMode::Move);
+        let before = moved(hello.clone(), &["o"]);
+        assert_eq!(text_of(&before, &before.selected), Some(""));
+        let escaped = reduce(before.clone(), "\x1b");
+        assert_eq!(escaped, reduce(before, "\r"));
+        let (state, effect) = escaped;
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.boxes, hello.boxes);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn esc_with_empty_text_on_a_bordered_box_leaves_the_same_state_as_enter() {
+        let before = moved(FlexState::default(), &["i"]);
+        assert!(selected_box(&before).border);
+        let escaped = reduce(before.clone(), "\x1b");
+        assert_eq!(escaped, reduce(before, "\r"));
+        let (state, effect) = escaped;
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(selected_box(&state).text, None);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn esc_after_i_returns_to_move_and_keeps_the_typed_text() {
+        let before = moved(hello_in(FlexMode::Move), &["i", "!", "?"]);
+        let state = reduce(before, "\x1b").0;
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(texts(&state), [Some("Hello!?")]);
+        assert_eq!(state.boxes.children(&[0]).len(), 0);
+    }
+
+    #[test]
+    fn esc_after_o_with_text_keeps_the_new_text_and_returns_to_move() {
+        let before = moved(hello_in(FlexMode::Move), &["o", "W", "o", "r", "l", "d"]);
+        let state = reduce(before.clone(), "\x1b").0;
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(text_of(&state, &state.selected), Some("World"));
+        assert_eq!(state.boxes.children(&[0]).len(), 1);
+    }
+
+    #[test]
+    fn esc_in_the_sibling_enter_just_spawned_keeps_its_text_and_returns_to_move() {
+        let before = moved(hello_in(FlexMode::Move), &["i", "!", "\r", "?"]);
+        assert_eq!(text_of(&before, &before.selected), Some("?"));
+        let state = reduce(before, "\x1b").0;
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(texts(&state), [Some("Hello!"), Some("?")]);
+        assert_eq!(state.selected, [1]);
     }
 
     #[test]
