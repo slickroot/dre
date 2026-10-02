@@ -420,11 +420,23 @@ mod tests {
 
     #[test]
     fn backspace_on_an_empty_new_box_selects_the_previous_sibling() {
-        let (state, _) = typed(&["o", "H", "e", "l", "l", "o", "\r", "h", "o", "\x7f"]);
-        assert_eq!(state.selected, [0, 0]);
-        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
-        assert_eq!(state.boxes.children(&[0]).len(), 1);
+        let hello = Tree::leaf(FlexBox {
+            border: false,
+            text: Some("Hello".to_string()),
+            ..FlexBox::default()
+        });
+        let state = FlexState {
+            boxes: new_window(vec![hello, new_text()]),
+            selected: vec![1],
+            mode: FlexMode::Write,
+            ..FlexState::default()
+        };
+        let (state, effect) = reduce(state, "\x7f");
+        assert_eq!(state.selected, [0]);
+        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(state.boxes.children(&[]).len(), 1);
         assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(effect, None);
     }
 
     #[test]
