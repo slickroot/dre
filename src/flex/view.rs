@@ -441,6 +441,14 @@ mod tests {
     }
 
     #[test]
+    fn the_first_box_starts_at_the_top_of_the_window() {
+        let state = FlexState::default();
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.y, WINDOW.row);
+    }
+
+    #[test]
     fn a_box_pads_its_content_by_the_space_width_on_the_left_and_right() {
         let state = with_text("Hello");
         let placements = placements(&state);
@@ -692,6 +700,16 @@ mod tests {
     }
 
     #[test]
+    fn three_boxes_stack_from_the_top_one_gap_apart() {
+        let state = stacked(&["Hello", "", "Hi"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes[0].y, WINDOW.row);
+        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
+        assert_eq!(boxes[2].y, boxes[1].y + BOX_HEIGHT + FLEX_SPACE.height);
+    }
+
+    #[test]
     fn stacked_boxes_line_up_by_their_centres() {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
@@ -704,20 +722,17 @@ mod tests {
     }
 
     #[test]
-    fn the_stack_is_centred_in_the_window() {
+    fn the_stack_starts_at_the_top_of_the_window() {
         let state = stacked(&["Hello", "", ""]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let left = boxes.iter().map(|b| b.x).min().unwrap();
         let right = boxes.iter().map(|b| b.x + b.width).max().unwrap();
         let top = boxes.iter().map(|b| b.y).min().unwrap();
-        let bottom = boxes.iter().map(|b| b.y + b.height).max().unwrap();
         let left_margin = left - WINDOW.col;
         let right_margin = WINDOW.col + WINDOW.cols - right;
-        let top_margin = top - WINDOW.row;
-        let bottom_margin = WINDOW.row + WINDOW.rows - bottom;
         assert!((left_margin - right_margin).abs() <= 1);
-        assert!((top_margin - bottom_margin).abs() <= 1);
+        assert_eq!(top, WINDOW.row);
     }
 
     #[test]
@@ -1180,16 +1195,15 @@ mod tests {
     }
 
     #[test]
-    fn a_scene_with_inner_boxes_is_centred_in_the_window() {
+    fn a_scene_with_inner_boxes_starts_at_the_top_of_the_window() {
         let state = outer_boxes_with_inner_counts(&[2, 1, 0]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let left = boxes.iter().map(|b| b.x).min().unwrap();
         let right = boxes.iter().map(|b| b.x + b.width).max().unwrap();
         let top = boxes.iter().map(|b| b.y).min().unwrap();
-        let bottom = boxes.iter().map(|b| b.y + b.height).max().unwrap();
         assert!(((left - WINDOW.col) - (WINDOW.col + WINDOW.cols - right)).abs() <= 1);
-        assert!(((top - WINDOW.row) - (WINDOW.row + WINDOW.rows - bottom)).abs() <= 1);
+        assert_eq!(top, WINDOW.row);
     }
 
     #[test]
@@ -1444,7 +1458,7 @@ mod tests {
     }
 
     #[test]
-    fn the_outer_box_grows_to_fit_the_row_in_height_and_stays_centred() {
+    fn the_outer_box_grows_to_fit_the_row_in_height_and_starts_at_the_top() {
         let state = hello_box_world();
         let placements = placements(&state);
         let outer = all_boxes(&placements)[0];
@@ -1452,10 +1466,8 @@ mod tests {
         assert_eq!((outer.width, outer.height), (WINDOW.cols, measured.height));
         let left = outer.x - WINDOW.col;
         let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
-        let top = outer.y - WINDOW.row;
-        let bottom = WINDOW.row + WINDOW.rows - (outer.y + outer.height);
         assert!((left - right).abs() <= 1);
-        assert!((top - bottom).abs() <= 1);
+        assert_eq!(outer.y, WINDOW.row);
     }
 
     #[test]
@@ -1511,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_and_stays_centred() {
+    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_at_the_top() {
         let state = from_row_after(&["A", "A"]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
@@ -1527,10 +1539,8 @@ mod tests {
         );
         let left = outer.x - WINDOW.col;
         let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
-        let top = outer.y - WINDOW.row;
-        let bottom = WINDOW.row + WINDOW.rows - (outer.y + outer.height);
         assert!((left - right).abs() <= 1);
-        assert!((top - bottom).abs() <= 1);
+        assert_eq!(outer.y, WINDOW.row);
     }
 
     const EVEN_SPREAD_WINDOW: Area = Area { cols: 82, ..WINDOW };

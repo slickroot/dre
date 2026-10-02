@@ -18,6 +18,7 @@ pub(crate) enum Justify {
     #[default]
     Start,
     SpaceBetween,
+    #[allow(dead_code)]
     Center,
 }
 
@@ -73,7 +74,7 @@ impl FlexBox {
     pub(crate) fn window() -> Self {
         Self {
             border: false,
-            justify: Justify::Center,
+            justify: Justify::Start,
             text: None,
             ..Self::default()
         }
@@ -1005,14 +1006,14 @@ mod tests {
     }
 
     #[test]
-    fn the_window_is_a_borderless_centred_column_with_no_text() {
+    fn the_window_is_a_borderless_top_aligned_column_with_no_text() {
         assert_eq!(
             FlexBox::window(),
             FlexBox {
                 text: None,
                 border: false,
                 direction: Direction::Column,
-                justify: Justify::Center,
+                justify: Justify::Start,
                 filled: false,
                 padding: 0,
             }
