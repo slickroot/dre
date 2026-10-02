@@ -259,6 +259,18 @@ pub(crate) struct Layout {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl Layout {
+    pub(crate) fn empty() -> Layout {
+        Layout {
+            arranged: Vec::new(),
+            area: Area {
+                col: 0,
+                row: 0,
+                cols: 0,
+                rows: 0,
+            },
+        }
+    }
+
     pub(crate) fn arrange(tree: &Tree<FlexBox>, area: Area) -> Layout {
         let window = Rect {
             x: area.col,

@@ -1,4 +1,5 @@
 use super::history::{self, Snapshot};
+use super::layout::Layout;
 use types::Tree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +136,11 @@ impl FlexState {
     }
 }
 
-pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
+pub(crate) fn reduce(
+    state: FlexState,
+    key: &str,
+    _layout: &Layout,
+) -> (FlexState, Option<FlexEffect>) {
     match (key, state.mode) {
         ("\x03", _) => (state, Some(FlexEffect::Quit)),
         ("\r", FlexMode::Write) => history::recorded(state, key, |s| write_key(s, key)),
@@ -299,7 +304,21 @@ pub(super) fn printable_char(key: &str) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flex::layout::Layout;
     use crate::tty;
+    use crate::view::Area;
+
+    const NAV_AREA: Area = Area {
+        col: 0,
+        row: 0,
+        cols: 40,
+        rows: 20,
+    };
+
+    fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
+        let layout = Layout::arrange(&state.boxes, NAV_AREA);
+        super::reduce(state, key, &layout)
+    }
 
     fn box_at<'a>(state: &'a FlexState, path: &[usize]) -> &'a FlexBox {
         state.boxes.value(path)

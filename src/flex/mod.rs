@@ -17,7 +17,7 @@ use state::{FlexEffect, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
-    fn render(&mut self, state: &FlexState) -> io::Result<()>;
+    fn render(&mut self, state: &FlexState) -> io::Result<Layout>;
     fn resize(&mut self) -> io::Result<()>;
 }
 
@@ -28,12 +28,13 @@ pub(crate) struct TerminalFlexScreen {
 }
 
 impl FlexScreen for TerminalFlexScreen {
-    fn render(&mut self, state: &FlexState) -> io::Result<()> {
+    fn render(&mut self, state: &FlexState) -> io::Result<Layout> {
         let new = new_boxes(&mut self.drawn, state);
         let layout = Layout::arrange(&state.boxes, self.renderer.area());
         self.renderer
             .render(&view::scene(state, &layout, &new), &mut self.out)?;
-        self.out.flush()
+        self.out.flush()?;
+        Ok(layout)
     }
 
     fn resize(&mut self) -> io::Result<()> {
@@ -60,14 +61,14 @@ fn new_boxes(drawn: &mut Option<HashSet<Vec<usize>>>, state: &FlexState) -> Hash
 pub(crate) fn run_loop(keys: &dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
     let mut state = FlexState::default();
     loop {
-        screen.render(&state)?;
+        let layout = screen.render(&state)?;
         let key = keys.next_key()?;
         if key == tty::RESIZE {
             screen.resize()?;
             continue;
         }
         let effect;
-        (state, effect) = state::reduce(state, &key);
+        (state, effect) = state::reduce(state, &key, &layout);
         if effect == Some(FlexEffect::Quit) {
             return Ok(());
         }
@@ -111,7 +112,7 @@ mod tests {
     use mockall::Sequence;
 
     fn after(state: FlexState, key: &str) -> FlexState {
-        state::reduce(state, key).0
+        state::reduce(state, key, &Layout::empty()).0
     }
 
     #[test]
@@ -176,7 +177,7 @@ mod tests {
                 .expect_render()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_| Ok(Layout::empty()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
@@ -204,7 +205,7 @@ mod tests {
                 .withf(move |state| last_text(state).unwrap_or_default() == shown)
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_| Ok(Layout::empty()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
@@ -224,7 +225,7 @@ mod tests {
             .withf(|state| last_text(state).is_none())
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(Layout::empty()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -234,7 +235,7 @@ mod tests {
             .withf(|state| last_text(state) == Some(""))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(Layout::empty()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -244,7 +245,7 @@ mod tests {
             .withf(|state| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(Layout::empty()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -259,7 +260,7 @@ mod tests {
             .withf(|state| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(Layout::empty()));
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
@@ -278,7 +279,7 @@ mod tests {
                 .expect_render()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(|_| Ok(()));
+                .returning(|_| Ok(Layout::empty()));
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)

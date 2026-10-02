@@ -143,7 +143,7 @@ pub(crate) fn scene<'a>(
 mod tests {
     use super::*;
     use crate::flex::layout::*;
-    use crate::flex::state::{new_box, new_window, reduce, Direction, FlexBox, Justify};
+    use crate::flex::state::{new_box, new_window, Direction, FlexBox, FlexEffect, Justify};
     use crate::view::{self, Area, BOX_HEIGHT};
     use types::Tree;
 
@@ -153,6 +153,11 @@ mod tests {
         cols: 80,
         rows: 24,
     };
+
+    fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
+        let layout = Layout::arrange(&state.boxes, WINDOW);
+        crate::flex::state::reduce(state, key, &layout)
+    }
 
     fn row() -> FlexBox {
         FlexBox {
