@@ -146,6 +146,15 @@ fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
     !b.border && children.is_empty()
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+fn sibling_or_else_parent(boxes: &Tree<FlexBox>, path: &[usize]) -> Vec<usize> {
+    if path.last() == Some(&0) {
+        boxes.parent(path)
+    } else {
+        boxes.previous(path)
+    }
+}
+
 fn drop_empty_text(mut state: FlexState) -> FlexState {
     let children = state.boxes.children(&state.selected);
     if is_droppable(state.selected_mut(), &children) {
@@ -260,6 +269,24 @@ mod tests {
             ..FlexBox::default()
         };
         assert!(!is_droppable(&b, &[vec![0]]));
+    }
+
+    #[test]
+    fn sibling_or_else_parent_of_a_box_with_a_previous_sibling_is_that_sibling() {
+        let boxes = new_window(vec![new_box(), new_box()]);
+        assert_eq!(sibling_or_else_parent(&boxes, &[1]), vec![0]);
+    }
+
+    #[test]
+    fn sibling_or_else_parent_of_a_first_child_is_its_parent() {
+        let boxes = new_window(vec![new_window(vec![new_box(), new_box()])]);
+        assert_eq!(sibling_or_else_parent(&boxes, &[0, 0]), vec![0]);
+    }
+
+    #[test]
+    fn sibling_or_else_parent_of_a_top_level_first_box_is_itself() {
+        let boxes = new_window(vec![new_box()]);
+        assert_eq!(sibling_or_else_parent(&boxes, &[0]), vec![0]);
     }
 
     fn box_at<'a>(state: &'a FlexState, path: &[usize]) -> &'a FlexBox {
