@@ -121,8 +121,6 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
     }
 }
 
-const BLINK_GAP_MS: u32 = 500;
-
 const GROW_FRAMES: usize = 9;
 const GROW_MS: u32 = 150;
 const GROW_GAP_MS: u32 = (GROW_MS + (GROW_FRAMES as u32 - 1) / 2) / (GROW_FRAMES as u32 - 1);
@@ -277,12 +275,6 @@ enum Image {
         frames: Vec<Canvas>,
         wezterm: bool,
     },
-    Blinking {
-        id: kitty::ImageId,
-        root: Canvas,
-        lit: Canvas,
-        wezterm: bool,
-    },
 }
 
 struct Placed {
@@ -313,12 +305,6 @@ impl Placed {
                 GROW_HOLD_MS,
                 *wezterm,
             ),
-            Image::Blinking {
-                id,
-                root,
-                lit,
-                wezterm,
-            } => kitty::blink(root, lit, *id, self.z, BLINK_GAP_MS, *wezterm),
         }
     }
 }
@@ -444,33 +430,6 @@ impl Frame {
     ) {
         if let Some(crop) = self.crop(geometry, area) {
             self.push(Image::Cached { id }, crop, z);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn place_blinking<G: Into<Geometry>>(
-        &mut self,
-        id: kitty::ImageId,
-        root: &Canvas,
-        lit: &Canvas,
-        geometry: G,
-        area: Area,
-        z: i32,
-        wezterm: bool,
-    ) {
-        if let Some(crop) = self.crop(geometry, area) {
-            let cropped =
-                |canvas: &Canvas| canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
-            self.push(
-                Image::Blinking {
-                    id,
-                    root: cropped(root),
-                    lit: cropped(lit),
-                    wezterm,
-                },
-                crop,
-                z,
-            );
         }
     }
 
@@ -904,13 +863,8 @@ impl TerminalRenderer {
         } else {
             let id = self.image_ids.allocate();
             self.caret_images.insert(key, id);
-            let lit = self.glyph_source.glyph('|', style.colour, style.bold);
-            let root = Canvas {
-                pixels: vec![0; lit.pixels.len()],
-                width: lit.width,
-                height: lit.height,
-            };
-            frame.place_blinking(id, &root, lit, geometry, area, z, self.wezterm);
+            let glyph = self.glyph_source.glyph('|', style.colour, style.bold);
+            frame.place_fresh(id, glyph, geometry, area, z);
         }
     }
 
@@ -1696,9 +1650,6 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { .. } => panic!("a cached image carries no canvas"),
                 Image::Growing { .. } => panic!("a growing image carries no single canvas"),
-                Image::Blinking { .. } => {
-                    panic!("a blinking image carries no single canvas")
-                }
             }
         }
     }
@@ -1715,7 +1666,7 @@ mod tests {
             .iter()
             .filter_map(|image| match &image.image {
                 Image::Fresh { id, canvas } => Some((*id, canvas)),
-                Image::Cached { .. } | Image::Growing { .. } | Image::Blinking { .. } => None,
+                Image::Cached { .. } | Image::Growing { .. } => None,
             })
             .collect();
         let canvas_of = |image: &'a Placed| -> &'a Canvas {
@@ -1723,9 +1674,6 @@ mod tests {
                 Image::Fresh { canvas, .. } => canvas,
                 Image::Cached { id } => fresh[id],
                 Image::Growing { .. } => panic!("a growing image carries no single canvas"),
-                Image::Blinking { .. } => {
-                    panic!("a blinking image carries no single canvas")
-                }
             }
         };
         let col = layer.iter().map(|image| image.col).min().expect("a layer");
@@ -1887,13 +1835,6 @@ mod tests {
             width: 1,
             height: 1,
             depth: 0,
-        }
-    }
-
-    fn blinking(image: &Placed) -> (&Canvas, &Canvas) {
-        match &image.image {
-            Image::Blinking { root, lit, .. } => (root, lit),
-            _ => panic!("a blinking image carries a root frame and a lit frame"),
         }
     }
 
@@ -2072,9 +2013,6 @@ mod tests {
                             kitty::place(*id, placement, image.col, image.row, image.z)
                         }
                         Image::Growing { .. } => panic!("no box in this frame grows"),
-                        Image::Blinking { .. } => {
-                            panic!("nothing in this frame is a typing caret")
-                        }
                     }),
             )
             .map(|command| command.to_string())
@@ -2490,63 +2428,33 @@ mod tests {
     }
 
     #[test]
-    fn the_typing_caret_root_frame_is_transparent() {
+    fn the_typing_caret_lands_on_its_cell_on_the_very_first_render() {
         let mut r = renderer_on(window(20, 10, 2, 4));
-        let caret = &sprites(&mut r, &[typing_caret_placement(3, 2)])[0];
-        let (root, lit) = blinking(caret);
-        assert_eq!((root.width, root.height), (lit.width, lit.height));
-        assert!(root.pixels.chunks(4).all(|pixel| pixel[3] == 0));
-    }
+        let caret = typing_caret_placement(3, 2);
 
-    #[test]
-    fn the_typing_caret_lit_frame_is_the_bar_glyph() {
-        let mut r = renderer_on(window(20, 10, 2, 4));
-        let caret = &sprites(&mut r, &[typing_caret_placement(3, 2)])[0];
-        let (_, lit) = blinking(caret);
+        let output = rendered_placements(&mut r, std::slice::from_ref(&caret));
+
+        let [id] = shown_ids(&output).try_into().unwrap();
         let glyph = r.glyph_source.glyph('|', typing_caret_colour(), false);
-        assert_eq!(lit.pixels, glyph.pixels);
-        let (r, g, b) = typing_caret_colour();
-        assert!(lit
-            .pixels
-            .chunks(4)
-            .all(|pixel| *pixel == [r, g, b, OPAQUE]));
+        assert!(output.contains(
+            &kitty::show(glyph, image_id(&id), caret.x, caret.y, depth_z(caret.depth)).to_string()
+        ));
+        assert!(placed_ids(&output).is_empty());
+        assert!(!output.contains("a=a,"));
     }
 
     #[test]
-    fn the_typing_caret_is_transmitted_once() {
-        let mut r = renderer_on(window(20, 10, 2, 4));
-        let output = rendered_placements(&mut r, &[typing_caret_placement(3, 2)]);
-
-        assert_eq!(output.matches("a=T,").count(), 1);
-        assert_eq!(output.matches("a=f,").count(), 1);
-        assert_eq!(output.matches("a=a,").count(), 1);
-        let animation = output
-            .split("\x1b_G")
-            .find(|command| command.starts_with("a=a,"))
-            .expect("the caret animation loops forever");
-        assert_eq!(command_fields(animation, "a=a,", "r="), vec!["1"]);
-        assert_eq!(
-            command_fields(animation, "a=a,", "z="),
-            vec![BLINK_GAP_MS.to_string()]
-        );
-        assert_eq!(command_fields(animation, "a=a,", "s="), vec!["3"]);
-        assert_eq!(command_fields(animation, "a=a,", "v="), vec!["1"]);
-        assert_eq!(
-            command_fields(&output, "a=T,", "z="),
-            vec![depth_z(0).to_string()]
-        );
-    }
-
-    #[test]
-    fn the_typing_caret_is_re_placed_and_not_re_transmitted() {
+    fn the_caret_is_re_placed_and_not_re_transmitted_when_typing_moves_it() {
         let mut r = renderer_on(window(20, 10, 2, 4));
         let first = rendered_placements(&mut r, &[typing_caret_placement(3, 2)]);
-        let second = rendered_placements(&mut r, &[typing_caret_placement(4, 2)]);
+        let moved = typing_caret_placement(4, 2);
+        let second = rendered_placements(&mut r, std::slice::from_ref(&moved));
 
         assert!(!second.contains("a=T,"));
         assert!(!second.contains("a=f,"));
         assert!(!second.contains("a=a,"));
         assert_eq!(placed_ids(&second), shown_ids(&first));
+        assert!(second.contains(&format!("\x1b[{};{}H", moved.y + 1, moved.x + 1)));
     }
 
     #[test]
