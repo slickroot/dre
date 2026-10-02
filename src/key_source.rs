@@ -5,7 +5,7 @@ use crate::tty;
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait KeySource {
-    fn next_key(&self) -> io::Result<String>;
+    fn next_key(&self, timeout_ms: Option<u32>) -> io::Result<String>;
 }
 
 pub(crate) struct TtyKeySource {
@@ -14,7 +14,7 @@ pub(crate) struct TtyKeySource {
 }
 
 impl KeySource for TtyKeySource {
-    fn next_key(&self) -> io::Result<String> {
-        tty::read_key(self.fd, self.resize_fd)
+    fn next_key(&self, timeout_ms: Option<u32>) -> io::Result<String> {
+        tty::read_key(self.fd, self.resize_fd, timeout_ms)
     }
 }

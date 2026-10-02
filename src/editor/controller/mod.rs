@@ -48,7 +48,7 @@ impl Controller for DreController {
         let mut state = state;
         while state.is_running() {
             self.screen.render(&state)?;
-            let key = self.keys.next_key()?;
+            let key = self.keys.next_key(None)?;
             if key == tty::RESIZE {
                 self.screen.resize()?;
             } else {
@@ -114,7 +114,7 @@ mod tests {
                 .expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
-                .return_once(move || Ok(key));
+                .return_once(move |_| Ok(key));
         }
         source
     }
@@ -156,7 +156,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|| Ok("x".to_string()));
+            .returning(|_| Ok("x".to_string()));
         screen
             .expect_render()
             .times(1)
@@ -286,7 +286,7 @@ mod tests {
         let mut keys = MockKeySource::new();
         keys.expect_next_key()
             .times(1)
-            .returning(|| Err(io::Error::other("keys failed")));
+            .returning(|_| Err(io::Error::other("keys failed")));
         let mut reducer = MockReducer::new();
         reducer.expect_reduce().never();
 
@@ -369,7 +369,7 @@ mod tests {
         let mut keys = MockKeySource::new();
         keys.expect_next_key()
             .times(1)
-            .returning(|| Ok("s".to_string()));
+            .returning(|_| Ok("s".to_string()));
 
         let error = controller(keys, any_screen(), reducer, executor)
             .run(State::default())

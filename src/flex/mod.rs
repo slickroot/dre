@@ -60,7 +60,7 @@ pub(crate) fn run_loop(keys: &dyn KeySource, screen: &mut dyn FlexScreen) -> io:
     let mut state = FlexState::default();
     loop {
         screen.render(&state)?;
-        let key = keys.next_key()?;
+        let key = keys.next_key(None)?;
         if key == tty::RESIZE {
             screen.resize()?;
             continue;
@@ -179,7 +179,7 @@ mod tests {
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
-                .return_once(move || Ok(key.to_string()));
+                .return_once(move |_| Ok(key.to_string()));
         }
 
         run_loop(&keys, &mut screen).unwrap();
@@ -207,7 +207,7 @@ mod tests {
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
-                .return_once(move || Ok(key.to_string()));
+                .return_once(move |_| Ok(key.to_string()));
         }
 
         run_loop(&keys, &mut screen).unwrap();
@@ -227,7 +227,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .return_once(|| Ok("i".to_string()));
+            .return_once(|_| Ok("i".to_string()));
         screen
             .expect_render()
             .withf(|state| last_text(state) == Some(""))
@@ -237,7 +237,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .return_once(|| Ok("a".to_string()));
+            .return_once(|_| Ok("a".to_string()));
         screen
             .expect_render()
             .withf(|state| last_text(state) == Some("a"))
@@ -247,7 +247,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .return_once(|| Ok(tty::RESIZE.to_string()));
+            .return_once(|_| Ok(tty::RESIZE.to_string()));
         screen
             .expect_resize()
             .times(1)
@@ -262,7 +262,7 @@ mod tests {
         keys.expect_next_key()
             .times(1)
             .in_sequence(&mut seq)
-            .return_once(|| Ok("\x03".to_string()));
+            .return_once(|_| Ok("\x03".to_string()));
 
         run_loop(&keys, &mut screen).unwrap();
     }
@@ -281,7 +281,7 @@ mod tests {
             keys.expect_next_key()
                 .times(1)
                 .in_sequence(&mut seq)
-                .return_once(move || Ok(key.to_string()));
+                .return_once(move |_| Ok(key.to_string()));
         }
 
         run_loop(&keys, &mut screen).unwrap();
