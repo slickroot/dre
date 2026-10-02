@@ -40,7 +40,7 @@ impl PlacementId {
         PlacementId(value)
     }
 
-    fn value(self) -> u32 {
+    pub(crate) fn value(self) -> u32 {
         self.0.get()
     }
 }

@@ -128,8 +128,7 @@ pub(super) struct VirtualTerminal {
 }
 
 fn placement_id_value(p: PlacementId) -> u32 {
-    // PlacementId is a transparent wrapper over NonZeroU32
-    unsafe { std::mem::transmute::<PlacementId, NonZeroU32>(p) }.get()
+    p.value()
 }
 
 impl VirtualTerminal {
