@@ -1,9 +1,9 @@
-use super::state::{FlexEffect, FlexMode, FlexNode, FlexState};
+use super::state::{FlexBox, FlexEffect, FlexMode, FlexState};
 use types::Tree;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Snapshot {
-    boxes: Tree<FlexNode>,
+    boxes: Tree<FlexBox>,
     selected: Vec<usize>,
 }
 

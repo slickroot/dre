@@ -11,7 +11,7 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
-use state::{FlexBox, FlexEffect, FlexNode, FlexState};
+use state::{FlexEffect, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait FlexScreen {
@@ -45,7 +45,7 @@ fn new_boxes(drawn: &mut Option<HashSet<Vec<usize>>>, state: &FlexState) -> Hash
     let paths: HashSet<Vec<usize>> = state
         .boxes
         .walk()
-        .filter(|(_, node)| matches!(node, FlexNode::Box(FlexBox { bare: false, .. })))
+        .filter(|(_, flex_box)| flex_box.border)
         .map(|(path, _)| path)
         .collect();
     let new = match drawn {
@@ -185,6 +185,13 @@ mod tests {
         run_loop(&mut keys, &mut screen).unwrap();
     }
 
+    fn last_text(state: &FlexState) -> Option<&str> {
+        state
+            .outer_boxes()
+            .last()
+            .and_then(|flex_box| flex_box.text.as_deref())
+    }
+
     #[test]
     fn renders_the_text_as_it_is_typed() {
         let mut keys = MockKeySource::new();
@@ -193,9 +200,7 @@ mod tests {
         for (key, shown) in [("i", ""), ("H", ""), ("i", "H"), ("\x03", "Hi")] {
             screen
                 .expect_render()
-                .withf(move |state| {
-                    state.texts_of(&[state.outer_boxes().count() - 1]).concat() == shown
-                })
+                .withf(move |state| last_text(state).unwrap_or_default() == shown)
                 .times(1)
                 .in_sequence(&mut seq)
                 .returning(|_| Ok(()));
@@ -215,11 +220,7 @@ mod tests {
         let mut seq = Sequence::new();
         screen
             .expect_render()
-            .withf(|state| {
-                state
-                    .texts_of(&[state.outer_boxes().count() - 1])
-                    .is_empty()
-            })
+            .withf(|state| last_text(state).is_none())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -229,7 +230,7 @@ mod tests {
             .return_once(|| Ok("i".to_string()));
         screen
             .expect_render()
-            .withf(|state| state.texts_of(&[state.outer_boxes().count() - 1]) == [""])
+            .withf(|state| last_text(state) == Some(""))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -239,7 +240,7 @@ mod tests {
             .return_once(|| Ok("a".to_string()));
         screen
             .expect_render()
-            .withf(|state| state.texts_of(&[state.outer_boxes().count() - 1])[0] == "a")
+            .withf(|state| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
@@ -254,7 +255,7 @@ mod tests {
             .returning(|| Ok(()));
         screen
             .expect_render()
-            .withf(|state| state.texts_of(&[state.outer_boxes().count() - 1])[0] == "a")
+            .withf(|state| last_text(state) == Some("a"))
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_| Ok(()));
