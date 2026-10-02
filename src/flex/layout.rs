@@ -1,6 +1,6 @@
 use types::Tree;
 
-use crate::view;
+use crate::view::{self, Area};
 
 use super::state::{Direction, FlexBox, Justify};
 
@@ -240,5 +240,212 @@ pub(crate) fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mu
     });
     for (child, child_rect) in children.iter().zip(child_rects) {
         arrange(tree, child, *child_rect, out);
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Heading {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+pub(crate) struct Layout {
+    arranged: Vec<Arranged>,
+    area: Area,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl Layout {
+    pub(crate) fn arrange(tree: &Tree<FlexBox>, area: Area) -> Layout {
+        let window = Rect {
+            x: area.col,
+            y: area.row,
+            width: area.cols,
+            height: area.rows,
+        };
+        let mut arranged = Vec::new();
+        arrange(tree, &[], window, &mut arranged);
+        Layout { arranged, area }
+    }
+
+    pub(crate) fn rect(&self, path: &[usize]) -> Option<Rect> {
+        self.arranged
+            .iter()
+            .find(|arranged| arranged.path == path)
+            .map(|arranged| arranged.rect)
+    }
+
+    pub(crate) fn arranged(&self) -> &[Arranged] {
+        &self.arranged
+    }
+
+    pub(crate) fn area(&self) -> Area {
+        self.area
+    }
+
+    pub(crate) fn nearest(&self, from: &[usize], heading: Heading) -> Option<Vec<usize>> {
+        let current = self.rect(from)?;
+        self.arranged
+            .iter()
+            .filter(|a| a.path != from)
+            .filter(|a| is_beyond(a.rect, current, heading))
+            .min_by_key(|a| {
+                (
+                    leading_gap(a.rect, current, heading),
+                    cross_offset(a.rect, current, heading),
+                )
+            })
+            .map(|a| a.path.clone())
+    }
+}
+
+fn is_beyond(r: Rect, c: Rect, heading: Heading) -> bool {
+    match heading {
+        Heading::Down => r.y > c.y,
+        Heading::Up => r.y < c.y,
+        Heading::Right => r.x > c.x,
+        Heading::Left => r.x < c.x,
+    }
+}
+
+fn leading_gap(r: Rect, c: Rect, heading: Heading) -> i64 {
+    match heading {
+        Heading::Down => r.y - c.y,
+        Heading::Up => c.y - r.y,
+        Heading::Right => r.x - c.x,
+        Heading::Left => c.x - r.x,
+    }
+}
+
+fn cross_offset(r: Rect, c: Rect, heading: Heading) -> i64 {
+    match heading {
+        Heading::Up | Heading::Down => (r.x - c.x).abs(),
+        Heading::Left | Heading::Right => (r.y - c.y).abs(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(path: &[usize], x: i64, y: i64, width: i64, height: i64) -> Arranged {
+        Arranged {
+            path: path.to_vec(),
+            rect: Rect {
+                x,
+                y,
+                width,
+                height,
+            },
+            text: None,
+        }
+    }
+
+    fn layout(nodes: Vec<Arranged>) -> Layout {
+        Layout {
+            arranged: nodes,
+            area: Area {
+                col: 0,
+                row: 0,
+                cols: 0,
+                rows: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn down_picks_the_box_whose_top_left_corner_is_lowest() {
+        let from = [0];
+        let layout = layout(vec![
+            at(&from, 0, 0, 1, 1),
+            at(&[1], 0, 8, 1, 1),
+            at(&[2], 0, 3, 1, 1),
+            at(&[3], 0, 5, 1, 1),
+        ]);
+        assert_eq!(layout.nearest(&from, Heading::Down), Some(vec![2]));
+    }
+
+    #[test]
+    fn up_picks_the_box_whose_top_left_corner_is_highest() {
+        let from = [0];
+        let layout = layout(vec![
+            at(&from, 0, 10, 1, 1),
+            at(&[1], 0, 5, 1, 1),
+            at(&[2], 0, 8, 1, 1),
+            at(&[3], 0, 1, 1, 1),
+        ]);
+        assert_eq!(layout.nearest(&from, Heading::Up), Some(vec![2]));
+    }
+
+    #[test]
+    fn left_and_right_pick_on_the_x_corner() {
+        let from = [0];
+        let layout = layout(vec![
+            at(&from, 10, 0, 1, 1),
+            at(&[1], 3, 0, 1, 1),
+            at(&[2], 25, 0, 1, 1),
+            at(&[3], 18, 0, 1, 1),
+        ]);
+        assert_eq!(layout.nearest(&from, Heading::Right), Some(vec![3]));
+        assert_eq!(layout.nearest(&from, Heading::Left), Some(vec![1]));
+    }
+
+    #[test]
+    fn a_box_level_with_the_current_one_is_not_to_its_left_or_right() {
+        let from = [0];
+        let layout = layout(vec![at(&from, 5, 0, 1, 1), at(&[1], 5, 10, 1, 1)]);
+        assert_eq!(layout.nearest(&from, Heading::Left), None);
+        assert_eq!(layout.nearest(&from, Heading::Right), None);
+    }
+
+    #[test]
+    fn an_equal_leading_corner_is_broken_by_the_closest_across_axis() {
+        let from = [0];
+        let layout = layout(vec![
+            at(&from, 0, 0, 1, 1),
+            at(&[1], 20, 5, 1, 1),
+            at(&[2], 2, 5, 1, 1),
+        ]);
+        assert_eq!(layout.nearest(&from, Heading::Down), Some(vec![2]));
+    }
+
+    #[test]
+    fn nothing_in_that_direction_selects_nothing() {
+        let from = [0];
+        let layout = layout(vec![at(&from, 0, 0, 1, 1), at(&[1], 0, 10, 1, 1)]);
+        assert_eq!(layout.nearest(&from, Heading::Left), None);
+        assert_eq!(layout.nearest(&from, Heading::Right), None);
+        assert_eq!(layout.nearest(&from, Heading::Up), None);
+    }
+
+    #[test]
+    fn a_descendant_below_is_picked_by_down() {
+        let from = [0];
+        let layout = layout(vec![at(&from, 0, 0, 10, 1), at(&[0, 0], 0, 5, 1, 1)]);
+        assert_eq!(layout.nearest(&from, Heading::Down), Some(vec![0, 0]));
+    }
+
+    #[test]
+    fn an_ancestor_up_and_left_is_picked_by_up() {
+        let from = [0, 0];
+        let layout = layout(vec![at(&[0], 0, 0, 1, 1), at(&from, 10, 10, 1, 1)]);
+        assert_eq!(layout.nearest(&from, Heading::Up), Some(vec![0]));
+        assert_eq!(layout.nearest(&from, Heading::Left), Some(vec![0]));
+    }
+
+    #[test]
+    fn the_root_is_a_candidate_like_any_other_box() {
+        let from = [0, 0];
+        let layout = layout(vec![at(&[], 0, 0, 1, 1), at(&from, 5, 5, 1, 1)]);
+        assert_eq!(layout.nearest(&from, Heading::Up), Some(vec![]));
+    }
+
+    #[test]
+    fn a_missing_from_path_selects_nothing() {
+        let layout = layout(vec![at(&[0], 0, 0, 1, 1), at(&[1], 0, 5, 1, 1)]);
+        assert_eq!(layout.nearest(&[9], Heading::Down), None);
     }
 }

@@ -12,6 +12,7 @@ use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
+use layout::Layout;
 use state::{FlexEffect, FlexState};
 
 #[cfg_attr(test, mockall::automock)]
@@ -29,10 +30,9 @@ pub(crate) struct TerminalFlexScreen {
 impl FlexScreen for TerminalFlexScreen {
     fn render(&mut self, state: &FlexState) -> io::Result<()> {
         let new = new_boxes(&mut self.drawn, state);
-        self.renderer.render(
-            &view::scene(state, self.renderer.area(), &new),
-            &mut self.out,
-        )?;
+        let layout = Layout::arrange(&state.boxes, self.renderer.area());
+        self.renderer
+            .render(&view::scene(state, &layout, &new), &mut self.out)?;
         self.out.flush()
     }
 

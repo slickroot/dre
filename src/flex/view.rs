@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use crate::style::FOREGROUND;
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, NO_SIDES};
 
-use super::layout::{arrange, Arranged, Rect, FLEX_BORDER};
+use super::layout::{Arranged, Layout, Rect, FLEX_BORDER};
 use super::state::{FlexBox, FlexMode, FlexState};
 
 const FLEX_BORDER_COLOUR: Rgb = (0x2A, 0x2A, 0x2E);
@@ -128,22 +128,15 @@ fn paint<'a>(
 
 pub(crate) fn scene<'a>(
     state: &'a FlexState,
-    window: Area,
+    layout: &Layout,
     new: &HashSet<Vec<usize>>,
 ) -> Scene<'a> {
-    let window_rect = Rect {
-        x: window.col,
-        y: window.row,
-        width: window.cols,
-        height: window.rows,
-    };
-    let mut rects = Vec::new();
-    arrange(&state.boxes, &[], window_rect, &mut rects);
-    let placements = rects
+    let placements = layout
+        .arranged()
         .iter()
         .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
         .collect();
-    vec![(window, placements)]
+    vec![(layout.area(), placements)]
 }
 
 #[cfg(test)]
@@ -151,7 +144,7 @@ mod tests {
     use super::*;
     use crate::flex::layout::*;
     use crate::flex::state::{new_box, new_window, reduce, Direction, FlexBox, Justify};
-    use crate::view::{self, BOX_HEIGHT};
+    use crate::view::{self, Area, BOX_HEIGHT};
     use types::Tree;
 
     const WINDOW: Area = Area {
@@ -206,7 +199,8 @@ mod tests {
         state: &'a FlexState,
         new: &HashSet<Vec<usize>>,
     ) -> Vec<Placement<'a>> {
-        let [(area, placements)] = <[_; 1]>::try_from(scene(state, WINDOW, new)).unwrap();
+        let layout = Layout::arrange(&state.boxes, WINDOW);
+        let [(area, placements)] = <[_; 1]>::try_from(scene(state, &layout, new)).unwrap();
         assert_eq!(area, WINDOW);
         placements
     }
@@ -416,7 +410,9 @@ mod tests {
     fn an_outer_box_follows_the_window() {
         let narrow = Area { cols: 40, ..WINDOW };
         let state = with_text("Hello");
-        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, narrow, &HashSet::new())).unwrap();
+        let layout = Layout::arrange(&state.boxes, narrow);
+        let [(_, placements)] =
+            <[_; 1]>::try_from(scene(&state, &layout, &HashSet::new())).unwrap();
         assert_eq!(the_box(&placements).width, narrow.cols);
     }
 
@@ -1374,8 +1370,9 @@ mod tests {
     #[test]
     fn a_space_between_outer_box_spreads_mixed_siblings_edge_to_edge_with_equal_gaps() {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
+        let layout = Layout::arrange(&state.boxes, EVEN_SPREAD_WINDOW);
         let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+            <[_; 1]>::try_from(scene(&state, &layout, &HashSet::new())).unwrap();
         let row = row_of(&placements, &state);
         assert_spread_edge_to_edge(&placements, &row);
         let gap = free_space(EVEN_SPREAD_WINDOW, &row) / 2;
@@ -1391,8 +1388,9 @@ mod tests {
         let state = keys
             .into_iter()
             .fold(FlexState::default(), |state, key| reduce(state, key).0);
+        let layout = Layout::arrange(&state.boxes, EVEN_SPREAD_WINDOW);
         let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+            <[_; 1]>::try_from(scene(&state, &layout, &HashSet::new())).unwrap();
         let outer = &placements[0];
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
@@ -2152,5 +2150,35 @@ mod tests {
         ));
         let placed = view::centre(decorated, WINDOW);
         assert_eq!(&placed[..content_only.len()], &content_only[..]);
+    }
+
+    #[test]
+    fn a_bordered_box_insets_its_children_by_at_least_one_row() {
+        let state = FlexState {
+            boxes: new_window(vec![Tree::new(FlexBox::default(), vec![new_box()])]),
+            ..FlexState::default()
+        };
+        let layout = Layout::arrange(&state.boxes, WINDOW);
+        let parent = layout.rect(&[0]).unwrap();
+        let child = layout.rect(&[0, 0]).unwrap();
+        assert!(child.y > parent.y);
+    }
+
+    #[test]
+    fn a_borderless_box_lays_its_first_child_on_its_own_rect() {
+        let state = FlexState {
+            boxes: new_window(vec![Tree::new(
+                FlexBox {
+                    border: false,
+                    ..FlexBox::default()
+                },
+                vec![new_box()],
+            )]),
+            ..FlexState::default()
+        };
+        let layout = Layout::arrange(&state.boxes, WINDOW);
+        let parent = layout.rect(&[0]).unwrap();
+        let child = layout.rect(&[0, 0]).unwrap();
+        assert_eq!(child, parent);
     }
 }
