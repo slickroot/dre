@@ -82,6 +82,13 @@ Rules, and they are all of them:
 - A **full render** sets `typing_caret` from the scene (recording the cell only when the placement
   survived `crop`, so an off-screen caret is `None`), and sets `typing_caret_lit` from the phase it
   was handed. It emits the caret as an ordinary placement, or omits it when dark.
+
+The caret's placement id is **reserved, not allocated**. `Frame::placement_ids()` numbers each
+frame's placements from a counter, so a full render would otherwise hand the caret a different id
+every time and the tick's `d=i,i=<caret>,p=<id>` would never name the placement a full render
+created — the caret would never hide, and re-placing would add a duplicate. So the full render
+emits the caret **at** the reserved constant, which is why `Placed` carries an optional placement id
+and every other image still takes a counter id. The constant is chosen out of reach of the counter.
 - A **tick** does nothing at all when `typing_caret` is `None`, or when the requested phase equals
   `typing_caret_lit`. Otherwise it emits the single delete or the single place, and updates
   `typing_caret_lit`.
@@ -110,12 +117,26 @@ renderer compare avoids the two-sources-of-truth bug that a duplicated `lit` fla
 The loop, with the `TICK` branch taking its own path so the top-of-loop render is skipped:
 
 ```
-render(state, lit)
-key = next_key(timeout)
-TICK    -> lit = !lit; blink(lit)
-RESIZE  -> resize()
-other   -> reduce; quit if Quit
+loop {
+    render(state, lit)
+    loop {
+        key = next_key(timeout)
+        if key == TICK {
+            lit = !lit
+            blink(lit)
+            continue
+        }
+        break
+    }
+    if key == RESIZE { resize(); continue }
+    (state, effect) = reduce(state, key)
+    if effect == Quit { return }
+}
 ```
+
+The inner `loop` is load-bearing. A plain `continue` on `TICK` would fall back through to the
+top-of-loop `render`, which is precisely the full repaint this design exists to avoid, so a tick
+waits for the next key in place instead. `RESIZE` and every keystroke still re-render.
 
 ### A timeout only while typing
 
@@ -152,6 +173,11 @@ the only change to `KeySource`; `#[automock]` absorbs it.
 - **`flex::view::scene` / `paint`** — takes the phase and emits the node only when lit, so a
   keystroke landing on a dark phase does not re-place the caret.
 - **`TerminalRenderer`** — owns the remembered cell, the two commands, and the cached glyph image.
+- **`Renderer::render`** — gains the phase as a parameter, because `TerminalRenderer::frame` sits
+  behind the trait and has to record what it emitted. Only `TerminalFlexScreen` has a phase; every
+  other implementation of the trait — `cli::export`, the legacy editor, the web build — passes a
+  literal `true`, meaning "no blinking caret here". That literal carries meaning, so it is the one
+  place in the change where `true` is not obviously meaningless.
 
 ### The node itself
 
