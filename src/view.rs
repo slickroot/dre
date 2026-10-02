@@ -53,6 +53,10 @@ pub enum PlacementNode<'a> {
     Label(Label<'a>),
     Arrow(Arrow),
     Caret(Caret),
+    TypingCaret {
+        colour: Rgb,
+        bold: bool,
+    },
     Brackets {
         border: i64,
     },
@@ -66,7 +70,9 @@ pub enum PlacementNode<'a> {
 impl<'a> PlacementNode<'a> {
     pub(crate) fn is_decoration(&self) -> bool {
         match self {
-            PlacementNode::Brackets { .. } | PlacementNode::Caret(_) => true,
+            PlacementNode::Brackets { .. }
+            | PlacementNode::Caret(_)
+            | PlacementNode::TypingCaret { .. } => true,
             PlacementNode::Box { .. }
             | PlacementNode::Label(_)
             | PlacementNode::Arrow(_)

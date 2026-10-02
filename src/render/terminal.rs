@@ -368,6 +368,7 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Caret(_) => self.draw_caret(desired, geometry, area),
+                PlacementNode::TypingCaret { .. } => {}
                 PlacementNode::Cursor(_) => self.draw_cursor(desired, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
                     desired,

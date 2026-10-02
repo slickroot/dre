@@ -330,7 +330,34 @@ fn paint<'a>(
                 rect,
             )
         });
-    border.into_iter().chain(highlight).chain(label).collect()
+    let caret = (state.mode == FlexMode::Write && &state.selected == path)
+        .then(|| {
+            flex_box
+                .text
+                .as_ref()
+                .zip(arranged.text)
+                .map(|(text, rect)| {
+                    placement(
+                        PlacementNode::TypingCaret {
+                            colour: FLEX_TEXT_COLOUR,
+                            bold: false,
+                        },
+                        Rect {
+                            x: rect.x + text.chars().count() as i64,
+                            y: rect.y,
+                            width: 1,
+                            height: 1,
+                        },
+                    )
+                })
+        })
+        .flatten();
+    border
+        .into_iter()
+        .chain(highlight)
+        .chain(label)
+        .chain(caret)
+        .collect()
 }
 
 pub(crate) fn scene<'a>(
@@ -2246,5 +2273,117 @@ mod tests {
     fn enter_as_the_first_replace_key_leaves_no_highlight() {
         let state = after(with_selected_text("Hello"), &["i", "\r"]);
         assert!(highlight(&placements(&state)).is_none());
+    }
+
+    fn writing(state: FlexState) -> FlexState {
+        FlexState {
+            mode: FlexMode::Write,
+            selected: vec![0, 0],
+            ..state
+        }
+    }
+
+    fn the_typing_caret<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
+        placements
+            .iter()
+            .find(|placement| matches!(placement.node, PlacementNode::TypingCaret { .. }))
+            .unwrap()
+    }
+
+    fn typing_caret_at(x: i64, y: i64) -> Placement<'static> {
+        Placement {
+            node: PlacementNode::TypingCaret {
+                colour: FLEX_TEXT_COLOUR,
+                bold: false,
+            },
+            x,
+            y,
+            width: 1,
+            height: 1,
+            depth: 0,
+        }
+    }
+
+    #[test]
+    fn write_mode_puts_a_typing_caret_one_cell_past_the_label() {
+        let state = writing(with_text("Hello"));
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let caret = the_typing_caret(&placements);
+        let PlacementNode::Label(Label { text, .. }) = &label.node else {
+            unreachable!()
+        };
+        assert_eq!(caret.x, label.x + text.chars().count() as i64);
+        assert_eq!(caret.y, label.y);
+        assert_eq!((caret.width, caret.height), (1, 1));
+        let PlacementNode::TypingCaret { colour, bold } = caret.node else {
+            unreachable!()
+        };
+        assert_eq!(colour, FLEX_TEXT_COLOUR);
+        assert!(!bold);
+    }
+
+    #[test]
+    fn an_empty_label_puts_the_caret_in_the_first_cell() {
+        let state = writing(with_text(""));
+        let placements = placements(&state);
+        assert_eq!(the_typing_caret(&placements).x, the_label(&placements).x);
+    }
+
+    #[test]
+    fn typing_the_next_character_moves_the_caret_right_by_one_cell() {
+        let before_state = writing(with_text("Hello"));
+        let before_caret = the_typing_caret(&placements(&before_state)).x;
+        let before_label = the_label(&placements(&before_state)).x;
+        let (typed, _) = reduce(before_state, "x");
+        let after = placements(&typed);
+        assert_eq!(the_typing_caret(&after).x, before_caret + 1);
+        assert_eq!(the_label(&after).x, before_label);
+    }
+
+    #[test]
+    fn backspacing_to_empty_leaves_the_caret_in_the_first_cell() {
+        let (emptied, _) = reduce(writing(with_text("x")), "\x7f");
+        let placements = placements(&emptied);
+        assert_eq!(the_typing_caret(&placements).x, the_label(&placements).x);
+    }
+
+    #[test]
+    fn move_mode_draws_no_typing_caret() {
+        let state = with_text("Hello");
+        let placements = placements(&state);
+        assert!(!placements
+            .iter()
+            .any(|placement| matches!(placement.node, PlacementNode::TypingCaret { .. })));
+    }
+
+    #[test]
+    fn the_caret_placement_is_one_cell_wide_and_does_not_widen_the_label() {
+        let plain_state = with_text_row("Hello");
+        let writing_state = writing(with_text_row("Hello"));
+        let plain = placements(&plain_state);
+        let writing = placements(&writing_state);
+        let caret = the_typing_caret(&writing);
+        assert_eq!((caret.width, caret.height), (1, 1));
+        assert_eq!(the_label(&writing).width, the_label(&plain).width);
+    }
+
+    #[test]
+    fn the_caret_is_a_decoration_and_stays_out_of_the_bounding_box() {
+        assert!(PlacementNode::TypingCaret {
+            colour: FLEX_TEXT_COLOUR,
+            bold: false,
+        }
+        .is_decoration());
+        let content_state = with_text("Hello");
+        let content = placements(&content_state);
+        let content_only = view::centre(content.clone(), WINDOW);
+        let mut decorated = content.clone();
+        decorated.push(typing_caret_at(
+            content[0].x + content[0].width + 5,
+            content[0].y + content[0].height + 5,
+        ));
+        let placed = view::centre(decorated, WINDOW);
+        assert_eq!(&placed[..content_only.len()], &content_only[..]);
     }
 }
