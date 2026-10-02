@@ -8,13 +8,11 @@ pub(crate) struct Snapshot {
 }
 
 pub(super) fn undoable(mode: FlexMode, key: &str) -> bool {
-    matches!(
-        (mode, key),
-        (
-            FlexMode::Move,
-            "a" | "A" | "o" | "i" | "s" | "r" | "f" | "]"
-        ) | (FlexMode::Write, "\r")
-    )
+    match mode {
+        FlexMode::Move => matches!(key, "a" | "A" | "o" | "i" | "s" | "r" | "f" | "]"),
+        FlexMode::Write => key == "\r",
+        FlexMode::Replace => key == "\x7f" || super::state::printable_char(key).is_some(),
+    }
 }
 
 pub(super) fn recorded(
@@ -81,6 +79,28 @@ mod tests {
     #[test]
     fn enter_is_not_undoable_in_move_mode() {
         assert!(!undoable(FlexMode::Move, "\r"));
+    }
+
+    #[test]
+    fn replace_backspace_is_undoable() {
+        assert!(undoable(FlexMode::Replace, "\x7f"));
+    }
+
+    #[test]
+    fn a_replace_printable_key_is_undoable() {
+        for key in ["a", "W", "é"] {
+            assert!(undoable(FlexMode::Replace, key), "{key}");
+        }
+    }
+
+    #[test]
+    fn replace_enter_is_not_undoable() {
+        assert!(!undoable(FlexMode::Replace, "\r"));
+    }
+
+    #[test]
+    fn replace_escape_is_not_undoable() {
+        assert!(!undoable(FlexMode::Replace, "\x1b"));
     }
 
     #[test]
