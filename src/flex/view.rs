@@ -1620,6 +1620,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_selected_borderless_leaf_paints_its_label_selected_and_no_box_of_its_own() {
+        let state = world_selected(FlexMode::Move);
+        let placements = placements(&state);
+        assert_eq!(all_boxes(&placements).len(), 2);
+        assert_eq!(all_labels(&placements).len(), 2);
+        assert_eq!(
+            text_colours(&placements, &["World"]),
+            vec![FLEX_SELECTED_COLOUR]
+        );
+    }
+
+    #[test]
+    fn a_selected_bordered_box_with_text_paints_a_selected_border_and_a_text_coloured_label() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0],
+            boxes: new_window(vec![Tree::leaf(FlexBox {
+                text: Some("Title".to_string()),
+                ..FlexBox::default()
+            })]),
+            ..FlexState::default()
+        };
+        let placements = placements(&state);
+        assert_eq!(borders(&placements), vec![FLEX_SELECTED_COLOUR]);
+        assert_eq!(
+            text_colours(&placements, &["Title"]),
+            vec![FLEX_TEXT_COLOUR]
+        );
+    }
+
+    #[test]
+    fn the_window_root_paints_nothing() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![],
+            boxes: new_window(vec![]),
+            ..FlexState::default()
+        };
+        assert!(placements(&state).is_empty());
+    }
+
     fn title_and_hi_in(direction: Direction) -> FlexState {
         let parent = FlexBox {
             direction,
