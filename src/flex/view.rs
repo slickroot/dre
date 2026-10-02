@@ -710,6 +710,23 @@ mod tests {
     }
 
     #[test]
+    fn the_boxes_stay_at_the_top_after_a_resize() {
+        let resized = Area {
+            col: 4,
+            row: 3,
+            cols: 100,
+            rows: 40,
+        };
+        let state = stacked(&["Hello", "", "Hi"]);
+        let [(_, placements)] =
+            <[_; 1]>::try_from(scene(&state, resized, &HashSet::new())).unwrap();
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes[0].y, resized.row);
+        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
+        assert_eq!(boxes[2].y, boxes[1].y + BOX_HEIGHT + FLEX_SPACE.height);
+    }
+
+    #[test]
     fn stacked_boxes_line_up_by_their_centres() {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
