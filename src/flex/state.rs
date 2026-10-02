@@ -143,9 +143,26 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
     }
 }
 
+fn drop_empty_text(mut state: FlexState) -> FlexState {
+    let borderless = !state.selected_mut().border;
+    if borderless && state.boxes.children(&state.selected).is_empty() {
+        let parent = state.boxes.parent(&state.selected);
+        state.boxes.remove(&state.selected);
+        state.selected = parent;
+    } else {
+        state.selected_mut().text = None;
+    }
+    state
+}
+
 fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
-        "\r" => state.mode = FlexMode::Move,
+        "\r" => {
+            if state.selected_mut().text.as_deref() == Some("") {
+                state = drop_empty_text(state);
+            }
+            state.mode = FlexMode::Move;
+        }
         "\x7f" => {
             if let Some(text) = state.selected_mut().text.as_mut() {
                 text.pop();
@@ -461,6 +478,36 @@ mod tests {
     }
 
     #[test]
+    fn s_then_enter_leaves_the_tree_as_it_was_with_the_parent_selected() {
+        let before = FlexState::default();
+        let state = moved(before.clone(), &["s", "\r"]);
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn s_then_enter_on_an_inner_box_selects_that_box() {
+        let before = moved(hello_box_world(), &["l", "j"]);
+        let state = moved(before.clone(), &["s", "\r"]);
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn i_then_enter_on_a_bordered_box_leaves_no_text() {
+        let before = FlexState::default();
+        let state = moved(before.clone(), &["i", "\r"]);
+        assert_eq!(state, before);
+        assert_eq!(selected_box(&state).text, None);
+    }
+
+    #[test]
+    fn enter_on_empty_text_that_has_children_keeps_the_box_without_text() {
+        let nested = moved(FlexState::default(), &["s", "x", "\r", "A", "A"]);
+        let state = moved(nested, &["i", "\x7f", "\r"]);
+        assert_eq!(text_of(&state, &state.selected), None);
+        assert_eq!(state.boxes.children(&state.selected).len(), 2);
+    }
+
+    #[test]
     fn s_adds_a_borderless_leaf_and_selects_it() {
         let before = FlexState::default();
         let state = moved(before.clone(), &["s"]);
@@ -472,14 +519,14 @@ mod tests {
 
     #[test]
     fn capital_a_on_a_text_leaf_nests_a_bordered_box_inside_the_leaf() {
-        let before = moved(FlexState::default(), &["s", "\r"]);
+        let before = moved(FlexState::default(), &["s", "x", "\r"]);
         let state = moved(before.clone(), &["A"]);
         let children = state.boxes.children(&before.selected);
         assert_eq!(children.len(), 1);
         let nested = box_at(&state, &children[0]);
         assert!(nested.border);
         assert_eq!(nested.text, None);
-        assert_eq!(text_of(&state, &before.selected), Some(""));
+        assert_eq!(text_of(&state, &before.selected), Some("x"));
     }
 
     #[test]
@@ -988,8 +1035,8 @@ mod tests {
     #[test]
     fn l_on_an_inner_box_holding_a_text_selects_that_text() {
         let inner = moved(hello_box_world(), &["l", "j"]);
-        let state = moved(inner.clone(), &["s", "\r", "h", "l"]);
-        assert_eq!(text_of(&state, &state.selected), Some(""));
+        let state = moved(inner.clone(), &["s", "x", "\r", "h", "l"]);
+        assert_eq!(text_of(&state, &state.selected), Some("x"));
         assert_eq!(state.selected, [inner.selected.as_slice(), &[0]].concat());
     }
 
@@ -1010,7 +1057,7 @@ mod tests {
     #[test]
     fn h_from_inside_an_inner_box_selects_the_inner_box() {
         let inner = moved(hello_box_world(), &["l", "j"]);
-        let state = moved(inner.clone(), &["s", "\r", "h"]);
+        let state = moved(inner.clone(), &["s", "x", "\r", "h"]);
         assert_eq!(state.selected, inner.selected);
     }
 
