@@ -137,6 +137,7 @@ impl FlexState {
 pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match (key, state.mode) {
         ("\x03", _) => (state, Some(FlexEffect::Quit)),
+        ("\r", FlexMode::Write) => history::recorded(state, key, |s| write_key(s, key)),
         (_, FlexMode::Write) => write_key(state, key),
         (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
@@ -1290,6 +1291,28 @@ mod tests {
         assert_eq!(text_of(&state, &[0]), Some("Hellou"));
         assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn u_twice_undoes_an_accidental_empty_enter_then_the_sibling_creation_itself() {
+        let before = hello_in(FlexMode::Move);
+
+        let after_sibling = moved(before.clone(), &["i", "\r"]);
+        assert_eq!(after_sibling.selected, [1]);
+        assert_eq!(after_sibling.mode, FlexMode::Write);
+        assert_eq!(text_of(&after_sibling, &[1]), Some(""));
+
+        let after_accidental_enter = moved(after_sibling, &["\r"]);
+        assert_eq!(after_accidental_enter.mode, FlexMode::Move);
+
+        let once = moved(after_accidental_enter.clone(), &["u"]);
+        assert_eq!(text_of(&once, &[1]), Some(""));
+        assert_eq!(once.mode, FlexMode::Move);
+
+        let state = moved(once, &["u"]);
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]

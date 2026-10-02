@@ -8,7 +8,13 @@ pub(crate) struct Snapshot {
 }
 
 pub(super) fn undoable(mode: FlexMode, key: &str) -> bool {
-    mode == FlexMode::Move && matches!(key, "a" | "A" | "o" | "i" | "s" | "r" | "f" | "]")
+    matches!(
+        (mode, key),
+        (
+            FlexMode::Move,
+            "a" | "A" | "o" | "i" | "s" | "r" | "f" | "]"
+        ) | (FlexMode::Write, "\r")
+    )
 }
 
 pub(super) fn recorded(
@@ -52,12 +58,35 @@ mod tests {
     }
 
     #[test]
-    fn no_key_is_undoable_in_write_mode() {
+    fn no_key_other_than_enter_is_undoable_in_write_mode() {
         for key in [
-            "a", "A", "o", "s", "i", "w", "g", "d", "r", "f", "p", "]", "y", "u", "h", "q", "\r",
-            "\x7f",
+            "a", "A", "o", "s", "i", "w", "g", "d", "r", "f", "p", "]", "y", "u", "h", "q", "\x7f",
         ] {
             assert!(!undoable(FlexMode::Write, key), "{key}");
+        }
+    }
+
+    #[test]
+    fn enter_is_undoable_in_write_mode() {
+        assert!(undoable(FlexMode::Write, "\r"));
+    }
+
+    #[test]
+    fn enter_is_not_undoable_in_move_mode() {
+        assert!(!undoable(FlexMode::Move, "\r"));
+    }
+
+    #[test]
+    fn recorded_pushes_a_snapshot_for_enter_in_write_mode_regardless_of_text() {
+        for text in [Some(String::new()), Some("Hello".to_string())] {
+            let mut state = FlexState {
+                mode: FlexMode::Write,
+                ..FlexState::default()
+            };
+            state.boxes.value_mut(&state.selected).text = text.clone();
+            let before_len = state.history.len();
+            let (state, _) = recorded(state, "\r", |s| (s, None));
+            assert_eq!(state.history.len(), before_len + 1, "{text:?}");
         }
     }
 
