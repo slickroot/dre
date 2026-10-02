@@ -56,7 +56,7 @@ fn new_boxes(drawn: &mut Option<HashSet<Vec<usize>>>, state: &FlexState) -> Hash
     new
 }
 
-pub(crate) fn run_loop(keys: &mut dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
+pub(crate) fn run_loop(keys: &dyn KeySource, screen: &mut dyn FlexScreen) -> io::Result<()> {
     let mut state = FlexState::default();
     loop {
         screen.render(&state)?;
@@ -94,7 +94,7 @@ fn start() -> io::Result<()> {
     let _raw = tty::RawMode::enter(fd)?;
     let resize_fd = tty::install_resize_pipe()?;
     run_loop(
-        &mut TtyKeySource { fd, resize_fd },
+        &TtyKeySource { fd, resize_fd },
         &mut TerminalFlexScreen {
             renderer,
             out: stdout,
@@ -182,7 +182,7 @@ mod tests {
                 .return_once(move || Ok(key.to_string()));
         }
 
-        run_loop(&mut keys, &mut screen).unwrap();
+        run_loop(&keys, &mut screen).unwrap();
     }
 
     fn last_text(state: &FlexState) -> Option<&str> {
@@ -210,7 +210,7 @@ mod tests {
                 .return_once(move || Ok(key.to_string()));
         }
 
-        run_loop(&mut keys, &mut screen).unwrap();
+        run_loop(&keys, &mut screen).unwrap();
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
             .in_sequence(&mut seq)
             .return_once(|| Ok("\x03".to_string()));
 
-        run_loop(&mut keys, &mut screen).unwrap();
+        run_loop(&keys, &mut screen).unwrap();
     }
 
     #[test]
@@ -284,6 +284,6 @@ mod tests {
                 .return_once(move || Ok(key.to_string()));
         }
 
-        run_loop(&mut keys, &mut screen).unwrap();
+        run_loop(&keys, &mut screen).unwrap();
     }
 }
