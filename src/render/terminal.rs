@@ -659,7 +659,7 @@ impl TerminalRenderer {
         let Some(tiles) = shape.tiles(geometry.width, geometry.height) else {
             return false;
         };
-        for (col, row, key) in tiles {
+        for (col, row, key, _col_span, _row_span) in tiles {
             let cell = Geometry {
                 x: geometry.x + col,
                 y: geometry.y + row,
@@ -3290,7 +3290,7 @@ mod tests {
     }
 
     #[test]
-    fn widening_a_tiled_box_transmits_no_tile_and_places_one_more_per_tiled_row() {
+    fn widening_a_tiled_box_transmits_no_tile_and_places_the_same_count() {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
@@ -3300,14 +3300,10 @@ mod tests {
         let first = rendered_placements(&mut r, &narrow);
         let second = rendered_placements(&mut r, &wide);
 
-        let tiled_rows = narrow[0].height;
         let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
         assert!(shown_ids(&second).is_empty());
         assert!(deleted_ids(&second).is_empty());
-        assert_eq!(
-            placed_ids(&second).len(),
-            first_placements + tiled_rows as usize
-        );
+        assert_eq!(placed_ids(&second).len(), first_placements);
     }
 
     #[test]
