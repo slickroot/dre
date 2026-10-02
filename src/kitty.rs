@@ -207,6 +207,20 @@ fn transmission(pixels: &[u8], width: i64, height: i64, id: ImageId, z: i32) -> 
     )
 }
 
+/// `a=T` carries no `p=`, so it cannot place an image at a chosen placement id;
+/// `a=t` transmits without displaying, leaving the placement to a later `a=p`.
+pub(crate) fn transmit(canvas: &Canvas, id: ImageId, z: i32) -> Command {
+    Command(chunked(
+        &format!(
+            "a=t,f=32,s={},v={},o=z,q=2,i={},z={z}",
+            canvas.width,
+            canvas.height,
+            id.value()
+        ),
+        &canvas.pixels,
+    ))
+}
+
 fn frame(canvas: &Canvas, id: ImageId, gap_ms: u32, wezterm: bool) -> String {
     // WezTerm reads a frame's gap from `Z` and kitty from `z`; without `Z`, WezTerm
     // uses 40 ms (wezterm-escape-parser/src/apc.rs, KittyImageFrame::from_keys).
@@ -352,6 +366,20 @@ mod tests {
         assert!(result.contains(",m=1;"));
         assert!(result.ends_with("\x1b\\"));
         assert!(result.matches("\x1b_G").count() > 1);
+    }
+
+    #[test]
+    fn transmit_names_the_image_and_displays_nothing() {
+        let canvas = Canvas {
+            pixels: vec![1u8, 2, 3, 4],
+            width: 2,
+            height: 1,
+        };
+        let result = transmit(&canvas, image_id(7), -1).to_string();
+
+        assert!(result.starts_with("\x1b_Ga=t,f=32,s=2,v=1,o=z,q=2,i=7,z=-1,m=0;"));
+        assert!(result.ends_with(&format!(";{}\x1b\\", encode(&canvas.pixels))));
+        assert!(!result.contains("a=T,"));
     }
 
     #[test]

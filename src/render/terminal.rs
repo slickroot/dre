@@ -441,6 +441,31 @@ impl Frame {
         }
     }
 
+    fn place_caret_cached(&mut self, id: kitty::ImageId, crop: Crop, z: i32) {
+        self.images.push(Placed {
+            image: Image::Cached { id },
+            col: crop.col,
+            row: crop.row,
+            z,
+            placement: Some(TYPING_CARET_PLACEMENT),
+        });
+    }
+
+    // The caret cannot go through `Image::Fresh`, because `kitty::show` is a
+    // single `a=T` with no `p=`, so first sight would land on kitty's default
+    // placement id while every delete and every tick names the reserved one.
+    fn place_caret_first_sight(&mut self, id: kitty::ImageId, canvas: &Canvas, crop: Crop, z: i32) {
+        let cropped = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
+        self.trailing.push(kitty::transmit(&cropped, id, z));
+        self.trailing.push(kitty::place(
+            id,
+            TYPING_CARET_PLACEMENT,
+            crop.col,
+            crop.row,
+            z,
+        ));
+    }
+
     fn push_fresh(&mut self, id: kitty::ImageId, canvas: &Canvas, crop: Crop, z: i32) {
         let canvas = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
         self.push(Image::Fresh { id, canvas }, crop, z);
@@ -923,27 +948,25 @@ impl TerminalRenderer {
             colour: style.colour,
             bold: style.bold,
         };
+        let Some(crop) = frame.crop(geometry, area) else {
+            return;
+        };
         let id = if let Some(id) = self.caret_images.get(&key).copied() {
-            frame.place_cached(id, geometry, area, z);
+            frame.place_caret_cached(id, crop, z);
             id
         } else {
             let id = self.image_ids.allocate();
             self.caret_images.insert(key, id);
             let glyph = self.glyph_source.glyph('|', style.colour, style.bold);
-            frame.place_fresh(id, glyph, geometry, area, z);
+            frame.place_caret_first_sight(id, glyph, crop, z);
             id
         };
-        if let Some(crop) = frame.crop(geometry, area) {
-            self.typing_caret = Some(TypingCaretCell {
-                image: id,
-                col: crop.col,
-                row: crop.row,
-                z,
-            });
-            if let Some(placed) = frame.images.last_mut() {
-                placed.placement = Some(TYPING_CARET_PLACEMENT);
-            }
-        }
+        self.typing_caret = Some(TypingCaretCell {
+            image: id,
+            col: crop.col,
+            row: crop.row,
+            z,
+        });
     }
 
     fn draw_caret(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
@@ -2312,14 +2335,24 @@ mod tests {
         assert!(output.find("a=T").unwrap() < output.find("a=p").unwrap());
     }
 
-    fn command_fields(output: &str, action: &str, field: &str) -> Vec<String> {
+    fn commands<'a>(output: &'a str, action: &str) -> Vec<&'a str> {
         output
             .split("\x1b_G")
             .filter(|command| command.starts_with(action))
+            .collect()
+    }
+
+    fn key_value<'a>(command: &'a str, field: &str) -> Option<&'a str> {
+        command
+            .split([',', ';'])
+            .find_map(|pair| pair.strip_prefix(field))
+    }
+
+    fn command_fields(output: &str, action: &str, field: &str) -> Vec<String> {
+        commands(output, action)
+            .into_iter()
             .map(|command| {
-                command
-                    .split([',', ';'])
-                    .find_map(|pair| pair.strip_prefix(field))
+                key_value(command, field)
                     .expect("every command of this action names the field")
                     .to_string()
             })
@@ -2328,6 +2361,10 @@ mod tests {
 
     fn shown_ids(output: &str) -> Vec<String> {
         command_fields(output, "a=T,", "i=")
+    }
+
+    fn transmitted_ids(output: &str) -> Vec<String> {
+        command_fields(output, "a=t,", "i=")
     }
 
     fn placed_ids(output: &str) -> Vec<String> {
@@ -2522,13 +2559,60 @@ mod tests {
 
         let output = rendered_placements(&mut r, std::slice::from_ref(&caret));
 
-        let [id] = shown_ids(&output).try_into().unwrap();
-        let glyph = r.glyph_source.glyph('|', typing_caret_colour(), false);
+        let cell = r.typing_caret.expect("the caret is remembered");
         assert!(output.contains(
-            &kitty::show(glyph, image_id(&id), caret.x, caret.y, depth_z(caret.depth)).to_string()
+            &kitty::place(
+                cell.image,
+                TYPING_CARET_PLACEMENT,
+                caret.x,
+                caret.y,
+                depth_z(caret.depth)
+            )
+            .to_string()
         ));
-        assert!(placed_ids(&output).is_empty());
         assert!(!output.contains("a=a,"));
+    }
+
+    #[test]
+    fn the_first_sight_placement_uses_the_reserved_placement_id() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+
+        let output = rendered_placements(&mut r, &[typing_caret_placement(3, 2)]);
+
+        let cell = r.typing_caret.expect("the caret is remembered");
+        let place = kitty::place(
+            cell.image,
+            TYPING_CARET_PLACEMENT,
+            cell.col,
+            cell.row,
+            cell.z,
+        );
+        let [transmit] = commands(&output, "a=t,").try_into().unwrap();
+        assert!(
+            !output.contains("a=T,"),
+            "`a=T` carries no `p=`, so it places the caret where no delete can name it"
+        );
+        assert_eq!(
+            key_value(transmit, "i="),
+            key_value(&place.to_string(), "i=")
+        );
+        assert_eq!(key_value(transmit, "z="), Some(cell.z.to_string().as_str()));
+        assert!(output.find(transmit) < output.find(&place.to_string()));
+        assert!(output.contains(&place.to_string()));
+    }
+
+    #[test]
+    fn a_dark_first_sight_leaves_nothing_placed() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+
+        let output = rendered_placements_in_phase(&mut r, &[typing_caret_placement(3, 2)], false);
+
+        let cell = r
+            .typing_caret
+            .expect("a dark render still remembers the cell");
+        assert!(output
+            .contains(&kitty::delete_placement(cell.image, TYPING_CARET_PLACEMENT).to_string()));
+        assert!(placement_survivors(&output).is_empty());
     }
 
     #[test]
@@ -2539,9 +2623,10 @@ mod tests {
         let second = rendered_placements(&mut r, std::slice::from_ref(&moved));
 
         assert!(!second.contains("a=T,"));
+        assert!(!second.contains("a=t,"));
         assert!(!second.contains("a=f,"));
         assert!(!second.contains("a=a,"));
-        assert_eq!(placed_ids(&second), shown_ids(&first));
+        assert_eq!(placed_ids(&second), transmitted_ids(&first));
         assert!(second.contains(&format!("\x1b[{};{}H", moved.y + 1, moved.x + 1)));
     }
 
@@ -2551,27 +2636,41 @@ mod tests {
         let placements = [typing_caret_placement(2, 2), typing_caret_placement(6, 2)];
         let output = rendered_placements(&mut r, &placements);
 
-        let shown = shown_ids(&output);
-        assert_eq!(shown.len(), 1);
-        assert_eq!(placed_ids(&output), shown);
+        let transmitted = transmitted_ids(&output);
+        assert_eq!(transmitted.len(), 1);
+        assert_eq!(
+            placed_ids(&output),
+            vec![transmitted[0].clone(); placements.len()]
+        );
     }
 
-    fn placement_survivors(output: &str) -> Vec<String> {
-        let mut surviving: Vec<String> = Vec::new();
+    // kitty gives a placement sent with no `p=` its default placement id, which
+    // is why a transmit-and-display is invisible to a `d=d=i` naming a `p=`.
+    const DEFAULT_PLACEMENT: &str = "0";
+
+    fn placement_key(command: &str) -> (String, String) {
+        (
+            key_value(command, "i=")
+                .expect("a command about an image names it")
+                .to_string(),
+            key_value(command, "p=")
+                .unwrap_or(DEFAULT_PLACEMENT)
+                .to_string(),
+        )
+    }
+
+    fn placement_survivors(output: &str) -> Vec<(String, String)> {
+        let mut surviving: Vec<(String, String)> = Vec::new();
         for command in output.split("\x1b_G").skip(1) {
-            let image = || {
-                command
-                    .split([',', ';'])
-                    .find_map(|pair| pair.strip_prefix("i="))
-                    .map(str::to_string)
-            };
             if command.starts_with("a=d,d=a") {
                 surviving.clear();
             } else if command.starts_with("a=T,") || command.starts_with("a=p,") {
-                surviving.push(image().expect("a placement names its image"));
-            } else if command.starts_with("a=d,d=i,") || command.starts_with("a=d,d=I,") {
-                let deleted = image().expect("a deletion names its image");
-                surviving.retain(|surviving| *surviving != deleted);
+                surviving.push(placement_key(command));
+            } else if command.starts_with("a=d,d=i,") {
+                surviving.retain(|surviving| *surviving != placement_key(command));
+            } else if command.starts_with("a=d,d=I,") {
+                let deleted = key_value(command, "i=").expect("a deletion names its image");
+                surviving.retain(|(image, _)| image != deleted);
             }
         }
         surviving
@@ -2586,11 +2685,23 @@ mod tests {
 
         let mut dark = renderer_on(window(20, 10, 2, 4));
         let dark_output = rendered_placements_in_phase(&mut dark, &placements, false);
-        let placed = shown_ids(&dark_output);
-        assert_eq!(shown_ids(&lit_output).len(), 1);
-        assert_eq!(placed.len(), 1);
+        assert_eq!(transmitted_ids(&lit_output).len(), 1);
+        assert_eq!(transmitted_ids(&dark_output).len(), 1);
+        let lit_cell = lit.typing_caret.expect("a lit render remembers the cell");
+        let dark_cell = dark.typing_caret.expect("a dark render remembers the cell");
+        assert_eq!(lit_cell.image, dark_cell.image);
+        assert!(lit_output.contains(
+            &kitty::place(
+                lit_cell.image,
+                TYPING_CARET_PLACEMENT,
+                lit_cell.col,
+                lit_cell.row,
+                lit_cell.z
+            )
+            .to_string()
+        ));
         assert!(dark_output.contains(
-            &kitty::delete_placement(image_id(&placed[0]), TYPING_CARET_PLACEMENT).to_string()
+            &kitty::delete_placement(dark_cell.image, TYPING_CARET_PLACEMENT).to_string()
         ));
         assert!(placement_survivors(&dark_output).is_empty());
         assert_eq!(placement_survivors(&lit_output).len(), 1);
