@@ -241,6 +241,17 @@ impl crate::canvas::Shape for SolidShape {
     }
 }
 
+struct CaretShape {
+    bar: i64,
+    colour: crate::canvas::Rgba,
+}
+
+impl crate::canvas::Shape for CaretShape {
+    fn colour_at(&self, x: i64, _y: i64) -> Option<crate::canvas::Rgba> {
+        (x < self.bar).then_some(self.colour)
+    }
+}
+
 pub(crate) struct TerminalRenderer {
     window: Window,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -819,6 +830,20 @@ impl Sprites for TerminalRenderer {
                     },
                 ))
             }
+            ImageKey::TypingCaret(ck) => {
+                let width = self.cells_to_pixels_x(1);
+                let height = self.cells_to_pixels_y(1);
+                let bar = (self.window.cell_width / 8).max(1);
+                let (r, g, b) = ck.colour;
+                Content::Still(Canvas::fill(
+                    width,
+                    height,
+                    &CaretShape {
+                        bar,
+                        colour: [r, g, b, OPAQUE],
+                    },
+                ))
+            }
             ImageKey::Grow(gk) => {
                 let (width, height, style) = match &gk.style_key {
                     SpriteKey::Box {
@@ -918,7 +943,7 @@ fn clip_stretched(
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::super::tiles::{cells_with_middle, TileShape};
-    use super::super::virtual_terminal::{Content, Desired, SourceRect, Sprites};
+    use super::super::virtual_terminal::{Content, Desired, SourceRect, Sprites, TypingCaretKey};
     use super::*;
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
@@ -3508,5 +3533,78 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_has_a_lit_column_at_its_left_edge() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        let (red, green, blue, alpha) = pixel_at(&canvas.pixels, canvas.width, 0, 0);
+        assert_eq!(
+            (red, green, blue, alpha),
+            (colour.0, colour.1, colour.2, OPAQUE)
+        );
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_is_transparent_past_the_bar() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        let (_, _, _, alpha) = pixel_at(&canvas.pixels, canvas.width, canvas.width - 1, 0);
+        assert_eq!(alpha, 0);
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_spans_the_whole_cell_height() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        assert_eq!(canvas.height, r.cells_to_pixels_y(1));
+        for y in 0..canvas.height {
+            let (red, green, blue, alpha) = pixel_at(&canvas.pixels, canvas.width, 0, y);
+            assert_eq!(
+                (red, green, blue, alpha),
+                (colour.0, colour.1, colour.2, OPAQUE)
+            );
+        }
+    }
+
+    #[test]
+    fn the_typing_caret_image_is_still_and_not_an_animation() {
+        let mut r = renderer(16, 32);
+        let content = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour: (0x11, 0x22, 0x33),
+                bold: false,
+            }),
+        );
+        assert!(matches!(content, Content::Still(_)));
     }
 }
