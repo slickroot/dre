@@ -5,7 +5,7 @@ use types::Tree;
 
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES};
 
-use super::state::{Direction, FlexBox, FlexMode, FlexNode, FlexState, Justify};
+use super::state::{Direction, FlexBox, FlexMode, FlexState, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_SPACE: Size = Size {
@@ -53,7 +53,7 @@ impl Size {
 }
 
 fn padding(flex_box: &FlexBox) -> Size {
-    if flex_box.bare {
+    if !flex_box.border {
         Size {
             width: 0,
             height: 0,
@@ -66,37 +66,36 @@ fn padding(flex_box: &FlexBox) -> Size {
     }
 }
 
-fn measure(tree: &Tree<FlexNode>, path: &[usize]) -> Size {
-    match tree.value(path) {
-        FlexNode::Text(text) => Size {
-            width: view::interior(text),
-            height: 1,
-        },
-        FlexNode::Box(flex_box) => {
-            let direction = flex_box.direction;
-            let children: Vec<Size> = tree
-                .children(path)
-                .iter()
-                .map(|child| measure(tree, child))
-                .collect();
-            let gaps = FLEX_SPACE.main(direction) * children.len().saturating_sub(1) as i64;
-            let main = children
-                .iter()
-                .map(|child| child.main(direction))
-                .sum::<i64>()
-                + gaps;
-            let cross = children
-                .iter()
-                .map(|child| child.cross(direction))
-                .max()
-                .unwrap_or(0);
-            let content = Size::along(direction, main, cross);
-            let padding = padding(flex_box);
-            Size {
-                width: content.width + 2 * padding.width,
-                height: content.height + 2 * padding.height,
-            }
-        }
+fn text_size(flex_box: &FlexBox) -> Option<Size> {
+    flex_box.text.as_ref().map(|text| Size {
+        width: view::interior(text),
+        height: 1,
+    })
+}
+
+fn item_sizes(tree: &Tree<FlexBox>, path: &[usize]) -> Vec<Size> {
+    text_size(tree.value(path))
+        .into_iter()
+        .chain(tree.children(path).iter().map(|child| measure(tree, child)))
+        .collect()
+}
+
+fn measure(tree: &Tree<FlexBox>, path: &[usize]) -> Size {
+    let flex_box = tree.value(path);
+    let direction = flex_box.direction;
+    let items = item_sizes(tree, path);
+    let gaps = FLEX_SPACE.main(direction) * items.len().saturating_sub(1) as i64;
+    let main = items.iter().map(|item| item.main(direction)).sum::<i64>() + gaps;
+    let cross = items
+        .iter()
+        .map(|item| item.cross(direction))
+        .max()
+        .unwrap_or(0);
+    let content = Size::along(direction, main, cross);
+    let padding = padding(flex_box);
+    Size {
+        width: content.width + 2 * padding.width,
+        height: content.height + 2 * padding.height,
     }
 }
 
@@ -188,14 +187,17 @@ impl Rect {
     }
 }
 
-fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec<usize>, Rect)>) {
-    out.push((path.to_vec(), rect));
-    let FlexNode::Box(flex_box) = tree.value(path) else {
-        return;
-    };
+struct Arranged {
+    path: Vec<usize>,
+    rect: Rect,
+    text: Option<Rect>,
+}
+
+fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mut Vec<Arranged>) {
+    let flex_box = tree.value(path);
     let direction = flex_box.direction;
     let children = tree.children(path);
-    let sizes: Vec<Size> = children.iter().map(|child| measure(tree, child)).collect();
+    let sizes = item_sizes(tree, path);
     let inner = rect.inner(padding(flex_box));
     let inner_cross = inner.size().cross(direction);
     let mains: Vec<i64> = match direction {
@@ -208,44 +210,61 @@ fn arrange(tree: &Tree<FlexNode>, path: &[usize], rect: Rect, out: &mut Vec<(Vec
         flex_box.justify,
         FLEX_SPACE.main(direction),
     );
-    for (((child, size), main), offset) in children.iter().zip(sizes).zip(&mains).zip(offsets) {
-        let (cross, cross_offset) = match direction {
-            Direction::Column => (inner_cross, 0),
-            Direction::Row => {
-                let cross = size.cross(direction);
-                (cross, (inner_cross - cross) / 2)
-            }
-        };
-        let child_rect = Rect::along(
-            direction,
-            inner.main_start(direction) + offset,
-            inner.cross_start(direction) + cross_offset,
-            Size::along(direction, *main, cross),
-        );
-        arrange(tree, child, child_rect, out);
+    let item_rects: Vec<Rect> = sizes
+        .iter()
+        .zip(&mains)
+        .zip(offsets)
+        .map(|((size, main), offset)| {
+            let (cross, cross_offset) = match direction {
+                Direction::Column => (inner_cross, 0),
+                Direction::Row => {
+                    let cross = size.cross(direction);
+                    (cross, (inner_cross - cross) / 2)
+                }
+            };
+            Rect::along(
+                direction,
+                inner.main_start(direction) + offset,
+                inner.cross_start(direction) + cross_offset,
+                Size::along(direction, *main, cross),
+            )
+        })
+        .collect();
+    let (text, child_rects) = if flex_box.text.is_some() {
+        (Some(item_rects[0]), &item_rects[1..])
+    } else {
+        (None, &item_rects[..])
+    };
+    out.push(Arranged {
+        path: path.to_vec(),
+        rect,
+        text,
+    });
+    for (child, child_rect) in children.iter().zip(child_rects) {
+        arrange(tree, child, *child_rect, out);
     }
 }
 
 fn paint<'a>(
     state: &FlexState,
     new: &HashSet<Vec<usize>>,
-    path: &[usize],
-    node: &'a FlexNode,
-    rect: Rect,
-) -> Placement<'a> {
-    let selected = state.mode == FlexMode::Move && state.selected == path;
-    let node = match node {
-        FlexNode::Text(text) => PlacementNode::Label(Label {
-            text: Cow::Borrowed(text),
-            colour: if selected {
-                FLEX_SELECTED_COLOUR
-            } else {
-                FLEX_TEXT_COLOUR
-            },
-            bold: false,
-        }),
-        FlexNode::Box(flex_box) => {
-            let outer = path.len() == 1;
+    flex_box: &'a FlexBox,
+    arranged: &Arranged,
+) -> Vec<Placement<'a>> {
+    let path = &arranged.path;
+    let selected = state.mode == FlexMode::Move && &state.selected == path;
+    let depth = path.len().saturating_sub(1) as u8;
+    let placement = |node, rect: Rect| Placement {
+        node,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        depth,
+    };
+    let border = flex_box.border.then(|| {
+        let outer = path.len() == 1;
+        placement(
             PlacementNode::Box {
                 colour: if selected {
                     FLEX_SELECTED_COLOUR
@@ -259,17 +278,29 @@ fn paint<'a>(
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
                 grow: new.contains(path),
-            }
-        }
-    };
-    Placement {
-        node,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        depth: (path.len() - 1) as u8,
-    }
+            },
+            arranged.rect,
+        )
+    });
+    let label = flex_box
+        .text
+        .as_ref()
+        .zip(arranged.text)
+        .map(|(text, rect)| {
+            placement(
+                PlacementNode::Label(Label {
+                    text: Cow::Borrowed(text),
+                    colour: if selected && !flex_box.border {
+                        FLEX_SELECTED_COLOUR
+                    } else {
+                        FLEX_TEXT_COLOUR
+                    },
+                    bold: false,
+                }),
+                rect,
+            )
+        });
+    border.into_iter().chain(label).collect()
 }
 
 pub(crate) fn scene<'a>(
@@ -286,11 +317,8 @@ pub(crate) fn scene<'a>(
     let mut rects = Vec::new();
     arrange(&state.boxes, &[], window_rect, &mut rects);
     let placements = rects
-        .into_iter()
-        .filter_map(|(path, rect)| match state.boxes.value(&path) {
-            FlexNode::Box(FlexBox { bare: true, .. }) => None,
-            node => Some(paint(state, new, &path, node, rect)),
-        })
+        .iter()
+        .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
         .collect();
     vec![(window, placements)]
 }
@@ -298,7 +326,7 @@ pub(crate) fn scene<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flex::state::{new_box, reduce, FlexBox, Justify};
+    use crate::flex::state::{new_box, new_window, reduce, FlexBox, Justify};
     use crate::view::BOX_HEIGHT;
     use types::Tree;
 
@@ -309,12 +337,12 @@ mod tests {
         rows: 24,
     };
 
-    fn outer(the_box: FlexBox, texts: &[&str], inner_boxes: usize) -> Tree<FlexNode> {
+    fn outer(the_box: FlexBox, texts: &[&str], inner_boxes: usize) -> Tree<FlexBox> {
         Tree::new(
-            FlexNode::Box(the_box),
+            the_box,
             texts
                 .iter()
-                .map(|text| Tree::leaf(FlexNode::Text(text.to_string())))
+                .map(|label| text(label))
                 .chain((0..inner_boxes).map(|_| new_box()))
                 .collect(),
         )
@@ -322,7 +350,7 @@ mod tests {
 
     fn holding(the_box: FlexBox, texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: Tree::root(vec![outer(the_box, texts, 0)]),
+            boxes: new_window(vec![outer(the_box, texts, 0)]),
             ..FlexState::default()
         }
     }
@@ -332,10 +360,7 @@ mod tests {
     }
 
     fn outer_box_mut(state: &mut FlexState, index: usize) -> &mut FlexBox {
-        let FlexNode::Box(flex_box) = state.boxes.value_mut(&[index]) else {
-            panic!("no box at {index}")
-        };
-        flex_box
+        state.boxes.value_mut(&[index])
     }
 
     fn placements(state: &FlexState) -> Vec<Placement<'_>> {
@@ -445,14 +470,21 @@ mod tests {
         let PlacementNode::Label(Label { text, .. }) = &label.node else {
             unreachable!()
         };
-        assert_eq!(text, state.texts_of(&[state.outer_boxes().count() - 1])[0]);
+        assert_eq!(
+            Some(text.as_ref()),
+            state.boxes.value(&[0, 0]).text.as_deref()
+        );
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
     }
 
     #[test]
     fn the_box_measures_narrower_after_backspace() {
-        let (before, _) = reduce(with_text("Hellp"), "i");
+        let typing = FlexState {
+            selected: vec![0, 0],
+            ..with_text("Hellp")
+        };
+        let (before, _) = reduce(typing, "i");
         let (after, _) = reduce(before.clone(), "\x7f");
         let before_width = measure(&before.boxes, &[0]).width;
         let after_width = measure(&after.boxes, &[0]).width;
@@ -472,7 +504,7 @@ mod tests {
 
     #[test]
     fn an_empty_box_wears_its_own_colours() {
-        let (state, _) = reduce(FlexState::default(), "i");
+        let (state, _) = reduce(FlexState::default(), "o");
         assert_eq!(
             colours(&placements(&state)),
             ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
@@ -563,7 +595,7 @@ mod tests {
     #[test]
     fn only_a_new_box_grows() {
         let state = FlexState {
-            boxes: Tree::root(vec![outer(FlexBox::default(), &[], 2)]),
+            boxes: new_window(vec![outer(FlexBox::default(), &[], 2)]),
             ..FlexState::default()
         };
         let new = HashSet::from([vec![0, 1]]);
@@ -576,7 +608,7 @@ mod tests {
 
     fn stacked(texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: Tree::root(
+            boxes: new_window(
                 texts
                     .iter()
                     .map(|text| outer(FlexBox::default(), &[text], 0))
@@ -801,13 +833,13 @@ mod tests {
     #[test]
     fn a_space_between_box_in_a_row_places_the_same_as_a_start_box() {
         let in_a_row = |justify| FlexState {
-            boxes: Tree::root(vec![Tree::new(
-                FlexNode::Box(FlexBox::default()),
+            boxes: new_window(vec![Tree::new(
+                FlexBox::default(),
                 vec![Tree::new(
-                    FlexNode::Box(FlexBox {
+                    FlexBox {
                         justify,
                         ..FlexBox::default()
-                    }),
+                    },
                     vec![text("Hello"), text("World")],
                 )],
             )]),
@@ -869,14 +901,14 @@ mod tests {
 
     fn with_inner_boxes(text: &str, count: usize) -> FlexState {
         FlexState {
-            boxes: Tree::root(vec![outer(FlexBox::default(), &[text], count)]),
+            boxes: new_window(vec![outer(FlexBox::default(), &[text], count)]),
             ..FlexState::default()
         }
     }
 
     fn outer_boxes_with_inner_counts(counts: &[usize]) -> FlexState {
         FlexState {
-            boxes: Tree::root(
+            boxes: new_window(
                 counts
                     .iter()
                     .map(|&count| outer(FlexBox::default(), &["Hello"], count))
@@ -1006,12 +1038,16 @@ mod tests {
         assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 
-    fn box_of(children: Vec<Tree<FlexNode>>) -> Tree<FlexNode> {
-        Tree::root(vec![Tree::new(FlexNode::Box(FlexBox::default()), children)])
+    fn box_of(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
+        new_window(vec![Tree::new(FlexBox::default(), children)])
     }
 
-    fn text(text: &str) -> Tree<FlexNode> {
-        Tree::leaf(FlexNode::Text(text.to_string()))
+    fn text(text: &str) -> Tree<FlexBox> {
+        Tree::leaf(FlexBox {
+            border: false,
+            text: Some(text.to_string()),
+            ..FlexBox::default()
+        })
     }
 
     #[test]
@@ -1027,9 +1063,18 @@ mod tests {
     }
 
     #[test]
+    fn a_borderless_text_ignores_its_padding() {
+        let padded = Tree::leaf(FlexBox {
+            padding: 3,
+            ..text("Hi").value(&[]).clone()
+        });
+        assert_eq!(measure(&padded, &[]), measure(&text("Hi"), &[]));
+    }
+
+    #[test]
     fn a_new_box_measures_its_padding_on_both_sides() {
         assert_eq!(
-            measure(&Tree::root(vec![new_box()]), &[0]),
+            measure(&new_window(vec![new_box()]), &[0]),
             Size {
                 width: 2 * FLEX_SPACE.width,
                 height: 2 * FLEX_SPACE.height,
@@ -1040,7 +1085,7 @@ mod tests {
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
         let tree = box_of(vec![text("Hello"), new_box(), text("World")]);
-        let empty_box = measure(&Tree::root(vec![new_box()]), &[0]);
+        let empty_box = measure(&new_window(vec![new_box()]), &[0]);
         assert_eq!(
             measure(&tree, &[0]),
             Size {
@@ -1143,8 +1188,8 @@ mod tests {
 
     fn hello_box_world() -> FlexState {
         FlexState {
-            boxes: Tree::root(vec![Tree::new(
-                FlexNode::Box(FlexBox::default()),
+            boxes: new_window(vec![Tree::new(
+                FlexBox::default(),
                 vec![text("Hello"), new_box(), text("World")],
             )]),
             ..FlexState::default()
@@ -1154,9 +1199,7 @@ mod tests {
     #[test]
     fn a_column_measures_its_children_stacked_with_gaps() {
         let mut state = hello_box_world();
-        if let FlexNode::Box(the_box) = state.boxes.value_mut(&[0]) {
-            the_box.direction = Direction::Column;
-        }
+        state.boxes.value_mut(&[0]).direction = Direction::Column;
         let children: Vec<Size> = state
             .boxes
             .children(&[0])
@@ -1241,7 +1284,7 @@ mod tests {
     }
 
     fn empty_box_size() -> Size {
-        measure(&Tree::root(vec![new_box()]), &[0])
+        measure(&new_window(vec![new_box()]), &[0])
     }
 
     #[test]
@@ -1291,13 +1334,13 @@ mod tests {
 
     const EVEN_SPREAD_WINDOW: Area = Area { cols: 82, ..WINDOW };
 
-    fn spread(children: Vec<Tree<FlexNode>>) -> FlexState {
+    fn spread(children: Vec<Tree<FlexBox>>) -> FlexState {
         FlexState {
-            boxes: Tree::root(vec![Tree::new(
-                FlexNode::Box(FlexBox {
+            boxes: new_window(vec![Tree::new(
+                FlexBox {
                     justify: Justify::SpaceBetween,
                     ..FlexBox::default()
-                }),
+                },
                 children,
             )]),
             ..FlexState::default()
@@ -1347,7 +1390,8 @@ mod tests {
     #[test]
     fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "i", "H", "e", "l", "l", "o", "\r", "A", "o", "W", "o", "r", "l", "d", "\r", "s",
+            "o", "H", "e", "l", "l", "o", "\r", "h", "A", "o", "W", "o", "r", "l", "d", "\r", "h",
+            "s",
         ];
         let state = keys
             .into_iter()
@@ -1487,7 +1531,7 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 8] = ["i", "H", "e", "l", "l", "o", "\r", "A"];
+    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "h", "A"];
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
@@ -1506,7 +1550,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["i", "H", "e", "l", "l", "o", "\r", "f", "A"]);
+        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "h", "f", "A"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
@@ -1576,19 +1620,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_selected_borderless_leaf_paints_its_label_selected_and_no_box_of_its_own() {
+        let state = world_selected(FlexMode::Move);
+        let placements = placements(&state);
+        assert_eq!(all_boxes(&placements).len(), 2);
+        assert_eq!(all_labels(&placements).len(), 2);
+        assert_eq!(
+            text_colours(&placements, &["World"]),
+            vec![FLEX_SELECTED_COLOUR]
+        );
+    }
+
+    #[test]
+    fn a_selected_bordered_box_with_text_paints_a_selected_border_and_a_text_coloured_label() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0],
+            boxes: new_window(vec![Tree::leaf(FlexBox {
+                text: Some("Title".to_string()),
+                ..FlexBox::default()
+            })]),
+            ..FlexState::default()
+        };
+        let placements = placements(&state);
+        assert_eq!(borders(&placements), vec![FLEX_SELECTED_COLOUR]);
+        assert_eq!(
+            text_colours(&placements, &["Title"]),
+            vec![FLEX_TEXT_COLOUR]
+        );
+    }
+
+    #[test]
+    fn the_window_root_paints_nothing() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![],
+            boxes: new_window(vec![]),
+            ..FlexState::default()
+        };
+        assert!(placements(&state).is_empty());
+    }
+
     fn title_and_hi_in(direction: Direction) -> FlexState {
         let parent = FlexBox {
             direction,
             ..FlexBox::default()
         };
-        let inner = Tree::new(FlexNode::Box(FlexBox::default()), vec![text("Hi")]);
+        let inner = Tree::new(FlexBox::default(), vec![text("Hi")]);
         FlexState {
             mode: FlexMode::Move,
             selected: vec![0, 1],
-            boxes: Tree::root(vec![Tree::new(
-                FlexNode::Box(parent),
-                vec![text("Title"), inner],
-            )]),
+            boxes: new_window(vec![Tree::new(parent, vec![text("Title"), inner])]),
             ..FlexState::default()
         }
     }
@@ -1783,5 +1866,66 @@ mod tests {
         let the_box = the_box(&placements);
         assert_eq!(the_box.width, before_width);
         assert_eq!(the_label(&placements).x, the_box.x + 2 * FLEX_SPACE.width);
+    }
+
+    fn titled(direction: Direction, title: Option<&str>) -> FlexState {
+        let parent = FlexBox {
+            direction,
+            text: title.map(str::to_string),
+            ..FlexBox::default()
+        };
+        FlexState {
+            boxes: new_window(vec![Tree::new(parent, vec![new_box(), new_box()])]),
+            ..FlexState::default()
+        }
+    }
+
+    fn the_label_and_inner_boxes<'a>(
+        placements: &'a [Placement<'a>],
+    ) -> (&'a Placement<'a>, Vec<&'a Placement<'a>>) {
+        let inner = all_boxes(placements).into_iter().skip(1).collect();
+        (the_label(placements), inner)
+    }
+
+    #[test]
+    fn in_a_column_an_own_text_comes_first_one_gap_above_the_inner_boxes() {
+        let state = titled(Direction::Column, Some("Title"));
+        let placements = placements(&state);
+        let (label, inner) = the_label_and_inner_boxes(&placements);
+        assert_eq!(label.height, 1);
+        assert_eq!(label.y + label.height + FLEX_SPACE.height, inner[0].y);
+        assert_eq!(label.x, inner[0].x);
+        assert_eq!(label.width, inner[0].width);
+    }
+
+    #[test]
+    fn in_a_row_an_own_text_comes_first_one_gap_before_the_inner_boxes() {
+        let state = titled(Direction::Row, Some("Title"));
+        let placements = placements(&state);
+        let (label, inner) = the_label_and_inner_boxes(&placements);
+        assert_eq!(label.x + label.width + FLEX_SPACE.width, inner[0].x);
+        assert!(inner[0].x < inner[1].x);
+    }
+
+    #[test]
+    fn a_box_with_an_own_text_measures_taller_in_a_column_by_a_row_and_a_gap() {
+        let without = measure(&titled(Direction::Column, None).boxes, &[0]);
+        let with = measure(&titled(Direction::Column, Some("Title")).boxes, &[0]);
+        assert_eq!(with.height, without.height + 1 + FLEX_SPACE.height);
+    }
+
+    #[test]
+    fn a_box_with_no_text_places_only_its_borders() {
+        let state = titled(Direction::Column, None);
+        let placements = placements(&state);
+        assert_eq!(placements.len(), all_boxes(&placements).len());
+        assert_eq!(placements.len(), 3);
+    }
+
+    #[test]
+    fn a_box_with_an_empty_own_text_keeps_a_slot_for_it() {
+        let empty = measure(&titled(Direction::Column, Some("")).boxes, &[0]);
+        let none = measure(&titled(Direction::Column, None).boxes, &[0]);
+        assert_eq!(empty.height, none.height + 1 + FLEX_SPACE.height);
     }
 }
