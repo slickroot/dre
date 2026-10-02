@@ -27,6 +27,8 @@ pub(super) struct TileKey {
     pub(super) row: Band,
 }
 
+pub(super) type TileRun = (i64, i64, TileKey, i64, i64);
+
 fn band(extent: i64, cell: i64) -> i64 {
     let covered = extent + 1;
     (covered + cell - 1) / cell
@@ -37,16 +39,6 @@ pub(super) fn cells_with_middle(band: i64) -> i64 {
 }
 
 impl Band {
-    fn of(index: i64, cells: i64, band: i64) -> Band {
-        if index < band {
-            Band::Start(index)
-        } else if index >= cells - band {
-            Band::End(cells - 1 - index)
-        } else {
-            Band::Middle
-        }
-    }
-
     fn reference_index(self, band: i64) -> i64 {
         match self {
             Band::Start(offset) => offset,
@@ -81,26 +73,64 @@ impl TileShape {
         )
     }
 
-    pub(super) fn tiles(&self, cols: i64, rows: i64) -> Option<Vec<(i64, i64, TileKey)>> {
+    pub(super) fn tiles(&self, cols: i64, rows: i64) -> Option<Vec<TileRun>> {
         let (column_band, row_band) = self.bands();
         if cols < cells_with_middle(column_band) || rows < cells_with_middle(row_band) {
             return None;
         }
         let shape = *self;
-        Some(
-            (0..rows)
-                .flat_map(|row| {
-                    (0..cols).map(move |col| {
-                        let key = TileKey {
-                            shape,
-                            column: Band::of(col, cols, column_band),
-                            row: Band::of(row, rows, row_band),
-                        };
-                        (col, row, key)
-                    })
-                })
-                .collect(),
-        )
+        let middle_col_count = cols - 2 * column_band;
+        let middle_row_count = rows - 2 * row_band;
+
+        let col_positions: Vec<(i64, Band)> = (0..column_band)
+            .map(|i| (i, Band::Start(i)))
+            .chain(std::iter::once((column_band, Band::Middle)))
+            .chain((0..column_band).rev().map(|i| (cols - 1 - i, Band::End(i))))
+            .collect();
+
+        let row_positions: Vec<(i64, Band)> = (0..row_band)
+            .map(|i| (i, Band::Start(i)))
+            .chain(std::iter::once((row_band, Band::Middle)))
+            .chain((0..row_band).rev().map(|i| (rows - 1 - i, Band::End(i))))
+            .collect();
+
+        let mut result = Vec::new();
+
+        for &(row_pos, row_b) in &row_positions {
+            for &(col_pos, col_b) in &col_positions {
+                let key = TileKey {
+                    shape,
+                    column: col_b,
+                    row: row_b,
+                };
+                match (col_b, row_b) {
+                    (Band::Middle, Band::Middle) => {
+                        let canvas = key.canvas();
+                        let is_transparent = canvas.pixels.chunks(4).all(|px| px[3] == 0);
+                        if !is_transparent {
+                            result.push((
+                                column_band,
+                                row_band,
+                                key,
+                                middle_col_count,
+                                middle_row_count,
+                            ));
+                        }
+                    }
+                    (Band::Middle, _) => {
+                        result.push((column_band, row_pos, key, middle_col_count, 1));
+                    }
+                    (_, Band::Middle) => {
+                        result.push((col_pos, row_band, key, 1, middle_row_count));
+                    }
+                    _ => {
+                        result.push((col_pos, row_pos, key, 1, 1));
+                    }
+                }
+            }
+        }
+
+        Some(result)
     }
 
     fn cell_canvas(&self, cols: i64, rows: i64, col: i64, row: i64) -> Canvas {
@@ -215,13 +245,21 @@ mod tests {
     ) -> Canvas {
         let (width, height) = (cols * shape.cell.width, rows * shape.cell.height);
         let mut pixels = vec![0u8; (width * height) as usize * CHANNELS];
-        for (col, row, key) in shape.tiles(cols, rows).expect("a tileable sprite") {
+        for (col, row, key, col_span, row_span) in
+            shape.tiles(cols, rows).expect("a tileable sprite")
+        {
             let tile = rasterized.entry(key).or_insert_with(|| key.canvas());
-            for y in 0..tile.height {
-                let from = (y * tile.width) as usize * CHANNELS;
-                let to = ((row * tile.height + y) * width + col * tile.width) as usize * CHANNELS;
-                let span = tile.width as usize * CHANNELS;
-                pixels[to..to + span].copy_from_slice(&tile.pixels[from..from + span]);
+            for dr in 0..row_span {
+                for dc in 0..col_span {
+                    for y in 0..tile.height {
+                        let from = (y * tile.width) as usize * CHANNELS;
+                        let to = (((row + dr) * tile.height + y) * width + (col + dc) * tile.width)
+                            as usize
+                            * CHANNELS;
+                        let span = tile.width as usize * CHANNELS;
+                        pixels[to..to + span].copy_from_slice(&tile.pixels[from..from + span]);
+                    }
+                }
             }
         }
         Canvas {
@@ -303,14 +341,14 @@ mod tests {
         }
     }
 
-    fn tiles_of(shape: TileShape, cols: i64, rows: i64) -> Vec<(i64, i64, TileKey)> {
+    fn tiles_of(shape: TileShape, cols: i64, rows: i64) -> Vec<TileRun> {
         shape.tiles(cols, rows).expect("a tileable sprite")
     }
 
     fn key_set(shape: TileShape, cols: i64, rows: i64) -> HashSet<TileKey> {
         tiles_of(shape, cols, rows)
             .into_iter()
-            .map(|(_, _, key)| key)
+            .map(|(_, _, key, _, _)| key)
             .collect()
     }
 
@@ -320,18 +358,32 @@ mod tests {
     }
 
     #[test]
-    fn tiles_are_in_row_major_order_one_per_cell() {
+    fn tiles_are_in_row_major_band_order() {
         let shape = rounded_box();
+        let (column_band, row_band) = shape.bands();
         let (cols, rows) = smallest_tileable(shape);
         let (cols, rows) = (cols + EXTRA_CELLS, rows + 1);
         let positions: Vec<(i64, i64)> = tiles_of(shape, cols, rows)
             .into_iter()
-            .map(|(col, row, _)| (col, row))
+            .map(|(col, row, _, _, _)| (col, row))
             .collect();
-        let expected: Vec<(i64, i64)> = (0..rows)
-            .flat_map(|row| (0..cols).map(move |col| (col, row)))
+        let all_col_pos: Vec<i64> = (0..column_band)
+            .chain(std::iter::once(column_band))
+            .chain((0..column_band).rev().map(|i| cols - 1 - i))
             .collect();
-        assert_eq!(positions, expected);
+        let all_row_pos: Vec<i64> = (0..row_band)
+            .chain(std::iter::once(row_band))
+            .chain((0..row_band).rev().map(|i| rows - 1 - i))
+            .collect();
+        let all_band_positions: Vec<(i64, i64)> = all_row_pos
+            .iter()
+            .flat_map(|&r| all_col_pos.iter().map(move |&c| (c, r)))
+            .collect();
+        let filtered: Vec<(i64, i64)> = all_band_positions
+            .into_iter()
+            .filter(|p| positions.contains(p))
+            .collect();
+        assert_eq!(positions, filtered);
     }
 
     #[test]
@@ -342,12 +394,12 @@ mod tests {
         let cols = cols + EXTRA_CELLS;
         let first_row: Vec<Band> = tiles_of(shape, cols, rows)
             .into_iter()
-            .filter(|&(_, row, _)| row == 0)
-            .map(|(_, _, key)| key.column)
+            .filter(|&(_, row, _, _, _)| row == 0)
+            .map(|(_, _, key, _, _)| key.column)
             .collect();
         let expected: Vec<Band> = (0..column_band)
             .map(Band::Start)
-            .chain((0..cols - 2 * column_band).map(|_| Band::Middle))
+            .chain(std::iter::once(Band::Middle))
             .chain((0..column_band).rev().map(Band::End))
             .collect();
         assert_eq!(first_row, expected);
@@ -396,9 +448,40 @@ mod tests {
             cell: ODD_CELL,
         };
         let (cols, rows) = smallest_tileable(shape);
-        for (_, _, key) in tiles_of(shape, cols, rows) {
+        for (_, _, key, _, _) in tiles_of(shape, cols, rows) {
             let tile = key.canvas();
             assert_eq!((tile.width, tile.height), (ODD_CELL.width, ODD_CELL.height));
         }
+    }
+
+    #[test]
+    fn a_tileable_box_stretches_its_middle_band() {
+        let shape = rounded_box();
+        let (column_band, row_band) = shape.bands();
+        let cols = cells_with_middle(column_band) + 2;
+        let rows = cells_with_middle(row_band) + 2;
+        let count = tiles_of(shape, cols, rows).len();
+        assert!(count < (cols * rows) as usize);
+    }
+
+    #[test]
+    fn a_flex_box_is_eight_placements_for_any_size() {
+        let style = BoxStyle {
+            colour: crate::style::rgb(Some(0)),
+            fill: None,
+            fill_alpha: None,
+            solid_fill: None,
+            rounded: false,
+            sides: ALL_SIDES,
+            border: BORDER,
+        };
+        let shape = TileShape { style, cell: CELL };
+        let (column_band, row_band) = shape.bands();
+        assert_eq!(column_band, 1);
+        assert_eq!(row_band, 1);
+        let cols = cells_with_middle(column_band) + 10;
+        let rows = cells_with_middle(row_band) + 10;
+        let count = tiles_of(shape, cols, rows).len();
+        assert_eq!(count, 8);
     }
 }

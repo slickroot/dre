@@ -6,6 +6,7 @@ pub(crate) trait Shape {
     fn colour_at(&self, x: i64, y: i64) -> Option<Rgba>;
 }
 
+#[derive(Clone)]
 pub(crate) struct Canvas {
     pub(crate) pixels: Vec<u8>,
     pub(crate) width: i64,
@@ -27,21 +28,6 @@ impl Canvas {
             pixels,
             width,
             height,
-        }
-    }
-
-    pub(crate) fn crop(&self, first_x: i64, last_x: i64, first_y: i64, last_y: i64) -> Canvas {
-        let mut pixels =
-            Vec::with_capacity(((last_x - first_x) * (last_y - first_y)) as usize * CHANNELS);
-        for y in first_y..last_y {
-            let start = ((y * self.width + first_x) as usize) * CHANNELS;
-            let end = ((y * self.width + last_x) as usize) * CHANNELS;
-            pixels.extend_from_slice(&self.pixels[start..end]);
-        }
-        Canvas {
-            pixels,
-            width: last_x - first_x,
-            height: last_y - first_y,
         }
     }
 }
@@ -101,29 +87,5 @@ mod tests {
                 assert_eq!(pixel(&canvas, x, y), expected);
             }
         }
-    }
-
-    #[test]
-    fn crop_has_the_size_of_the_window() {
-        let cropped = Canvas::fill(8, 6, &Gradient).crop(2, 7, 1, 4);
-        assert_eq!((cropped.width, cropped.height), (5, 3));
-        assert_eq!(cropped.pixels.len(), 5 * 3 * CHANNELS);
-    }
-
-    #[test]
-    fn crop_keeps_the_pixels_inside_the_window() {
-        let whole = Canvas::fill(8, 6, &Gradient);
-        let cropped = whole.crop(2, 7, 1, 4);
-        for y in 0..cropped.height {
-            for x in 0..cropped.width {
-                assert_eq!(pixel(&cropped, x, y), pixel(&whole, x + 2, y + 1));
-            }
-        }
-    }
-
-    #[test]
-    fn cropping_to_the_whole_canvas_changes_nothing() {
-        let whole = Canvas::fill(8, 6, &Gradient);
-        assert_eq!(whole.crop(0, 8, 0, 6).pixels, whole.pixels);
     }
 }

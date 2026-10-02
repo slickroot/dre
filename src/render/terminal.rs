@@ -1,22 +1,19 @@
 use std::io::{self, Write};
-use std::num::NonZeroU32;
 
 use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, LedShape};
 use super::tiles::{CellSize, TileKey, TileShape};
+use super::virtual_terminal::{CaretKey, Content, Desired, GrowKey, ImageKey, SourceRect, Sprites};
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
-use crate::kitty;
 #[cfg(test)]
 use crate::style::palette;
 use crate::tty::Window;
 use crate::view::Scene;
-use crate::view::{Geometry, Label, Placement, PlacementNode, Rgb, Sides};
+use crate::view::{Geometry, Placement, PlacementNode, Rgb, Sides};
 
-const BLANK: char = ' ';
-const HOME_CURSOR: &str = "\x1b[H";
 const BEGIN_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026h";
 const END_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026l";
 
@@ -59,10 +56,10 @@ struct LabelStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct GlyphKey {
-    character: char,
-    colour: Rgb,
-    bold: bool,
+pub(super) struct GlyphKey {
+    pub(super) character: char,
+    pub(super) colour: Rgb,
+    pub(super) bold: bool,
 }
 
 #[derive(Clone)]
@@ -110,11 +107,6 @@ pub(super) fn box_shape(width: i64, height: i64, style: BoxStyle) -> BoxShape {
 }
 
 const GROW_FRAMES: usize = 9;
-const GROW_MS: u32 = 150;
-const GROW_GAP_MS: u32 = (GROW_MS + (GROW_FRAMES as u32 - 1) / 2) / (GROW_FRAMES as u32 - 1);
-// WezTerm ignores `a=a` and loops the frames, so the last frame is held for
-// about 23 days instead of relying on `v=2` to stop after one play.
-const GROW_HOLD_MS: u32 = 2_000_000_000;
 
 fn eased(t: f64) -> f64 {
     1.0 - (1.0 - t).powi(3)
@@ -180,18 +172,8 @@ pub(super) fn python_round(value: f64) -> f64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Crop {
-    col: i64,
-    row: i64,
-    first_x: i64,
-    last_x: i64,
-    first_y: i64,
-    last_y: i64,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum SpriteKey {
+pub(super) enum SpriteKey {
     Box {
         width: i64,
         height: i64,
@@ -249,221 +231,6 @@ fn led_key(width: i64, height: i64, style: LedStyle) -> SpriteKey {
     }
 }
 
-enum Image {
-    Fresh {
-        id: kitty::ImageId,
-        canvas: Canvas,
-    },
-    Cached {
-        id: kitty::ImageId,
-    },
-    Growing {
-        id: kitty::ImageId,
-        root: Canvas,
-        frames: Vec<Canvas>,
-        wezterm: bool,
-    },
-}
-
-struct Placed {
-    image: Image,
-    col: i64,
-    row: i64,
-    z: i32,
-}
-
-impl Placed {
-    fn command(&self, placement: kitty::PlacementId) -> kitty::Command {
-        match &self.image {
-            Image::Fresh { id, canvas } => kitty::show(canvas, *id, self.col, self.row, self.z),
-            Image::Cached { id } => kitty::place(*id, placement, self.col, self.row, self.z),
-            Image::Growing {
-                id,
-                root,
-                frames,
-                wezterm,
-            } => kitty::grow(
-                root,
-                frames,
-                *id,
-                self.col,
-                self.row,
-                self.z,
-                GROW_GAP_MS,
-                GROW_HOLD_MS,
-                *wezterm,
-            ),
-        }
-    }
-}
-
-struct ImageIds {
-    next: u32,
-    transient: Vec<kitty::ImageId>,
-}
-
-impl ImageIds {
-    fn new() -> Self {
-        ImageIds {
-            next: 1,
-            transient: Vec::new(),
-        }
-    }
-
-    fn allocate(&mut self) -> kitty::ImageId {
-        let value = NonZeroU32::new(self.next).expect("image ID allocator exhausted");
-        self.next = self
-            .next
-            .checked_add(1)
-            .expect("image ID allocator exhausted");
-        kitty::ImageId::new(value)
-    }
-
-    fn allocate_transient(&mut self) -> kitty::ImageId {
-        let id = self.allocate();
-        self.transient.push(id);
-        id
-    }
-
-    fn take_transient(&mut self) -> Vec<kitty::ImageId> {
-        std::mem::take(&mut self.transient)
-    }
-}
-
-struct Frame {
-    window: Window,
-    characters: Vec<Vec<char>>,
-    images: Vec<Placed>,
-    previous_transient_images: Vec<kitty::ImageId>,
-}
-
-impl Frame {
-    #[cfg(test)]
-    fn new(window: Window) -> Self {
-        Self::with_previous(window, Vec::new())
-    }
-
-    fn with_previous(window: Window, previous_transient_images: Vec<kitty::ImageId>) -> Self {
-        Frame {
-            window,
-            characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
-            images: Vec::new(),
-            previous_transient_images,
-        }
-    }
-
-    // Clipping happens by cropping: kitty::show cannot position at a negative
-    // column, and sends a=T without C=1, so an overhang would shift into view
-    // or scroll the screen instead of being cut off.
-    fn crop<G: Into<Geometry>>(&self, geometry: G, area: Area) -> Option<Crop> {
-        let geometry = geometry.into();
-        let (left, top) = (geometry.x, geometry.y);
-        let col = left.max(area.col).max(0);
-        let row = top.max(area.row).max(0);
-        let right = (left + geometry.width)
-            .min(area.col + area.cols)
-            .min(self.window.cols);
-        let bottom = (top + geometry.height)
-            .min(area.row + area.rows)
-            .min(self.window.rows);
-        if col >= right || row >= bottom {
-            return None;
-        }
-        Some(Crop {
-            col,
-            row,
-            first_x: (col - left) * self.window.cell_width,
-            last_x: (right - left) * self.window.cell_width,
-            first_y: (row - top) * self.window.cell_height,
-            last_y: (bottom - top) * self.window.cell_height,
-        })
-    }
-
-    fn shows<G: Into<Geometry>>(&self, geometry: G, area: Area) -> bool {
-        self.crop(geometry, area).is_some()
-    }
-
-    fn place_fresh<G: Into<Geometry>>(
-        &mut self,
-        id: kitty::ImageId,
-        canvas: &Canvas,
-        geometry: G,
-        area: Area,
-        z: i32,
-    ) {
-        if let Some(crop) = self.crop(geometry, area) {
-            self.push_fresh(id, canvas, crop, z);
-        }
-    }
-
-    fn place_transient<G: Into<Geometry>>(
-        &mut self,
-        ids: &mut ImageIds,
-        canvas: &Canvas,
-        geometry: G,
-        area: Area,
-        z: i32,
-    ) {
-        if let Some(crop) = self.crop(geometry, area) {
-            self.push_fresh(ids.allocate_transient(), canvas, crop, z);
-        }
-    }
-
-    fn place_cached<G: Into<Geometry>>(
-        &mut self,
-        id: kitty::ImageId,
-        geometry: G,
-        area: Area,
-        z: i32,
-    ) {
-        if let Some(crop) = self.crop(geometry, area) {
-            self.push(Image::Cached { id }, crop, z);
-        }
-    }
-
-    fn push_fresh(&mut self, id: kitty::ImageId, canvas: &Canvas, crop: Crop, z: i32) {
-        let canvas = canvas.crop(crop.first_x, crop.last_x, crop.first_y, crop.last_y);
-        self.push(Image::Fresh { id, canvas }, crop, z);
-    }
-
-    fn push(&mut self, image: Image, crop: Crop, z: i32) {
-        self.images.push(Placed {
-            image,
-            col: crop.col,
-            row: crop.row,
-            z,
-        });
-    }
-
-    fn into_bytes(self) -> Vec<u8> {
-        let rows: Vec<String> = self
-            .characters
-            .into_iter()
-            .map(|row| row.into_iter().collect())
-            .collect();
-        let mut bytes = BEGIN_SYNCHRONIZED_UPDATE.as_bytes().to_vec();
-        bytes.extend_from_slice(HOME_CURSOR.as_bytes());
-        bytes.extend_from_slice(rows.join("\r\n").as_bytes());
-        bytes.extend_from_slice(kitty::soft_clear().to_string().as_bytes());
-        for id in &self.previous_transient_images {
-            bytes.extend_from_slice(kitty::delete(*id).to_string().as_bytes());
-        }
-        for (placement, image) in Self::placement_ids().zip(&self.images) {
-            bytes.extend_from_slice(image.command(placement).to_string().as_bytes());
-        }
-        bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
-        bytes
-    }
-
-    // WezTerm removes every placement of an image when a new placement of it
-    // has no placement ID, so each placement in a frame is numbered apart.
-    fn placement_ids() -> impl Iterator<Item = kitty::PlacementId> {
-        (1..)
-            .map_while(NonZeroU32::new)
-            .map(kitty::PlacementId::new)
-    }
-}
-
 struct SolidShape {
     colour: crate::canvas::Rgba,
 }
@@ -479,42 +246,31 @@ pub(crate) struct TerminalRenderer {
     cache: std::collections::HashMap<SpriteKey, Canvas>,
     cache_limit: usize,
     glyph_source: Box<dyn GlyphSource>,
-    glyph_images: std::collections::HashMap<GlyphKey, kitty::ImageId>,
     tile_canvases: std::collections::HashMap<TileKey, Canvas>,
-    tile_images: std::collections::HashMap<TileKey, kitty::ImageId>,
-    bracket_images: std::collections::HashMap<BracketKey, kitty::ImageId>,
-    image_ids: ImageIds,
     grow_stamp: u64,
     pub(crate) wezterm: bool,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn place_sprite<K, C>(
-    images: &mut std::collections::HashMap<K, kitty::ImageId>,
-    image_ids: &mut ImageIds,
-    frame: &mut Frame,
-    key: K,
-    geometry: Geometry,
-    area: Area,
-    z: i32,
-    canvas: impl FnOnce() -> C,
-) where
-    K: std::hash::Hash + Eq,
-    C: std::borrow::Borrow<Canvas>,
-{
-    if let Some(id) = images.get(&key).copied() {
-        frame.place_cached(id, geometry, area, z);
-    } else {
-        let id = image_ids.allocate();
-        images.insert(key, id);
-        frame.place_fresh(id, canvas().borrow(), geometry, area, z);
-    }
+    vt: super::virtual_terminal::VirtualTerminal,
+    clear_pending: bool,
+    pending_ops: Vec<super::virtual_terminal::Op>,
 }
 
 impl Renderer for TerminalRenderer {
     fn render(&mut self, scene: &Scene<'_>, out: &mut impl Write) -> io::Result<()> {
-        let frame = self.frame(scene);
-        out.write_all(&frame.into_bytes())
+        let desired = self.paint_scene(scene);
+        let mut vt = std::mem::take(&mut self.vt);
+        let ops = vt.commit(&desired, self);
+        self.vt = vt;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(BEGIN_SYNCHRONIZED_UPDATE.as_bytes());
+        if self.clear_pending {
+            bytes.extend_from_slice(b"\x1b[2J");
+            self.clear_pending = false;
+        }
+        let mut all_ops = std::mem::take(&mut self.pending_ops);
+        all_ops.extend(ops);
+        bytes.extend_from_slice(&crate::kitty::encode_ops(&all_ops, self.wezterm));
+        bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
+        out.write_all(&bytes)
     }
 }
 
@@ -529,36 +285,37 @@ impl TerminalRenderer {
             cache: std::collections::HashMap::new(),
             cache_limit,
             glyph_source,
-            glyph_images: std::collections::HashMap::new(),
             tile_canvases: std::collections::HashMap::new(),
-            tile_images: std::collections::HashMap::new(),
-            bracket_images: std::collections::HashMap::new(),
-            image_ids: ImageIds::new(),
             grow_stamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_nanos() as u64),
             wezterm: false,
+            vt: super::virtual_terminal::VirtualTerminal::new(),
+            clear_pending: true,
+            pending_ops: Vec::new(),
         }
     }
 
     pub(crate) fn on_resize(&mut self, window: Window) {
         self.window.cols = window.cols;
         self.window.rows = window.rows;
+        self.pending_ops.extend(self.vt.reset());
+        self.clear_pending = true;
     }
 
     pub(crate) fn area(&self) -> Area {
         whole(self.window)
     }
 
-    fn frame(&mut self, scene: &Scene<'_>) -> Frame {
-        let mut frame = Frame::with_previous(self.window, self.image_ids.take_transient());
+    fn paint_scene(&mut self, scene: &Scene<'_>) -> Vec<super::virtual_terminal::Desired> {
+        let mut desired = Vec::new();
         for (area, placements) in scene {
-            self.paint(&mut frame, placements, *area);
+            self.paint(&mut desired, placements, *area);
         }
-        frame
+        desired
     }
 
-    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
+    fn paint(&mut self, desired: &mut Vec<Desired>, placements: &[Placement], area: Area) {
         for placement in placements {
             let geometry = Geometry::from(placement);
             match &placement.node {
@@ -572,7 +329,7 @@ impl TerminalRenderer {
                     border,
                     grow,
                 } => self.draw_box(
-                    frame,
+                    desired,
                     geometry,
                     area,
                     placement.depth,
@@ -588,10 +345,10 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Brackets { border } => {
-                    self.draw_brackets(frame, geometry, area, *border)
+                    self.draw_brackets(desired, geometry, area, *border)
                 }
                 PlacementNode::Arrow(arrow) => self.draw_arrow(
-                    frame,
+                    desired,
                     geometry,
                     area,
                     ArrowStyle {
@@ -600,7 +357,7 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Label(label) => self.draw_label(
-                    frame,
+                    desired,
                     geometry,
                     area,
                     placement.depth,
@@ -610,10 +367,10 @@ impl TerminalRenderer {
                         bold: label.bold,
                     },
                 ),
-                PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
-                PlacementNode::Cursor(_) => self.draw_cursor(frame, geometry, area),
+                PlacementNode::Caret(_) => self.draw_caret(desired, geometry, area),
+                PlacementNode::Cursor(_) => self.draw_cursor(desired, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
-                    frame,
+                    desired,
                     geometry,
                     area,
                     LedStyle {
@@ -625,28 +382,9 @@ impl TerminalRenderer {
         }
     }
 
-    fn place_cached(
-        &mut self,
-        frame: &mut Frame,
-        key: SpriteKey,
-        geometry: Geometry,
-        area: Area,
-        z: i32,
-        build: impl FnOnce(&Self) -> Canvas,
-    ) {
-        if !frame.shows(geometry, area) {
-            return;
-        }
-        if !self.cache.contains_key(&key) {
-            let drawn = build(self);
-            self.remember(key.clone(), drawn);
-        }
-        frame.place_transient(&mut self.image_ids, &self.cache[&key], geometry, area, z);
-    }
-
     fn place_tiles(
         &mut self,
-        frame: &mut Frame,
+        desired: &mut Vec<Desired>,
         style: BoxStyle,
         geometry: Geometry,
         area: Area,
@@ -659,34 +397,41 @@ impl TerminalRenderer {
         let Some(tiles) = shape.tiles(geometry.width, geometry.height) else {
             return false;
         };
-        for (col, row, key) in tiles {
-            let cell = Geometry {
-                x: geometry.x + col,
-                y: geometry.y + row,
-                width: 1,
-                height: 1,
-            };
-            if !frame.shows(cell, area) {
-                continue;
+        for (col, row, key, col_span, row_span) in tiles {
+            let tile_col = geometry.x + col;
+            let tile_row = geometry.y + row;
+            if col_span == 1 && row_span == 1 {
+                if let Some((vc, vr, source)) =
+                    clip_natural(tile_col, tile_row, 1, 1, area, self.window)
+                {
+                    desired.push(Desired {
+                        image: ImageKey::Tile(key),
+                        col: vc,
+                        row: vr,
+                        z,
+                        source,
+                        cells: None,
+                    });
+                }
+            } else if let Some((vc, vr, cs, rs)) =
+                clip_stretched(tile_col, tile_row, col_span, row_span, area, self.window)
+            {
+                desired.push(Desired {
+                    image: ImageKey::Tile(key),
+                    col: vc,
+                    row: vr,
+                    z,
+                    source: None,
+                    cells: Some((cs, rs)),
+                });
             }
-            let tile_canvases = &mut self.tile_canvases;
-            place_sprite(
-                &mut self.tile_images,
-                &mut self.image_ids,
-                frame,
-                key,
-                cell,
-                area,
-                z,
-                || &*tile_canvases.entry(key).or_insert_with(|| key.canvas()),
-            );
         }
         true
     }
 
     fn draw_box(
         &mut self,
-        frame: &mut Frame,
+        desired: &mut Vec<Desired>,
         geometry: Geometry,
         area: Area,
         depth: u8,
@@ -694,95 +439,170 @@ impl TerminalRenderer {
         style: BoxStyle,
     ) {
         let z = depth_z(depth);
-        if grow && self.place_growing(frame, geometry, area, z, style) {
+        if grow && self.place_growing(desired, geometry, area, z, style) {
             return;
         }
-        if self.place_tiles(frame, style, geometry, area, z) {
+        if self.place_tiles(desired, style, geometry, area, z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
-        self.place_cached(frame, key, geometry, area, z, |renderer| {
-            renderer.box_canvas(geometry.width, geometry.height, style)
-        });
+        if let Some((col, row, source)) = clip_natural(
+            geometry.x,
+            geometry.y,
+            geometry.width,
+            geometry.height,
+            area,
+            self.window,
+        ) {
+            if !self.cache.contains_key(&key) {
+                let canvas = self.build_sprite(&key);
+                self.remember(key.clone(), canvas);
+            }
+            desired.push(Desired {
+                image: ImageKey::Sprite(key),
+                col,
+                row,
+                z,
+                source,
+                cells: None,
+            });
+        }
     }
 
     fn place_growing(
         &mut self,
-        frame: &mut Frame,
+        desired: &mut Vec<Desired>,
         geometry: Geometry,
         area: Area,
         z: i32,
         style: BoxStyle,
     ) -> bool {
-        let width = self.cells_to_pixels_x(geometry.width);
-        let height = self.cells_to_pixels_y(geometry.height);
-        let Some(crop) = frame.crop(geometry, area) else {
-            return false;
-        };
-        if (crop.first_x, crop.first_y, crop.last_x, crop.last_y) != (0, 0, width, height) {
+        let left = geometry.x;
+        let top = geometry.y;
+        let right = geometry.x + geometry.width;
+        let bottom = geometry.y + geometry.height;
+        if left < area.col
+            || top < area.row
+            || right > area.col + area.cols
+            || bottom > area.row + area.rows
+            || left < 0
+            || top < 0
+            || right > self.window.cols
+            || bottom > self.window.rows
+        {
             return false;
         }
         self.grow_stamp = self.grow_stamp.wrapping_add(1);
-        let frames = grow_frames(width, height, style);
-        let image = Image::Growing {
-            id: self.image_ids.allocate_transient(),
-            root: grow_root(&frames[GROW_FRAMES - 1], self.grow_stamp),
-            frames,
-            wezterm: self.wezterm,
-        };
-        frame.push(image, crop, z);
+        desired.push(Desired {
+            image: ImageKey::Grow(GrowKey {
+                style_key: box_key(geometry.width, geometry.height, style),
+                stamp: self.grow_stamp,
+            }),
+            col: geometry.x,
+            row: geometry.y,
+            z,
+            source: None,
+            cells: None,
+        });
         true
     }
 
-    fn draw_brackets(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, border: i64) {
+    fn draw_brackets(
+        &mut self,
+        desired: &mut Vec<Desired>,
+        geometry: Geometry,
+        area: Area,
+        border: i64,
+    ) {
         let cell = self.cell_size();
         let blocks = corner_cells(cell);
         for corner in CORNERS {
             let (col, row) = corner_offset(corner, geometry.width, geometry.height, cell);
-            let block = Geometry {
-                x: geometry.x + col,
-                y: geometry.y + row,
-                width: blocks,
-                height: blocks,
-            };
-            if !frame.shows(block, area) {
-                continue;
+            let bx = geometry.x + col;
+            let by = geometry.y + row;
+            if let Some((vc, vr, source)) = clip_natural(bx, by, blocks, blocks, area, self.window)
+            {
+                desired.push(Desired {
+                    image: ImageKey::Bracket(BracketKey {
+                        corner,
+                        border,
+                        cell,
+                    }),
+                    col: vc,
+                    row: vr,
+                    z: BRACKETS_Z,
+                    source,
+                    cells: None,
+                });
             }
-            let key = BracketKey {
-                corner,
-                border,
-                cell,
-            };
-            place_sprite(
-                &mut self.bracket_images,
-                &mut self.image_ids,
-                frame,
-                key,
-                block,
-                area,
-                BRACKETS_Z,
-                || key.canvas(),
-            );
         }
     }
 
-    fn draw_led(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: LedStyle) {
+    fn draw_led(
+        &mut self,
+        desired: &mut Vec<Desired>,
+        geometry: Geometry,
+        area: Area,
+        style: LedStyle,
+    ) {
         let key = led_key(geometry.width, geometry.height, style);
-        self.place_cached(frame, key, geometry, area, INK_Z, |renderer| {
-            renderer.led_canvas(geometry.width, geometry.height, style)
-        });
+        if let Some((col, row, source)) = clip_natural(
+            geometry.x,
+            geometry.y,
+            geometry.width,
+            geometry.height,
+            area,
+            self.window,
+        ) {
+            if !self.cache.contains_key(&key) {
+                let canvas = self.build_sprite(&key);
+                self.remember(key.clone(), canvas);
+            }
+            desired.push(Desired {
+                image: ImageKey::Sprite(key),
+                col,
+                row,
+                z: INK_Z,
+                source,
+                cells: None,
+            });
+        }
     }
 
-    fn draw_arrow(&mut self, frame: &mut Frame, geometry: Geometry, area: Area, style: ArrowStyle) {
+    fn draw_arrow(
+        &mut self,
+        desired: &mut Vec<Desired>,
+        geometry: Geometry,
+        area: Area,
+        style: ArrowStyle,
+    ) {
         let key = arrow_key(geometry.width, geometry.height, &style);
-        self.place_cached(frame, key, geometry, area, CONTENT_Z, |renderer| {
-            renderer.arrow_canvas(geometry.width, geometry.height, &style)
-        });
+        if let Some((col, row, source)) = clip_natural(
+            geometry.x,
+            geometry.y,
+            geometry.width,
+            geometry.height,
+            area,
+            self.window,
+        ) {
+            if !self.cache.contains_key(&key) {
+                let canvas = self.build_sprite(&key);
+                self.remember(key.clone(), canvas);
+            }
+            desired.push(Desired {
+                image: ImageKey::Sprite(key),
+                col,
+                row,
+                z: CONTENT_Z,
+                source,
+                cells: None,
+            });
+        }
     }
 
     fn draw_label(
         &mut self,
-        frame: &mut Frame,
+        desired: &mut Vec<Desired>,
         geometry: Geometry,
         area: Area,
         depth: u8,
@@ -790,53 +610,52 @@ impl TerminalRenderer {
     ) {
         let z = depth_z(depth);
         for (offset, character) in style.text.chars().enumerate() {
-            let char_placement = Placement {
-                node: PlacementNode::Label(Label {
-                    text: style.text.clone().into(),
+            let char_x = geometry.x + offset as i64;
+            let char_y = geometry.y;
+            if let Some((col, row, source)) = clip_natural(char_x, char_y, 1, 1, area, self.window)
+            {
+                let key = GlyphKey {
+                    character,
                     colour: style.colour,
                     bold: style.bold,
-                }),
-                x: geometry.x + offset as i64,
-                y: geometry.y,
-                width: 1,
-                height: 1,
-                depth,
-            };
-            if !frame.shows(&char_placement, area) {
-                continue;
-            }
-            let key = GlyphKey {
-                character,
-                colour: style.colour,
-                bold: style.bold,
-            };
-            if let Some(id) = self.glyph_images.get(&key).copied() {
-                frame.place_cached(id, &char_placement, area, z);
-            } else {
-                let id = self.image_ids.allocate();
-                self.glyph_images.insert(key, id);
-                let glyph = self.glyph_source.glyph(character, style.colour, style.bold);
-                frame.place_fresh(id, glyph, &char_placement, area, z);
+                };
+                desired.push(Desired {
+                    image: ImageKey::Glyph(key),
+                    col,
+                    row,
+                    z,
+                    source,
+                    cells: None,
+                });
             }
         }
     }
 
-    fn draw_caret(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
-        let width = self.cells_to_pixels_x(geometry.width);
-        let height = self.cells_to_pixels_y(geometry.height);
-        let (r, g, b) = colour(None);
-        let canvas = Canvas::fill(
-            width,
-            height,
-            &SolidShape {
-                colour: [r, g, b, OPAQUE],
-            },
-        );
-        frame.place_transient(&mut self.image_ids, &canvas, geometry, area, CONTENT_Z);
+    fn draw_caret(&mut self, desired: &mut Vec<Desired>, geometry: Geometry, area: Area) {
+        if let Some((col, row, source)) = clip_natural(
+            geometry.x,
+            geometry.y,
+            geometry.width,
+            geometry.height,
+            area,
+            self.window,
+        ) {
+            desired.push(Desired {
+                image: ImageKey::Caret(CaretKey {
+                    cols: geometry.width,
+                    rows: geometry.height,
+                }),
+                col,
+                row,
+                z: CONTENT_Z,
+                source,
+                cells: None,
+            });
+        }
     }
 
-    fn draw_cursor(&mut self, frame: &mut Frame, geometry: Geometry, area: Area) {
-        self.draw_caret(frame, geometry, area);
+    fn draw_cursor(&mut self, desired: &mut Vec<Desired>, geometry: Geometry, area: Area) {
+        self.draw_caret(desired, geometry, area);
     }
 
     fn remember(&mut self, key: SpriteKey, drawn: Canvas) {
@@ -909,12 +728,196 @@ impl TerminalRenderer {
         };
         Canvas::fill(width, height, &shape)
     }
+
+    fn build_sprite(&self, key: &SpriteKey) -> Canvas {
+        match key {
+            SpriteKey::Box {
+                width,
+                height,
+                colour,
+                fill,
+                fill_alpha,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+            } => self.box_canvas(
+                *width,
+                *height,
+                BoxStyle {
+                    colour: *colour,
+                    fill: *fill,
+                    fill_alpha: *fill_alpha,
+                    solid_fill: *solid_fill,
+                    rounded: *rounded,
+                    sides: *sides,
+                    border: *border,
+                },
+            ),
+            SpriteKey::Arrow {
+                width,
+                height,
+                stops,
+                shaft,
+            } => self.arrow_canvas(
+                *width,
+                *height,
+                &ArrowStyle {
+                    stops: stops.clone(),
+                    shaft: *shaft,
+                },
+            ),
+            SpriteKey::Led {
+                width,
+                height,
+                colour,
+                lit,
+            } => self.led_canvas(
+                *width,
+                *height,
+                LedStyle {
+                    colour: *colour,
+                    lit: *lit,
+                },
+            ),
+        }
+    }
+}
+
+impl Sprites for TerminalRenderer {
+    fn content(&mut self, key: &ImageKey) -> Content {
+        match key {
+            ImageKey::Glyph(gk) => Content::Still(
+                self.glyph_source
+                    .glyph(gk.character, gk.colour, gk.bold)
+                    .clone(),
+            ),
+            ImageKey::Tile(tk) => Content::Still(
+                self.tile_canvases
+                    .entry(*tk)
+                    .or_insert_with(|| tk.canvas())
+                    .clone(),
+            ),
+            ImageKey::Bracket(bk) => Content::Still(bk.canvas()),
+            ImageKey::Sprite(sk) => {
+                if !self.cache.contains_key(sk) {
+                    let canvas = self.build_sprite(sk);
+                    self.remember(sk.clone(), canvas);
+                }
+                Content::Still(self.cache[sk].clone())
+            }
+            ImageKey::Caret(ck) => {
+                let width = self.cells_to_pixels_x(ck.cols);
+                let height = self.cells_to_pixels_y(ck.rows);
+                let (r, g, b) = colour(None);
+                Content::Still(Canvas::fill(
+                    width,
+                    height,
+                    &SolidShape {
+                        colour: [r, g, b, OPAQUE],
+                    },
+                ))
+            }
+            ImageKey::Grow(gk) => {
+                let (width, height, style) = match &gk.style_key {
+                    SpriteKey::Box {
+                        width,
+                        height,
+                        colour,
+                        fill,
+                        fill_alpha,
+                        solid_fill,
+                        rounded,
+                        sides,
+                        border,
+                    } => (
+                        *width,
+                        *height,
+                        BoxStyle {
+                            colour: *colour,
+                            fill: *fill,
+                            fill_alpha: *fill_alpha,
+                            solid_fill: *solid_fill,
+                            rounded: *rounded,
+                            sides: *sides,
+                            border: *border,
+                        },
+                    ),
+                    _ => panic!("grow key must be a box sprite"),
+                };
+                let pw = self.cells_to_pixels_x(width);
+                let ph = self.cells_to_pixels_y(height);
+                let frames = grow_frames(pw, ph, style);
+                let root = grow_root(&frames[GROW_FRAMES - 1], gk.stamp);
+                Content::Animation { root, frames }
+            }
+        }
+    }
+}
+
+fn clip_natural(
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
+    area: Area,
+    window: Window,
+) -> Option<(i64, i64, Option<SourceRect>)> {
+    let col = x.max(area.col).max(0);
+    let row = y.max(area.row).max(0);
+    let right = (x + width).min(area.col + area.cols).min(window.cols);
+    let bottom = (y + height).min(area.row + area.rows).min(window.rows);
+    if col >= right || row >= bottom {
+        return None;
+    }
+    let first_x = (col - x) * window.cell_width;
+    let last_x = (right - x) * window.cell_width;
+    let first_y = (row - y) * window.cell_height;
+    let last_y = (bottom - y) * window.cell_height;
+    let fully_visible = first_x == 0
+        && first_y == 0
+        && last_x == width * window.cell_width
+        && last_y == height * window.cell_height;
+    let source = if fully_visible {
+        None
+    } else {
+        Some(SourceRect {
+            x: first_x,
+            y: first_y,
+            width: last_x - first_x,
+            height: last_y - first_y,
+        })
+    };
+    Some((col, row, source))
+}
+
+fn clip_stretched(
+    col_start: i64,
+    row_start: i64,
+    col_span: i64,
+    row_span: i64,
+    area: Area,
+    window: Window,
+) -> Option<(i64, i64, i64, i64)> {
+    let col = col_start.max(area.col).max(0);
+    let row = row_start.max(area.row).max(0);
+    let right = (col_start + col_span)
+        .min(area.col + area.cols)
+        .min(window.cols);
+    let bottom = (row_start + row_span)
+        .min(area.row + area.rows)
+        .min(window.rows);
+    if col >= right || row >= bottom {
+        return None;
+    }
+    Some((col, row, right - col, bottom - row))
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::super::tiles::{cells_with_middle, TileShape};
+    use super::super::virtual_terminal::{Content, Desired, SourceRect, Sprites};
     use super::*;
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
@@ -1421,7 +1424,7 @@ mod tests {
             with_border(&plain, BORDER + 1),
         ];
         for variant in &variants {
-            sprites(&mut r, &[box_placement(variant, 0, 0, 4, 3)]);
+            paint_desired(&mut r, &[box_placement(variant, 0, 0, 4, 3)]);
         }
         assert_eq!(r.cache.len(), variants.len());
     }
@@ -1444,7 +1447,7 @@ mod tests {
     fn an_unselected_box_places_no_brackets() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = box_node(Some(1), None, false);
-        let images = sprites(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
+        let images = paint_desired(&mut r, &[box_placement(&node, 4, 4, 4, 4)]);
         assert_eq!(images.len(), 1);
     }
 
@@ -1452,7 +1455,7 @@ mod tests {
     fn a_selected_box_places_its_brackets_above_the_fill_and_below_content() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node();
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[
                 box_placement(&box_node(Some(1), None, false), 4, 4, 4, 4),
@@ -1461,8 +1464,8 @@ mod tests {
             ],
         );
         let layers: std::collections::BTreeSet<i32> = images.iter().map(|image| image.z).collect();
-        let brackets = composed(&images, BRACKETS_Z, r.window);
-        let boxed = composed(&images, depth_z(0), r.window);
+        let brackets = composed_desired(&mut r, &images, BRACKETS_Z);
+        let boxed = composed_desired(&mut r, &images, depth_z(0));
         let content = images
             .iter()
             .find(|image| {
@@ -1477,7 +1480,7 @@ mod tests {
         );
     }
 
-    fn z_at(images: &[Placed], cell: (i64, i64)) -> i32 {
+    fn z_at(images: &[Desired], cell: (i64, i64)) -> i32 {
         images
             .iter()
             .find(|image| (image.col, image.row) == cell)
@@ -1492,7 +1495,7 @@ mod tests {
             depth: 1,
             ..box_placement(&box_node(None, None, false), 12, 12, 3, 3)
         };
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[
                 box_placement(&box_node(Some(1), None, false), 2, 2, 3, 3),
@@ -1513,7 +1516,7 @@ mod tests {
             depth: 1,
             ..box_placement(&box_node(None, None, false), 12, 12, 3, 3)
         };
-        let images = sprites(&mut r, &[label, deeper]);
+        let images = paint_desired(&mut r, &[label, deeper]);
         assert!(z_at(&images, (12, 12)) > z_at(&images, (2, 2)));
     }
 
@@ -1521,8 +1524,8 @@ mod tests {
     fn the_brackets_is_centred_on_the_box_and_extends_beyond_it() {
         let mut r = renderer_on(window(20, 20, 2, 2));
         let node = selected_box_node();
-        let images = sprites(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
-        let brackets = composed(&images, BRACKETS_Z, r.window);
+        let images = paint_desired(&mut r, &[box_placement(&node, 7, 7, 6, 6)]);
+        let brackets = composed_desired(&mut r, &images, BRACKETS_Z);
         assert_eq!(brackets.col, 8 - BRACKET_MARGIN);
         assert_eq!(brackets.row, 8 - BRACKET_MARGIN);
         assert_eq!(
@@ -1539,8 +1542,8 @@ mod tests {
     fn transparent_sprite_padding_is_cell_aligned_independently_of_bracket_thickness() {
         let mut r = renderer_on(window(20, 20, 5, 9));
         let node = selected_box_node();
-        let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let brackets = composed(&images, BRACKETS_Z, r.window);
+        let images = paint_desired(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
+        let brackets = composed_desired(&mut r, &images, BRACKETS_Z);
         assert_eq!(brackets.col, 4 - BRACKET_MARGIN);
         assert_eq!(brackets.row, 4 - BRACKET_MARGIN);
         let padding_px_x = BRACKET_MARGIN * r.window.cell_width;
@@ -1560,8 +1563,8 @@ mod tests {
     fn the_brackets_are_drawn_in_the_foreground_colour() {
         let mut r = renderer_on(window(20, 20, CELL_WIDTH, CELL_HEIGHT));
         let node = selected_box_node();
-        let images = sprites(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
-        let brackets = composed(&images, BRACKETS_Z, r.window);
+        let images = paint_desired(&mut r, &[box_placement(&node, 3, 3, 6, 6)]);
+        let brackets = composed_desired(&mut r, &images, BRACKETS_Z);
         let (foreground_r, foreground_g, foreground_b) = colour(None);
         let painted: Vec<&[u8]> = brackets
             .canvas
@@ -1593,18 +1596,105 @@ mod tests {
         ] {
             let next = rendered_placements(&mut r, &[box_placement(&node, x, y, width, height)]);
             assert!(shown_ids(&next).is_empty());
-            assert_eq!(placed_ids(&next).len(), CORNERS.len());
+            assert!(deleted_ids(&next).is_empty());
+            assert!(placed_ids(&next).len() <= CORNERS.len());
         }
     }
 
-    impl Placed {
-        fn canvas(&self) -> &Canvas {
-            match &self.image {
-                Image::Fresh { canvas, .. } => canvas,
-                Image::Cached { .. } => panic!("a cached image carries no canvas"),
-                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
+    fn paint_desired(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Desired> {
+        let mut desired = Vec::new();
+        r.paint(&mut desired, placements, whole(r.window));
+        desired
+    }
+
+    fn paint_desired_in(
+        r: &mut TerminalRenderer,
+        placements: &[Placement],
+        area: Area,
+    ) -> Vec<Desired> {
+        let mut desired = Vec::new();
+        r.paint(&mut desired, placements, area);
+        desired
+    }
+
+    fn framed(r: &mut TerminalRenderer, state: &State) -> Vec<Desired> {
+        r.paint_scene(&editor(state, whole(r.window)))
+    }
+
+    fn canvas_of(r: &mut TerminalRenderer, d: &Desired) -> Canvas {
+        let content = Sprites::content(r, &d.image);
+        let canvas = match content {
+            Content::Still(c) => c,
+            Content::Animation { root, .. } => root,
+        };
+        match &d.source {
+            Some(src) => cropped(&canvas, src),
+            None => canvas,
+        }
+    }
+
+    fn cropped(canvas: &Canvas, src: &SourceRect) -> Canvas {
+        let mut pixels = Vec::new();
+        for y in src.y..src.y + src.height {
+            let start = ((y * canvas.width + src.x) * 4) as usize;
+            let end = ((y * canvas.width + src.x + src.width) * 4) as usize;
+            pixels.extend_from_slice(&canvas.pixels[start..end]);
+        }
+        Canvas {
+            pixels,
+            width: src.width,
+            height: src.height,
+        }
+    }
+
+    fn covered_cells(r: &mut TerminalRenderer, d: &Desired) -> (i64, i64) {
+        match d.cells {
+            Some(cells) => cells,
+            None => {
+                let canvas = canvas_of(r, d);
+                (
+                    canvas.width / r.window.cell_width,
+                    canvas.height / r.window.cell_height,
+                )
             }
         }
+    }
+
+    fn stretched_canvas_of(r: &mut TerminalRenderer, d: &Desired) -> Canvas {
+        let tile = canvas_of(r, d);
+        let (cols, rows) = d.cells.unwrap_or((1, 1));
+        let (width, height) = (tile.width * cols, tile.height * rows);
+        if d.cells.is_none() {
+            return tile;
+        }
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let from = (((y % tile.height) * tile.width + x % tile.width) * 4) as usize;
+                pixels.extend_from_slice(&tile.pixels[from..from + 4]);
+            }
+        }
+        Canvas {
+            pixels,
+            width,
+            height,
+        }
+    }
+
+    fn glyph_cols(desired: &[Desired], row: i64) -> Vec<i64> {
+        desired
+            .iter()
+            .filter(|d| d.row == row && matches!(d.image, ImageKey::Glyph(_)))
+            .map(|d| d.col)
+            .collect()
+    }
+
+    fn is_caret(d: &Desired) -> bool {
+        matches!(d.image, ImageKey::Caret(_))
+    }
+
+    fn image_keys(desired: &[Desired]) -> std::collections::HashSet<ImageKey> {
+        desired.iter().map(|d| d.image.clone()).collect()
     }
 
     struct Sprite {
@@ -1613,45 +1703,39 @@ mod tests {
         canvas: Canvas,
     }
 
-    fn composed<'a>(images: &'a [Placed], z: i32, window: Window) -> Sprite {
-        let layer: Vec<&'a Placed> = images.iter().filter(|image| image.z == z).collect();
-        let fresh: std::collections::HashMap<kitty::ImageId, &'a Canvas> = layer
+    fn composed_desired(r: &mut TerminalRenderer, desired: &[Desired], z: i32) -> Sprite {
+        let layer: Vec<usize> = desired
             .iter()
-            .filter_map(|image| match &image.image {
-                Image::Fresh { id, canvas } => Some((*id, canvas)),
-                Image::Cached { .. } | Image::Growing { .. } => None,
-            })
+            .enumerate()
+            .filter(|(_, d)| d.z == z)
+            .map(|(i, _)| i)
             .collect();
-        let canvas_of = |image: &'a Placed| -> &'a Canvas {
-            match &image.image {
-                Image::Fresh { canvas, .. } => canvas,
-                Image::Cached { id } => fresh[id],
-                Image::Growing { .. } => panic!("a growing image carries no single canvas"),
-            }
-        };
-        let col = layer.iter().map(|image| image.col).min().expect("a layer");
-        let row = layer.iter().map(|image| image.row).min().expect("a layer");
-        let origin = |image: &Placed| {
-            (
-                (image.col - col) * window.cell_width,
-                (image.row - row) * window.cell_height,
-            )
-        };
+        assert!(!layer.is_empty(), "no items at z={z}");
+        let canvases: Vec<Canvas> = layer
+            .iter()
+            .map(|&i| stretched_canvas_of(r, &desired[i]))
+            .collect();
+        let col = layer.iter().map(|&i| desired[i].col).min().unwrap();
+        let row = layer.iter().map(|&i| desired[i].row).min().unwrap();
+        let cell_w = r.window.cell_width;
+        let cell_h = r.window.cell_height;
         let width = layer
             .iter()
-            .map(|image| origin(image).0 + canvas_of(image).width)
+            .zip(&canvases)
+            .map(|(&i, c)| (desired[i].col - col) * cell_w + c.width)
             .max()
-            .expect("a layer");
+            .unwrap();
         let height = layer
             .iter()
-            .map(|image| origin(image).1 + canvas_of(image).height)
+            .zip(&canvases)
+            .map(|(&i, c)| (desired[i].row - row) * cell_h + c.height)
             .max()
-            .expect("a layer");
-        let channels = 4;
+            .unwrap();
+        let channels = 4i64;
         let mut pixels = vec![0u8; (width * height * channels) as usize];
-        for image in &layer {
-            let (x, y) = origin(image);
-            let canvas = canvas_of(image);
+        for (&idx, canvas) in layer.iter().zip(&canvases) {
+            let x = (desired[idx].col - col) * cell_w;
+            let y = (desired[idx].row - row) * cell_h;
             for line in 0..canvas.height {
                 for column in 0..canvas.width {
                     let from = ((line * canvas.width + column) * channels) as usize;
@@ -1689,45 +1773,6 @@ mod tests {
     fn renderer_on(window: Window) -> TerminalRenderer {
         let source = Box::new(FakeGlyphSource::new(window.cell_width, window.cell_height));
         TerminalRenderer::new(window, source, CACHE_LIMIT)
-    }
-
-    fn drawn_frame(r: &mut TerminalRenderer, placements: &[Placement]) -> Frame {
-        let mut frame = Frame::new(r.window);
-        let area = whole(r.window);
-        r.paint(&mut frame, placements, area);
-        frame
-    }
-
-    fn rows(frame: &Frame) -> Vec<String> {
-        frame
-            .characters
-            .iter()
-            .map(|row| row.iter().collect())
-            .collect()
-    }
-
-    fn grid(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<String> {
-        rows(&drawn_frame(r, placements))
-    }
-
-    fn sprites(r: &mut TerminalRenderer, placements: &[Placement]) -> Vec<Placed> {
-        drawn_frame(r, placements).images
-    }
-
-    fn unwrapped(frame: &str) -> &str {
-        frame
-            .strip_prefix(BEGIN_SYNCHRONIZED_UPDATE)
-            .unwrap()
-            .strip_suffix(END_SYNCHRONIZED_UPDATE)
-            .unwrap()
-    }
-
-    fn lines_of(frame: &str) -> Vec<&str> {
-        unwrapped(frame)
-            .strip_prefix(HOME_CURSOR)
-            .unwrap()
-            .split("\r\n")
-            .collect()
     }
 
     fn label_placement(
@@ -1774,244 +1819,19 @@ mod tests {
     }
 
     #[test]
-    fn a_box_on_screen_is_cropped_to_the_whole_shape() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let (width, height) = (5, 4);
-        let frame = Frame::new(window);
-        assert_eq!(
-            frame.crop(
-                &box_placement(&node, 2, 3, width, height),
-                whole(frame.window)
-            ),
-            Some(Crop {
-                col: 2,
-                row: 3,
-                first_x: 0,
-                last_x: width * window.cell_width,
-                first_y: 0,
-                last_y: height * window.cell_height,
-            })
-        );
-    }
-
-    #[test]
-    fn a_crop_is_clipped_to_its_area_not_the_window() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let area = Area {
-            col: 2,
-            row: 3,
-            cols: 5,
-            rows: 4,
-        };
-        let frame = Frame::new(window);
-        let crop = frame
-            .crop(&box_placement(&node, 0, 0, window.cols, window.rows), area)
-            .unwrap();
-        assert_eq!((crop.col, crop.row), (area.col, area.row));
-        assert_eq!(
-            (crop.first_x, crop.last_x),
-            (
-                area.col * window.cell_width,
-                (area.col + area.cols) * window.cell_width
-            )
-        );
-        assert_eq!(
-            (crop.first_y, crop.last_y),
-            (
-                area.row * window.cell_height,
-                (area.row + area.rows) * window.cell_height
-            )
-        );
-    }
-
-    #[test]
-    fn a_crop_overhanging_the_left_drops_the_hidden_columns() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let (hidden, width) = (2, 5);
-        let frame = Frame::new(window);
-        let crop = frame
-            .crop(
-                &box_placement(&node, -hidden, 0, width, 3),
-                whole(frame.window),
-            )
-            .unwrap();
-        assert_eq!(crop.col, 0);
-        assert_eq!(crop.first_x, hidden * window.cell_width);
-        assert_eq!(crop.last_x, width * window.cell_width);
-    }
-
-    #[test]
-    fn a_crop_overhanging_the_top_drops_the_hidden_rows() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let (hidden, height) = (2, 5);
-        let frame = Frame::new(window);
-        let crop = frame
-            .crop(
-                &box_placement(&node, 0, -hidden, 3, height),
-                whole(frame.window),
-            )
-            .unwrap();
-        assert_eq!(crop.row, 0);
-        assert_eq!(crop.first_y, hidden * window.cell_height);
-        assert_eq!(crop.last_y, height * window.cell_height);
-    }
-
-    #[test]
-    fn a_crop_overhanging_the_right_stops_at_the_last_column() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let x = 18;
-        let frame = Frame::new(window);
-        let crop = frame
-            .crop(&box_placement(&node, x, 0, 5, 3), whole(frame.window))
-            .unwrap();
-        assert_eq!(crop.col, x);
-        assert_eq!(crop.first_x, 0);
-        assert_eq!(crop.last_x, (window.cols - x) * window.cell_width);
-    }
-
-    #[test]
-    fn a_crop_overhanging_the_bottom_stops_at_the_last_row() {
-        let node = box_node(None, None, false);
-        let window = window(20, 10, 4, 8);
-        let y = 8;
-        let frame = Frame::new(window);
-        let crop = frame
-            .crop(&box_placement(&node, 0, y, 3, 5), whole(frame.window))
-            .unwrap();
-        assert_eq!(crop.row, y);
-        assert_eq!(crop.first_y, 0);
-        assert_eq!(crop.last_y, (window.rows - y) * window.cell_height);
-    }
-
-    #[test]
-    fn a_box_beyond_the_right_edge_has_no_crop() {
-        let node = box_node(None, None, false);
-        let frame = Frame::new(window(20, 10, 4, 8));
-        assert_eq!(
-            frame.crop(&box_placement(&node, 20, 0, 4, 3), whole(frame.window)),
-            None
-        );
-    }
-
-    #[test]
-    fn a_box_beyond_the_top_edge_has_no_crop() {
-        let node = box_node(None, None, false);
-        let frame = Frame::new(window(20, 10, 4, 8));
-        assert_eq!(
-            frame.crop(&box_placement(&node, 0, -3, 4, 3), whole(frame.window)),
-            None
-        );
-    }
-
-    #[test]
-    fn line_count_is_unchanged() {
-        let mut r = renderer_on(window(3, 3, 2, 4));
-        assert_eq!(lines_of(&rendered(&mut r, &empty_state())).len(), 3);
-    }
-
-    #[test]
-    fn the_graphics_payload_is_appended_to_the_last_line_only() {
-        let frame = Frame::new(window(3, 2, 2, 4));
-        let output = String::from_utf8(frame.into_bytes()).unwrap();
-        let lines = lines_of(&output);
-        assert_eq!(lines[0], BLANK.to_string().repeat(3));
-        assert_eq!(
-            lines[1],
-            format!("{}{}", BLANK.to_string().repeat(3), kitty::soft_clear())
-        );
-    }
-
-    #[test]
-    fn a_frame_with_sprites_ends_with_a_clear_then_each_sprite_shown_in_order() {
-        let node = box_node(None, None, false);
-        let placements = [
-            box_placement(&node, 0, 0, 4, 3),
-            box_placement(&node, 6, 0, 4, 3),
-        ];
-        let mut r = renderer_on(window(10, 3, 2, 4));
-        let frame = drawn_frame(&mut r, &placements);
-        assert!(frame.images.len() > 1);
-        let expected: String = std::iter::once(kitty::soft_clear())
-            .chain(
-                Frame::placement_ids()
-                    .zip(&frame.images)
-                    .map(|(placement, image)| match &image.image {
-                        Image::Fresh { id, canvas } => {
-                            kitty::show(canvas, *id, image.col, image.row, image.z)
-                        }
-                        Image::Cached { id } => {
-                            kitty::place(*id, placement, image.col, image.row, image.z)
-                        }
-                        Image::Growing { .. } => panic!("no box in this frame grows"),
-                    }),
-            )
-            .map(|command| command.to_string())
-            .collect();
-        let bytes = String::from_utf8(frame.into_bytes()).unwrap();
-        assert!(unwrapped(&bytes).ends_with(&expected));
-    }
-
-    fn a_labelled_box(width: i64, height: i64) -> [Placement<'static>; 2] {
-        [
-            box_placement(&box_node(None, None, false), 0, 0, width, height),
-            label_placement("hi", 1, height / 2, 2, 1),
-        ]
-    }
-
-    #[test]
-    fn an_overflowing_diagram_is_cropped_equally_on_both_sides() {
-        let state = one_leaf();
-        let width = leaf_box(&state).width;
-        let cut_each_side = 1;
-        let window = window(width - 2 * cut_each_side, 10, 1, 1);
-        let frame = Frame::new(window);
-        let screen = editor(&state, whole(window));
-        let (body, diagram) = &screen[0];
-        let placed = &diagram[0];
-        let crop = frame.crop(placed, *body).unwrap();
-        let cut_on_left = crop.first_x;
-        let cut_on_right = placed.width * window.cell_width - crop.last_x;
-        assert_eq!(cut_on_left, cut_each_side);
-        assert_eq!(cut_on_right, cut_each_side);
-    }
-
-    #[test]
-    fn on_resize_re_centres_the_next_render_on_the_new_size() {
-        let state = one_leaf();
-        let leaf = leaf_box(&state);
-        let mut r = renderer_on(window(20, 10, 1, 1));
-        framed(&mut r, &state);
-        let (cols, rows) = (40, 20);
-        r.on_resize(window(cols, rows, 1, 1));
-        let frame = framed(&mut r, &state);
-        assert_eq!(
-            (frame.images[0].col, frame.images[0].row),
-            (
-                (cols - leaf.width).div_euclid(2),
-                (rows - FOOTER_ROWS - leaf.height).div_euclid(2)
-            )
-        );
-    }
-
-    #[test]
     fn on_resize_with_a_different_rounded_cell_height_does_not_panic_on_the_next_render() {
         let mut r = renderer_on(window(40, 20, 2, 4));
         let node = box_node(None, None, false);
         let placement = box_placement(&node, 0, 0, 4, 3);
-        sprites(&mut r, std::slice::from_ref(&placement));
+        paint_desired(&mut r, std::slice::from_ref(&placement));
         r.on_resize(window(40, 20, 2, 5));
-        sprites(&mut r, &[placement]);
+        paint_desired(&mut r, &[placement]);
     }
 
     #[test]
     fn on_resize_leaves_the_sprite_cache_untouched() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        sprites(
+        paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
@@ -2020,20 +1840,11 @@ mod tests {
         assert_eq!(r.cache.len(), 1);
     }
 
-    fn rendered(r: &mut TerminalRenderer, state: &State) -> String {
-        let mut out = Vec::new();
-        r.render(&editor(state, whole(r.window)), &mut out).unwrap();
-        String::from_utf8(out).unwrap()
-    }
-
     fn rendered_placements(r: &mut TerminalRenderer, placements: &[Placement<'static>]) -> String {
         let scene = vec![(whole(r.window), placements.to_vec())];
-        String::from_utf8(r.frame(&scene).into_bytes()).unwrap()
-    }
-
-    fn framed(r: &mut TerminalRenderer, state: &State) -> Frame {
-        let scene = editor(state, whole(r.window));
-        r.frame(&scene)
+        let mut out = Vec::new();
+        r.render(&scene, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
     fn empty_state() -> State {
@@ -2041,113 +1852,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_goes_home_before_the_lines() {
-        let frame = Frame::new(Window {
-            cols: 2,
-            rows: 2,
-            cell_width: 1,
-            cell_height: 1,
-        });
-        assert_eq!(
-            unwrapped(&String::from_utf8(frame.into_bytes()).unwrap()),
-            format!("{HOME_CURSOR}  \r\n  {}", kitty::soft_clear())
-        );
-    }
-
-    #[test]
-    fn a_frame_begins_a_synchronized_update_before_homing_the_cursor_and_ends_it_last() {
-        let mut r = renderer_on(window(3, 3, 2, 4));
-        let output = rendered(&mut r, &empty_state());
-        assert!(output.starts_with(&format!("{BEGIN_SYNCHRONIZED_UPDATE}{HOME_CURSOR}")));
-        assert!(output.ends_with(END_SYNCHRONIZED_UPDATE));
-    }
-
-    fn a_frame_after_one_with_a_transient_image(r: &mut TerminalRenderer) -> Frame {
-        let first = [
-            label_placement("aa", 0, 0, 2, 1),
-            caret_placement(2, 0, 1, 1),
-        ];
-        let second = [
-            label_placement("ab", 0, 0, 2, 1),
-            caret_placement(2, 0, 1, 1),
-        ];
-        rendered_placements(r, &first);
-        r.frame(&vec![(whole(r.window), second.to_vec())])
-    }
-
-    fn assert_one_synchronized_update_ending_after_the_images(frame: Frame) {
-        let last_image = Frame::placement_ids()
-            .zip(&frame.images)
-            .last()
-            .map(|(placement, image)| image.command(placement).to_string());
-        let output = String::from_utf8(frame.into_bytes()).unwrap();
-        assert_eq!(output.matches(BEGIN_SYNCHRONIZED_UPDATE).count(), 1);
-        assert_eq!(output.matches(END_SYNCHRONIZED_UPDATE).count(), 1);
-        let end = output.find(END_SYNCHRONIZED_UPDATE).unwrap();
-        if let Some(last_image) = last_image {
-            assert!(output.rfind(&last_image).unwrap() + last_image.len() <= end);
-        }
-    }
-
-    #[test]
-    fn an_empty_frame_holds_one_synchronized_update() {
-        assert_one_synchronized_update_ending_after_the_images(Frame::new(window(3, 2, 2, 4)));
-    }
-
-    #[test]
-    fn a_frame_of_fresh_cached_and_transient_images_holds_one_synchronized_update_ending_after_them(
-    ) {
-        let mut r = renderer_on(window(3, 1, 1, 1));
-        let frame = a_frame_after_one_with_a_transient_image(&mut r);
-        assert!(!frame.previous_transient_images.is_empty());
-        assert_one_synchronized_update_ending_after_the_images(frame);
-    }
-
-    #[test]
-    fn inside_the_synchronized_update_come_rows_soft_clear_deletes_then_images_in_scene_order() {
-        let mut r = renderer_on(window(3, 1, 1, 1));
-        let frame = a_frame_after_one_with_a_transient_image(&mut r);
-        assert!(frame
-            .images
-            .iter()
-            .any(|image| matches!(image.image, Image::Fresh { .. })));
-        assert!(frame
-            .images
-            .iter()
-            .any(|image| matches!(image.image, Image::Cached { .. })));
-        assert!(!frame.previous_transient_images.is_empty());
-        let expected: String = [HOME_CURSOR.to_string(), rows(&frame).join("\r\n")]
-            .into_iter()
-            .chain(std::iter::once(kitty::soft_clear().to_string()))
-            .chain(
-                frame
-                    .previous_transient_images
-                    .iter()
-                    .map(|id| kitty::delete(*id).to_string()),
-            )
-            .chain(
-                Frame::placement_ids()
-                    .zip(&frame.images)
-                    .map(|(placement, image)| image.command(placement).to_string()),
-            )
-            .collect();
-        let output = String::from_utf8(frame.into_bytes()).unwrap();
-        assert_eq!(unwrapped(&output), expected);
-    }
-
-    #[test]
-    fn no_newline_follows_the_last_line() {
-        let mut r = renderer_on(Window {
-            cols: 2,
-            rows: 2,
-            cell_width: 1,
-            cell_height: 1,
-        });
-        assert!(!rendered(&mut r, &empty_state()).ends_with('\n'));
-    }
-
-    #[test]
-    fn repeated_glyphs_transmit_once_and_place_the_cached_image() {
+    fn repeated_glyphs_transmit_once_and_place_the_image_under_distinct_placement_ids() {
         let placements = [label_placement("aa", 0, 0, 2, 1)];
         let mut r = renderer_on(window(3, 1, 1, 1));
 
@@ -2155,8 +1860,9 @@ mod tests {
 
         let shown = shown_ids(&output);
         assert_eq!(shown.len(), 1);
-        assert_eq!(placed_ids(&output), shown);
-        assert!(output.find("a=T").unwrap() < output.find("a=p").unwrap());
+        assert_eq!(placed_ids(&output), vec![shown[0].clone(); 2]);
+        assert!(all_distinct(&placement_ids(&output)));
+        assert!(output.find("a=t").unwrap() < output.find("a=p").unwrap());
     }
 
     fn command_fields(output: &str, action: &str, field: &str) -> Vec<String> {
@@ -2174,7 +1880,7 @@ mod tests {
     }
 
     fn shown_ids(output: &str) -> Vec<String> {
-        command_fields(output, "a=T,", "i=")
+        command_fields(output, "a=t,", "i=")
     }
 
     fn placed_ids(output: &str) -> Vec<String> {
@@ -2189,54 +1895,21 @@ mod tests {
         command_fields(output, "a=p,", "p=")
     }
 
-    fn image_id(value: &str) -> kitty::ImageId {
-        kitty::ImageId::new(value.parse().expect("image IDs are non-zero numbers"))
-    }
-
     fn all_distinct(ids: &[String]) -> bool {
         ids.iter().collect::<std::collections::HashSet<_>>().len() == ids.len()
     }
 
     #[test]
-    fn repeated_glyphs_in_a_frame_each_get_their_own_placement_id() {
-        let text = "aaa";
-        let placements = [label_placement(text, 0, 0, text.len() as i64, 1)];
-        let mut r = renderer_on(window(3, 1, 1, 1));
-
-        let output = rendered_placements(&mut r, &placements);
-
-        let ids = placement_ids(&output);
-        assert_eq!(ids.len(), text.len() - 1);
-        assert!(all_distinct(&ids));
-    }
-
-    #[test]
-    fn fully_cached_glyphs_in_a_later_frame_each_get_their_own_placement_id() {
-        let text = "aaa";
-        let placements = [label_placement(text, 0, 0, text.len() as i64, 1)];
-        let mut r = renderer_on(window(3, 1, 1, 1));
-
-        rendered_placements(&mut r, &placements);
-        let second = rendered_placements(&mut r, &placements);
-
-        let ids = placement_ids(&second);
-        assert_eq!(ids.len(), text.len());
-        assert!(all_distinct(&ids));
-    }
-
-    #[test]
-    fn a_glyph_is_placed_from_the_terminal_cache_in_the_next_frame() {
+    fn an_unchanged_frame_sends_no_commands() {
         let placements = [label_placement("a", 0, 0, 1, 1)];
         let mut r = renderer_on(window(3, 1, 1, 1));
 
         let first = rendered_placements(&mut r, &placements);
         let second = rendered_placements(&mut r, &placements);
 
-        assert_eq!(first.matches("a=T").count(), 1);
-        assert_eq!(second.matches("a=T").count(), 0);
-        assert_eq!(second.matches("a=p").count(), 1);
-        assert!(unwrapped(&second).starts_with(&format!("{HOME_CURSOR}   {}", kitty::soft_clear())));
-        assert!(deleted_ids(&second).is_empty());
+        assert_eq!(first.matches("a=t").count(), 1);
+        assert_eq!(first.matches("a=p").count(), 1);
+        assert!(!second.contains("\x1b_G"));
     }
 
     #[test]
@@ -2265,7 +1938,8 @@ mod tests {
         let shown = shown_ids(&output);
         assert_eq!(shown.len(), placements.len());
         assert!(all_distinct(&shown));
-        assert!(placed_ids(&output).is_empty());
+        assert_eq!(placed_ids(&output).len(), placements.len());
+        assert!(all_distinct(&placed_ids(&output)));
     }
 
     #[test]
@@ -2283,74 +1957,17 @@ mod tests {
     }
 
     #[test]
-    fn a_non_glyph_image_is_retransmitted_with_a_new_id_and_its_old_id_deleted() {
-        let placements = [caret_placement(0, 0, 1, 1)];
-        let mut r = renderer_on(window(3, 1, 1, 1));
-
-        let first = rendered_placements(&mut r, &placements);
-        let second = rendered_placements(&mut r, &placements);
-
-        let (first_shown, second_shown) = (shown_ids(&first), shown_ids(&second));
-        assert_eq!(first_shown.len(), 1);
-        assert_eq!(second_shown.len(), 1);
-        assert_ne!(first_shown, second_shown);
-        assert_eq!(deleted_ids(&second), first_shown);
-    }
-
-    #[test]
-    fn transient_images_are_deleted_after_soft_clear_before_the_next_frame() {
-        let placements = [caret_placement(0, 0, 1, 1)];
-        let mut r = renderer_on(window(3, 1, 1, 1));
-
-        let first = rendered_placements(&mut r, &placements);
-        let second = rendered_placements(&mut r, &placements);
-
-        let [first_id] = shown_ids(&first).try_into().unwrap();
-        let clear_then_delete = format!(
-            "{}{}",
-            kitty::soft_clear(),
-            kitty::delete(image_id(&first_id))
-        );
-        let clear_and_delete = second.find(&clear_then_delete).unwrap();
-        let show = second.find("a=T").unwrap();
-        assert!(clear_and_delete < show);
-    }
-
-    #[test]
-    fn the_output_is_sized_by_the_terminal() {
-        let (cols, rows) = (5, 4);
-        let frame = Frame::new(Window {
-            cols,
-            rows,
-            cell_width: 1,
-            cell_height: 1,
-        });
-        let output = String::from_utf8(frame.into_bytes()).unwrap();
-        let body = unwrapped(&output)
-            .strip_prefix(HOME_CURSOR)
-            .unwrap()
-            .strip_suffix(&kitty::soft_clear().to_string())
-            .unwrap();
-        assert_eq!(
-            body.split("\r\n").collect::<Vec<_>>(),
-            vec![BLANK.to_string().repeat(cols as usize); rows as usize]
-        );
-    }
-
-    #[test]
     fn the_caret_is_drawn_last_as_a_solid_sprite() {
         let mut r = renderer_on(window(20, 10, 1, 1));
-        let [box_at, label] = a_labelled_box(4, 3);
+        let box_at = box_placement(&box_node(None, None, false), 0, 0, 4, 3);
+        let label = label_placement("hi", 1, 1, 2, 1);
         let caret = caret_placement(label.x + label.width - 1, label.y, 1, 1);
-        let images = sprites(&mut r, &[box_at, label, caret]);
-        let caret_image = images.last().expect("a sprite is drawn for the caret");
+        let desired = paint_desired(&mut r, &[box_at, label, caret]);
+        let last = desired.last().expect("a sprite is drawn for the caret");
+        let canvas = canvas_of(&mut r, last);
         let (cr, cg, cb) = colour(None);
         let solid = [cr, cg, cb, OPAQUE];
-        assert!(caret_image
-            .canvas()
-            .pixels
-            .chunks(4)
-            .all(|pixel| pixel == solid));
+        assert!(canvas.pixels.chunks(4).all(|pixel| pixel == solid));
     }
 
     #[test]
@@ -2359,7 +1976,6 @@ mod tests {
         let mut r = renderer_on(window);
         let frame = framed(&mut r, &empty_state());
         assert!(frame
-            .images
             .iter()
             .all(|image| image.row >= window.rows - FOOTER_ROWS));
     }
@@ -2369,7 +1985,7 @@ mod tests {
         let cell = 4;
         let mut r = renderer_on(window(40, 10, cell, cell));
         let frame = framed(&mut r, &empty_state());
-        let footer = composed(&frame.images, depth_z(0), r.window);
+        let footer = composed_desired(&mut r, &frame, depth_z(0));
         let (er, eg, eb, ea) = fill_colour(
             Some(crate::style::FOREGROUND),
             quantized_alpha(Some(FOOTER_FILL_OPACITY)),
@@ -2380,43 +1996,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_canvas_fills_terminal() {
-        let grid = grid(&mut renderer_on(window(11, 5, 1, 1)), &[]);
-        assert_eq!(grid, vec![BLANK.to_string().repeat(11); 5]);
-    }
-
-    #[test]
-    fn grid_matches_the_requested_size() {
-        let (cols, rows) = (20, 7);
-        let grid = grid(
-            &mut renderer_on(window(cols, rows, 1, 1)),
-            &[box_placement(&box_node(None, None, false), 4, 4, 3, 3)],
-        );
-        assert_eq!(grid.len() as i64, rows);
-        for line in &grid {
-            assert_eq!(line.chars().count() as i64, cols);
-        }
-    }
-
-    #[test]
-    fn a_box_claims_its_cells_without_border_characters() {
-        let grid = grid(
-            &mut renderer_on(window(11, 11, 1, 1)),
-            &[box_placement(&box_node(None, None, false), 4, 4, 3, 3)],
-        );
-        assert_eq!(&grid[4][4..7], "   ");
-    }
-
-    #[test]
-    fn a_box_reaching_past_the_edge_is_clipped() {
-        let grid = grid(
-            &mut renderer_on(window(4, 2, 1, 1)),
-            &[box_placement(&box_node(None, None, false), 3, 1, 3, 3)],
-        );
-        assert_eq!(grid, vec!["    ".to_string(), "    ".to_string()]);
-    }
-
-    #[test]
     fn label_is_drawn_inside_the_box() {
         let node = box_node(None, None, false);
         let placements = vec![
@@ -2424,14 +2003,8 @@ mod tests {
             label_placement("hi", 1, 1, 2, 1),
         ];
         let mut r = renderer_on(window(5, 3, 1, 1));
-        let frame = drawn_frame(&mut r, &placements);
-        let label_cols: Vec<i64> = frame
-            .images
-            .iter()
-            .filter(|image| image.row == 1)
-            .map(|image| image.col)
-            .collect();
-        assert_eq!(label_cols, vec![1, 2]);
+        let desired = paint_desired(&mut r, &placements);
+        assert_eq!(glyph_cols(&desired, 1), vec![1, 2]);
     }
 
     fn coloured_label_placement(
@@ -2459,16 +2032,12 @@ mod tests {
     #[test]
     fn a_bold_label_renders_a_different_glyph_than_a_regular_label() {
         let mut r = renderer_on(window(2, 1, 1, 1));
-        let regular_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, false)])[0]
-            .canvas()
-            .pixels
-            .clone();
+        let regular = paint_desired(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, false)]);
+        let regular_pixels = canvas_of(&mut r, &regular[0]).pixels;
 
         let mut r = renderer_on(window(2, 1, 1, 1));
-        let bold_pixels = sprites(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, true)])[0]
-            .canvas()
-            .pixels
-            .clone();
+        let bold = paint_desired(&mut r, &[bold_label_placement("h", 0, 0, 1, 1, true)]);
+        let bold_pixels = canvas_of(&mut r, &bold[0]).pixels;
 
         assert_ne!(regular_pixels, bold_pixels);
     }
@@ -2476,13 +2045,11 @@ mod tests {
     #[test]
     fn a_label_with_a_colour_renders_a_different_glyph_colour_than_the_default() {
         let mut r = renderer_on(window(2, 1, 1, 1));
-        let default_pixels = sprites(&mut r, &[coloured_label_placement("h", 0, 0, 1, 1, None)])[0]
-            .canvas()
-            .pixels
-            .clone();
+        let default = paint_desired(&mut r, &[coloured_label_placement("h", 0, 0, 1, 1, None)]);
+        let default_pixels = canvas_of(&mut r, &default[0]).pixels;
 
         let mut r = renderer_on(window(2, 1, 1, 1));
-        let coloured_pixels = sprites(
+        let coloured = paint_desired(
             &mut r,
             &[coloured_label_placement(
                 "h",
@@ -2492,10 +2059,8 @@ mod tests {
                 1,
                 Some(crate::style::LIME),
             )],
-        )[0]
-        .canvas()
-        .pixels
-        .clone();
+        );
+        let coloured_pixels = canvas_of(&mut r, &coloured[0]).pixels;
 
         assert_ne!(default_pixels, coloured_pixels);
     }
@@ -2503,10 +2068,8 @@ mod tests {
     #[test]
     fn a_label_without_a_colour_matches_todays_default_foreground_rendering() {
         let mut r = renderer_on(window(2, 1, 1, 1));
-        let pixels = sprites(&mut r, &[label_placement("h", 0, 0, 1, 1)])[0]
-            .canvas()
-            .pixels
-            .clone();
+        let desired = paint_desired(&mut r, &[label_placement("h", 0, 0, 1, 1)]);
+        let pixels = canvas_of(&mut r, &desired[0]).pixels;
 
         assert!(pixels.iter().all(|&byte| byte == 0));
     }
@@ -2520,28 +2083,19 @@ mod tests {
             caret_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(5, 3, 1, 1));
-        let frame = drawn_frame(&mut r, &placements);
-        assert_eq!(rows(&frame)[1], "     ".to_string());
-        let (cr, cg, cb) = colour(None);
-        let solid = [cr, cg, cb, OPAQUE];
-        let is_caret =
-            |image: &&Placed| image.canvas().pixels.chunks(4).all(|pixel| pixel == solid);
-        let caret_cols: Vec<i64> = frame
-            .images
+        let desired = paint_desired(&mut r, &placements);
+        let caret_cols: Vec<i64> = desired
             .iter()
-            .filter(|image| image.row == 1)
-            .filter(is_caret)
-            .map(|image| image.col)
+            .filter(|d| d.row == 1 && is_caret(d))
+            .map(|d| d.col)
             .collect();
         assert_eq!(caret_cols, vec![3]);
-        let label_cols: Vec<i64> = frame
-            .images
+        assert_eq!(glyph_cols(&desired, 1), vec![1, 2]);
+        let caret_z = desired.iter().find(|d| is_caret(d)).unwrap().z;
+        assert!(desired
             .iter()
-            .filter(|image| image.row == 1)
-            .filter(|image| !is_caret(image))
-            .map(|image| image.col)
-            .collect();
-        assert_eq!(label_cols, vec![1, 2]);
+            .filter(|d| matches!(d.image, ImageKey::Glyph(_)))
+            .all(|d| d.z < caret_z));
     }
 
     #[test]
@@ -2553,141 +2107,160 @@ mod tests {
             caret_placement(3, 1, 1, 1),
         ];
         let mut r = renderer_on(window(3, 3, 1, 1));
-        let frame = drawn_frame(&mut r, &placements);
-        let label_cols: Vec<i64> = frame
-            .images
-            .iter()
-            .filter(|image| image.row == 1)
-            .map(|image| image.col)
-            .collect();
-        assert_eq!(label_cols, vec![1, 2]);
+        let desired = paint_desired(&mut r, &placements);
+        assert_eq!(glyph_cols(&desired, 1), vec![1, 2]);
+        assert!(!desired.iter().any(is_caret));
     }
 
     #[test]
     fn a_box_does_not_draw_a_caret() {
-        let grid = grid(
-            &mut renderer_on(window(5, 3, 1, 1)),
+        let mut r = renderer_on(window(5, 3, 1, 1));
+        let desired = paint_desired(
+            &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 5, 3)],
         );
-        assert!(!grid.join("").contains('\u{2588}'));
+        assert!(!desired.iter().any(is_caret));
     }
 
     #[test]
     fn caret_placement_is_drawn_at_its_own_position() {
         let mut r = renderer_on(window(4, 3, 1, 1));
-        let images = sprites(&mut r, &[caret_placement(2, 1, 1, 1)]);
+        let images = paint_desired(&mut r, &[caret_placement(2, 1, 1, 1)]);
         assert_eq!(images.len(), 1);
         assert_eq!((images[0].col, images[0].row), (2, 1));
         let (cr, cg, cb) = colour(None);
-        assert_eq!(&images[0].canvas().pixels[0..4], &[cr, cg, cb, OPAQUE]);
+        assert_eq!(
+            &canvas_of(&mut r, &images[0]).pixels[0..4],
+            &[cr, cg, cb, OPAQUE]
+        );
     }
 
     #[test]
     fn a_caret_outside_the_grid_is_clipped() {
         let mut r = renderer_on(window(4, 3, 1, 1));
-        let images = sprites(&mut r, &[caret_placement(9, 9, 1, 1)]);
+        let images = paint_desired(&mut r, &[caret_placement(9, 9, 1, 1)]);
         assert!(images.is_empty());
-    }
-
-    #[test]
-    fn an_arrow_leaves_the_gap_blank() {
-        let grid = grid(
-            &mut renderer_on(window(4, 4, 1, 1)),
-            &[arrow_placement(vec![0], 0, 2, 1, 1, 2)],
-        );
-        assert_eq!(grid, vec!["    ".to_string(); 4]);
-    }
-
-    #[test]
-    fn a_plain_box_emits_no_escapes() {
-        let node = box_node(None, None, false);
-        let placements = vec![
-            box_placement(&node, 0, 0, 5, 3),
-            label_placement("hi", 1, 1, 2, 1),
-            caret_placement(3, 1, 1, 1),
-        ];
-        let grid = grid(&mut renderer_on(window(5, 3, 1, 1)), &placements);
-        assert!(!grid.join("").contains('\x1b'));
-    }
-
-    #[test]
-    fn a_coloured_box_puts_no_colour_in_the_grid() {
-        let grid = grid(
-            &mut renderer_on(window(5, 3, 1, 1)),
-            &[box_placement(&box_node(Some(2), None, false), 0, 0, 5, 3)],
-        );
-        assert_eq!(grid, vec!["     ".to_string(); 3]);
     }
 
     #[test]
     fn a_caret_has_a_sprite() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        assert_eq!(sprites(&mut r, &[caret_placement(1, 1, 1, 1)]).len(), 1);
+        assert_eq!(
+            paint_desired(&mut r, &[caret_placement(1, 1, 1, 1)]).len(),
+            1
+        );
     }
 
     #[test]
     fn a_box_off_screen_has_no_sprite() {
         let mut r = renderer_on(window(5, 20, 4, 4));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 10, 0, 4, 3)],
         );
         assert!(images.is_empty());
     }
 
+    fn visible_source(images: &[Desired]) -> &SourceRect {
+        images[0]
+            .source
+            .as_ref()
+            .expect("a partly visible sprite names its visible pixels")
+    }
+
     #[test]
     fn a_box_overhanging_the_left_is_cropped() {
         let mut r = renderer_on(window(40, 20, 4, 4));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), -2, 1, 5, 3)],
         );
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].col, 0);
-        assert_eq!(images[0].canvas().width, 3 * 4);
+        let source = visible_source(&images);
+        assert_eq!(source.x, 2 * r.window.cell_width);
+        assert_eq!(source.width, 3 * r.window.cell_width);
+        assert_eq!(source.height, 3 * r.window.cell_height);
     }
 
     #[test]
     fn a_box_overhanging_the_top_is_cropped() {
         let mut r = renderer_on(window(40, 20, 4, 4));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, -2, 4, 5)],
         );
         assert_eq!(images[0].row, 0);
-        assert_eq!(images[0].canvas().height, 3 * 4);
+        let source = visible_source(&images);
+        assert_eq!(source.y, 2 * r.window.cell_height);
+        assert_eq!(source.height, 3 * r.window.cell_height);
     }
 
     #[test]
     fn a_box_overhanging_the_right_is_cropped() {
         let mut r = renderer_on(window(4, 20, 4, 4));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, 0, 6, 3)],
         );
         assert_eq!(images[0].col, 1);
-        assert_eq!(images[0].canvas().width, 3 * 4);
+        let source = visible_source(&images);
+        assert_eq!(source.x, 0);
+        assert_eq!(source.width, 3 * r.window.cell_width);
     }
 
     #[test]
     fn a_box_overhanging_the_bottom_is_cropped() {
         let mut r = renderer_on(window(40, 4, 4, 4));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 1, 3, 6)],
         );
         assert_eq!(images[0].row, 1);
-        assert_eq!(images[0].canvas().height, 3 * 4);
+        let source = visible_source(&images);
+        assert_eq!(source.y, 0);
+        assert_eq!(source.height, 3 * r.window.cell_height);
+    }
+
+    #[test]
+    fn a_partly_visible_sprite_carries_a_source_rect() {
+        let mut r = renderer_on(window(10, 10, 4, 6));
+        let whole_box = paint_desired(
+            &mut r,
+            &[box_placement(&box_node(None, None, false), 2, 2, 4, 3)],
+        );
+        let clipped = paint_desired(
+            &mut r,
+            &[box_placement(&box_node(None, None, false), -1, 2, 4, 3)],
+        );
+        assert!(whole_box[0].source.is_none());
+        assert_eq!(whole_box[0].image, clipped[0].image);
+        assert_eq!(clipped[0].cells, None);
+        let source = visible_source(&clipped);
+        assert_eq!(
+            (source.x, source.y, source.width, source.height),
+            (
+                r.window.cell_width,
+                0,
+                3 * r.window.cell_width,
+                3 * r.window.cell_height
+            )
+        );
+        let content = canvas_of(&mut r, &whole_box[0]);
+        assert_eq!(
+            (content.width, content.height),
+            (4 * r.window.cell_width, 3 * r.window.cell_height)
+        );
     }
 
     #[test]
     fn a_box_sprite_sits_at_the_placement_cell() {
         let mut r = renderer_on(window(40, 20, 6, 12));
-        let images = sprites(
+        let images = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 1, 2, 4, 3)],
         );
-        let boxed = composed(&images, depth_z(0), r.window);
+        let boxed = composed_desired(&mut r, &images, depth_z(0));
         assert_eq!((boxed.col, boxed.row), (1, 2));
         assert_eq!((boxed.canvas.width, boxed.canvas.height), (24, 36));
     }
@@ -2696,7 +2269,7 @@ mod tests {
     fn a_border_takes_the_colour_of_its_palette_index() {
         for index in (0..).take_while(|&i| palette(i).is_some()) {
             let mut r = renderer_on(window(40, 20, 2, 4));
-            let images = sprites(
+            let images = paint_desired(
                 &mut r,
                 &[box_placement(
                     &box_node(Some(index), None, false),
@@ -2707,7 +2280,10 @@ mod tests {
                 )],
             );
             let (px, py, pz) = colour(Some(index));
-            assert_eq!(&images[0].canvas().pixels[0..4], &[px, py, pz, OPAQUE]);
+            assert_eq!(
+                &canvas_of(&mut r, &images[0]).pixels[0..4],
+                &[px, py, pz, OPAQUE]
+            );
         }
     }
 
@@ -2716,25 +2292,29 @@ mod tests {
         let mut r = renderer_on(window(40, 20, 2, 4));
         let node = box_node(Some(1), Some(1), false);
         let placement = box_placement(&node, 0, 0, 4, 3);
-        let first = sprites(&mut r, std::slice::from_ref(&placement));
+        let first = paint_desired(&mut r, std::slice::from_ref(&placement));
         assert_eq!(r.cache.len(), 1);
-        let second = sprites(&mut r, &[placement]);
-        assert_eq!(first[0].canvas().pixels, second[0].canvas().pixels);
+        let second = paint_desired(&mut r, &[placement]);
+        assert!(first == second);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_recoloured_box_is_redrawn() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        let plain = sprites(
+        let plain = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        let blue = sprites(
+        let blue = paint_desired(
             &mut r,
             &[box_placement(&box_node(Some(4), None, false), 0, 0, 4, 3)],
         );
-        assert_ne!(plain[0].canvas().pixels, blue[0].canvas().pixels);
+        assert_ne!(plain[0].image, blue[0].image);
+        assert_ne!(
+            canvas_of(&mut r, &plain[0]).pixels,
+            canvas_of(&mut r, &blue[0]).pixels
+        );
         assert_eq!(r.cache.len(), 2);
     }
 
@@ -2742,7 +2322,7 @@ mod tests {
     fn rounded_and_square_are_cached_distinctly() {
         let mut r = renderer_on(window(40, 20, 2, 4));
         for rounded in [false, true] {
-            sprites(
+            paint_desired(
                 &mut r,
                 &[box_placement(&box_node(None, None, rounded), 0, 0, 4, 3)],
             );
@@ -2753,26 +2333,26 @@ mod tests {
     #[test]
     fn a_relabelled_box_of_the_same_size_reuses_its_pixels() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        let first = sprites(
+        let first = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        let second = sprites(
+        let second = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        assert_eq!(first[0].canvas().pixels, second[0].canvas().pixels);
+        assert_eq!(first[0].image, second[0].image);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_cached_sprite_moves_to_its_own_position() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        sprites(
+        paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        let moved = sprites(
+        let moved = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 5, 2, 4, 3)],
         );
@@ -2782,37 +2362,42 @@ mod tests {
     #[test]
     fn a_moved_box_reuses_its_cached_pixels() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        let first = sprites(
+        let first = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        let moved = sprites(
+        let moved = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 5, 2, 4, 3)],
         );
-        assert_eq!(first[0].canvas().pixels, moved[0].canvas().pixels);
+        assert_eq!(first[0].image, moved[0].image);
+        assert_eq!(
+            canvas_of(&mut r, &first[0]).pixels,
+            canvas_of(&mut r, &moved[0]).pixels
+        );
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_differently_cropped_box_shares_one_cache_entry() {
         let mut r = renderer_on(window(4, 20, 2, 4));
-        let whole = sprites(
+        let whole = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 0, 0, 4, 3)],
         );
-        let cropped = sprites(
+        let cropped = paint_desired(
             &mut r,
             &[box_placement(&box_node(None, None, false), 2, 0, 4, 3)],
         );
-        assert_ne!(whole[0].canvas().width, cropped[0].canvas().width);
+        assert_eq!(whole[0].image, cropped[0].image);
+        assert_ne!(whole[0].source, cropped[0].source);
         assert_eq!(r.cache.len(), 1);
     }
 
     #[test]
     fn a_shape_beyond_the_screen_leaves_the_cache_empty() {
         let mut r = renderer_on(window(4, 4, 2, 4));
-        sprites(
+        paint_desired(
             &mut r,
             &[
                 box_placement(&box_node(None, None, false), 10, 0, 4, 3),
@@ -2825,75 +2410,74 @@ mod tests {
     #[test]
     fn a_box_beyond_the_right_edge_is_not_shown() {
         let node = box_node(None, None, false);
-        let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(!frame.shows(&box_placement(&node, 20, 0, 4, 3), whole(frame.window)));
+        let mut r = renderer_on(window(20, 10, 4, 8));
+        let desired = paint_desired(&mut r, &[box_placement(&node, 20, 0, 4, 3)]);
+        assert!(desired.is_empty());
     }
 
     #[test]
     fn a_box_beyond_the_top_edge_is_not_shown() {
         let node = box_node(None, None, false);
-        let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(!frame.shows(&box_placement(&node, 0, -3, 4, 3), whole(frame.window)));
+        let mut r = renderer_on(window(20, 10, 4, 8));
+        let desired = paint_desired(&mut r, &[box_placement(&node, 0, -3, 4, 3)]);
+        assert!(desired.is_empty());
     }
 
     #[test]
     fn a_box_straddling_an_edge_is_shown() {
         let node = box_node(None, None, false);
-        let frame = Frame::new(window(20, 10, 4, 8));
-        assert!(frame.shows(&box_placement(&node, 18, 0, 4, 3), whole(frame.window)));
-        assert!(frame.shows(&box_placement(&node, -2, 8, 4, 3), whole(frame.window)));
+        let mut r = renderer_on(window(20, 10, 4, 8));
+        assert_eq!(
+            paint_desired(&mut r, &[box_placement(&node, 18, 0, 4, 3)]).len(),
+            1
+        );
+        assert_eq!(
+            paint_desired(&mut r, &[box_placement(&node, -2, 8, 4, 3)]).len(),
+            1
+        );
     }
 
     #[test]
     fn a_block_poking_out_of_the_placement_is_cropped_to_the_screen() {
-        let frame = Frame::new(window(20, 10, 4, 8));
-        let area = whole(frame.window);
-        let poking = Geometry {
-            x: -1,
-            y: -1,
-            width: 2,
-            height: 2,
-        };
-        let crop = frame.crop(poking, area).unwrap();
-        assert_eq!((crop.col, crop.row), (0, 0));
-        assert_eq!((crop.first_x, crop.first_y), (4, 8));
-        assert_eq!((crop.last_x, crop.last_y), (8, 16));
-        let outside = Geometry {
-            x: -2,
-            y: 0,
-            width: 2,
-            height: 2,
-        };
-        assert!(!frame.shows(outside, area));
+        let w = window(20, 10, 4, 8);
+        let area = whole(w);
+        let (col, row, source) = clip_natural(-1, -1, 2, 2, area, w).unwrap();
+        assert_eq!((col, row), (0, 0));
+        let source = source.unwrap();
+        assert_eq!(
+            (source.x, source.y, source.width, source.height),
+            (w.cell_width, w.cell_height, w.cell_width, w.cell_height)
+        );
+        assert!(clip_natural(-2, 0, 2, 2, area, w).is_none());
     }
 
     #[test]
     fn a_block_beyond_the_area_is_clipped_to_the_area() {
-        let frame = Frame::new(window(20, 10, 4, 8));
+        let w = window(20, 10, 4, 8);
         let area = Area {
             col: 2,
             row: 2,
             cols: 3,
             rows: 3,
         };
-        let block = Geometry {
-            x: 4,
-            y: 0,
-            width: 4,
-            height: 4,
-        };
-        let crop = frame.crop(block, area).unwrap();
-        assert_eq!((crop.col, crop.row), (4, 2));
-        assert_eq!((crop.first_x, crop.last_x), (0, 4));
-        assert_eq!((crop.first_y, crop.last_y), (16, 32));
+        let (col, row, source) = clip_natural(4, 0, 4, 4, area, w).unwrap();
+        assert_eq!((col, row), (4, 2));
+        let source = source.unwrap();
+        assert_eq!(
+            (source.x, source.y, source.width, source.height),
+            (0, 2 * w.cell_height, w.cell_width, 2 * w.cell_height)
+        );
     }
 
     #[test]
     fn arrows_with_different_stops_are_redrawn() {
         let mut r = renderer_on(window(40, 20, 2, 4));
-        let one = sprites(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
-        let two = sprites(&mut r, &[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)]);
-        assert_ne!(one[0].canvas().pixels, two[0].canvas().pixels);
+        let one = paint_desired(&mut r, &[arrow_placement(vec![0], 0, 0, 0, 4, 6)]);
+        let two = paint_desired(&mut r, &[arrow_placement(vec![0, 2], 0, 0, 0, 4, 6)]);
+        assert_ne!(
+            canvas_of(&mut r, &one[0]).pixels,
+            canvas_of(&mut r, &two[0]).pixels
+        );
     }
 
     #[test]
@@ -2902,7 +2486,7 @@ mod tests {
         let source = Box::new(FakeGlyphSource::new(1, 1));
         let mut r = TerminalRenderer::new(window(20, 5, 1, 1), source, limit);
         for width in 0..(limit as i64 + 2) {
-            sprites(
+            paint_desired(
                 &mut r,
                 &[box_placement(
                     &box_node(None, None, false),
@@ -3176,7 +2760,7 @@ mod tests {
         let state = one_leaf();
         let leaf = leaf_box(&state);
         let frame = framed(&mut r, &state);
-        let drawn = &frame.images[0];
+        let drawn = &frame[0];
         assert_eq!(
             (drawn.col, drawn.row),
             (
@@ -3194,14 +2778,11 @@ mod tests {
         let window = window(20, body_rows + FOOTER_ROWS, 1, 1);
         let mut r = renderer_on(window);
         let frame = framed(&mut r, &state);
-        let body_images: Vec<&Placed> = frame
-            .images
-            .iter()
-            .filter(|image| image.row < body_rows)
-            .collect();
+        let body_images: Vec<&Desired> = frame.iter().filter(|d| d.row < body_rows).collect();
         assert!(!body_images.is_empty());
         for image in body_images {
-            assert!(image.row + image.canvas().height / window.cell_height <= body_rows);
+            let (_, rows) = covered_cells(&mut r, image);
+            assert!(image.row + rows <= body_rows);
         }
     }
 
@@ -3275,13 +2856,6 @@ mod tests {
         ]
     }
 
-    fn image_ids(output: &str) -> std::collections::HashSet<String> {
-        shown_ids(output)
-            .into_iter()
-            .chain(placed_ids(output))
-            .collect()
-    }
-
     fn cells_of(placement: &Placement) -> Vec<(i64, i64)> {
         let geometry = Geometry::from(placement);
         (geometry.y..geometry.y + geometry.height)
@@ -3289,25 +2863,76 @@ mod tests {
             .collect()
     }
 
+    fn covered_positions(desired: &[Desired]) -> Vec<(i64, i64)> {
+        let mut positions: Vec<(i64, i64)> = desired
+            .iter()
+            .flat_map(|d| {
+                let (cols, rows) = d.cells.unwrap_or((1, 1));
+                (d.row..d.row + rows)
+                    .flat_map(move |row| (d.col..d.col + cols).map(move |col| (col, row)))
+            })
+            .collect();
+        positions.sort();
+        positions
+    }
+
+    fn commit_ops(
+        vt: &mut super::super::virtual_terminal::VirtualTerminal,
+        r: &mut TerminalRenderer,
+        placements: &[Placement],
+    ) -> Vec<super::super::virtual_terminal::Op> {
+        let desired = paint_desired(r, placements);
+        vt.commit(&desired, r)
+    }
+
+    fn tile_images(desired: &[Desired]) -> std::collections::HashSet<ImageKey> {
+        image_keys(desired)
+            .into_iter()
+            .filter(|key| matches!(key, ImageKey::Tile(_)))
+            .collect()
+    }
+
+    fn middle_cells(
+        r: &TerminalRenderer,
+        node: &PlacementNode<'static>,
+        width: i64,
+        height: i64,
+    ) -> (i64, i64) {
+        let (column_band, row_band) = tile_shape(r, node).bands();
+        (width - 2 * column_band, height - 2 * row_band)
+    }
+
     #[test]
-    fn widening_a_tiled_box_transmits_no_tile_and_places_one_more_per_tiled_row() {
+    fn widening_a_tiled_box_keeps_the_same_placements_and_images() {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
         let narrow = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height);
         let wide = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width + 1, height);
 
-        let first = rendered_placements(&mut r, &narrow);
-        let second = rendered_placements(&mut r, &wide);
+        let first = paint_desired(&mut r, &narrow);
+        let second = paint_desired(&mut r, &wide);
 
-        let tiled_rows = narrow[0].height;
-        let first_placements = shown_ids(&first).len() + placed_ids(&first).len();
-        assert!(shown_ids(&second).is_empty());
-        assert!(deleted_ids(&second).is_empty());
-        assert_eq!(
-            placed_ids(&second).len(),
-            first_placements + tiled_rows as usize
-        );
+        assert_eq!(first.len(), second.len());
+        assert_eq!(image_keys(&first), image_keys(&second));
+    }
+
+    #[test]
+    fn widening_a_tiled_box_uploads_nothing_and_deletes_nothing() {
+        let mut r = renderer_on(tiled_window());
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
+        let colour = Some(1);
+        let (width, height) = smallest_tiled_selected_box(&r, colour);
+        let narrow = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height);
+        let wide = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width + 1, height);
+
+        commit_ops(&mut vt, &mut r, &narrow);
+        let ops = commit_ops(&mut vt, &mut r, &wide);
+
+        assert!(!ops.is_empty());
+        assert!(ops
+            .iter()
+            .all(|op| matches!(op, super::super::virtual_terminal::Op::Place { .. })));
     }
 
     #[test]
@@ -3316,11 +2941,11 @@ mod tests {
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
 
-        let small = rendered_placements(
+        let small = paint_desired(
             &mut r,
             &selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height),
         );
-        let large = rendered_placements(
+        let large = paint_desired(
             &mut r,
             &selected_box(
                 colour,
@@ -3331,7 +2956,7 @@ mod tests {
             ),
         );
 
-        assert_eq!(image_ids(&small), image_ids(&large));
+        assert_eq!(image_keys(&small), image_keys(&large));
     }
 
     #[test]
@@ -3339,20 +2964,20 @@ mod tests {
         let mut r = renderer_on(tiled_window());
         let (width, height) = smallest_tiled_selected_box(&r, Some(1));
 
-        let one = rendered_placements(
+        let one = paint_desired(
             &mut r,
             &selected_box(Some(1), BRACKET_MARGIN, BRACKET_MARGIN, width, height)[..1],
         );
-        let other = rendered_placements(
+        let other = paint_desired(
             &mut r,
             &selected_box(Some(2), BRACKET_MARGIN, BRACKET_MARGIN, width, height)[..1],
         );
 
-        assert!(image_ids(&one).is_disjoint(&image_ids(&other)));
+        assert!(image_keys(&one).is_disjoint(&image_keys(&other)));
     }
 
     #[test]
-    fn a_partly_clipped_tiled_box_shows_only_its_whole_tiles_inside_the_area() {
+    fn a_partly_clipped_tiled_box_shows_only_the_cells_inside_the_area() {
         let mut r = renderer_on(tiled_window());
         let node = outlined_node(Some(1));
         let (width, height) = smallest_tiled(&r, &node);
@@ -3363,47 +2988,44 @@ mod tests {
             rows: height,
         };
         let placement = box_placement(&node, area.col - 1, area.row + 1, width, height);
-        let mut frame = Frame::new(r.window);
 
-        r.paint(&mut frame, std::slice::from_ref(&placement), area);
+        let desired = paint_desired_in(&mut r, std::slice::from_ref(&placement), area);
 
         let inside = |&(col, row): &(i64, i64)| {
             (area.col..area.col + area.cols).contains(&col)
                 && (area.row..area.row + area.rows).contains(&row)
         };
-        let expected: Vec<(i64, i64)> = cells_of(&placement).into_iter().filter(inside).collect();
-        let positions: Vec<(i64, i64)> = frame
-            .images
-            .iter()
-            .map(|image| (image.col, image.row))
-            .collect();
-        assert_eq!(positions, expected);
-        for image in &frame.images {
-            if let Image::Fresh { canvas, .. } = &image.image {
-                assert_eq!(
-                    (canvas.width, canvas.height),
-                    (r.window.cell_width, r.window.cell_height)
-                );
-            }
+        let mut expected: Vec<(i64, i64)> =
+            cells_of(&placement).into_iter().filter(inside).collect();
+        expected.sort();
+        assert_eq!(covered_positions(&desired), expected);
+        for d in &desired {
+            let content = canvas_of(&mut r, d);
+            assert_eq!(
+                (content.width, content.height),
+                (r.window.cell_width, r.window.cell_height)
+            );
         }
     }
 
     #[test]
-    fn tiles_keep_their_sprites_z_and_are_queued_row_major_in_scene_order() {
+    fn tiles_keep_their_sprites_z_and_are_queued_in_scene_order() {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (width, height) = smallest_tiled_selected_box(&r, colour);
         let [boxed, brackets] = selected_box(colour, BRACKET_MARGIN, BRACKET_MARGIN, width, height);
 
-        let images = sprites(&mut r, &[boxed.clone(), brackets.clone()]);
+        let images = paint_desired(&mut r, &[boxed.clone(), brackets.clone()]);
 
         let queued: Vec<(i64, i64, i32)> = images
             .iter()
             .map(|image| (image.col, image.row, image.z))
             .collect();
-        let expected: Vec<(i64, i64, i32)> = cells_of(&boxed)
+        let expected: Vec<(i64, i64, i32)> = tile_shape(&r, &boxed.node)
+            .tiles(boxed.width, boxed.height)
+            .unwrap()
             .into_iter()
-            .map(|(col, row)| (col, row, depth_z(0)))
+            .map(|(col, row, ..)| (boxed.x + col, boxed.y + row, depth_z(0)))
             .chain(CORNERS.into_iter().map(|corner| {
                 let (col, row) =
                     corner_offset(corner, brackets.width, brackets.height, r.cell_size());
@@ -3414,33 +3036,41 @@ mod tests {
     }
 
     #[test]
-    fn a_box_too_small_to_tile_is_one_transient_whole_sprite() {
+    fn a_box_too_small_to_tile_is_one_whole_sprite_uploaded_once() {
         let mut r = renderer_on(tiled_window());
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
         let node = outlined_node(Some(1));
         let (width, height) = smallest_tiled(&r, &node);
         let placements = [box_placement(&node, 0, 0, width - 1, height)];
 
-        let images = sprites(&mut r, &placements);
-        let first = rendered_placements(&mut r, &placements);
-        let second = rendered_placements(&mut r, &placements);
+        let images = paint_desired(&mut r, &placements);
+        let first = commit_ops(&mut vt, &mut r, &placements);
+        let second = commit_ops(&mut vt, &mut r, &placements);
 
         let [image] = images.as_slice() else {
             panic!("expected a single whole sprite");
         };
+        assert!(matches!(image.image, ImageKey::Sprite(_)));
+        let content = canvas_of(&mut r, image);
         assert_eq!(
-            (image.canvas().width, image.canvas().height),
+            (content.width, content.height),
             (
                 (width - 1) * r.window.cell_width,
                 height * r.window.cell_height
             )
         );
-        assert_eq!(shown_ids(&first).len(), 1);
-        assert!(placed_ids(&second).is_empty());
-        assert_eq!(deleted_ids(&second), shown_ids(&first));
+        assert_eq!(
+            first
+                .iter()
+                .filter(|op| matches!(op, super::super::virtual_terminal::Op::Upload { .. }))
+                .count(),
+            1
+        );
+        assert!(second.is_empty());
     }
 
     #[test]
-    fn resizing_the_cell_size_produces_new_tile_keys_and_fresh_transmissions() {
+    fn resizing_the_cell_size_produces_new_tile_keys() {
         let mut r = renderer_on(tiled_window());
         let colour = Some(1);
         let (old_cell_width, old_cell_height) = (r.window.cell_width, r.window.cell_height);
@@ -3458,22 +3088,132 @@ mod tests {
             old_height.max(new_height),
         );
 
-        let before = rendered_placements(&mut r, &placements);
-        let keys_before = r.tile_images.len();
+        let before = paint_desired(&mut r, &placements);
         r.window.cell_width = 2 * old_cell_width;
         r.window.cell_height = 2 * old_cell_height;
-        let after = rendered_placements(&mut r, &placements);
+        let after = paint_desired(&mut r, &placements);
 
-        let shown_after: std::collections::HashSet<String> =
-            shown_ids(&after).into_iter().collect();
-        assert!(!shown_after.is_empty());
-        assert!(placed_ids(&after).iter().all(|id| shown_after.contains(id)));
-        assert!(image_ids(&before).is_disjoint(&image_ids(&after)));
-        assert!(r.tile_images.len() > keys_before);
-        assert!(r
-            .tile_images
-            .keys()
-            .any(|key| key.shape.cell == r.cell_size()));
+        assert!(!after.is_empty());
+        assert!(image_keys(&before).is_disjoint(&image_keys(&after)));
+        assert!(tile_images(&after)
+            .iter()
+            .all(|key| matches!(key, ImageKey::Tile(tile) if tile.shape.cell == r.cell_size())));
+    }
+
+    #[test]
+    fn a_tileable_box_stretches_its_middle_band() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let (width, height) = (width + EXTRA_CELLS, height + EXTRA_CELLS);
+        let (middle_cols, middle_rows) = middle_cells(&r, &node, width, height);
+
+        let desired = paint_desired(&mut r, &[box_placement(&node, 0, 0, width, height)]);
+
+        assert!(desired.len() < (width * height) as usize);
+        assert!(desired.iter().any(|d| d.cells == Some((middle_cols, 1))));
+        assert!(desired.iter().any(|d| d.cells == Some((1, middle_rows))));
+        assert_eq!(covered_positions(&desired).len(), (width * height) as usize);
+    }
+
+    #[test]
+    fn an_unfilled_box_omits_its_middle() {
+        let mut r = renderer_on(tiled_window());
+        let filled = outlined_node(Some(1));
+        let unfilled = box_node(Some(1), None, true);
+        let (width, height) = smallest_tiled(&r, &filled);
+        let (width, height) = (width + EXTRA_CELLS, height + EXTRA_CELLS);
+        let (middle_cols, middle_rows) = middle_cells(&r, &filled, width, height);
+
+        let with_fill = paint_desired(&mut r, &[box_placement(&filled, 0, 0, width, height)]);
+        let without_fill = paint_desired(&mut r, &[box_placement(&unfilled, 0, 0, width, height)]);
+
+        let middle = |d: &&Desired| d.cells == Some((middle_cols, middle_rows));
+        assert_eq!(with_fill.iter().filter(middle).count(), 1);
+        assert_eq!(without_fill.iter().filter(middle).count(), 0);
+        assert_eq!(with_fill.len(), without_fill.len() + 1);
+    }
+
+    #[test]
+    fn a_flex_box_is_eight_placements_whatever_its_size() {
+        const THIN_BORDER: i64 = 1;
+        let mut r = renderer_on(tiled_window());
+        let node = with_border(&box_node(Some(1), None, false), THIN_BORDER);
+        let (column_band, row_band) = tile_shape(&r, &node).bands();
+        assert_eq!((column_band, row_band), (1, 1));
+        let (width, height) = smallest_tiled(&r, &node);
+
+        let counts: Vec<usize> = [(0, 0), (3, 2), (10, 7)]
+            .into_iter()
+            .map(|(extra_cols, extra_rows)| {
+                paint_desired(
+                    &mut r,
+                    &[box_placement(
+                        &node,
+                        0,
+                        0,
+                        width + extra_cols,
+                        height + extra_rows,
+                    )],
+                )
+                .len()
+            })
+            .collect();
+
+        assert!(counts.iter().all(|&count| count == counts[0]));
+        assert_eq!(counts[0], 2 * (column_band + row_band) as usize + 4);
+    }
+
+    #[test]
+    fn a_partly_visible_run_is_shortened() {
+        let mut r = renderer_on(tiled_window());
+        let node = outlined_node(Some(1));
+        let (width, height) = smallest_tiled(&r, &node);
+        let (width, height) = (width + EXTRA_CELLS, height + 1);
+        let (column_band, _) = tile_shape(&r, &node).bands();
+        let overhang = column_band + 1;
+        let top_run = |desired: &[Desired]| {
+            desired
+                .iter()
+                .find(|d| d.row == 0 && matches!(d.cells, Some((_, 1))))
+                .cloned()
+                .unwrap()
+        };
+
+        let whole_box = paint_desired(&mut r, &[box_placement(&node, 0, 0, width, height)]);
+        let clipped_x = r.window.cols - (width - overhang);
+        let clipped = paint_desired(&mut r, &[box_placement(&node, clipped_x, 0, width, height)]);
+
+        let (whole_run, clipped_run) = (top_run(&whole_box), top_run(&clipped));
+        assert_eq!(whole_run.image, clipped_run.image);
+        assert_eq!(clipped_run.source, None);
+        let visible = r.window.cols - clipped_run.col;
+        assert_eq!(clipped_run.cells.unwrap().0, visible);
+        assert!(visible < whole_run.cells.unwrap().0);
+    }
+
+    #[test]
+    fn the_caret_is_keyed_by_its_size() {
+        let mut r = renderer_on(window(20, 10, 4, 6));
+        let key_at = |r: &mut TerminalRenderer, x, width, height| {
+            paint_desired(r, &[caret_placement(x, 1, width, height)])[0]
+                .image
+                .clone()
+        };
+
+        let one = key_at(&mut r, 2, 1, 1);
+        let moved = key_at(&mut r, 5, 1, 1);
+        let wide = key_at(&mut r, 2, 3, 1);
+
+        assert_eq!(one, moved);
+        assert_ne!(one, wide);
+        let Content::Still(canvas) = Sprites::content(&mut r, &wide) else {
+            panic!("a caret is a still image");
+        };
+        assert_eq!(
+            (canvas.width, canvas.height),
+            (3 * r.window.cell_width, r.window.cell_height)
+        );
     }
 
     #[test]
@@ -3633,7 +3373,7 @@ mod tests {
     fn root_payload(output: &str) -> String {
         output
             .split("\x1b_G")
-            .skip_while(|command| !command.starts_with("a=T,"))
+            .skip_while(|command| !command.starts_with("a=t,"))
             .enumerate()
             .take_while(|(index, command)| *index == 0 || command.starts_with("m="))
             .map(|(_, command)| command)
@@ -3647,15 +3387,26 @@ mod tests {
     #[test]
     fn a_growing_box_that_fits_is_one_image_with_every_grow_frame_and_no_tiles() {
         let mut r = renderer_on(tiled_window());
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
         let placements = growing_box(&r, 1, 1);
 
-        let output = rendered_placements(&mut r, &placements);
+        let desired = paint_desired(&mut r, &placements);
+        let ops = commit_ops(&mut vt, &mut r, &placements);
 
-        assert_eq!(output.matches("a=T").count(), 1);
-        assert_eq!(output.matches("a=f").count(), GROW_FRAMES);
-        assert!(output.find("a=T").unwrap() < output.find("a=f").unwrap());
-        assert!(placed_ids(&output).is_empty());
-        assert!(r.tile_images.is_empty());
+        assert_eq!(desired.len(), 1);
+        assert!(matches!(desired[0].image, ImageKey::Grow(_)));
+        let animations: Vec<usize> = ops
+            .iter()
+            .filter_map(|op| match op {
+                super::super::virtual_terminal::Op::Upload {
+                    content: Content::Animation { frames, .. },
+                    ..
+                } => Some(frames.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(animations, vec![GROW_FRAMES]);
+        assert!(r.tile_canvases.is_empty());
     }
 
     fn grow_frame_keys(output: &str) -> Vec<&str> {
@@ -3704,10 +3455,10 @@ mod tests {
             ..placement
         };
 
-        let output = rendered_placements(&mut r, &[cropped]);
+        let desired = paint_desired(&mut r, &[cropped]);
 
-        assert_eq!(output.matches("a=f").count(), 0);
-        assert!(!r.tile_images.is_empty());
+        assert!(!desired.is_empty());
+        assert!(desired.iter().all(|d| matches!(d.image, ImageKey::Tile(_))));
     }
 
     #[test]
@@ -3723,19 +3474,38 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_after_a_grow_deletes_it_and_draws_the_box_with_tiles() {
+    fn the_frame_after_a_grow_frees_it_and_draws_the_box_with_tiles() {
         let mut r = renderer_on(tiled_window());
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
         let [growing] = growing_box(&r, 1, 1);
         let settled = Placement {
             node: box_node(Some(1), Some(1), true),
             ..growing.clone()
         };
 
-        let first = rendered_placements(&mut r, &[growing]);
-        let second = rendered_placements(&mut r, &[settled]);
+        commit_ops(&mut vt, &mut r, &[growing]);
+        let second = commit_ops(&mut vt, &mut r, &[settled]);
 
-        assert_eq!(deleted_ids(&second), shown_ids(&first));
-        assert_eq!(second.matches("a=f").count(), 0);
-        assert!(!r.tile_images.is_empty());
+        assert_eq!(
+            second
+                .iter()
+                .filter(|op| matches!(op, super::super::virtual_terminal::Op::Free { .. }))
+                .count(),
+            1
+        );
+        assert!(second.iter().any(|op| matches!(
+            op,
+            super::super::virtual_terminal::Op::Upload {
+                content: Content::Still(_),
+                ..
+            }
+        )));
+        assert!(second.iter().all(|op| !matches!(
+            op,
+            super::super::virtual_terminal::Op::Upload {
+                content: Content::Animation { .. },
+                ..
+            }
+        )));
     }
 }
