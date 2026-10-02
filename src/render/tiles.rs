@@ -27,6 +27,8 @@ pub(super) struct TileKey {
     pub(super) row: Band,
 }
 
+pub(super) type TileRun = (i64, i64, TileKey, i64, i64);
+
 fn band(extent: i64, cell: i64) -> i64 {
     let covered = extent + 1;
     (covered + cell - 1) / cell
@@ -37,16 +39,6 @@ pub(super) fn cells_with_middle(band: i64) -> i64 {
 }
 
 impl Band {
-    fn of(index: i64, cells: i64, band: i64) -> Band {
-        if index < band {
-            Band::Start(index)
-        } else if index >= cells - band {
-            Band::End(cells - 1 - index)
-        } else {
-            Band::Middle
-        }
-    }
-
     fn reference_index(self, band: i64) -> i64 {
         match self {
             Band::Start(offset) => offset,
@@ -81,7 +73,7 @@ impl TileShape {
         )
     }
 
-    pub(super) fn tiles(&self, cols: i64, rows: i64) -> Option<Vec<(i64, i64, TileKey, i64, i64)>> {
+    pub(super) fn tiles(&self, cols: i64, rows: i64) -> Option<Vec<TileRun>> {
         let (column_band, row_band) = self.bands();
         if cols < cells_with_middle(column_band) || rows < cells_with_middle(row_band) {
             return None;
@@ -116,7 +108,13 @@ impl TileShape {
                         let canvas = key.canvas();
                         let is_transparent = canvas.pixels.chunks(4).all(|px| px[3] == 0);
                         if !is_transparent {
-                            result.push((column_band, row_band, key, middle_col_count, middle_row_count));
+                            result.push((
+                                column_band,
+                                row_band,
+                                key,
+                                middle_col_count,
+                                middle_row_count,
+                            ));
                         }
                     }
                     (Band::Middle, _) => {
@@ -247,13 +245,17 @@ mod tests {
     ) -> Canvas {
         let (width, height) = (cols * shape.cell.width, rows * shape.cell.height);
         let mut pixels = vec![0u8; (width * height) as usize * CHANNELS];
-        for (col, row, key, col_span, row_span) in shape.tiles(cols, rows).expect("a tileable sprite") {
+        for (col, row, key, col_span, row_span) in
+            shape.tiles(cols, rows).expect("a tileable sprite")
+        {
             let tile = rasterized.entry(key).or_insert_with(|| key.canvas());
             for dr in 0..row_span {
                 for dc in 0..col_span {
                     for y in 0..tile.height {
                         let from = (y * tile.width) as usize * CHANNELS;
-                        let to = (((row + dr) * tile.height + y) * width + (col + dc) * tile.width) as usize * CHANNELS;
+                        let to = (((row + dr) * tile.height + y) * width + (col + dc) * tile.width)
+                            as usize
+                            * CHANNELS;
                         let span = tile.width as usize * CHANNELS;
                         pixels[to..to + span].copy_from_slice(&tile.pixels[from..from + span]);
                     }
@@ -339,7 +341,7 @@ mod tests {
         }
     }
 
-    fn tiles_of(shape: TileShape, cols: i64, rows: i64) -> Vec<(i64, i64, TileKey, i64, i64)> {
+    fn tiles_of(shape: TileShape, cols: i64, rows: i64) -> Vec<TileRun> {
         shape.tiles(cols, rows).expect("a tileable sprite")
     }
 

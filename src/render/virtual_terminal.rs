@@ -1,52 +1,18 @@
 use crate::canvas::Canvas;
 use crate::kitty::{ImageId, PlacementId};
-use crate::view::{Rgb, Sides};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use super::brackets::BracketKey;
+use super::terminal::{GlyphKey, SpriteKey};
 use super::tiles::TileKey;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct GlyphKey {
-    pub(super) character: char,
-    pub(super) colour: Rgb,
-    pub(super) bold: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum SpriteKey {
-    Box {
-        width: i64,
-        height: i64,
-        colour: Rgb,
-        fill: Option<u8>,
-        fill_alpha: Option<u8>,
-        solid_fill: Option<Rgb>,
-        rounded: bool,
-        sides: Sides,
-        border: i64,
-    },
-    Arrow {
-        width: i64,
-        height: i64,
-        stops: Vec<i64>,
-        shaft: i64,
-    },
-    Led {
-        width: i64,
-        height: i64,
-        colour: u8,
-        lit: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct SourceRect {
-    pub(super) x: i64,
-    pub(super) y: i64,
-    pub(super) width: i64,
-    pub(super) height: i64,
+pub(crate) struct SourceRect {
+    pub(crate) x: i64,
+    pub(crate) y: i64,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -71,7 +37,7 @@ pub(super) struct GrowKey {
     pub(super) stamp: u64,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct Desired {
     pub(super) image: ImageKey,
     pub(super) col: i64,
@@ -81,7 +47,7 @@ pub(super) struct Desired {
     pub(super) cells: Option<(i64, i64)>,
 }
 
-pub(super) enum Content {
+pub(crate) enum Content {
     Still(Canvas),
     Animation { root: Canvas, frames: Vec<Canvas> },
 }
@@ -90,7 +56,7 @@ pub(super) trait Sprites {
     fn content(&mut self, key: &ImageKey) -> Content;
 }
 
-pub(super) enum Op {
+pub(crate) enum Op {
     Upload {
         image: ImageId,
         content: Content,
@@ -111,41 +77,6 @@ pub(super) enum Op {
     Free {
         image: ImageId,
     },
-}
-
-pub(super) fn encode(ops: &[Op]) -> Vec<u8> {
-    let mut result = Vec::new();
-    for op in ops {
-        let s = match op {
-            Op::Upload {
-                image,
-                content: Content::Still(canvas),
-            } => crate::kitty::transmit(canvas, *image).to_string(),
-            Op::Upload {
-                image,
-                content: Content::Animation { root, frames },
-            } => crate::kitty::transmit_animation(root, frames, *image, 0, 0, false).to_string(),
-            Op::Place {
-                image,
-                placement,
-                col,
-                row,
-                z,
-                source,
-                cells,
-            } => {
-                let src = source.as_ref().map(|s| (s.x, s.y, s.width, s.height));
-                crate::kitty::place_ext(*image, *placement, *col, *row, *z, src, *cells)
-                    .to_string()
-            }
-            Op::Delete { image, placement } => {
-                crate::kitty::delete_placement(*image, *placement).to_string()
-            }
-            Op::Free { image } => crate::kitty::delete(*image).to_string(),
-        };
-        result.extend_from_slice(s.as_bytes());
-    }
-    result
 }
 
 #[derive(Clone, PartialEq)]
@@ -175,15 +106,13 @@ impl VirtualTerminal {
     }
 
     pub(super) fn commit(&mut self, desired: &[Desired], sprites: &mut dyn Sprites) -> Vec<Op> {
-        let mut desired_unclaimed: Vec<(usize, &Desired)> =
-            desired.iter().enumerate().collect();
+        let mut desired_unclaimed: Vec<(usize, &Desired)> = desired.iter().enumerate().collect();
 
         let mut deletes: Vec<Op> = Vec::new();
         let mut uploads: Vec<Op> = Vec::new();
         let mut places: Vec<Op> = Vec::new();
         let mut frees: Vec<Op> = Vec::new();
 
-        // Step 1: mark exact-match placements as kept and remove them from unclaimed
         let mut kept: HashMap<ImageKey, Vec<usize>> = HashMap::new();
 
         for (key, (_id, placements)) in &self.images {
@@ -203,7 +132,6 @@ impl VirtualTerminal {
             }
         }
 
-        // Step 2: collect spare (non-kept) placement indices per image
         let mut spares: HashMap<ImageKey, Vec<usize>> = HashMap::new();
         for (key, (_id, placements)) in &self.images {
             let kept_indices = kept.get(key).cloned().unwrap_or_default();
@@ -214,7 +142,6 @@ impl VirtualTerminal {
             }
         }
 
-        // Step 3: process each unclaimed desired entry
         let mut new_placements: Vec<(ImageKey, ImageId, PlacementId, PlacedProps)> = Vec::new();
         let mut used_spares: HashMap<ImageKey, Vec<usize>> = HashMap::new();
 
@@ -227,13 +154,19 @@ impl VirtualTerminal {
                 cells: d.cells,
             };
 
-            // Try to reuse a spare placement of the same image
             let spare = spares.get_mut(&d.image).and_then(|v| {
-                if v.is_empty() { None } else { Some(v.remove(0)) }
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v.remove(0))
+                }
             });
 
             if let Some(spare_idx) = spare {
-                used_spares.entry(d.image.clone()).or_default().push(spare_idx);
+                used_spares
+                    .entry(d.image.clone())
+                    .or_default()
+                    .push(spare_idx);
                 let (image_id, placements) = self.images.get(&d.image).unwrap();
                 let (placement_id, _) = placements[spare_idx];
                 places.push(Op::Place {
@@ -247,7 +180,6 @@ impl VirtualTerminal {
                 });
                 new_placements.push((d.image.clone(), *image_id, placement_id, props));
             } else if let Some((image_id, existing_placements)) = self.images.get(&d.image) {
-                // Image already uploaded (all its current placements are kept): new placement id
                 let max_existing = existing_placements
                     .iter()
                     .map(|(p, _)| placement_id_value(*p))
@@ -274,7 +206,6 @@ impl VirtualTerminal {
                 .find(|(k, _, _, _)| k == &d.image)
                 .map(|(_, id, _, _)| *id)
             {
-                // Image was uploaded earlier in this same commit batch
                 let extra = new_placements
                     .iter()
                     .filter(|(k, _, _, _)| k == &d.image)
@@ -291,7 +222,6 @@ impl VirtualTerminal {
                 });
                 new_placements.push((d.image.clone(), batch_id, placement_id, props));
             } else {
-                // Image not yet known: upload then place
                 let image_id = ImageId::new(NonZeroU32::new(self.next_image_id).unwrap());
                 self.next_image_id += 1;
                 let placement_id = PlacementId::new(NonZeroU32::new(1).unwrap());
@@ -313,7 +243,6 @@ impl VirtualTerminal {
             }
         }
 
-        // Step 4: emit deletes for unclaimed placements not reused as spares
         for (key, (image_id, placements)) in &self.images {
             let kept_indices = kept.get(key).cloned().unwrap_or_default();
             let used_spare_indices = used_spares.get(key).cloned().unwrap_or_default();
@@ -327,7 +256,6 @@ impl VirtualTerminal {
             }
         }
 
-        // Rebuild state from kept and new placements
         let mut new_state: HashMap<ImageKey, (ImageId, Vec<(PlacementId, PlacedProps)>)> =
             HashMap::new();
 
@@ -351,7 +279,6 @@ impl VirtualTerminal {
                 .push((placement_id, props));
         }
 
-        // Free images that have no placements remaining
         for (key, (image_id, _)) in &self.images {
             if !new_state.contains_key(key) {
                 frees.push(Op::Free { image: *image_id });
@@ -376,6 +303,12 @@ impl VirtualTerminal {
             .collect();
         self.images.clear();
         ops
+    }
+}
+
+impl Default for VirtualTerminal {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -426,18 +359,6 @@ mod tests {
         }
     }
 
-    fn image_id(value: u32) -> ImageId {
-        ImageId::new(std::num::NonZeroU32::new(value).unwrap())
-    }
-
-    fn placement_id(value: u32) -> PlacementId {
-        PlacementId::new(std::num::NonZeroU32::new(value).unwrap())
-    }
-
-    fn solid_canvas(colour: u8) -> Canvas {
-        Canvas::fill(1, 1, &Solid([colour, colour, colour, 255]))
-    }
-
     fn first_upload_image_id(ops: &[Op]) -> Option<ImageId> {
         ops.iter().find_map(|op| match op {
             Op::Upload { image, .. } => Some(*image),
@@ -462,8 +383,14 @@ mod tests {
         ];
         let ops = vt.commit(&desired, &mut sprites);
 
-        let upload_count = ops.iter().filter(|op| matches!(op, Op::Upload { .. })).count();
-        let place_count = ops.iter().filter(|op| matches!(op, Op::Place { .. })).count();
+        let upload_count = ops
+            .iter()
+            .filter(|op| matches!(op, Op::Upload { .. }))
+            .count();
+        let place_count = ops
+            .iter()
+            .filter(|op| matches!(op, Op::Place { .. }))
+            .count();
         assert_eq!(upload_count, 2);
         assert_eq!(place_count, 2);
     }
@@ -497,7 +424,12 @@ mod tests {
             .collect();
         assert_eq!(place_ops.len(), 1);
         match &place_ops[0] {
-            Op::Place { image, placement, col, .. } => {
+            Op::Place {
+                image,
+                placement,
+                col,
+                ..
+            } => {
                 assert_eq!(*image, orig_image_id);
                 assert_eq!(*placement, orig_placement_id);
                 assert_eq!(*col, 1);
@@ -597,8 +529,14 @@ mod tests {
         vt.commit(&[test_desired(test_key(1), 0, 0)], &mut sprites);
         let ops = vt.commit(&[], &mut sprites);
 
-        let delete_count = ops.iter().filter(|op| matches!(op, Op::Delete { .. })).count();
-        let free_count = ops.iter().filter(|op| matches!(op, Op::Free { .. })).count();
+        let delete_count = ops
+            .iter()
+            .filter(|op| matches!(op, Op::Delete { .. }))
+            .count();
+        let free_count = ops
+            .iter()
+            .filter(|op| matches!(op, Op::Free { .. }))
+            .count();
         assert_eq!(delete_count, 1);
         assert_eq!(free_count, 1);
 
@@ -689,115 +627,5 @@ mod tests {
         assert!(delete_pos < upload_pos);
         assert!(upload_pos < place_pos);
         assert!(place_pos < free_pos);
-    }
-
-    #[test]
-    fn encode_upload_still_transmits_without_displaying() {
-        let canvas = solid_canvas(128);
-        let ops = vec![Op::Upload {
-            image: image_id(3),
-            content: Content::Still(canvas),
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("a=t,"), "expected a=t in: {s}");
-        assert!(!s.contains("a=T,"), "unexpected a=T in: {s}");
-    }
-
-    #[test]
-    fn encode_upload_animation_transmits_root_and_frames() {
-        let root = solid_canvas(10);
-        let frames = vec![solid_canvas(20), solid_canvas(30)];
-        let ops = vec![Op::Upload {
-            image: image_id(4),
-            content: Content::Animation { root, frames },
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("a=t,"), "expected a=t for root in: {s}");
-        assert!(s.contains("a=f,"), "expected a=f frame in: {s}");
-    }
-
-    #[test]
-    fn encode_place_positions_the_cursor_and_names_the_image() {
-        let ops = vec![Op::Place {
-            image: image_id(7),
-            placement: placement_id(2),
-            col: 3,
-            row: 5,
-            z: -1,
-            source: None,
-            cells: None,
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("a=p,"), "expected a=p in: {s}");
-        assert!(s.contains("i=7,"), "expected i=7 in: {s}");
-        assert!(s.contains("p=2,"), "expected p=2 in: {s}");
-    }
-
-    #[test]
-    fn encode_place_with_source_emits_x_y_w_h() {
-        let ops = vec![Op::Place {
-            image: image_id(1),
-            placement: placement_id(1),
-            col: 0,
-            row: 0,
-            z: 0,
-            source: Some(SourceRect {
-                x: 1,
-                y: 2,
-                width: 3,
-                height: 4,
-            }),
-            cells: None,
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("x=1,"), "expected x=1 in: {s}");
-        assert!(s.contains("y=2,"), "expected y=2 in: {s}");
-        assert!(s.contains("w=3,"), "expected w=3 in: {s}");
-        assert!(s.contains("h=4"), "expected h=4 in: {s}");
-    }
-
-    #[test]
-    fn encode_place_with_cells_emits_c_r() {
-        let ops = vec![Op::Place {
-            image: image_id(1),
-            placement: placement_id(1),
-            col: 0,
-            row: 0,
-            z: 0,
-            source: None,
-            cells: Some((5, 3)),
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("c=5,"), "expected c=5 in: {s}");
-        assert!(s.contains("r=3"), "expected r=3 in: {s}");
-    }
-
-    #[test]
-    fn encode_delete_emits_d_i_with_placement() {
-        let ops = vec![Op::Delete {
-            image: image_id(7),
-            placement: placement_id(2),
-        }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("a=d,"), "expected a=d in: {s}");
-        assert!(s.contains("d=i,"), "expected d=i in: {s}");
-        assert!(s.contains("i=7,"), "expected i=7 in: {s}");
-        assert!(s.contains("p=2,"), "expected p=2 in: {s}");
-    }
-
-    #[test]
-    fn encode_free_emits_d_I() {
-        let ops = vec![Op::Free { image: image_id(5) }];
-        let bytes = encode(&ops);
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("a=d,"), "expected a=d in: {s}");
-        assert!(s.contains("d=I,"), "expected d=I in: {s}");
-        assert!(s.contains("i=5,"), "expected i=5 in: {s}");
     }
 }
