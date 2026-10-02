@@ -300,7 +300,23 @@ fn paint<'a>(
                 rect,
             )
         });
-    border.into_iter().chain(label).collect()
+    let typing = (state.mode == FlexMode::Write && &state.selected == path)
+        .then(|| flex_box.text.as_ref().zip(arranged.text))
+        .flatten()
+        .map(|(text, rect)| {
+            placement(
+                PlacementNode::TypingCaret {
+                    colour: FLEX_TEXT_COLOUR,
+                    bold: false,
+                },
+                Rect {
+                    x: rect.x + text.chars().count() as i64,
+                    width: 1,
+                    ..rect
+                },
+            )
+        });
+    border.into_iter().chain(label).chain(typing).collect()
 }
 
 pub(crate) fn scene<'a>(
@@ -2091,6 +2107,86 @@ mod tests {
         let placements = placements(&state);
         assert_eq!(placements.len(), all_boxes(&placements).len());
         assert_eq!(placements.len(), 3);
+    }
+
+    fn writing(text: &str) -> FlexState {
+        FlexState {
+            mode: FlexMode::Write,
+            selected: vec![0, 0],
+            ..with_text(text)
+        }
+    }
+
+    fn the_typing_caret<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
+        placements
+            .iter()
+            .find(|placement| matches!(placement.node, PlacementNode::TypingCaret { .. }))
+            .unwrap()
+    }
+
+    fn typing_carets<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
+        placements
+            .iter()
+            .filter(|placement| matches!(placement.node, PlacementNode::TypingCaret { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn write_mode_puts_a_typing_caret_one_cell_past_the_label() {
+        let state = writing("Hello");
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        assert_eq!(
+            the_typing_caret(&placements).x,
+            label.x + "Hello".chars().count() as i64
+        );
+    }
+
+    #[test]
+    fn an_empty_label_puts_the_caret_in_the_first_cell() {
+        let state = writing("");
+        let placements = placements(&state);
+        assert_eq!(the_typing_caret(&placements).x, the_label(&placements).x);
+    }
+
+    #[test]
+    fn typing_the_next_character_moves_the_caret_right_by_one_cell() {
+        let before_state = writing("Hell");
+        let before = the_typing_caret(&placements(&before_state)).x;
+        let state = after(before_state, &["o"]);
+        assert_eq!(the_typing_caret(&placements(&state)).x, before + 1);
+    }
+
+    #[test]
+    fn backspacing_to_empty_leaves_the_caret_in_the_first_cell() {
+        let state = after(writing("H"), &["\x7f"]);
+        let placements = placements(&state);
+        assert_eq!(the_typing_caret(&placements).x, the_label(&placements).x);
+    }
+
+    #[test]
+    fn move_mode_draws_no_typing_caret() {
+        let state = FlexState {
+            selected: vec![0, 0],
+            ..with_text("Hello")
+        };
+        assert!(typing_carets(&placements(&state)).is_empty());
+    }
+
+    #[test]
+    fn the_caret_placement_is_one_cell_wide_and_does_not_widen_the_label() {
+        let writing_state = writing("Hello");
+        let writing = placements(&writing_state);
+        let caret = the_typing_caret(&writing);
+        let moving_state = with_text("Hello");
+        let moving = placements(&moving_state);
+        assert_eq!((caret.width, caret.height), (1, 1));
+        assert_eq!(caret.y, the_label(&writing).y);
+        assert_eq!(
+            geometry(&[the_label(&writing)]),
+            geometry(&[the_label(&moving)])
+        );
+        assert_eq!(the_box_width(&writing), the_box_width(&moving));
     }
 
     #[test]

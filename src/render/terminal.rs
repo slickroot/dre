@@ -610,6 +610,7 @@ impl TerminalRenderer {
                         bold: label.bold,
                     },
                 ),
+                PlacementNode::TypingCaret { .. } => {}
                 PlacementNode::Caret(_) => self.draw_caret(frame, geometry, area),
                 PlacementNode::Cursor(_) => self.draw_cursor(frame, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
