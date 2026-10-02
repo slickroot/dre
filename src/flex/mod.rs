@@ -109,7 +109,15 @@ fn start() -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::key_source::MockKeySource;
+    use crate::view::Area;
     use mockall::Sequence;
+
+    const WINDOW: Area = Area {
+        col: 0,
+        row: 0,
+        cols: 40,
+        rows: 20,
+    };
 
     fn after(state: FlexState, key: &str) -> FlexState {
         state::reduce(state, key, &Layout::empty()).0
@@ -285,6 +293,78 @@ mod tests {
                 .in_sequence(&mut seq)
                 .return_once(move || Ok(key.to_string()));
         }
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn the_layout_handed_to_reduce_matches_the_one_that_was_drawn() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|state| Ok(Layout::arrange(&state.boxes, WINDOW)));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("k".to_string()));
+        screen
+            .expect_render()
+            .withf(|state| state.selected.is_empty())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Layout::empty()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("\x03".to_string()));
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn a_resize_re_arranges_before_the_next_key_is_reduced() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Layout::empty()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok(tty::RESIZE.to_string()));
+        screen
+            .expect_resize()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|| Ok(()));
+        screen
+            .expect_render()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|state| Ok(Layout::arrange(&state.boxes, WINDOW)));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("k".to_string()));
+        screen
+            .expect_render()
+            .withf(|state| state.selected.is_empty())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(Layout::empty()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|| Ok("\x03".to_string()));
 
         run_loop(&keys, &mut screen).unwrap();
     }
