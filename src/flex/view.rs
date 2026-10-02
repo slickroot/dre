@@ -1717,8 +1717,8 @@ mod tests {
     }
 
     #[test]
-    fn d_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
-        let state = after(title_and_hi_in(Direction::Row), &["h", "d"]);
+    fn r_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
+        let state = after(title_and_hi_in(Direction::Row), &["h", "r"]);
         let placements = placements(&state);
         let (outer, inner) = outer_and_inner(&placements);
         assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
