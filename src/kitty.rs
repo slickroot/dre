@@ -88,6 +88,24 @@ pub(crate) fn grow(
     Command(output)
 }
 
+#[allow(dead_code)]
+pub(crate) fn blink(
+    root: &Canvas,
+    lit: &Canvas,
+    id: ImageId,
+    z: i32,
+    gap_ms: u32,
+    wezterm: bool,
+) -> Command {
+    let mut output = transmission(&root.pixels, root.width, root.height, id, z);
+    output.push_str(&frame(lit, id, gap_ms, wezterm));
+    output.push_str(&escape(
+        &format!("a=a,i={},r=1,z={gap_ms},s=3,v=1,q=2", id.value()),
+        "",
+    ));
+    Command(output)
+}
+
 pub(crate) fn place(id: ImageId, placement: PlacementId, col: i64, row: i64, z: i32) -> Command {
     Command(format!(
         "\x1b[{};{}H\x1b_Ga=p,i={},p={},q=2,z={};\x1b\\",
@@ -416,6 +434,10 @@ mod tests {
         .to_string()
     }
 
+    fn blinked(root: &Canvas, lit: &Canvas, gap_ms: u32, wezterm: bool) -> String {
+        blink(root, lit, image_id(7), -1, gap_ms, wezterm).to_string()
+    }
+
     fn frame_key<'a>(frame: &'a str, key: &str) -> Option<&'a str> {
         let (keys, _) = frame.split_once(';').unwrap();
         keys.split(',')
@@ -518,6 +540,56 @@ mod tests {
         let last = output.rsplit("\x1b_G").next().unwrap();
         assert!(last.starts_with("a=a,i=7,s=3,v=2"));
         assert!(output.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn blink_transmits_a_transparent_root_then_the_lit_frame() {
+        let gap_ms = 500;
+        let root = grow_canvas(0);
+        let output = blinked(&root, &grow_canvas(1), gap_ms, false);
+        assert!(output.starts_with(&transmission(
+            &root.pixels,
+            root.width,
+            root.height,
+            image_id(7),
+            -1
+        )));
+        assert_eq!(output.matches("a=T,").count(), 1);
+        let frames = frame_escapes(&output);
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].contains(",f=32,"));
+        assert!(frames[0].contains(",o=z,"));
+        assert!(frames[0].contains(",i=7,"));
+        assert!(output.find("a=T,") < output.find("a=f,"));
+    }
+
+    #[test]
+    fn blink_holds_the_root_for_its_gap_and_loops_forever() {
+        let gap_ms = 500;
+        let output = blinked(&grow_canvas(0), &grow_canvas(1), gap_ms, false);
+        assert_eq!(
+            frame_key(frame_escapes(&output)[0], "z"),
+            Some(gap_ms.to_string().as_str())
+        );
+        let last = output.rsplit("\x1b_G").next().unwrap();
+        assert_eq!(
+            frame_key(last, "r"),
+            Some("1"),
+            "the transparent root needs its own gap or the cycle is lit-then-instantly-dark"
+        );
+        assert_eq!(frame_key(last, "z"), Some(gap_ms.to_string().as_str()));
+        assert_eq!(frame_key(last, "s"), Some("3"));
+        assert_eq!(frame_key(last, "v"), Some("1"));
+        assert!(output.ends_with("\x1b\\"));
+    }
+
+    #[test]
+    fn blink_frames_carry_capital_z_in_wezterm() {
+        let gap_ms = 500;
+        let output = blinked(&grow_canvas(0), &grow_canvas(1), gap_ms, true);
+        let frames = frame_escapes(&output);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frame_key(frames[0], "Z"), frame_key(frames[0], "z"));
     }
 
     #[test]
