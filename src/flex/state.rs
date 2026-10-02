@@ -147,7 +147,6 @@ fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
     !b.border && children.is_empty()
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn sibling_or_else_parent(boxes: &Tree<FlexBox>, path: &[usize]) -> Vec<usize> {
     if path.last() == Some(&0) {
         boxes.parent(path)
@@ -186,7 +185,16 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
             state.mode = FlexMode::Move;
         }
         "\x7f" => {
-            if let Some(text) = state.selected_mut().text.as_mut() {
+            let children = state.boxes.children(&state.selected);
+            if state.selected_mut().text.as_deref() == Some("")
+                && is_droppable(state.boxes.value(&state.selected), &children)
+            {
+                history::record(&mut state);
+                let next = sibling_or_else_parent(&state.boxes, &state.selected);
+                state.boxes.remove(&state.selected);
+                state.selected = next;
+                state.mode = FlexMode::Move;
+            } else if let Some(text) = state.selected_mut().text.as_mut() {
                 text.pop();
             }
         }
@@ -380,18 +388,48 @@ mod tests {
     }
 
     #[test]
-    fn backspace_on_an_empty_new_text_leaves_the_state_unchanged() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "o");
-        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+    fn backspace_on_an_empty_new_text_removes_it_and_selects_the_parent() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["o", "\x7f"]);
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]
-    fn backspace_empties_the_new_text_and_then_changes_nothing() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "o");
-        let (state, _) = reduce(state, "W");
-        let (state, _) = reduce(state, "\x7f");
-        assert_eq!(text_of(&state, &state.selected), Some(""));
-        assert_eq!(reduce(state.clone(), "\x7f"), (state, None));
+    fn backspace_empties_the_new_text_and_then_removes_it() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["o", "W", "\x7f", "\x7f"]);
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn backspace_on_an_empty_borderless_box_with_a_previous_sibling_selects_it() {
+        let before = moved(hello_in(FlexMode::Move), &["A", "o"]);
+        assert_eq!(before.selected, [0, 1]);
+        let state = reduce(before, "\x7f").0;
+        assert_eq!(
+            state.boxes,
+            new_window(vec![Tree::new(
+                FlexBox {
+                    text: Some("Hello".to_string()),
+                    ..FlexBox::default()
+                },
+                vec![new_box()],
+            )])
+        );
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn backspace_on_a_bordered_box_with_empty_text_leaves_it_in_place() {
+        let before = moved(FlexState::default(), &["i"]);
+        assert!(selected_box(&before).border);
+        assert_eq!(text_of(&before, &before.selected), Some(""));
+        assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
     }
 
     #[test]
@@ -1361,6 +1399,16 @@ mod tests {
         let state = moved(once, &["u"]);
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn u_after_backspace_removes_an_empty_box_brings_it_and_its_selection_back() {
+        let before = hello_in(FlexMode::Move);
+        let after_o = moved(before.clone(), &["o"]);
+        let state = moved(after_o.clone(), &["\x7f", "u"]);
+        assert_eq!(state.boxes, after_o.boxes);
+        assert_eq!(state.selected, after_o.selected);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
