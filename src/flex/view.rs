@@ -200,9 +200,9 @@ fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mut Vec<Arran
     let sizes = item_sizes(tree, path);
     let inner = rect.inner(padding(flex_box));
     let inner_cross = inner.size().cross(direction);
-    let mains: Vec<i64> = match direction {
-        Direction::Column => sizes.iter().map(|size| size.main(direction)).collect(),
-        Direction::Row => share(inner.width, sizes.len(), FLEX_SPACE.width),
+    let mains: Vec<i64> = match (direction, flex_box.justify) {
+        (Direction::Row, Justify::Start) => share(inner.width, sizes.len(), FLEX_SPACE.width),
+        _ => sizes.iter().map(|size| size.main(direction)).collect(),
     };
     let offsets = distribute(
         &mains,
@@ -850,24 +850,153 @@ mod tests {
     }
 
     #[test]
-    fn a_space_between_box_in_a_row_places_the_same_as_a_start_box() {
-        let in_a_row = |justify| FlexState {
-            boxes: new_window(vec![Tree::new(
-                FlexBox::default(),
-                vec![Tree::new(
-                    FlexBox {
-                        justify,
-                        ..FlexBox::default()
-                    },
-                    vec![text("Hello"), text("World")],
-                )],
+    fn a_space_between_row_spreads_two_boxes_to_its_inner_edges() {
+        let state = FlexState {
+            boxes: new_window(vec![outer(
+                FlexBox {
+                    justify: Justify::SpaceBetween,
+                    ..FlexBox::default()
+                },
+                &[],
+                2,
             )]),
             ..FlexState::default()
         };
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (row, first, last) = (boxes[0], boxes[1], boxes[2]);
+        assert_eq!(first.x, row.x + FLEX_SPACE.width);
+        assert_eq!(last.x + last.width, row.x + row.width - FLEX_SPACE.width);
+        assert_eq!(first.width, measure(&state.boxes, &[0, 0]).width);
+        assert_eq!(last.width, measure(&state.boxes, &[0, 1]).width);
+    }
+
+    fn row_of_boxes(row: FlexBox, own_text: &[&str], box_texts: &[&str]) -> FlexState {
+        let boxes: Vec<_> = box_texts
+            .iter()
+            .map(|label| outer(FlexBox::default(), &[label], 0))
+            .collect();
+        FlexState {
+            boxes: new_window(vec![Tree::new(
+                row,
+                own_text
+                    .iter()
+                    .map(|label| text(label))
+                    .chain(boxes)
+                    .collect(),
+            )]),
+            ..FlexState::default()
+        }
+    }
+
+    fn spreading() -> FlexBox {
+        FlexBox {
+            justify: Justify::SpaceBetween,
+            ..FlexBox::default()
+        }
+    }
+
+    fn free_space_of_row(state: &FlexState, box_count: usize) -> i64 {
+        let placements = placements(state);
+        let row = all_boxes(&placements)[0];
+        let widths: i64 = (0..box_count)
+            .map(|index| measure(&state.boxes, &[0, index]).width)
+            .sum();
+        row.width - 2 * FLEX_SPACE.width - widths
+    }
+
+    #[test]
+    fn a_space_between_row_with_one_box_keeps_it_its_width_at_the_left_edge() {
+        let state = row_of_boxes(spreading(), &[], &["Hello"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        assert_eq!(boxes[1].x, boxes[0].x + FLEX_SPACE.width);
+        assert_eq!(boxes[1].width, measure(&state.boxes, &[0, 0]).width);
+    }
+
+    #[test]
+    fn a_space_between_row_with_three_boxes_has_equal_gaps_when_the_free_space_divides_evenly() {
+        let state = row_of_boxes(spreading(), &[], &["Hello", "Hello", "Hi"]);
+        assert_eq!(free_space_of_row(&state, 3) % 2, 0);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (row, items) = (boxes[0], &boxes[1..]);
+        assert_eq!(items[0].x, row.x + FLEX_SPACE.width);
         assert_eq!(
-            placements(&in_a_row(Justify::SpaceBetween)),
-            placements(&in_a_row(Justify::Start))
+            items[2].x + items[2].width,
+            row.x + row.width - FLEX_SPACE.width
         );
+        let gaps = gaps_between(items);
+        assert_eq!(gaps[0], gaps[1]);
+    }
+
+    #[test]
+    fn a_space_between_row_with_an_odd_remainder_keeps_both_edges_and_gaps_within_one() {
+        let state = row_of_boxes(spreading(), &[], &["Hello", "Hello", "Hello"]);
+        assert_eq!(free_space_of_row(&state, 3) % 2, 1);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (row, items) = (boxes[0], &boxes[1..]);
+        assert_eq!(items[0].x, row.x + FLEX_SPACE.width);
+        assert_eq!(
+            items[2].x + items[2].width,
+            row.x + row.width - FLEX_SPACE.width
+        );
+        let gaps = gaps_between(items);
+        assert!((gaps[0] - gaps[1]).abs() <= 1);
+    }
+
+    #[test]
+    fn a_space_between_row_spreads_its_own_text_with_its_boxes() {
+        let state = row_of_boxes(spreading(), &["Title"], &["Hello", "World"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let (row, items) = (boxes[0], &boxes[1..]);
+        let label = the_label(&placements);
+        assert_eq!(label.x, row.x + FLEX_SPACE.width);
+        assert_eq!(
+            items[1].x + items[1].width,
+            row.x + row.width - FLEX_SPACE.width
+        );
+        let gaps = [
+            items[0].x - (label.x + label.width),
+            items[1].x - (items[0].x + items[0].width),
+        ];
+        assert!((gaps[0] - gaps[1]).abs() <= 1);
+    }
+
+    #[test]
+    fn a_start_row_gives_each_of_two_boxes_half_of_its_width() {
+        let state = row_of_boxes(FlexBox::default(), &[], &["Hello", "Hi"]);
+        let placements = placements(&state);
+        let boxes = all_boxes(&placements);
+        let inner_width = boxes[0].width - 2 * FLEX_SPACE.width;
+        assert_eq!(
+            boxes[1].width + FLEX_SPACE.width + boxes[2].width,
+            inner_width
+        );
+        assert!((boxes[1].width - boxes[2].width).abs() <= 1);
+        assert_eq!(boxes[2].x, boxes[1].x + boxes[1].width + FLEX_SPACE.width);
+    }
+
+    #[test]
+    fn pressing_s_twice_on_a_row_gives_the_boxes_their_equal_shares_again() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            selected: vec![0],
+            ..row_of_boxes(FlexBox::default(), &[], &["Hello", "Hi"])
+        };
+        let before = placements(&state)
+            .iter()
+            .map(|placement| (placement.x, placement.width))
+            .collect::<Vec<_>>();
+        let (spread, _) = reduce(state, "s");
+        let (back, _) = reduce(spread, "s");
+        let after = placements(&back)
+            .iter()
+            .map(|placement| (placement.x, placement.width))
+            .collect::<Vec<_>>();
+        assert_eq!(after, before);
     }
 
     #[test]
