@@ -1,5 +1,6 @@
 use crate::canvas::Canvas;
 use crate::kitty::{ImageId, PlacementId};
+use crate::view::Rgb;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
@@ -22,7 +23,14 @@ pub(super) enum ImageKey {
     Bracket(BracketKey),
     Sprite(SpriteKey),
     Caret(CaretKey),
+    TypingCaret(TypingCaretKey),
     Grow(GrowKey),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct TypingCaretKey {
+    pub(super) colour: Rgb,
+    pub(super) bold: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

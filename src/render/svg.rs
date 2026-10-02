@@ -118,6 +118,7 @@ fn paint(placements: &[Placement]) -> String {
             PlacementNode::Caret(_) | PlacementNode::Cursor(_) => {
                 cursors.push_str(&caret_rect(placement))
             }
+            PlacementNode::TypingCaret { .. } => {}
             PlacementNode::Brackets { border } => {
                 brackets.push_str(&brackets_path(placement, *border))
             }

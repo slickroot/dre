@@ -4,7 +4,9 @@ use super::brackets::{corner_cells, corner_offset, BracketKey, CORNERS};
 use super::font::GlyphSource;
 use super::shapes::{ArrowShape, BoxShape, LedShape};
 use super::tiles::{CellSize, TileKey, TileShape};
-use super::virtual_terminal::{CaretKey, Content, Desired, GrowKey, ImageKey, SourceRect, Sprites};
+use super::virtual_terminal::{
+    CaretKey, Content, Desired, GrowKey, ImageKey, SourceRect, Sprites, TypingCaretKey,
+};
 use super::{colour, Renderer, ARROW_OPACITY, OPAQUE, ROUNDED_RADIUS};
 use crate::canvas::Canvas;
 use crate::composer::Area;
@@ -241,6 +243,17 @@ impl crate::canvas::Shape for SolidShape {
     }
 }
 
+struct CaretShape {
+    bar: i64,
+    colour: crate::canvas::Rgba,
+}
+
+impl crate::canvas::Shape for CaretShape {
+    fn colour_at(&self, x: i64, _y: i64) -> Option<crate::canvas::Rgba> {
+        (x < self.bar).then_some(self.colour)
+    }
+}
+
 pub(crate) struct TerminalRenderer {
     window: Window,
     cache: std::collections::HashMap<SpriteKey, Canvas>,
@@ -368,6 +381,9 @@ impl TerminalRenderer {
                     },
                 ),
                 PlacementNode::Caret(_) => self.draw_caret(desired, geometry, area),
+                PlacementNode::TypingCaret { colour, bold } => {
+                    self.draw_typing_caret(desired, geometry, area, placement.depth, *colour, *bold)
+                }
                 PlacementNode::Cursor(_) => self.draw_cursor(desired, geometry, area),
                 PlacementNode::Led { colour, lit } => self.draw_led(
                     desired,
@@ -654,6 +670,34 @@ impl TerminalRenderer {
         }
     }
 
+    fn draw_typing_caret(
+        &mut self,
+        desired: &mut Vec<Desired>,
+        geometry: Geometry,
+        area: Area,
+        depth: u8,
+        colour: Rgb,
+        bold: bool,
+    ) {
+        if let Some((col, row, source)) = clip_natural(
+            geometry.x,
+            geometry.y,
+            geometry.width,
+            geometry.height,
+            area,
+            self.window,
+        ) {
+            desired.push(Desired {
+                image: ImageKey::TypingCaret(TypingCaretKey { colour, bold }),
+                col,
+                row,
+                z: depth_z(depth),
+                source,
+                cells: None,
+            });
+        }
+    }
+
     fn draw_cursor(&mut self, desired: &mut Vec<Desired>, geometry: Geometry, area: Area) {
         self.draw_caret(desired, geometry, area);
     }
@@ -818,6 +862,20 @@ impl Sprites for TerminalRenderer {
                     },
                 ))
             }
+            ImageKey::TypingCaret(ck) => {
+                let width = self.cells_to_pixels_x(1);
+                let height = self.cells_to_pixels_y(1);
+                let bar = (self.window.cell_width / 8).max(1);
+                let (r, g, b) = ck.colour;
+                Content::Still(Canvas::fill(
+                    width,
+                    height,
+                    &CaretShape {
+                        bar,
+                        colour: [r, g, b, OPAQUE],
+                    },
+                ))
+            }
             ImageKey::Grow(gk) => {
                 let (width, height, style) = match &gk.style_key {
                     SpriteKey::Box {
@@ -917,7 +975,7 @@ fn clip_stretched(
 mod tests {
     use super::super::font::FakeGlyphSource;
     use super::super::tiles::{cells_with_middle, TileShape};
-    use super::super::virtual_terminal::{Content, Desired, SourceRect, Sprites};
+    use super::super::virtual_terminal::{Content, Desired, SourceRect, Sprites, TypingCaretKey};
     use super::*;
     use crate::state::Mode;
     use crate::style::{BOX_FILL_OPACITY, CELL_HEIGHT, CELL_WIDTH, FOOTER_FILL_OPACITY};
@@ -1815,6 +1873,20 @@ mod tests {
             width,
             height,
             depth: 0,
+        }
+    }
+
+    fn typing_caret_placement(x: i64, y: i64) -> crate::view::Placement<'static> {
+        crate::view::Placement {
+            node: crate::view::PlacementNode::TypingCaret {
+                colour: crate::style::rgb(None),
+                bold: false,
+            },
+            x,
+            y,
+            width: 1,
+            height: 1,
+            depth: 1,
         }
     }
 
@@ -3507,5 +3579,139 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_has_a_lit_column_at_its_left_edge() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        let (red, green, blue, alpha) = pixel_at(&canvas.pixels, canvas.width, 0, 0);
+        assert_eq!(
+            (red, green, blue, alpha),
+            (colour.0, colour.1, colour.2, OPAQUE)
+        );
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_is_transparent_past_the_bar() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        let (_, _, _, alpha) = pixel_at(&canvas.pixels, canvas.width, canvas.width - 1, 0);
+        assert_eq!(alpha, 0);
+    }
+
+    #[test]
+    fn the_typing_caret_canvas_spans_the_whole_cell_height() {
+        let mut r = renderer(16, 32);
+        let colour = (0x11, 0x22, 0x33);
+        let Content::Still(canvas) = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour,
+                bold: false,
+            }),
+        ) else {
+            panic!("typing caret must be still");
+        };
+        assert_eq!(canvas.height, r.cells_to_pixels_y(1));
+        for y in 0..canvas.height {
+            let (red, green, blue, alpha) = pixel_at(&canvas.pixels, canvas.width, 0, y);
+            assert_eq!(
+                (red, green, blue, alpha),
+                (colour.0, colour.1, colour.2, OPAQUE)
+            );
+        }
+    }
+
+    #[test]
+    fn the_typing_caret_image_is_still_and_not_an_animation() {
+        let mut r = renderer(16, 32);
+        let content = Sprites::content(
+            &mut r,
+            &ImageKey::TypingCaret(TypingCaretKey {
+                colour: (0x11, 0x22, 0x33),
+                bold: false,
+            }),
+        );
+        assert!(matches!(content, Content::Still(_)));
+    }
+
+    #[test]
+    fn the_typing_caret_desired_sits_at_the_label_end_cell() {
+        let mut r = renderer_on(window(8, 3, 1, 1));
+        let label = label_placement("hi", 1, 1, 2, 1);
+        let caret = typing_caret_placement(label.x + 2, label.y);
+        let desired = paint_desired(&mut r, &[label.clone(), caret.clone()]);
+        let typing: Vec<&Desired> = desired
+            .iter()
+            .filter(|d| matches!(d.image, ImageKey::TypingCaret(_)))
+            .collect();
+        assert_eq!(typing.len(), 1);
+        assert_eq!((typing[0].col, typing[0].row), (caret.x, caret.y));
+    }
+
+    #[test]
+    fn an_unchanged_typing_caret_commits_no_ops() {
+        let mut r = renderer_on(window(8, 3, 1, 1));
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
+        let placements = [typing_caret_placement(4, 1)];
+
+        commit_ops(&mut vt, &mut r, &placements);
+        let ops = commit_ops(&mut vt, &mut r, &placements);
+
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn the_typing_caret_is_re_placed_as_the_label_grows() {
+        let mut r = renderer_on(window(8, 3, 1, 1));
+        let mut vt = super::super::virtual_terminal::VirtualTerminal::new();
+
+        let first = commit_ops(&mut vt, &mut r, &[typing_caret_placement(3, 1)]);
+        let (original_id, original_col) = first
+            .iter()
+            .find_map(|op| match op {
+                super::super::virtual_terminal::Op::Place { placement, col, .. } => {
+                    Some((*placement, *col))
+                }
+                _ => None,
+            })
+            .expect("the first commit places the caret");
+        assert_eq!(original_col, 3);
+
+        let second = commit_ops(&mut vt, &mut r, &[typing_caret_placement(4, 1)]);
+
+        assert!(!second
+            .iter()
+            .any(|op| matches!(op, super::super::virtual_terminal::Op::Delete { .. })));
+        let (moved_id, moved_col) = second
+            .iter()
+            .find_map(|op| match op {
+                super::super::virtual_terminal::Op::Place { placement, col, .. } => {
+                    Some((*placement, *col))
+                }
+                _ => None,
+            })
+            .expect("the caret is re-placed");
+        assert_eq!(moved_id, original_id);
+        assert_eq!(moved_col, 4);
     }
 }
