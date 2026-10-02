@@ -1345,9 +1345,9 @@ mod tests {
     }
 
     #[test]
-    fn g_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
+    fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "i", "H", "e", "l", "l", "o", "\r", "A", "o", "W", "o", "r", "l", "d", "\r", "g",
+            "i", "H", "e", "l", "l", "o", "\r", "A", "o", "W", "o", "r", "l", "d", "\r", "s",
         ];
         let state = keys
             .into_iter()

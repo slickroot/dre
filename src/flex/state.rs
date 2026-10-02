@@ -225,7 +225,7 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             );
             state.mode = FlexMode::Write;
         }
-        "g" => {
+        "s" => {
             let selected = state.selected_box();
             selected.justify = selected.justify.toggle();
         }
@@ -660,8 +660,8 @@ mod tests {
     }
 
     #[test]
-    fn g_in_move_mode_spreads_the_texts_and_keeps_the_rest() {
-        let (state, effect) = reduce(hello_in(FlexMode::Move), "g");
+    fn s_in_move_mode_spreads_the_texts_and_keeps_the_rest() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "s");
         assert_eq!(selected_box(&state).justify, Justify::SpaceBetween);
         assert_eq!(state.texts_of(&state.selected), ["Hello"]);
         assert_eq!(state.mode, FlexMode::Move);
@@ -669,24 +669,24 @@ mod tests {
     }
 
     #[test]
-    fn g_twice_in_move_mode_toggles_the_justify_back_to_start() {
-        let (state, _) = reduce(hello_in(FlexMode::Move), "g");
-        let (state, effect) = reduce(state, "g");
+    fn s_twice_in_move_mode_toggles_the_justify_back_to_start() {
+        let (state, _) = reduce(hello_in(FlexMode::Move), "s");
+        let (state, effect) = reduce(state, "s");
         assert_eq!(state, hello_in(FlexMode::Move));
         assert_eq!(effect, None);
     }
 
     #[test]
-    fn g_in_write_mode_is_typed_into_the_box_and_leaves_the_justify_alone() {
-        let (state, effect) = reduce(hello_in(FlexMode::Write), "g");
-        assert_eq!(state.texts_of(&state.selected), ["Hellog"]);
+    fn s_in_write_mode_is_typed_into_the_box_and_leaves_the_justify_alone() {
+        let (state, effect) = reduce(hello_in(FlexMode::Write), "s");
+        assert_eq!(state.texts_of(&state.selected), ["Hellos"]);
         assert_eq!(selected_box(&state).justify, Justify::Start);
         assert_eq!(effect, None);
     }
 
     #[test]
-    fn g_only_spreads_the_selected_box() {
-        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "g");
+    fn s_only_spreads_the_selected_box() {
+        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "s");
         assert_eq!(box_at(&state, &[0]).justify, Justify::Start);
         assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
     }
@@ -832,9 +832,9 @@ mod tests {
     }
 
     #[test]
-    fn g_only_spreads_a_selected_box_above_the_bottom() {
+    fn s_only_spreads_a_selected_box_above_the_bottom() {
         let before = middle_selected();
-        let (state, _) = reduce(before.clone(), "g");
+        let (state, _) = reduce(before.clone(), "s");
         assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
         only_the_middle_box_changed(&before, &state);
     }
@@ -1047,8 +1047,8 @@ mod tests {
     }
 
     #[test]
-    fn g_on_a_selected_text_spreads_its_parent_box() {
-        let state = moved(world_selected(), &["g"]);
+    fn s_on_a_selected_text_spreads_its_parent_box() {
+        let state = moved(world_selected(), &["s"]);
         assert_eq!(box_at(&state, &[0]).justify, Justify::SpaceBetween);
     }
 
@@ -1118,7 +1118,7 @@ mod tests {
 
     #[test]
     fn u_after_a_toggle_brings_back_the_state_before_the_key() {
-        for key in ["g", "d", "f"] {
+        for key in ["s", "d", "f"] {
             let before = world_selected();
             assert_eq!(moved(before.clone(), &[key, "u"]), before, "{key}");
         }
