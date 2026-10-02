@@ -31,6 +31,14 @@ pub(super) fn recorded(
     reduce(state)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn record(state: &mut FlexState) {
+    state.history.push(Snapshot {
+        boxes: state.boxes.clone(),
+        selected: state.selected.clone(),
+    });
+}
+
 pub(super) fn undo(mut state: FlexState) -> FlexState {
     if let Some(previous) = state.history.pop() {
         state.boxes = previous.boxes;
@@ -88,6 +96,26 @@ mod tests {
             let (state, _) = recorded(state, "\r", |s| (s, None));
             assert_eq!(state.history.len(), before_len + 1, "{text:?}");
         }
+    }
+
+    #[test]
+    fn record_pushes_a_snapshot_that_undo_can_restore() {
+        let before = FlexState {
+            mode: FlexMode::Write,
+            ..FlexState::default()
+        };
+        let before_len = before.history.len();
+
+        let mut state = before.clone();
+        record(&mut state);
+        assert_eq!(state.history.len(), before_len + 1);
+
+        state.boxes.value_mut(&state.selected).text = Some("changed".to_string());
+        state.selected = vec![];
+
+        let undone = undo(state);
+        assert_eq!(undone.boxes, before.boxes);
+        assert_eq!(undone.selected, before.selected);
     }
 
     #[test]
