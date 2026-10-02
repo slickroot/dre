@@ -167,12 +167,18 @@ fn drop_empty_text(mut state: FlexState) -> FlexState {
     state
 }
 
+fn exit_write_mode(mut state: FlexState) -> FlexState {
+    if state.selected_mut().text.as_deref() == Some("") {
+        state = drop_empty_text(state);
+    }
+    state.mode = FlexMode::Move;
+    state
+}
+
 fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
         "\r" => {
-            if state.selected_mut().text.as_deref() == Some("") {
-                state = drop_empty_text(state);
-            } else {
+            if state.selected_mut().text.as_deref() != Some("") {
                 let mut new_box = state.selected_mut().clone();
                 new_box.text = Some(String::new());
                 let parent = &state.selected[..state.selected.len() - 1];
@@ -182,7 +188,7 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
                     .insert(parent, index, Tree::new(new_box, vec![]));
                 return (state, None);
             }
-            state.mode = FlexMode::Move;
+            state = exit_write_mode(state);
         }
         "\x7f" => {
             let children = state.boxes.children(&state.selected);
@@ -648,6 +654,19 @@ mod tests {
         let state = moved(nested, &["i", "\x7f", "\r"]);
         assert_eq!(text_of(&state, &state.selected), None);
         assert_eq!(state.boxes.children(&state.selected).len(), 2);
+    }
+
+    #[test]
+    fn enter_on_empty_text_drops_the_box_and_returns_to_move() {
+        let hello = hello_in(FlexMode::Move);
+        let before = moved(hello.clone(), &["o"]);
+        assert_eq!(text_of(&before, &before.selected), Some(""));
+        let (state, effect) = reduce(before, "\r");
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.boxes, hello.boxes);
+        assert_eq!(state.selected, [0]);
+        assert!(state.boxes.children(&[0]).is_empty());
+        assert_eq!(effect, None);
     }
 
     #[test]
