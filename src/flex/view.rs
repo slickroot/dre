@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn an_empty_box_wears_its_own_colours() {
-        let (state, _) = reduce(FlexState::default(), "s");
+        let (state, _) = reduce(FlexState::default(), "o");
         assert_eq!(
             colours(&placements(&state)),
             ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
@@ -782,7 +782,7 @@ mod tests {
 
     #[test]
     fn the_box_is_centred_again_after_a_text_is_added() {
-        let (grown, _) = reduce(with_text("Hello"), "s");
+        let (grown, _) = reduce(with_text("Hello"), "o");
         let (left, right) = margins(&placements(&grown));
         assert!((left - right).abs() <= 1);
     }
@@ -1267,7 +1267,7 @@ mod tests {
 
     #[test]
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
-        let state = ["\r", "A", "s", "W", "o", "r", "l", "d"]
+        let state = ["\r", "A", "o", "W", "o", "r", "l", "d"]
             .into_iter()
             .fold(with_text("Hello"), |state, key| reduce(state, key).0);
         let placements = placements(&state);
@@ -1388,10 +1388,10 @@ mod tests {
     }
 
     #[test]
-    fn g_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
+    fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let keys = [
-            "s", "H", "e", "l", "l", "o", "\r", "h", "A", "s", "W", "o", "r", "l", "d", "\r", "h",
-            "g",
+            "o", "H", "e", "l", "l", "o", "\r", "h", "A", "o", "W", "o", "r", "l", "d", "\r", "h",
+            "s",
         ];
         let state = keys
             .into_iter()
@@ -1531,7 +1531,7 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["s", "H", "e", "l", "l", "o", "\r", "h", "A"];
+    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "h", "A"];
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
@@ -1550,7 +1550,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["s", "H", "e", "l", "l", "o", "\r", "h", "f", "A"]);
+        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "h", "f", "A"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
@@ -1800,8 +1800,8 @@ mod tests {
     }
 
     #[test]
-    fn d_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
-        let state = after(title_and_hi_in(Direction::Row), &["h", "d"]);
+    fn r_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
+        let state = after(title_and_hi_in(Direction::Row), &["h", "r"]);
         let placements = placements(&state);
         let (outer, inner) = outer_and_inner(&placements);
         assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
@@ -1812,8 +1812,8 @@ mod tests {
     }
 
     #[test]
-    fn p_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
-        let state = after(with_text("Hello"), &["\r", "p"]);
+    fn close_bracket_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
+        let state = after(with_text("Hello"), &["\r", "]"]);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
@@ -1834,9 +1834,9 @@ mod tests {
     }
 
     #[test]
-    fn p_twice_adds_two_space_widths_of_padding_on_each_side() {
+    fn close_bracket_twice_adds_two_space_widths_of_padding_on_each_side() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "p", "p"]);
+        let state = after(before.clone(), &["\r", "]", "]"]);
         assert_eq!(
             measure(&state.boxes, &[0]).width,
             measure(&before.boxes, &[0]).width + 4 * FLEX_SPACE.width
@@ -1844,9 +1844,9 @@ mod tests {
     }
 
     #[test]
-    fn p_on_an_inner_box_widens_it_and_its_parent() {
+    fn close_bracket_on_an_inner_box_widens_it_and_its_parent() {
         let before = title_and_hi_in(Direction::Row);
-        let state = after(before.clone(), &["p"]);
+        let state = after(before.clone(), &["]"]);
         assert_eq!(
             measure(&state.boxes, &[0, 1]).width,
             measure(&before.boxes, &[0, 1]).width + 2 * FLEX_SPACE.width
@@ -1858,9 +1858,9 @@ mod tests {
     }
 
     #[test]
-    fn p_on_an_outer_box_keeps_its_width_and_moves_its_text_in() {
+    fn close_bracket_on_an_outer_box_keeps_its_width_and_moves_its_text_in() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "p"]);
+        let state = after(before.clone(), &["\r", "]"]);
         let before_width = the_box_width(&placements(&before));
         let placements = placements(&state);
         let the_box = the_box(&placements);
