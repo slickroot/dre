@@ -124,6 +124,9 @@ fn paint(placements: &[Placement]) -> String {
             PlacementNode::Led { colour, lit } => {
                 leds.push_str(&led_circle(placement, *colour, *lit))
             }
+            // Flex scenes are never exported to SVG (only legacy view::body is), and a
+            // frozen frame of a blinking caret has no meaning anyway.
+            PlacementNode::TypingCaret { .. } => {}
         }
     }
     [arrows, boxes, brackets, labels, cursors, leds].concat()

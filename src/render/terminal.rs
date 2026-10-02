@@ -621,6 +621,7 @@ impl TerminalRenderer {
                         lit: *lit,
                     },
                 ),
+                PlacementNode::TypingCaret { .. } => {}
             }
         }
     }

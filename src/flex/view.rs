@@ -253,6 +253,7 @@ fn paint<'a>(
 ) -> Vec<Placement<'a>> {
     let path = &arranged.path;
     let selected = state.mode == FlexMode::Move && &state.selected == path;
+    let is_typing = state.mode == FlexMode::Write && &state.selected == path;
     let depth = path.len().saturating_sub(1) as u8;
     let placement = |node, rect: Rect| Placement {
         node,
@@ -300,7 +301,27 @@ fn paint<'a>(
                 rect,
             )
         });
-    border.into_iter().chain(label).collect()
+    let caret = is_typing
+        .then(|| flex_box.text.as_ref().zip(arranged.text))
+        .flatten()
+        .map(|(text, rect)| {
+            // text.x + chars().count(), not rect.width: interior() floors an empty
+            // label's width at 1, which would put the caret one cell too far right
+            // before anything has been typed.
+            placement(
+                PlacementNode::TypingCaret {
+                    colour: FLEX_TEXT_COLOUR,
+                    bold: false,
+                },
+                Rect {
+                    x: rect.x + text.chars().count() as i64,
+                    y: rect.y,
+                    width: 1,
+                    height: 1,
+                },
+            )
+        });
+    border.into_iter().chain(label).chain(caret).collect()
 }
 
 pub(crate) fn scene<'a>(
@@ -399,6 +420,27 @@ mod tests {
             .iter()
             .find(|placement| matches!(placement.node, PlacementNode::Label(_)))
             .unwrap()
+    }
+
+    fn all_carets<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
+        placements
+            .iter()
+            .filter(|placement| matches!(placement.node, PlacementNode::TypingCaret { .. }))
+            .collect()
+    }
+
+    fn the_caret<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
+        let carets = all_carets(placements);
+        assert_eq!(carets.len(), 1);
+        carets[0]
+    }
+
+    fn writing(text: &str) -> FlexState {
+        FlexState {
+            mode: FlexMode::Write,
+            selected: vec![0, 0],
+            ..with_text(text)
+        }
     }
 
     #[test]
@@ -1049,6 +1091,66 @@ mod tests {
     fn in_write_no_box_has_the_selected_border() {
         let state = selecting(FlexMode::Write, 1);
         assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
+    }
+
+    #[test]
+    fn write_mode_puts_a_typing_caret_one_cell_past_the_label() {
+        let state = writing("ab");
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let caret = the_caret(&placements);
+        assert_eq!((caret.x, caret.y), (label.x + 2, label.y));
+        assert_eq!((caret.width, caret.height), (1, 1));
+    }
+
+    #[test]
+    fn an_empty_label_puts_the_caret_in_the_first_cell() {
+        let state = writing("");
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let caret = the_caret(&placements);
+        assert_eq!(caret.x, label.x);
+    }
+
+    #[test]
+    fn typing_the_next_character_moves_the_caret_right_by_one_cell() {
+        let before = the_caret(&placements(&writing("ab"))).x;
+        let after = the_caret(&placements(&writing("abc"))).x;
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn backspacing_to_empty_leaves_the_caret_in_the_first_cell() {
+        let state = writing("");
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let caret = the_caret(&placements);
+        assert_eq!(caret.x, label.x);
+    }
+
+    #[test]
+    fn move_mode_draws_no_typing_caret() {
+        let state = FlexState {
+            mode: FlexMode::Move,
+            ..writing("ab")
+        };
+        assert_eq!(all_carets(&placements(&state)).len(), 0);
+    }
+
+    #[test]
+    fn the_caret_placement_is_one_cell_wide_and_does_not_widen_the_label() {
+        let not_typing = FlexState {
+            mode: FlexMode::Move,
+            ..writing("ab")
+        };
+        let typing = writing("ab");
+        let typing_placements = placements(&typing);
+        let caret = the_caret(&typing_placements);
+        assert_eq!((caret.width, caret.height), (1, 1));
+        assert_eq!(
+            the_label(&placements(&not_typing)).width,
+            the_label(&typing_placements).width
+        );
     }
 
     fn with_inner_boxes(text: &str, count: usize) -> FlexState {
