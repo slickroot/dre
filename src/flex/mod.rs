@@ -1,4 +1,5 @@
 mod history;
+mod layout;
 mod state;
 mod view;
 
