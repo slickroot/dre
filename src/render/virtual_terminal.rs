@@ -23,7 +23,6 @@ pub(super) enum ImageKey {
     Bracket(BracketKey),
     Sprite(SpriteKey),
     Caret(CaretKey),
-    #[cfg_attr(not(test), allow(dead_code))]
     TypingCaret(TypingCaretKey),
     Grow(GrowKey),
 }
