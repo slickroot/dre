@@ -352,6 +352,7 @@ struct Frame {
     window: Window,
     characters: Vec<Vec<char>>,
     images: Vec<Placed>,
+    trailing: Vec<kitty::Command>,
     previous_transient_images: Vec<kitty::ImageId>,
 }
 
@@ -366,6 +367,7 @@ impl Frame {
             window,
             characters: vec![vec![BLANK; window.cols as usize]; window.rows as usize],
             images: Vec::new(),
+            trailing: Vec::new(),
             previous_transient_images,
         }
     }
@@ -471,6 +473,9 @@ impl Frame {
             let placement = image.placement.unwrap_or(numbered);
             bytes.extend_from_slice(image.command(placement).to_string().as_bytes());
         }
+        for command in &self.trailing {
+            bytes.extend_from_slice(command.to_string().as_bytes());
+        }
         bytes.extend_from_slice(END_SYNCHRONIZED_UPDATE.as_bytes());
         bytes
     }
@@ -516,6 +521,8 @@ pub(crate) struct TerminalRenderer {
     grow_stamp: u64,
     // Valid only between ticks: a full render's `soft_clear` has just wiped every
     // placement, and that same full render is what resets both of these fields.
+    // The cell records where the caret belongs, not whether it is lit, so a dark
+    // full render keeps it and the next tick can put the caret back.
     typing_caret: Option<TypingCaretCell>,
     typing_caret_lit: bool,
     pub(crate) wezterm: bool,
@@ -615,13 +622,22 @@ impl TerminalRenderer {
         let mut frame = Frame::with_previous(self.window, self.image_ids.take_transient());
         self.typing_caret = None;
         for (area, placements) in scene {
-            self.paint(&mut frame, placements, *area, lit);
+            self.paint(&mut frame, placements, *area);
+        }
+        // The caret is placed whatever the phase, so a tick always has a cell to
+        // move; a dark render puts it back in the same synchronized block.
+        if !lit {
+            if let Some(caret) = self.typing_caret {
+                frame
+                    .trailing
+                    .push(kitty::delete_placement(caret.image, TYPING_CARET_PLACEMENT));
+            }
         }
         self.typing_caret_lit = lit;
         frame
     }
 
-    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area, lit: bool) {
+    fn paint(&mut self, frame: &mut Frame, placements: &[Placement], area: Area) {
         for placement in placements {
             let geometry = Geometry::from(placement);
             match &placement.node {
@@ -678,7 +694,6 @@ impl TerminalRenderer {
                     geometry,
                     area,
                     placement.depth,
-                    lit,
                     CaretStyle {
                         colour: *colour,
                         bold: *bold,
@@ -901,12 +916,8 @@ impl TerminalRenderer {
         geometry: Geometry,
         area: Area,
         depth: u8,
-        lit: bool,
         style: CaretStyle,
     ) {
-        if !lit {
-            return;
-        }
         let z = depth_z(depth);
         let key = CaretKey {
             colour: style.colour,
@@ -1808,7 +1819,7 @@ mod tests {
     fn drawn_frame(r: &mut TerminalRenderer, placements: &[Placement]) -> Frame {
         let mut frame = Frame::new(r.window);
         let area = whole(r.window);
-        r.paint(&mut frame, placements, area, true);
+        r.paint(&mut frame, placements, area);
         frame
     }
 
@@ -2271,6 +2282,7 @@ mod tests {
                     .zip(&frame.images)
                     .map(|(placement, image)| image.command(placement).to_string()),
             )
+            .chain(frame.trailing.iter().map(|command| command.to_string()))
             .collect();
         let output = String::from_utf8(frame.into_bytes()).unwrap();
         assert_eq!(unwrapped(&output), expected);
@@ -2544,8 +2556,29 @@ mod tests {
         assert_eq!(placed_ids(&output), shown);
     }
 
+    fn placement_survivors(output: &str) -> Vec<String> {
+        let mut surviving: Vec<String> = Vec::new();
+        for command in output.split("\x1b_G").skip(1) {
+            let image = || {
+                command
+                    .split([',', ';'])
+                    .find_map(|pair| pair.strip_prefix("i="))
+                    .map(str::to_string)
+            };
+            if command.starts_with("a=d,d=a") {
+                surviving.clear();
+            } else if command.starts_with("a=T,") || command.starts_with("a=p,") {
+                surviving.push(image().expect("a placement names its image"));
+            } else if command.starts_with("a=d,d=i,") || command.starts_with("a=d,d=I,") {
+                let deleted = image().expect("a deletion names its image");
+                surviving.retain(|surviving| *surviving != deleted);
+            }
+        }
+        surviving
+    }
+
     #[test]
-    fn a_lit_render_places_the_caret_and_a_dark_one_does_not() {
+    fn a_lit_render_places_the_caret_and_a_dark_one_leaves_nothing_placed() {
         let placements = [typing_caret_placement(3, 2)];
         let mut lit = renderer_on(window(20, 10, 2, 4));
 
@@ -2553,11 +2586,49 @@ mod tests {
 
         let mut dark = renderer_on(window(20, 10, 2, 4));
         let dark_output = rendered_placements_in_phase(&mut dark, &placements, false);
+        let placed = shown_ids(&dark_output);
         assert_eq!(shown_ids(&lit_output).len(), 1);
-        assert!(shown_ids(&dark_output).is_empty());
-        assert!(placed_ids(&dark_output).is_empty());
-        assert!(dark.typing_caret.is_none());
-        assert_eq!(blinked(&mut dark, true), "");
+        assert_eq!(placed.len(), 1);
+        assert!(dark_output.contains(
+            &kitty::delete_placement(image_id(&placed[0]), TYPING_CARET_PLACEMENT).to_string()
+        ));
+        assert!(placement_survivors(&dark_output).is_empty());
+        assert_eq!(placement_survivors(&lit_output).len(), 1);
+    }
+
+    #[test]
+    fn the_caret_survives_a_keystroke_that_lands_on_the_dark_phase() {
+        let placements = [typing_caret_placement(3, 2)];
+        let mut r = renderer_on(window(20, 10, 2, 4));
+        rendered_placements_in_phase(&mut r, &placements, true);
+        blinked(&mut r, false);
+        rendered_placements_in_phase(&mut r, &placements, false);
+
+        let relit = blinked(&mut r, true);
+
+        assert_eq!(relit.matches("\x1b_G").count(), 1);
+        let caret = r
+            .typing_caret
+            .expect("a dark render still remembers the cell");
+        assert!(relit.contains(
+            &kitty::place(
+                caret.image,
+                TYPING_CARET_PLACEMENT,
+                caret.col,
+                caret.row,
+                caret.z
+            )
+            .to_string()
+        ));
+        assert_eq!(placement_survivors(&relit).len(), 1);
+    }
+
+    #[test]
+    fn a_tick_that_cannot_find_a_cell_emits_nothing() {
+        let mut r = renderer_on(window(20, 10, 2, 4));
+
+        assert_eq!(blinked(&mut r, true), "");
+        assert_eq!(blinked(&mut r, false), "");
     }
 
     fn blinked(r: &mut TerminalRenderer, lit: bool) -> String {
@@ -3686,7 +3757,7 @@ mod tests {
         let placement = box_placement(&node, area.col - 1, area.row + 1, width, height);
         let mut frame = Frame::new(r.window);
 
-        r.paint(&mut frame, std::slice::from_ref(&placement), area, true);
+        r.paint(&mut frame, std::slice::from_ref(&placement), area);
 
         let inside = |&(col, row): &(i64, i64)| {
             (area.col..area.col + area.cols).contains(&col)

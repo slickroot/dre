@@ -69,6 +69,11 @@ pub(crate) fn run_loop(keys: &dyn KeySource, screen: &mut dyn FlexScreen) -> io:
     let mut state = FlexState::default();
     let mut lit = true;
     loop {
+        // Outside typing mode there is no caret, so the phase carries no meaning
+        // and must not survive into the next write session.
+        if state.mode != FlexMode::Write {
+            lit = true;
+        }
         screen.render(&state, lit)?;
         // A tick moves one placement, so it waits for the next key here instead
         // of coming back around to the full render above.
@@ -325,6 +330,56 @@ mod tests {
         screen
             .expect_render()
             .withf(|state, lit| *lit && last_text(state) == Some(""))
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\x03".to_string()));
+
+        run_loop(&keys, &mut screen).unwrap();
+    }
+
+    #[test]
+    fn re_entering_write_mode_on_a_dark_phase_renders_with_the_caret_lit() {
+        let mut keys = MockKeySource::new();
+        let mut screen = MockFlexScreen::new();
+        let mut seq = Sequence::new();
+        for key in ["i", tty::TICK] {
+            screen
+                .expect_render()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(|_, _| Ok(()));
+            keys.expect_next_key()
+                .times(1)
+                .in_sequence(&mut seq)
+                .return_once(move |_| Ok(key.to_string()));
+        }
+        screen
+            .expect_blink()
+            .withf(|lit| !*lit)
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("\r".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, lit| *lit && state.mode == FlexMode::Move)
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(()));
+        keys.expect_next_key()
+            .times(1)
+            .in_sequence(&mut seq)
+            .return_once(|_| Ok("i".to_string()));
+        screen
+            .expect_render()
+            .withf(|state, lit| *lit && state.mode == FlexMode::Write)
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| Ok(()));
