@@ -25,3 +25,46 @@ word stuck at the end.
   empty text, so they never highlight anything.
 
 ## Technical Design
+
+This is a `dre-flex` (`src/flex/`) feature.
+
+`FlexBox` (`src/flex/state.rs`) has no cursor field — typing always
+appends/pops at the end of `text: Option<String>`. `FlexMode` currently has
+two variants, `Move` and `Write`. We add a third: `FlexMode::Replace`.
+
+**Entering Replace (`i` handler, `state.rs:220-223`)**
+
+- If the selected box's text is `Some(s)` with `!s.is_empty()`, set
+  `mode = FlexMode::Replace`. The text itself is left untouched so it still
+  renders.
+- Otherwise (text is `None` or `Some("")`), behave exactly as today: ensure
+  `text` is `Some(String::new())` and set `mode = FlexMode::Write`.
+
+**Handling keys in Replace mode**
+
+`write_key` gains a mode check at the top for `FlexMode::Replace`:
+
+- Backspace (`"\x7f"`): set `text = Some(String::new())`, set
+  `mode = FlexMode::Write`, and return — wrapped in `history::recorded` so
+  undo restores the whole original label in one step. This bypasses the
+  normal backspace arm, which would otherwise see empty text on a droppable
+  box and delete the box.
+- Enter (`"\r"`): no special handling. Fall through unchanged into the
+  existing Enter arm, which already preserves the old text, clones the box
+  for the next sibling, and sets its own resulting mode — exactly today's
+  "moves on to the next text node" behaviour.
+- Any printable key: set `text = Some(String::new())`, set
+  `mode = FlexMode::Write` (wrapped in `history::recorded`, same undo
+  reasoning as Backspace), then fall through into the existing
+  printable-key arm so the typed character is pushed onto the now-empty
+  text.
+
+**Rendering the highlight**
+
+No new `PlacementNode` variant is needed. In `paint()`, when
+`path == state.selected && state.mode == FlexMode::Replace`, emit an extra
+`PlacementNode::Box` (reusing the existing filled-box/`solid_fill`
+mechanism) using `FLEX_SELECTED_COLOUR`, positioned before the `Label`
+placement so it paints behind the text. Its rect is sized to the label
+exactly, not the full text rect (which may be wider due to justify/padding):
+`{ x: text_rect.x, y: text_rect.y, width: label.chars().count(), height: 1 }`.
