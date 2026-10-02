@@ -1731,7 +1731,7 @@ mod tests {
 
     #[test]
     fn enter_and_backspace_type_themselves_in_write_mode() {
-        let before = moved(hello_in(FlexMode::Move), &["i"]);
+        let before = hello_in(FlexMode::Write);
         let deleted = reduce(before.clone(), "\x7f").0;
         assert_eq!(text_of(&deleted, &deleted.selected), Some("Hell"));
         assert_eq!(deleted.mode, FlexMode::Write);

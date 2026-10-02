@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 use crate::style::FOREGROUND;
-use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, NO_SIDES};
+use crate::view::{Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, NO_SIDES};
 
 use super::layout::{Arranged, Layout, Rect, FLEX_BORDER};
 use super::state::{FlexBox, FlexMode, FlexState};
