@@ -66,7 +66,7 @@ impl<T> Tree<T> {
         self.insert(parent, index, child)
     }
 
-    pub(crate) fn insert(&mut self, parent: &[usize], index: usize, child: Tree<T>) -> Vec<usize> {
+    pub fn insert(&mut self, parent: &[usize], index: usize, child: Tree<T>) -> Vec<usize> {
         self.get_mut(parent).children.insert(index, child);
         [parent, &[index]].concat()
     }
