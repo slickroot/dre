@@ -5,6 +5,7 @@ use types::Tree;
 pub(crate) enum FlexMode {
     Write,
     Move,
+    Replace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +140,7 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
         ("\x03", _) => (state, Some(FlexEffect::Quit)),
         ("\r", FlexMode::Write) => history::recorded(state, key, |s| write_key(s, key)),
         (_, FlexMode::Write) => write_key(state, key),
+        (_, FlexMode::Replace) => write_key(state, key),
         (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
 }
@@ -176,6 +178,21 @@ fn exit_write_mode(mut state: FlexState) -> FlexState {
 }
 
 fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
+    if state.mode == FlexMode::Replace {
+        match key {
+            "\x7f" => {
+                state.selected_mut().text = Some(String::new());
+                state.mode = FlexMode::Write;
+                return (state, None);
+            }
+            "\r" => state.mode = FlexMode::Write,
+            _ if printable_char(key).is_some() => {
+                state.selected_mut().text = Some(String::new());
+                state.mode = FlexMode::Write;
+            }
+            _ => {}
+        }
+    }
     match key {
         "\r" => {
             if state.selected_mut().text.as_deref() != Some("") {
@@ -218,8 +235,17 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
 fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
     match key {
         "i" => {
-            state.selected_mut().text.get_or_insert_with(String::new);
-            state.mode = FlexMode::Write;
+            let has_text = state
+                .selected_mut()
+                .text
+                .as_deref()
+                .is_some_and(|text| !text.is_empty());
+            if has_text {
+                state.mode = FlexMode::Replace;
+            } else {
+                state.selected_mut().text.get_or_insert_with(String::new);
+                state.mode = FlexMode::Write;
+            }
         }
         "a" => state.selected = state.boxes.push(&[], new_box()),
         "A" => {
@@ -588,11 +614,66 @@ mod tests {
     }
 
     #[test]
-    fn i_in_move_mode_switches_to_write_and_keeps_the_text() {
+    fn i_in_move_mode_switches_to_replace_and_keeps_the_text() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "i");
-        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(state.mode, FlexMode::Replace);
         assert_eq!(text_of(&state, &state.selected), Some("Hello"));
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn the_first_printable_key_in_replace_mode_replaces_the_whole_text() {
+        let state = moved(hello_in(FlexMode::Move), &["i", "W"]);
+        assert_eq!(text_of(&state, &state.selected), Some("W"));
+        assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn keys_after_the_first_replace_append() {
+        let state = moved(hello_in(FlexMode::Move), &["i", "W", "o", "r", "l", "d"]);
+        assert_eq!(text_of(&state, &state.selected), Some("World"));
+    }
+
+    #[test]
+    fn a_multibyte_first_key_in_replace_mode_replaces_the_whole_text() {
+        let state = moved(hello_in(FlexMode::Move), &["i", "é"]);
+        assert_eq!(text_of(&state, &state.selected), Some("é"));
+        assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn backspace_as_the_first_key_in_replace_mode_empties_the_text() {
+        let before = moved(hello_in(FlexMode::Move), &["i"]);
+        let (state, effect) = reduce(before, "\x7f");
+        assert_eq!(text_of(&state, &state.selected), Some(""));
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn enter_as_the_first_key_in_replace_mode_adds_an_empty_sibling() {
+        let before = moved(hello_in(FlexMode::Move), &["i"]);
+        let (state, effect) = reduce(before, "\r");
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[1]), Some(""));
+        assert_eq!(state.selected, [1]);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn i_on_a_box_with_empty_text_switches_to_write() {
+        let (state, _) = reduce(holding("", FlexMode::Move), "i");
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(text_of(&state, &state.selected), Some(""));
+    }
+
+    #[test]
+    fn o_and_the_enter_add_flow_never_produce_replace() {
+        let (after_o, _) = reduce(hello_in(FlexMode::Move), "o");
+        assert_eq!(after_o.mode, FlexMode::Write);
+        let (after_enter, _) = reduce(moved(hello_in(FlexMode::Move), &["i"]), "\r");
+        assert_eq!(after_enter.mode, FlexMode::Write);
     }
 
     #[test]
@@ -673,13 +754,10 @@ mod tests {
     #[test]
     fn esc_with_non_empty_text_returns_to_move_and_adds_no_sibling() {
         let before = moved(middle_selected(), &["i", "!", "?"]);
-        assert_eq!(text_of(&before, &before.selected), Some("Middle!?"));
+        assert_eq!(text_of(&before, &before.selected), Some("!?"));
         let (state, effect) = reduce(before.clone(), "\x1b");
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(
-            texts(&state),
-            [Some("Top"), Some("Middle!?"), Some("Bottom")]
-        );
+        assert_eq!(texts(&state), [Some("Top"), Some("!?"), Some("Bottom")]);
         assert_eq!(state.outer_boxes().count(), before.outer_boxes().count());
         assert_eq!(state.selected, before.selected);
         assert_eq!(effect, None);
@@ -716,7 +794,7 @@ mod tests {
         let before = moved(hello_in(FlexMode::Move), &["i", "!", "?"]);
         let state = reduce(before, "\x1b").0;
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(texts(&state), [Some("Hello!?")]);
+        assert_eq!(texts(&state), [Some("!?")]);
         assert_eq!(state.boxes.children(&[0]).len(), 0);
     }
 
@@ -736,7 +814,7 @@ mod tests {
         assert_eq!(text_of(&before, &before.selected), Some("?"));
         let state = reduce(before, "\x1b").0;
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(texts(&state), [Some("Hello!"), Some("?")]);
+        assert_eq!(texts(&state), [Some("!"), Some("?")]);
         assert_eq!(state.selected, [1]);
     }
 
@@ -1145,7 +1223,7 @@ mod tests {
     fn typing_after_i_only_goes_into_the_selected_box() {
         let before = middle_selected();
         let state = moved(before.clone(), &["i", "!", "?", "\x7f"]);
-        assert_eq!(text_of(&state, &[1]), Some("Middle!"));
+        assert_eq!(text_of(&state, &[1]), Some("!"));
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1153,7 +1231,7 @@ mod tests {
     fn j_and_k_in_write_mode_are_typed_into_the_selected_text() {
         let before = moved(middle_selected(), &["i"]);
         let state = moved(before.clone(), &["j", "k"]);
-        assert_eq!(text_of(&state, &[1]), Some("Middlejk"));
+        assert_eq!(text_of(&state, &[1]), Some("jk"));
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
         only_the_middle_box_changed(&before, &state);
@@ -1212,7 +1290,7 @@ mod tests {
     #[test]
     fn typing_after_capital_a_and_i_goes_into_the_selected_boxes_text() {
         let state = moved(hello_in(FlexMode::Move), &["A", "i", "H", "i"]);
-        assert_eq!(text_of(&state, &state.selected), Some("HelloHi"));
+        assert_eq!(text_of(&state, &state.selected), Some("Hi"));
         assert_eq!(state.outer_boxes().count(), 1);
     }
 
@@ -1379,7 +1457,7 @@ mod tests {
     fn i_and_typing_on_a_selected_text_types_into_that_text() {
         let before = world_selected();
         let state = moved(before.clone(), &["i", "!"]);
-        assert_eq!(text_of(&state, &before.selected), Some("World!"));
+        assert_eq!(text_of(&state, &before.selected), Some("!"));
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
     }
@@ -1387,7 +1465,7 @@ mod tests {
     #[test]
     fn backspace_on_a_selected_text_deletes_from_that_text() {
         let state = moved(world_selected(), &["i", "\x7f"]);
-        assert_eq!(text_of(&state, &state.selected), Some("Worl"));
+        assert_eq!(text_of(&state, &state.selected), Some(""));
     }
 
     #[test]
@@ -1450,7 +1528,7 @@ mod tests {
         let before = hello_in(FlexMode::Move);
         let state = moved(before, &["i", " ", "W", "o", "r", "l", "d", "\r", "u"]);
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(text_of(&state, &[0]), Some("Hello World"));
+        assert_eq!(text_of(&state, &[0]), Some(" World"));
         assert_eq!(text_of(&state, &[1]), Some("u"));
     }
 
@@ -1465,7 +1543,7 @@ mod tests {
     fn u_in_write_mode_is_typed_and_leaves_the_history_alone() {
         let before = moved(hello_in(FlexMode::Move), &["i"]);
         let (state, effect) = reduce(before.clone(), "u");
-        assert_eq!(text_of(&state, &[0]), Some("Hellou"));
+        assert_eq!(text_of(&state, &[0]), Some("u"));
         assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }

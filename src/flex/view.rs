@@ -491,11 +491,11 @@ mod tests {
 
     #[test]
     fn the_box_measures_narrower_after_backspace() {
-        let typing = FlexState {
+        let before = FlexState {
             selected: vec![0, 0],
+            mode: FlexMode::Write,
             ..with_text("Hellp")
         };
-        let (before, _) = reduce(typing, "i");
         let (after, _) = reduce(before.clone(), "\x7f");
         let before_width = measure(&before.boxes, &[0]).width;
         let after_width = measure(&after.boxes, &[0]).width;
