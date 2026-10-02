@@ -1729,8 +1729,8 @@ mod tests {
     }
 
     #[test]
-    fn p_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
-        let state = after(with_text("Hello"), &["\r", "p"]);
+    fn close_bracket_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
+        let state = after(with_text("Hello"), &["\r", "]"]);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
@@ -1751,9 +1751,9 @@ mod tests {
     }
 
     #[test]
-    fn p_twice_adds_two_space_widths_of_padding_on_each_side() {
+    fn close_bracket_twice_adds_two_space_widths_of_padding_on_each_side() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "p", "p"]);
+        let state = after(before.clone(), &["\r", "]", "]"]);
         assert_eq!(
             measure(&state.boxes, &[0]).width,
             measure(&before.boxes, &[0]).width + 4 * FLEX_SPACE.width
@@ -1761,9 +1761,9 @@ mod tests {
     }
 
     #[test]
-    fn p_on_an_inner_box_widens_it_and_its_parent() {
+    fn close_bracket_on_an_inner_box_widens_it_and_its_parent() {
         let before = title_and_hi_in(Direction::Row);
-        let state = after(before.clone(), &["p"]);
+        let state = after(before.clone(), &["]"]);
         assert_eq!(
             measure(&state.boxes, &[0, 1]).width,
             measure(&before.boxes, &[0, 1]).width + 2 * FLEX_SPACE.width
@@ -1775,9 +1775,9 @@ mod tests {
     }
 
     #[test]
-    fn p_on_an_outer_box_keeps_its_width_and_moves_its_text_in() {
+    fn close_bracket_on_an_outer_box_keeps_its_width_and_moves_its_text_in() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "p"]);
+        let state = after(before.clone(), &["\r", "]"]);
         let before_width = the_box_width(&placements(&before));
         let placements = placements(&state);
         let the_box = the_box(&placements);
