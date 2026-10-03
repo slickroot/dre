@@ -89,14 +89,6 @@ pub(crate) fn new_window(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
     Tree::new(FlexBox::window(), children)
 }
 
-pub(crate) fn new_text() -> Tree<FlexBox> {
-    Tree::leaf(FlexBox {
-        border: false,
-        text: Some(String::new()),
-        ..FlexBox::default()
-    })
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct FlexState {
     pub(crate) boxes: Tree<FlexBox>,
@@ -278,7 +270,12 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             };
         }
         "o" => {
-            state.selected = state.boxes.push(&state.selected, new_text());
+            let new_box = copied_box(state.boxes.value(&state.selected));
+            let parent = parent_path(&state.selected);
+            let index = state.selected.last().copied().unwrap() + 1;
+            state.selected = state
+                .boxes
+                .insert(&parent, index, Tree::new(new_box, vec![]));
             state.mode = FlexMode::Write;
         }
         "s" => {
@@ -407,27 +404,23 @@ mod tests {
     }
 
     #[test]
-    fn o_in_move_mode_adds_an_empty_text_leaf_and_switches_to_write() {
-        let before = hello_in(FlexMode::Move);
-        let (state, effect) = reduce(before.clone(), "o");
-        assert_eq!(state.selected, [before.selected.as_slice(), &[0]].concat());
+    fn o_in_move_mode_adds_a_copy_after_and_switches_to_write() {
+        let (state, effect) = reduce(hello_in(FlexMode::Move), "o");
+        assert_eq!(state.selected, [1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
-        assert!(!box_at(&state, &state.selected).border);
-        assert_eq!(
-            text_of(&state, &before.selected),
-            text_of(&before, &before.selected)
-        );
-        assert_eq!(state.outer_boxes().count(), 1);
+        assert!(box_at(&state, &state.selected).border);
+        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(state.outer_boxes().count(), 2);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
 
     #[test]
-    fn typing_after_o_goes_into_the_new_text() {
+    fn typing_after_o_goes_into_the_new_copy() {
         let state = ["o", "W", "o", "r", "l", "d"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(text_of(&state, &[0, 0]), Some("World"));
+        assert_eq!(text_of(&state, &[1]), Some("World"));
         assert_eq!(text_of(&state, &[0]), Some("Hello"));
     }
 
@@ -436,9 +429,9 @@ mod tests {
         let state = ["o", "W", "o", "r", "l", "d", "\r", "o"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [2]);
         assert_eq!(text_of(&state, &state.selected), Some("o"));
-        assert_eq!(text_of(&state, &[0, 0]), Some("World"));
+        assert_eq!(text_of(&state, &[1]), Some("World"));
         assert_eq!(state.mode, FlexMode::Write);
     }
 
@@ -451,39 +444,20 @@ mod tests {
     }
 
     #[test]
-    fn backspace_on_an_empty_new_text_removes_it_and_selects_the_parent() {
-        let before = hello_in(FlexMode::Move);
-        let state = moved(before.clone(), &["o", "\x7f"]);
-        assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0]);
-        assert_eq!(state.mode, FlexMode::Move);
-    }
-
-    #[test]
-    fn backspace_empties_the_new_text_and_then_removes_it() {
-        let before = hello_in(FlexMode::Move);
+    fn backspace_empties_a_borderless_copy_and_then_removes_it() {
+        let before = world_selected();
         let state = moved(before.clone(), &["o", "W", "\x7f", "\x7f"]);
         assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 2]);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]
     fn backspace_on_an_empty_borderless_box_with_a_previous_sibling_selects_it() {
-        let before = moved(hello_in(FlexMode::Move), &["A", "o"]);
-        assert_eq!(before.selected, [0, 1]);
-        let state = reduce(before, "\x7f").0;
-        assert_eq!(
-            state.boxes,
-            new_window(vec![Tree::new(
-                FlexBox {
-                    text: Some("Hello".to_string()),
-                    ..FlexBox::default()
-                },
-                vec![new_box()],
-            )])
-        );
-        assert_eq!(state.selected, [0, 0]);
+        let before = world_selected();
+        let state = moved(before.clone(), &["o", "\x7f"]);
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, [0, 2]);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
@@ -496,10 +470,65 @@ mod tests {
     }
 
     #[test]
-    fn o_only_adds_a_text_leaf_to_the_selected_box() {
-        let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "o");
-        assert_eq!(state.boxes.children(&[0]).len(), 0);
-        assert_eq!(state.boxes.children(&[1]).len(), 1);
+    fn o_inserts_a_copy_after_the_selected_box_among_its_siblings() {
+        let (state, _) = reduce(middle_selected(), "o");
+        assert_eq!(
+            texts(&state),
+            [Some("Top"), Some("Middle"), Some(""), Some("Bottom")]
+        );
+        assert_eq!(state.selected, [2]);
+    }
+
+    #[test]
+    fn o_on_a_top_level_box_inserts_after_the_selected_top_level_box() {
+        let before = FlexState::default();
+        let (state, _) = reduce(before, "o");
+        assert_eq!(state.outer_boxes().count(), 2);
+        assert_eq!(state.selected, [1]);
+        assert_eq!(text_of(&state, &[0]), None);
+    }
+
+    #[test]
+    fn o_enters_write_mode_so_the_next_keys_fill_the_new_box() {
+        let state = moved(FlexState::default(), &["o", "H", "i"]);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(text_of(&state, &[1]), Some("Hi"));
+        assert_eq!(text_of(&state, &[0]), None);
+    }
+
+    #[test]
+    fn o_copies_border_fill_padding_justify_and_direction() {
+        let styled = moved(middle_selected(), &["f", "]", "r", "s"]);
+        let (state, _) = reduce(styled.clone(), "o");
+        let source = box_at(&styled, &[1]);
+        let copy = box_at(&state, &[2]);
+        assert_eq!(copy.text.as_deref(), Some(""));
+        assert_eq!(copy.border, source.border);
+        assert_eq!(copy.filled, source.filled);
+        assert_eq!(copy.padding, source.padding);
+        assert_eq!(copy.justify, source.justify);
+        assert_eq!(copy.direction, source.direction);
+        assert!(state.boxes.children(&state.selected).is_empty());
+        assert_eq!(state.selected, [2]);
+    }
+
+    #[test]
+    fn o_on_a_nested_box_inserts_a_sibling_within_that_parent() {
+        let before = moved(hello_box_world(), &["\r", "j"]);
+        let (state, _) = reduce(before, "o");
+        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected.len(), 2);
+        assert_eq!(state.boxes.parent(&state.selected), [0]);
+        assert_eq!(state.boxes.children(&[0]).len(), 4);
+    }
+
+    #[test]
+    fn one_u_after_o_removes_the_copy_and_restores_the_selection() {
+        let before = middle_selected();
+        let state = moved(before.clone(), &["o", "\x1b", "u"]);
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]
@@ -737,17 +766,22 @@ mod tests {
     }
 
     #[test]
-    fn o_then_enter_leaves_the_tree_as_it_was_with_the_parent_selected() {
-        let before = FlexState::default();
-        let state = moved(before.clone(), &["o", "\r"]);
-        assert_eq!(state, before);
+    fn o_then_enter_keeps_the_empty_copied_box_and_returns_to_move() {
+        let state = moved(FlexState::default(), &["o", "\r"]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.outer_boxes().count(), 2);
+        assert_eq!(text_of(&state, &[1]), None);
+        assert!(state.boxes.children(&[1]).is_empty());
     }
 
     #[test]
-    fn o_then_enter_on_an_inner_box_selects_that_box() {
+    fn o_then_enter_on_an_inner_box_leaves_an_empty_copy_next_to_it() {
         let before = moved(hello_box_world(), &["\r", "j"]);
-        let state = moved(before.clone(), &["o", "\r"]);
-        assert_eq!(state, before);
+        let state = moved(before, &["o", "\r"]);
+        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(text_of(&state, &[0, 2]), None);
+        assert!(box_at(&state, &[0, 2]).border);
     }
 
     #[test]
@@ -781,15 +815,12 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_empty_text_drops_the_box_and_returns_to_move() {
-        let hello = hello_in(FlexMode::Move);
-        let before = moved(hello.clone(), &["o"]);
-        assert_eq!(text_of(&before, &before.selected), Some(""));
-        let (state, effect) = reduce(before, "\r");
+    fn enter_on_an_empty_borderless_copy_drops_it_and_returns_to_move() {
+        let before = world_selected();
+        let (state, effect) = reduce(moved(before.clone(), &["o"]), "\r");
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(state.boxes, hello.boxes);
+        assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.selected, [0]);
-        assert!(state.boxes.children(&[0]).is_empty());
         assert_eq!(effect, None);
     }
 
@@ -814,8 +845,8 @@ mod tests {
         assert_eq!(escaped, reduce(before, "\r"));
         let (state, effect) = escaped;
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(state.boxes, hello.boxes);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.outer_boxes().count(), 2);
+        assert_eq!(selected_box(&state).text, None);
         assert_eq!(effect, None);
     }
 
@@ -847,7 +878,7 @@ mod tests {
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(state.selected, before.selected);
         assert_eq!(text_of(&state, &state.selected), Some("World"));
-        assert_eq!(state.boxes.children(&[0]).len(), 1);
+        assert_eq!(state.outer_boxes().count(), 2);
     }
 
     #[test]
@@ -861,12 +892,11 @@ mod tests {
     }
 
     #[test]
-    fn o_adds_a_borderless_leaf_and_selects_it() {
-        let before = FlexState::default();
-        let state = moved(before.clone(), &["o"]);
-        assert_eq!(state.boxes.children(&before.selected).len(), 1);
-        assert_eq!(state.boxes.parent(&state.selected), before.selected);
-        assert!(!selected_box(&state).border);
+    fn o_adds_a_copy_after_and_selects_it() {
+        let state = moved(FlexState::default(), &["o"]);
+        assert_eq!(state.outer_boxes().count(), 2);
+        assert_eq!(state.selected, [1]);
+        assert!(selected_box(&state).border);
         assert!(state.boxes.children(&state.selected).is_empty());
     }
 
@@ -1048,14 +1078,6 @@ mod tests {
         let default = FlexBox::default();
         assert!(default.border);
         assert_eq!(default.text, None);
-    }
-
-    #[test]
-    fn a_new_text_is_a_borderless_leaf_with_empty_text() {
-        let text = new_text();
-        assert!(!text.value(&[]).border);
-        assert_eq!(text.value(&[]).text.as_deref(), Some(""));
-        assert_eq!(text.children(&[]).len(), 0);
     }
 
     #[test]
@@ -1254,11 +1276,13 @@ mod tests {
     }
 
     #[test]
-    fn o_only_adds_a_text_leaf_to_a_selected_box_above_the_bottom() {
-        let before = middle_selected();
-        let (state, _) = reduce(before.clone(), "o");
-        assert_eq!(state.boxes.children(&[1]).len(), 1);
-        only_the_middle_box_changed(&before, &state);
+    fn o_inserts_a_copy_after_a_selected_box_above_the_bottom() {
+        let (state, _) = reduce(middle_selected(), "o");
+        assert_eq!(
+            texts(&state),
+            [Some("Top"), Some("Middle"), Some(""), Some("Bottom")]
+        );
+        assert_eq!(state.selected, [2]);
     }
 
     #[test]
@@ -1403,8 +1427,10 @@ mod tests {
 
     #[test]
     fn l_on_an_inner_box_holding_a_text_selects_that_text() {
-        let inner = moved(hello_box_world(), &["\r", "j"]);
-        let mut leaf = moved(inner.clone(), &["o", "x"]);
+        let mut inner = moved(hello_box_world(), &["\r", "j"]);
+        inner.boxes.insert(&inner.selected, 0, text("x"));
+        let mut leaf = inner.clone();
+        leaf.selected = [inner.selected.as_slice(), &[0]].concat();
         leaf.mode = FlexMode::Move;
         let state = moved(leaf, &["\x7f", "\r"]);
         assert_eq!(text_of(&state, &state.selected), Some("x"));
@@ -1419,8 +1445,10 @@ mod tests {
 
     #[test]
     fn h_from_inside_an_inner_box_selects_the_inner_box() {
-        let inner = moved(hello_box_world(), &["\r", "j"]);
-        let mut leaf = moved(inner.clone(), &["o", "x"]);
+        let mut inner = moved(hello_box_world(), &["\r", "j"]);
+        inner.boxes.insert(&inner.selected, 0, text("x"));
+        let mut leaf = inner.clone();
+        leaf.selected = [inner.selected.as_slice(), &[0]].concat();
         leaf.mode = FlexMode::Move;
         let state = moved(leaf, &["\x7f"]);
         assert_eq!(state.selected, inner.selected);
@@ -1588,11 +1616,12 @@ mod tests {
     }
 
     #[test]
-    fn o_on_a_selected_text_nests_an_empty_text_inside_it_and_selects_it() {
+    fn o_on_a_selected_text_inserts_a_copy_after_it_and_selects_it() {
         let before = moved(hello_box_world(), &["\r"]);
-        let (state, effect) = reduce(before.clone(), "o");
-        assert_eq!(state.boxes.parent(&state.selected), before.selected);
+        let (state, effect) = reduce(before, "o");
+        assert_eq!(state.selected, [0, 1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
+        assert!(!selected_box(&state).border);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -1613,10 +1642,10 @@ mod tests {
     }
 
     #[test]
-    fn o_on_a_selected_box_selects_the_new_text() {
+    fn o_on_a_selected_box_selects_the_new_copy() {
         let before = hello_in(FlexMode::Move);
-        let (state, _) = reduce(before.clone(), "o");
-        assert_eq!(state.boxes.parent(&state.selected), before.selected);
+        let (state, _) = reduce(before, "o");
+        assert_eq!(state.selected, [1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
     }
 
@@ -1663,8 +1692,8 @@ mod tests {
         let before = hello_in(FlexMode::Move);
         let state = moved(before, &["o", "H", "e", "l", "l", "o", "\r", "u"]);
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
-        assert_eq!(text_of(&state, &[0, 1]), Some("u"));
+        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[2]), Some("u"));
     }
 
     #[test]
@@ -1716,8 +1745,8 @@ mod tests {
 
     #[test]
     fn u_after_backspace_removes_an_empty_box_brings_it_and_its_selection_back() {
-        let before = hello_in(FlexMode::Move);
-        let after_o = moved(before.clone(), &["o"]);
+        let before = world_selected();
+        let after_o = moved(before, &["o"]);
         let state = moved(after_o.clone(), &["\x7f", "u"]);
         assert_eq!(state.boxes, after_o.boxes);
         assert_eq!(state.selected, after_o.selected);
