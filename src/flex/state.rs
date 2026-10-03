@@ -178,14 +178,6 @@ fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
     !b.border && children.is_empty()
 }
 
-fn sibling_or_else_parent(boxes: &Tree<FlexBox>, path: &[usize]) -> Vec<usize> {
-    if path.last() == Some(&0) {
-        boxes.parent(path)
-    } else {
-        boxes.previous(path)
-    }
-}
-
 fn drop_empty_text(mut state: FlexState) -> FlexState {
     let children = state.boxes.children(&state.selected);
     if is_droppable(state.boxes.value(&state.selected), &children) {
@@ -248,9 +240,7 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
                 && is_droppable(state.boxes.value(&state.selected), &children)
             {
                 history::record(&mut state);
-                let next = sibling_or_else_parent(&state.boxes, &state.selected);
-                state.boxes.remove(&state.selected);
-                state.selected = next;
+                state.remove_selected();
                 state.mode = FlexMode::Move;
             } else if let Some(text) = state.selected_mut().text.as_mut() {
                 text.pop();
@@ -469,18 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn sibling_or_else_parent_returns_previous_sibling_when_not_first_child() {
-        let boxes = new_canvas(vec![new_box(), new_box()]);
-        assert_eq!(sibling_or_else_parent(&boxes, &[0, 1]), vec![0, 0]);
-    }
-
-    #[test]
-    fn sibling_or_else_parent_returns_parent_when_first_child() {
-        let boxes = new_canvas(vec![new_canvas(vec![new_box()])]);
-        assert_eq!(sibling_or_else_parent(&boxes, &[0, 0]), vec![0]);
-    }
-
-    #[test]
     fn o_in_move_mode_adds_a_copy_after_and_switches_to_write() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "o");
         assert_eq!(state.selected, [0, 1]);
@@ -527,16 +505,37 @@ mod tests {
         let before = world_selected();
         let state = moved(before.clone(), &["o", "W", "\x7f", "\x7f"]);
         assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0, 0, 2]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]
-    fn backspace_on_an_empty_borderless_box_with_a_previous_sibling_selects_it() {
-        let before = world_selected();
-        let state = moved(before.clone(), &["o", "\x7f"]);
-        assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0, 0, 2]);
+    fn backspace_on_an_empty_borderless_box_with_a_following_sibling_selects_it() {
+        let before = moved(hello_box_world(), &["\r", "j", "j", "k", "k"]);
+        assert_eq!(before.selected, [0, 0, 0]);
+
+        let state = moved(before, &["o", "\x7f"]);
+
+        assert_eq!(state.selected, [0, 0, 1]);
+        assert_eq!(state.mode, FlexMode::Move);
+    }
+
+    #[test]
+    fn backspace_drops_an_empty_box_and_selects_the_following_sibling() {
+        let before = FlexState {
+            boxes: new_canvas(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Top"), text(""), text("Bottom")],
+            )]),
+            selected: vec![0, 0, 1],
+            mode: FlexMode::Write,
+            ..FlexState::default()
+        };
+
+        let (state, _) = reduce(before, "\x7f");
+
+        assert_eq!(state.selected, [0, 0, 1]);
+        assert_eq!(text_of(&state, &state.selected), Some("Bottom"));
         assert_eq!(state.mode, FlexMode::Move);
     }
 
