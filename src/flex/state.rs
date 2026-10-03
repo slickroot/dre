@@ -272,9 +272,20 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             };
         }
         "o" | "O" => {
-            let new_box = copied_box(state.boxes.value(&state.selected));
-            let parent = parent_path(&state.selected);
-            let index = state.selected.last().copied().unwrap() + usize::from(key == "o");
+            let source = if state.selected.is_empty() {
+                state.boxes.value(&[])
+            } else {
+                state.boxes.value(&state.selected)
+            };
+            let new_box = copied_box(source);
+            let (parent, index) = if state.selected.is_empty() {
+                (Vec::new(), state.boxes.children(&[]).len())
+            } else {
+                (
+                    parent_path(&state.selected),
+                    state.selected.last().copied().unwrap() + usize::from(key == "o"),
+                )
+            };
             state.selected = state
                 .boxes
                 .insert(&parent, index, Tree::new(new_box, vec![]));
@@ -1889,6 +1900,24 @@ mod tests {
 
         assert!(state.boxes.children(&[]).is_empty());
         assert_eq!(state.selected, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn o_and_capital_o_on_an_empty_canvas_copy_the_window_as_a_top_level_box() {
+        let (cut, _) = reduce(hello_box_world(), "d");
+        assert_eq!(cut.selected, Vec::<usize>::new());
+        assert!(cut.boxes.children(&[]).is_empty());
+
+        let window = copied_box(&FlexBox::window());
+
+        for key in ["o", "O"] {
+            let (state, _) = reduce(cut.clone(), key);
+            assert_eq!(state.boxes.children(&[]).len(), 1, "{key}");
+            assert_eq!(state.boxes.value(&[0]), &window, "{key}");
+            assert!(state.boxes.children(&[0]).is_empty(), "{key}");
+            assert_eq!(state.selected, [0], "{key}");
+            assert_eq!(state.mode, FlexMode::Write, "{key}");
+        }
     }
 
     #[test]
