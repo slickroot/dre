@@ -2006,6 +2006,67 @@ mod tests {
     }
 
     #[test]
+    fn y_then_p_pastes_a_copy_and_leaves_the_original_in_place() {
+        let before = nested_box_with_a_child_selected();
+        let yanked = moved(before.clone(), &["y"]).clipboard.unwrap();
+        let after = moved(before.clone(), &["y", "k"]);
+        assert_eq!(after.selected, [0, 0]);
+
+        let state = moved(after, &["p"]);
+
+        assert_eq!(
+            state.boxes.children(&[0]).len(),
+            before.boxes.children(&[0]).len()
+        );
+        assert_eq!(box_at(&state, &[0, 1]), box_at(&before, &[0, 1]));
+        let pasted = state.boxes.children(&[0, 0]);
+        assert_eq!(pasted.len(), 1);
+        assert_eq!(box_at(&state, &pasted[0]), yanked.value(&[]));
+        assert_eq!(
+            state.boxes.children(&pasted[0]).len(),
+            yanked.children(&[]).len()
+        );
+    }
+
+    #[test]
+    fn u_after_y_undoes_the_last_real_change_and_keeps_the_clipboard() {
+        let before = hello_in(FlexMode::Move);
+        let after_f = moved(before.clone(), &["f"]);
+        assert!(selected_box(&after_f).filled);
+
+        let before_y = after_f.clone();
+        let after_y = moved(after_f, &["y"]);
+        assert_eq!(after_y.history.len(), before_y.history.len());
+        assert!(after_y.clipboard.is_some());
+
+        let state = moved(after_y, &["u"]);
+
+        assert_eq!(selected_box(&state).filled, selected_box(&before).filled);
+        assert!(state.clipboard.is_some());
+    }
+
+    #[test]
+    fn y_in_write_mode_is_typed_and_copies_nothing() {
+        let before = hello_in(FlexMode::Write);
+
+        let (state, _) = reduce(before.clone(), "y");
+
+        assert_eq!(text_of(&state, &state.selected), Some("Helloy"));
+        assert_eq!(state.clipboard, None);
+        assert_eq!(state.boxes.walk().count(), before.boxes.walk().count());
+    }
+
+    #[test]
+    fn y_in_replace_mode_is_typed_and_copies_nothing() {
+        let before = hello_in(FlexMode::Replace);
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(text_of(&state, &state.selected), Some("y"));
+        assert_eq!(state.clipboard, None);
+    }
+
+    #[test]
     fn d_cuts_the_selected_box_and_its_nested_contents() {
         let before = nested_box_with_a_child_selected();
         assert_eq!(before.selected, [0, 1]);
