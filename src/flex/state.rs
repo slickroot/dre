@@ -319,6 +319,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
                 state = cut_selected(state);
             }
         }
+        "y" => {
+            let mut boxes = state.boxes.clone();
+            state.clipboard = Some(boxes.remove(&state.selected));
+        }
         "p" => state = paste_clipboard(state),
         "q" => return (state, Some(FlexEffect::Quit)),
         "J" | "K" => state = reorder_selected(state, key),
@@ -1938,6 +1942,50 @@ mod tests {
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.history.len(), before.history.len() + 1);
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn y_yanks_the_selected_box_and_its_nested_contents_without_removing_them() {
+        let before = nested_box_with_a_child_selected();
+        let boxes = before.boxes.clone();
+        let selected = before.selected.clone();
+        let mut expected = before.boxes.clone();
+        let yanked = expected.remove(&before.selected);
+
+        let (state, effect) = reduce(before.clone(), "y");
+
+        assert_eq!(state.boxes, boxes);
+        assert_eq!(state.selected, selected);
+        assert_eq!(state.clipboard, Some(yanked));
+        assert_eq!(state.clipboard.as_ref().unwrap().walk().count(), 1);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn y_replaces_whatever_was_on_the_clipboard() {
+        let before = FlexState {
+            clipboard: Some(box_with("Old")),
+            ..nested_box_with_a_child_selected()
+        };
+        let mut expected = before.boxes.clone();
+        let yanked = expected.remove(&before.selected);
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(state.clipboard, Some(yanked));
+        assert_ne!(state.clipboard, Some(box_with("Old")));
+    }
+
+    #[test]
+    fn y_preserves_the_selected_boxs_nested_child_count_in_the_diagram() {
+        let before = nested_box_with_a_child_selected();
+        let children = before.boxes.children(&before.selected).len();
+        let count = before.boxes.walk().count();
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(state.boxes.children(&state.selected).len(), children);
+        assert_eq!(state.boxes.walk().count(), count);
     }
 
     #[test]
