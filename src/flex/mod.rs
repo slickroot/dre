@@ -136,15 +136,14 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_marks_the_added_inner_box_as_new() {
+    fn capital_a_in_move_mode_marks_no_box_as_new() {
         let mut drawn = None;
         let state = FlexState::default();
         new_boxes(&mut drawn, &state);
 
         let state = after(state, "A");
 
-        let inner = state.boxes.children(&state.selected).pop().unwrap();
-        assert_eq!(new_boxes(&mut drawn, &state), HashSet::from([inner]));
+        assert!(new_boxes(&mut drawn, &state).is_empty());
     }
 
     #[test]

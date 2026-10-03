@@ -1516,9 +1516,13 @@ mod tests {
 
     #[test]
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
-        let state = ["A", "o", "W", "o", "r", "l", "d"]
+        let start = FlexState {
+            boxes: new_window(vec![outer(row(), &["Hello"], 1)]),
+            ..FlexState::default()
+        };
+        let state = ["o", "W", "o", "r", "l", "d"]
             .into_iter()
-            .fold(with_text_row("Hello"), |state, key| reduce(state, key).0);
+            .fold(start, |state, key| reduce(state, key).0);
         let placements = placements(&state);
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
@@ -1532,21 +1536,13 @@ mod tests {
             .fold(FlexState::default(), |state, key| reduce(state, key).0)
     }
 
-    fn from_row_after(keys: &[&str]) -> FlexState {
-        let state = FlexState {
-            boxes: new_window(vec![Tree::new(row(), vec![])]),
-            ..FlexState::default()
-        };
-        keys.iter().fold(state, |state, key| reduce(state, key).0)
-    }
-
     fn empty_box_size() -> Size {
         measure(&new_window(vec![new_box()]), &[0])
     }
 
     #[test]
     fn one_a_places_an_empty_inner_box_one_space_inside_the_outer_box() {
-        let state = from_default_after(&["A"]);
+        let state = from_default_after(&["a", "\x1b"]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
@@ -1567,8 +1563,11 @@ mod tests {
     }
 
     #[test]
-    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_at_the_top() {
-        let state = from_row_after(&["A", "A"]);
+    fn two_inner_boxes_in_a_row_sit_one_gap_apart_at_the_top() {
+        let state = FlexState {
+            boxes: new_window(vec![Tree::new(row(), vec![new_box(), new_box()])]),
+            ..FlexState::default()
+        };
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
@@ -1644,13 +1643,14 @@ mod tests {
 
     #[test]
     fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
-        let keys = [
-            "o", "H", "e", "l", "l", "o", "\r", "\r", "A", "o", "W", "o", "r", "l", "d", "\r",
-            "\r", "s",
-        ];
-        let state = keys
-            .into_iter()
-            .fold(FlexState::default(), |state, key| reduce(state, key).0);
+        let start = FlexState {
+            boxes: new_window(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Hello"), new_box(), text("World")],
+            )]),
+            ..FlexState::default()
+        };
+        let state = reduce(start, "s").0;
         let [(_, placements)] =
             <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
         let outer = &placements[0];
@@ -1772,11 +1772,6 @@ mod tests {
         assert_stretched_across(outer, &row_of(&placements, &state));
     }
 
-    fn pressed(keys: &[&str]) -> FlexState {
-        keys.iter()
-            .fold(FlexState::default(), |state, key| reduce(state, key).0)
-    }
-
     fn outer_hello_and_inner_depths(placements: &[Placement<'_>]) -> (u8, u8, u8) {
         let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
         (
@@ -1786,18 +1781,26 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "\r", "A"];
+    fn hello_with_an_inner_box() -> FlexState {
+        FlexState {
+            boxes: new_window(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Hello"), new_box()],
+            )]),
+            ..FlexState::default()
+        }
+    }
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
-        let state = pressed(&HELLO_WITH_AN_INNER_BOX);
+        let state = hello_with_an_inner_box();
         let placements = placements(&state);
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
     }
 
     #[test]
     fn filling_the_outer_box_keeps_its_texts_and_inner_box_one_deeper() {
-        let state = pressed(&[&HELLO_WITH_AN_INNER_BOX[..], &["f"]].concat());
+        let state = reduce(hello_with_an_inner_box(), "f").0;
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
@@ -1805,7 +1808,9 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "\r", "f", "A"]);
+        let state = ["f", "a"]
+            .into_iter()
+            .fold(with_text("Hello"), |state, key| reduce(state, key).0);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));

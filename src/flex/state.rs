@@ -265,9 +265,6 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             state.selected = state.boxes.push(&state.selected, new_child_box());
             state.mode = FlexMode::Write;
         }
-        "A" => {
-            state.boxes.push(&state.selected, new_box());
-        }
         "\r" => state.selected = state.boxes.child(&state.selected),
         "\x7f" => state.selected = state.boxes.parent(&state.selected),
         "j" | "k" | "h" | "l" => {
@@ -474,7 +471,7 @@ mod tests {
 
     #[test]
     fn backspace_on_an_empty_borderless_box_with_a_previous_sibling_selects_it() {
-        let before = moved(hello_in(FlexMode::Move), &["A", "o"]);
+        let before = moved(hello_in(FlexMode::Move), &["a", "\x1b", "\x7f", "o"]);
         assert_eq!(before.selected, [0, 1]);
         let state = reduce(before, "\x7f").0;
         assert_eq!(
@@ -875,19 +872,16 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_on_a_text_leaf_nests_a_bordered_box_inside_the_leaf() {
+    fn capital_a_on_a_text_leaf_is_ignored_in_move_mode() {
         let before = FlexState {
             boxes: new_window(vec![Tree::new(FlexBox::default(), vec![text("x")])]),
             selected: vec![0, 0],
             ..FlexState::default()
         };
-        let state = moved(before.clone(), &["A"]);
-        let children = state.boxes.children(&before.selected);
-        assert_eq!(children.len(), 1);
-        let nested = box_at(&state, &children[0]);
-        assert!(nested.border);
-        assert_eq!(nested.text, None);
-        assert_eq!(text_of(&state, &before.selected), Some("x"));
+        let (state, effect) = reduce(before.clone(), "A");
+        assert_eq!(state, before);
+        assert_eq!(state.history.len(), before.history.len());
+        assert_eq!(effect, None);
     }
 
     #[test]
@@ -1223,10 +1217,12 @@ mod tests {
     }
 
     #[test]
-    fn pressing_capital_a_twice_from_launch_stacks_two_inner_boxes_in_a_column() {
-        let state = moved(FlexState::default(), &["A", "A"]);
-        assert_eq!(selected_box(&state).direction, Direction::Column);
-        assert_eq!(inner_boxes_of(&state, 0), 2);
+    fn pressing_capital_a_twice_from_launch_adds_no_inner_box_and_changes_nothing() {
+        let before = FlexState::default();
+        let state = moved(before.clone(), &["A", "A"]);
+        assert_eq!(state, before);
+        assert_eq!(state.history.len(), before.history.len());
+        assert_eq!(inner_boxes_of(&state, 0), 0);
     }
 
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
@@ -1362,37 +1358,35 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_in_move_mode_adds_an_inner_box_keeps_the_selection_and_stays_in_move() {
+    fn capital_a_in_move_mode_is_ignored() {
         let before = hello_in(FlexMode::Move);
         let (state, effect) = reduce(before.clone(), "A");
-        assert_eq!(inner_boxes_of(&state, 0), 1);
-        assert_eq!(state.selected, before.selected);
-        assert_eq!(state.mode, FlexMode::Move);
+        assert_eq!(state, before);
+        assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }
 
     #[test]
-    fn capital_a_adds_an_inner_box_with_no_children() {
-        let state = moved(hello_in(FlexMode::Move), &["A"]);
-        let hello_box = box_at(&hello_in(FlexMode::Move), &[0]).clone();
-        assert_eq!(
-            subtree(&state, 0),
-            [(vec![0], &hello_box), (vec![0, 0], &FlexBox::default()),]
-        );
-    }
-
-    #[test]
-    fn a_second_capital_a_adds_a_second_inner_box_to_the_same_box() {
-        let state = moved(hello_in(FlexMode::Move), &["A", "A"]);
-        assert_eq!(inner_boxes_of(&state, 0), 2);
-        assert_eq!(state.outer_boxes().count(), 1);
-    }
-
-    #[test]
-    fn capital_a_only_adds_the_inner_box_to_the_selected_outer_box() {
-        let state = moved(three_boxes_in_move(), &["k", "A"]);
-        assert_eq!(inner_boxes_of(&state, 1), 1);
+    fn capital_a_adds_no_inner_box() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["A"]);
+        assert_eq!(state, before);
         assert_eq!(inner_boxes_of(&state, 0), 0);
+    }
+
+    #[test]
+    fn a_second_capital_a_adds_no_inner_box() {
+        let before = hello_in(FlexMode::Move);
+        let state = moved(before.clone(), &["A", "A"]);
+        assert_eq!(state, before);
+        assert_eq!(inner_boxes_of(&state, 0), 0);
+    }
+
+    #[test]
+    fn capital_a_adds_no_inner_box_to_any_outer_box() {
+        let state = moved(three_boxes_in_move(), &["k", "A"]);
+        assert_eq!(inner_boxes_of(&state, 0), 0);
+        assert_eq!(inner_boxes_of(&state, 1), 0);
         assert_eq!(inner_boxes_of(&state, 2), 0);
     }
 
@@ -1404,25 +1398,23 @@ mod tests {
     }
 
     #[test]
-    fn typing_after_capital_a_and_i_goes_into_the_selected_boxes_text() {
-        let state = moved(hello_in(FlexMode::Move), &["A", "i", "H", "i"]);
+    fn typing_after_i_goes_into_the_selected_boxes_text() {
+        let state = moved(hello_in(FlexMode::Move), &["i", "H", "i"]);
         assert_eq!(text_of(&state, &state.selected), Some("Hi"));
         assert_eq!(state.outer_boxes().count(), 1);
     }
 
     #[test]
-    fn j_and_k_after_capital_a_only_move_between_outer_boxes() {
-        let state = moved(three_boxes_in_move(), &["A", "k", "A", "k", "j", "j", "j"]);
+    fn j_and_k_move_between_outer_boxes() {
+        let state = moved(three_boxes_in_move(), &["k", "k", "j", "j", "j"]);
         assert_eq!(state.selected, [2]);
         let state = moved(state, &["k", "k", "k"]);
         assert_eq!(state.selected, [0]);
     }
 
     #[test]
-    fn a_after_capital_a_nests_a_child_inside_the_selected_box() {
-        let before = moved(hello_in(FlexMode::Move), &["A"]);
-        assert_eq!(before.mode, FlexMode::Move);
-        assert_eq!(inner_boxes_of(&before, 0), 1);
+    fn a_nests_a_child_inside_the_selected_box() {
+        let before = hello_in(FlexMode::Move);
         let (state, effect) = reduce(before.clone(), "a");
         assert_eq!(state.outer_boxes().count(), 1);
         assert_eq!(state.mode, FlexMode::Write);
@@ -1656,12 +1648,11 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_on_a_selected_text_nests_a_box_inside_the_text_and_keeps_the_selection() {
+    fn capital_a_on_a_selected_text_is_ignored() {
         let before = world_selected();
         let (state, effect) = reduce(before.clone(), "A");
-        assert_eq!(state.boxes.children(&before.selected).len(), 1);
-        assert_eq!(inner_boxes_of(&state, 0), inner_boxes_of(&before, 0));
-        assert_eq!(state.selected, before.selected);
+        assert_eq!(state, before);
+        assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }
 
@@ -1699,10 +1690,9 @@ mod tests {
     }
 
     #[test]
-    fn u_after_a_or_capital_a_brings_back_the_state_before_the_key() {
+    fn u_after_a_brings_back_the_state_before_the_key() {
         let before = middle_selected();
-        assert_eq!(moved(before.clone(), &["a", "\x1b", "u"]), before, "a");
-        assert_eq!(moved(before.clone(), &["A", "u"]), before, "A");
+        assert_eq!(moved(before.clone(), &["a", "\x1b", "u"]), before);
     }
 
     #[test]
