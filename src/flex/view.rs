@@ -1951,8 +1951,11 @@ mod tests {
     }
 
     #[test]
-    fn a_second_outer_box_added_with_a_spans_the_window_too() {
-        let state = pressed(&["a"]);
+    fn both_outer_boxes_span_the_window() {
+        let state = FlexState {
+            boxes: new_window(vec![new_box(), new_box()]),
+            ..FlexState::default()
+        };
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         assert_eq!(boxes.len(), 2);

@@ -154,6 +154,7 @@ mod tests {
         new_boxes(&mut drawn, &state);
         let state = after(state, "a");
         new_boxes(&mut drawn, &state);
+        let state = after(state, "\x1b");
         let state = after(state, "u");
         new_boxes(&mut drawn, &state);
 
