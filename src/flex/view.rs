@@ -1534,21 +1534,13 @@ mod tests {
             .fold(FlexState::default(), |state, key| reduce(state, key).0)
     }
 
-    fn from_row_after(keys: &[&str]) -> FlexState {
-        let state = FlexState {
-            boxes: new_window(vec![Tree::new(row(), vec![])]),
-            ..FlexState::default()
-        };
-        keys.iter().fold(state, |state, key| reduce(state, key).0)
-    }
-
     fn empty_box_size() -> Size {
         measure(&new_window(vec![new_box()]), &[0])
     }
 
     #[test]
     fn one_a_places_an_empty_inner_box_one_space_inside_the_outer_box() {
-        let state = from_default_after(&["A"]);
+        let state = from_default_after(&["a", "\x1b"]);
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
@@ -1569,8 +1561,11 @@ mod tests {
     }
 
     #[test]
-    fn a_second_a_adds_an_inner_box_one_gap_to_the_right_at_the_top() {
-        let state = from_row_after(&["A", "A"]);
+    fn two_inner_boxes_in_a_row_sit_one_gap_apart_at_the_top() {
+        let state = FlexState {
+            boxes: new_window(vec![Tree::new(row(), vec![new_box(), new_box()])]),
+            ..FlexState::default()
+        };
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
@@ -1768,11 +1763,6 @@ mod tests {
         assert_stretched_across(outer, &row_of(&placements, &state));
     }
 
-    fn pressed(keys: &[&str]) -> FlexState {
-        keys.iter()
-            .fold(FlexState::default(), |state, key| reduce(state, key).0)
-    }
-
     fn outer_hello_and_inner_depths(placements: &[Placement<'_>]) -> (u8, u8, u8) {
         let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
         (
@@ -1806,7 +1796,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = after(holding(FlexBox::default(), &["Hello"]), &["f", "A"]);
+        let state = after(with_text("Hello"), &["f", "a"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
@@ -1952,8 +1942,11 @@ mod tests {
     }
 
     #[test]
-    fn a_second_outer_box_added_with_a_spans_the_window_too() {
-        let state = pressed(&["a"]);
+    fn both_outer_boxes_span_the_window() {
+        let state = FlexState {
+            boxes: new_window(vec![new_box(), new_box()]),
+            ..FlexState::default()
+        };
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         assert_eq!(boxes.len(), 2);
