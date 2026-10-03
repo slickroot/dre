@@ -363,8 +363,7 @@ fn reorder_selected(mut state: FlexState, key: &str) -> FlexState {
 }
 
 fn cut_selected(mut state: FlexState) -> FlexState {
-    state.clipboard = Some(state.boxes.remove(&state.selected));
-    state.selected = parent_path(&state.selected);
+    state.clipboard = Some(state.remove_selected());
     state
 }
 
@@ -1906,7 +1905,7 @@ mod tests {
     fn p_appends_the_cut_branch_as_the_last_child_preserving_its_contents_and_fields() {
         let source = moved(nested_box_with_a_child_selected(), &["f", "]", "r", "s"]);
         let styled = box_at(&source, &source.selected).clone();
-        let cut = moved(source, &["d"]);
+        let cut = moved(source, &["d", "\x7f"]);
         let clipboard = cut.clipboard.clone();
 
         let state = moved(cut, &["p"]);
@@ -1921,7 +1920,7 @@ mod tests {
 
     #[test]
     fn p_twice_appends_two_independent_copies() {
-        let cut = moved(nested_box_with_a_child_selected(), &["d"]);
+        let cut = moved(nested_box_with_a_child_selected(), &["d", "\x7f"]);
         let state = moved(cut, &["p", "p"]);
 
         let children = state.boxes.children(&[0, 0]);
@@ -2111,12 +2110,30 @@ mod tests {
     }
 
     #[test]
-    fn d_selects_the_parent_after_a_nested_cut() {
-        let before = moved(hello_box_world(), &["\r", "j"]);
+    fn d_cuts_and_selects_the_following_sibling() {
+        let before = nested_box_with_a_child_selected();
         assert_eq!(before.selected, [0, 0, 1]);
 
         let (state, _) = reduce(before, "d");
 
+        assert_eq!(state.selected, [0, 0, 1]);
+        assert_eq!(text_of(&state, &state.selected), Some("World"));
+    }
+
+    #[test]
+    fn d_on_the_last_sibling_selects_the_parent() {
+        let (top_level, _) = reduce(stacked(&["Top", "Bottom"], FlexMode::Move), "d");
+        assert_eq!(top_level.selected, [0]);
+
+        let nested = FlexState {
+            boxes: new_canvas(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Top"), text("Middle"), text("Bottom")],
+            )]),
+            selected: vec![0, 0, 2],
+            ..FlexState::default()
+        };
+        let (state, _) = reduce(nested, "d");
         assert_eq!(state.selected, [0, 0]);
     }
 
