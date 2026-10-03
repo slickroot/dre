@@ -580,7 +580,11 @@ mod tests {
 
     #[test]
     fn an_empty_box_wears_its_own_colours() {
-        let (state, _) = reduce(FlexState::default(), "o");
+        let state = FlexState {
+            selected: vec![0, 0],
+            mode: FlexMode::Write,
+            ..with_text("")
+        };
         assert_eq!(
             colours(&placements(&state)),
             ((0x2A, 0x2A, 0x2E), (0xC9, 0xC9, 0xCF))
@@ -886,7 +890,7 @@ mod tests {
 
     #[test]
     fn the_box_is_centred_again_after_a_text_is_added() {
-        let (grown, _) = reduce(with_text("Hello"), "o");
+        let grown = holding(FlexBox::default(), &["Hello", ""]);
         let (left, right) = margins(&placements(&grown));
         assert!((left - right).abs() <= 1);
     }
@@ -1516,9 +1520,7 @@ mod tests {
 
     #[test]
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
-        let state = ["A", "o", "W", "o", "r", "l", "d"]
-            .into_iter()
-            .fold(with_text_row("Hello"), |state, key| reduce(state, key).0);
+        let state = hello_box_world();
         let placements = placements(&state);
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
@@ -1644,13 +1646,7 @@ mod tests {
 
     #[test]
     fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
-        let keys = [
-            "o", "H", "e", "l", "l", "o", "\r", "\r", "A", "o", "W", "o", "r", "l", "d", "\r",
-            "\r", "s",
-        ];
-        let state = keys
-            .into_iter()
-            .fold(FlexState::default(), |state, key| reduce(state, key).0);
+        let state = spread(vec![text("Hello"), new_box(), text("World")]);
         let [(_, placements)] =
             <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
         let outer = &placements[0];
@@ -1786,18 +1782,23 @@ mod tests {
         )
     }
 
-    const HELLO_WITH_AN_INNER_BOX: [&str; 9] = ["o", "H", "e", "l", "l", "o", "\r", "\r", "A"];
+    fn hello_with_an_inner_box() -> FlexState {
+        FlexState {
+            boxes: new_window(vec![outer(FlexBox::default(), &["Hello"], 1)]),
+            ..FlexState::default()
+        }
+    }
 
     #[test]
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
-        let state = pressed(&HELLO_WITH_AN_INNER_BOX);
+        let state = hello_with_an_inner_box();
         let placements = placements(&state);
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
     }
 
     #[test]
     fn filling_the_outer_box_keeps_its_texts_and_inner_box_one_deeper() {
-        let state = pressed(&[&HELLO_WITH_AN_INNER_BOX[..], &["f"]].concat());
+        let state = after(hello_with_an_inner_box(), &["f"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
@@ -1805,7 +1806,7 @@ mod tests {
 
     #[test]
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
-        let state = pressed(&["o", "H", "e", "l", "l", "o", "\r", "\r", "f", "A"]);
+        let state = after(holding(FlexBox::default(), &["Hello"]), &["f", "A"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
