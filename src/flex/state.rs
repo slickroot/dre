@@ -258,6 +258,8 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
         "A" => {
             state.boxes.push(&state.selected, new_box());
         }
+        "\r" => state.selected = state.boxes.child(&state.selected),
+        "\x7f" => state.selected = state.boxes.parent(&state.selected),
         "j" => state.selected = state.boxes.next(&state.selected),
         "k" => state.selected = state.boxes.previous(&state.selected),
         "l" => state.selected = state.boxes.child(&state.selected),
@@ -1426,6 +1428,36 @@ mod tests {
         assert_eq!(text_of(&state, &state.selected), Some("Hellohl"));
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn enter_selects_the_first_child_and_stays_on_a_childless_box() {
+        let before = hello_box_world();
+        let (child, effect) = reduce(before.clone(), "\r");
+        assert_eq!(child.selected, [0, 0]);
+        assert_eq!(child.boxes, before.boxes);
+        assert_eq!(child.mode, FlexMode::Move);
+        assert_eq!(effect, None);
+        assert_eq!(reduce(child.clone(), "\r"), (child, None));
+    }
+
+    #[test]
+    fn backspace_selects_the_parent_and_stays_on_a_top_level_box() {
+        let child = moved(hello_box_world(), &["\r"]);
+        assert_eq!(child.selected, [0, 0]);
+        let (state, effect) = reduce(child, "\x7f");
+        assert_eq!(state.selected, [0]);
+        assert_eq!(effect, None);
+        let top = hello_box_world();
+        assert_eq!(reduce(top.clone(), "\x7f"), (top, None));
+    }
+
+    #[test]
+    fn enter_and_backspace_type_themselves_in_write_mode() {
+        let (state, _) = reduce(hello_in(FlexMode::Write), "\r");
+        assert_eq!(texts(&state), [Some("Hello"), Some("")]);
+        let (state, _) = reduce(hello_in(FlexMode::Write), "\x7f");
+        assert_eq!(text_of(&state, &state.selected), Some("Hell"));
     }
 
     fn world_selected() -> FlexState {
