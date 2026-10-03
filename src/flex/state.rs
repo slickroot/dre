@@ -85,8 +85,11 @@ pub(crate) fn new_box() -> Tree<FlexBox> {
     Tree::new(FlexBox::default(), vec![])
 }
 
-pub(crate) fn new_window(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
-    Tree::new(FlexBox::window(), children)
+pub(crate) fn new_canvas(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
+    Tree::new(
+        FlexBox::window(),
+        vec![Tree::new(FlexBox::window(), children)],
+    )
 }
 
 pub(crate) fn new_child_box() -> Tree<FlexBox> {
@@ -113,8 +116,8 @@ impl PartialEq for FlexState {
 impl Default for FlexState {
     fn default() -> Self {
         Self {
-            boxes: new_window(vec![new_box()]),
-            selected: vec![0],
+            boxes: new_canvas(vec![new_box()]),
+            selected: vec![0, 0],
             mode: FlexMode::Move,
             clipboard: None,
             history: Vec::new(),
@@ -126,9 +129,9 @@ impl FlexState {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn outer_boxes(&self) -> impl Iterator<Item = &FlexBox> {
         self.boxes
-            .walk()
-            .filter(|(path, _)| path.len() == 1)
-            .map(|(_, flex_box)| flex_box)
+            .children(&[0])
+            .into_iter()
+            .map(|path| self.boxes.value(&path))
     }
 
     fn selected_mut(&mut self) -> &mut FlexBox {
@@ -142,8 +145,20 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
         ("\r", FlexMode::Write) => history::recorded(state, key, |s| write_key(s, key)),
         (_, FlexMode::Write) => write_key(state, key),
         (_, FlexMode::Replace) => write_key(state, key),
+        (_, FlexMode::Move) if is_canvas(&state.selected) && canvas_self_edit(key) => (state, None),
         (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
+}
+
+fn is_canvas(path: &[usize]) -> bool {
+    path.len() == 1
+}
+
+fn canvas_self_edit(key: &str) -> bool {
+    matches!(
+        key,
+        "i" | "o" | "O" | "s" | "r" | "f" | "]" | "d" | "J" | "K" | "y"
+    )
 }
 
 fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
@@ -278,20 +293,9 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             };
         }
         "o" | "O" => {
-            let source = if state.selected.is_empty() {
-                state.boxes.value(&[])
-            } else {
-                state.boxes.value(&state.selected)
-            };
-            let new_box = copied_box(source);
-            let (parent, index) = if state.selected.is_empty() {
-                (Vec::new(), state.boxes.children(&[]).len())
-            } else {
-                (
-                    parent_path(&state.selected),
-                    state.selected.last().copied().unwrap() + usize::from(key == "o"),
-                )
-            };
+            let new_box = copied_box(state.boxes.value(&state.selected));
+            let parent = parent_path(&state.selected);
+            let index = state.selected.last().copied().unwrap() + usize::from(key == "o");
             state.selected = state
                 .boxes
                 .insert(&parent, index, Tree::new(new_box, vec![]));
@@ -314,16 +318,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             selected.padding = selected.padding.saturating_add(1);
         }
         "u" => state = history::undo(state),
-        "d" => {
-            if !state.selected.is_empty() {
-                state = cut_selected(state);
-            }
-        }
+        "d" => state = cut_selected(state),
         "y" => {
-            if !state.selected.is_empty() {
-                let mut boxes = state.boxes.clone();
-                state.clipboard = Some(boxes.remove(&state.selected));
-            }
+            let mut boxes = state.boxes.clone();
+            state.clipboard = Some(boxes.remove(&state.selected));
         }
         "p" => state = paste_clipboard(state),
         "q" => return (state, Some(FlexEffect::Quit)),
@@ -406,7 +404,8 @@ mod tests {
 
     fn holding(text: &str, mode: FlexMode) -> FlexState {
         FlexState {
-            boxes: new_window(vec![box_with(text)]),
+            boxes: new_canvas(vec![box_with(text)]),
+            selected: vec![0, 0],
             mode,
             ..FlexState::default()
         }
@@ -417,16 +416,19 @@ mod tests {
         let state = FlexState::default();
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(state.outer_boxes().count(), 1);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(state.boxes.children(&state.selected).len(), 0);
     }
 
     #[test]
     fn a_new_box_has_no_children() {
-        let boxes = new_window(vec![new_box()]);
+        let boxes = new_canvas(vec![new_box()]);
         assert_eq!(
             boxes.walk().collect::<Vec<_>>(),
-            [(vec![0], &FlexBox::default())]
+            [
+                (vec![0], &FlexBox::window()),
+                (vec![0, 0], &FlexBox::default())
+            ]
         );
     }
 
@@ -456,23 +458,23 @@ mod tests {
 
     #[test]
     fn sibling_or_else_parent_returns_previous_sibling_when_not_first_child() {
-        let boxes = new_window(vec![new_box(), new_box()]);
-        assert_eq!(sibling_or_else_parent(&boxes, &[1]), vec![0]);
+        let boxes = new_canvas(vec![new_box(), new_box()]);
+        assert_eq!(sibling_or_else_parent(&boxes, &[0, 1]), vec![0, 0]);
     }
 
     #[test]
     fn sibling_or_else_parent_returns_parent_when_first_child() {
-        let boxes = new_window(vec![new_window(vec![new_box()])]);
+        let boxes = new_canvas(vec![new_canvas(vec![new_box()])]);
         assert_eq!(sibling_or_else_parent(&boxes, &[0, 0]), vec![0]);
     }
 
     #[test]
     fn o_in_move_mode_adds_a_copy_after_and_switches_to_write() {
         let (state, effect) = reduce(hello_in(FlexMode::Move), "o");
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
         assert!(box_at(&state, &state.selected).border);
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
         assert_eq!(state.outer_boxes().count(), 2);
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
@@ -483,8 +485,8 @@ mod tests {
         let state = ["o", "W", "o", "r", "l", "d"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(text_of(&state, &[1]), Some("World"));
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 1]), Some("World"));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
     }
 
     #[test]
@@ -492,9 +494,9 @@ mod tests {
         let state = ["o", "W", "o", "r", "l", "d", "\r", "o"]
             .iter()
             .fold(hello_in(FlexMode::Move), |state, key| reduce(state, key).0);
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
         assert_eq!(text_of(&state, &state.selected), Some("o"));
-        assert_eq!(text_of(&state, &[1]), Some("World"));
+        assert_eq!(text_of(&state, &[0, 1]), Some("World"));
         assert_eq!(state.mode, FlexMode::Write);
     }
 
@@ -513,7 +515,7 @@ mod tests {
         let before = world_selected();
         let state = moved(before.clone(), &["o", "W", "\x7f", "\x7f"]);
         assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected, [0, 0, 2]);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
@@ -522,7 +524,7 @@ mod tests {
         let before = world_selected();
         let state = moved(before.clone(), &["o", "\x7f"]);
         assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected, [0, 0, 2]);
         assert_eq!(state.mode, FlexMode::Move);
     }
 
@@ -541,7 +543,7 @@ mod tests {
             texts(&state),
             [Some("Top"), Some("Middle"), Some(""), Some("Bottom")]
         );
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
     }
 
     #[test]
@@ -551,16 +553,16 @@ mod tests {
             texts(&state),
             [Some("Top"), Some(""), Some("Middle"), Some("Bottom")]
         );
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
     }
 
     #[test]
     fn capital_o_on_a_top_level_box_inserts_before_the_selected_top_level_box() {
         let (state, _) = reduce(FlexState::default(), "O");
         assert_eq!(state.outer_boxes().count(), 2);
-        assert_eq!(state.selected, [0]);
-        assert_eq!(text_of(&state, &[0]), Some(""));
-        assert_eq!(text_of(&state, &[1]), None);
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(text_of(&state, &[0, 0]), Some(""));
+        assert_eq!(text_of(&state, &[0, 1]), None);
     }
 
     #[test]
@@ -568,8 +570,8 @@ mod tests {
         let before = FlexState::default();
         let (state, _) = reduce(before, "o");
         assert_eq!(state.outer_boxes().count(), 2);
-        assert_eq!(state.selected, [1]);
-        assert_eq!(text_of(&state, &[0]), None);
+        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(text_of(&state, &[0, 0]), None);
     }
 
     #[test]
@@ -577,8 +579,8 @@ mod tests {
         for (key, filled, other) in [("o", 1usize, 0usize), ("O", 0usize, 1usize)] {
             let state = moved(FlexState::default(), &[key, "H", "i"]);
             assert_eq!(state.mode, FlexMode::Write, "{key}");
-            assert_eq!(text_of(&state, &[filled]), Some("Hi"), "{key}");
-            assert_eq!(text_of(&state, &[other]), None, "{key}");
+            assert_eq!(text_of(&state, &[0, filled]), Some("Hi"), "{key}");
+            assert_eq!(text_of(&state, &[0, other]), None, "{key}");
         }
     }
 
@@ -587,8 +589,8 @@ mod tests {
         let styled = moved(middle_selected(), &["f", "]", "r", "s"]);
         for (key, copy_index) in [("o", 2usize), ("O", 1usize)] {
             let (state, _) = reduce(styled.clone(), key);
-            let source = box_at(&styled, &[1]);
-            let copy = box_at(&state, &[copy_index]);
+            let source = box_at(&styled, &[0, 1]);
+            let copy = box_at(&state, &[0, copy_index]);
             assert_eq!(copy.text.as_deref(), Some(""));
             assert_eq!(copy.border, source.border);
             assert_eq!(copy.filled, source.filled);
@@ -596,7 +598,7 @@ mod tests {
             assert_eq!(copy.justify, source.justify);
             assert_eq!(copy.direction, source.direction);
             assert!(state.boxes.children(&state.selected).is_empty());
-            assert_eq!(state.selected, [copy_index], "{key}");
+            assert_eq!(state.selected, [0, copy_index], "{key}");
         }
     }
 
@@ -605,10 +607,10 @@ mod tests {
         for (key, copy_index) in [("o", 2usize), ("O", 1usize)] {
             let before = moved(hello_box_world(), &["\r", "j"]);
             let (state, _) = reduce(before, key);
-            assert_eq!(state.selected, [0, copy_index], "{key}");
-            assert_eq!(state.selected.len(), 2);
-            assert_eq!(state.boxes.parent(&state.selected), [0]);
-            assert_eq!(state.boxes.children(&[0]).len(), 4);
+            assert_eq!(state.selected, [0, 0, copy_index], "{key}");
+            assert_eq!(state.selected.len(), 3);
+            assert_eq!(state.boxes.parent(&state.selected), [0, 0]);
+            assert_eq!(state.boxes.children(&[0, 0]).len(), 4);
         }
     }
 
@@ -719,9 +721,9 @@ mod tests {
         let before = hello_in(FlexMode::Write);
         let (state, effect) = reduce(before.clone(), "\r");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(state.selected, [1]);
-        assert_eq!(text_of(&state, &[1]), Some(""));
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(text_of(&state, &[0, 1]), Some(""));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
         assert_eq!(effect, None);
     }
 
@@ -736,15 +738,15 @@ mod tests {
             texts(&state),
             [Some("Top"), Some("Middle"), Some(""), Some("Bottom")]
         );
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
     }
 
     #[test]
     fn enter_on_non_empty_text_copies_the_boxs_fields_onto_the_new_sibling() {
         let before = moved(hello_in(FlexMode::Move), &["r", "f", "]", "i"]);
         let (state, _) = reduce(before.clone(), "\r");
-        let original = box_at(&state, &[0]);
-        let new_box = box_at(&state, &[1]);
+        let original = box_at(&state, &[0, 0]);
+        let new_box = box_at(&state, &[0, 1]);
         assert_eq!(new_box.direction, original.direction);
         assert_eq!(new_box.border, original.border);
         assert_eq!(new_box.filled, original.filled);
@@ -766,9 +768,12 @@ mod tests {
     }
 
     #[test]
-    fn backspace_in_move_mode_leaves_the_state_unchanged() {
+    fn backspace_in_move_mode_selects_the_parent() {
         let before = hello_in(FlexMode::Move);
-        assert_eq!(reduce(before.clone(), "\x7f"), (before, None));
+        let (state, effect) = reduce(before.clone(), "\x7f");
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(effect, None);
     }
 
     #[test]
@@ -813,9 +818,9 @@ mod tests {
         let before = moved(hello_in(FlexMode::Move), &["i"]);
         let (state, effect) = reduce(before, "\r");
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
-        assert_eq!(text_of(&state, &[1]), Some(""));
-        assert_eq!(state.selected, [1]);
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 1]), Some(""));
+        assert_eq!(state.selected, [0, 1]);
         assert_eq!(effect, None);
     }
 
@@ -869,8 +874,8 @@ mod tests {
         let state = moved(FlexState::default(), &["o", "\r"]);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(state.outer_boxes().count(), 2);
-        assert_eq!(text_of(&state, &[1]), None);
-        assert!(state.boxes.children(&[1]).is_empty());
+        assert_eq!(text_of(&state, &[0, 1]), None);
+        assert!(state.boxes.children(&[0, 1]).is_empty());
     }
 
     #[test]
@@ -878,9 +883,9 @@ mod tests {
         let before = moved(hello_box_world(), &["\r", "j"]);
         let state = moved(before, &["o", "\r"]);
         assert_eq!(state.mode, FlexMode::Move);
-        assert_eq!(state.selected, [0, 2]);
-        assert_eq!(text_of(&state, &[0, 2]), None);
-        assert!(box_at(&state, &[0, 2]).border);
+        assert_eq!(state.selected, [0, 0, 2]);
+        assert_eq!(text_of(&state, &[0, 0, 2]), None);
+        assert!(box_at(&state, &[0, 0, 2]).border);
     }
 
     #[test]
@@ -894,7 +899,7 @@ mod tests {
     #[test]
     fn enter_on_empty_text_that_has_children_keeps_the_box_without_text() {
         let nested = FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 FlexBox::default(),
                 vec![Tree::new(
                     FlexBox {
@@ -905,7 +910,7 @@ mod tests {
                     vec![new_box(), new_box()],
                 )],
             )]),
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             ..FlexState::default()
         };
         let state = moved(nested, &["i", "\x7f", "\r"]);
@@ -919,7 +924,7 @@ mod tests {
         let (state, effect) = reduce(moved(before.clone(), &["o"]), "\r");
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(state.boxes, before.boxes);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(effect, None);
     }
 
@@ -967,7 +972,7 @@ mod tests {
         let state = reduce(before, "\x1b").0;
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(texts(&state), [Some("!?")]);
-        assert_eq!(state.boxes.children(&[0]).len(), 0);
+        assert_eq!(state.boxes.children(&[0, 0]).len(), 0);
     }
 
     #[test]
@@ -987,14 +992,14 @@ mod tests {
         let state = reduce(before, "\x1b").0;
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(texts(&state), [Some("!"), Some("?")]);
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
     }
 
     #[test]
     fn o_adds_a_copy_after_and_selects_it() {
         let state = moved(FlexState::default(), &["o"]);
         assert_eq!(state.outer_boxes().count(), 2);
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
         assert!(selected_box(&state).border);
         assert!(state.boxes.children(&state.selected).is_empty());
     }
@@ -1066,8 +1071,8 @@ mod tests {
 
     fn stacked(texts: &[&str], mode: FlexMode) -> FlexState {
         FlexState {
-            boxes: new_window(texts.iter().map(|text| box_with(text)).collect()),
-            selected: vec![texts.len() - 1],
+            boxes: new_canvas(texts.iter().map(|text| box_with(text)).collect()),
+            selected: vec![0, texts.len() - 1],
             mode,
             ..FlexState::default()
         }
@@ -1075,7 +1080,7 @@ mod tests {
 
     fn texts(state: &FlexState) -> Vec<Option<&str>> {
         (0..state.outer_boxes().count())
-            .map(|index| text_of(state, &[index]))
+            .map(|index| text_of(state, &[0, index]))
             .collect()
     }
 
@@ -1083,12 +1088,12 @@ mod tests {
     fn a_in_move_mode_nests_an_empty_bordered_box_and_switches_to_write() {
         let before = hello_in(FlexMode::Move);
         let (state, effect) = reduce(before.clone(), "a");
-        assert_eq!(state.selected, [0, 0]);
-        let new_box = box_at(&state, &[0, 0]);
+        assert_eq!(state.selected, [0, 0, 0]);
+        let new_box = box_at(&state, &[0, 0, 0]);
         assert!(new_box.border);
         assert_eq!(new_box.text, Some(String::new()));
-        assert!(state.boxes.children(&[0, 0]).is_empty());
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert!(state.boxes.children(&[0, 0, 0]).is_empty());
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -1097,7 +1102,7 @@ mod tests {
     fn a_adds_an_inner_box_with_no_children() {
         let state = moved(hello_in(FlexMode::Move), &["a"]);
         assert_eq!(state.outer_boxes().count(), 1);
-        let children = state.boxes.children(&[0]);
+        let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 1);
         let child = box_at(&state, &children[0]);
         assert!(child.border);
@@ -1109,8 +1114,8 @@ mod tests {
     fn a_second_a_in_write_mode_is_typed_into_the_new_child() {
         let (state, _) = reduce(hello_in(FlexMode::Move), "a");
         let (state, effect) = reduce(state, "a");
-        assert_eq!(state.selected, [0, 0]);
-        assert_eq!(text_of(&state, &[0, 0]), Some("a"));
+        assert_eq!(state.selected, [0, 0, 0]);
+        assert_eq!(text_of(&state, &[0, 0, 0]), Some("a"));
         assert_eq!(state.mode, FlexMode::Write);
         assert_eq!(effect, None);
     }
@@ -1137,25 +1142,25 @@ mod tests {
     #[test]
     fn a_appends_the_new_box_as_the_last_child() {
         let before = FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 FlexBox::default(),
                 vec![new_box(), new_box()],
             )]),
-            selected: vec![0],
+            selected: vec![0, 0],
             ..FlexState::default()
         };
         let state = moved(before, &["a"]);
-        let children = state.boxes.children(&[0]);
+        let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 3);
-        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected, [0, 0, 2]);
     }
 
     #[test]
     fn typing_after_a_goes_into_the_new_child() {
         let before = hello_in(FlexMode::Move);
         let state = moved(before.clone(), &["a", "H", "i"]);
-        assert_eq!(text_of(&state, &[0, 0]), Some("Hi"));
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 0, 0]), Some("Hi"));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
         assert_eq!(state.mode, FlexMode::Write);
     }
 
@@ -1258,8 +1263,8 @@ mod tests {
     #[test]
     fn s_only_spreads_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "s");
-        assert_eq!(box_at(&state, &[0]).justify, Justify::Start);
-        assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
+        assert_eq!(box_at(&state, &[0, 0]).justify, Justify::Start);
+        assert_eq!(box_at(&state, &[0, 1]).justify, Justify::SpaceBetween);
     }
 
     #[test]
@@ -1305,22 +1310,22 @@ mod tests {
     #[test]
     fn r_only_changes_the_direction_of_the_selected_box() {
         let (state, _) = reduce(stacked(&["Hello", "World"], FlexMode::Move), "r");
-        assert_eq!(box_at(&state, &[0]).direction, Direction::Column);
-        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[0, 0]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[0, 1]).direction, Direction::Row);
     }
 
     #[test]
     fn new_outer_and_inner_boxes_start_as_columns() {
         let state = FlexState {
-            boxes: new_window(vec![
+            boxes: new_canvas(vec![
                 Tree::new(FlexBox::default(), vec![new_box(), new_box()]),
                 new_box(),
             ]),
             ..FlexState::default()
         };
-        assert_eq!(box_at(&state, &[0]).direction, Direction::Column);
         assert_eq!(box_at(&state, &[0, 0]).direction, Direction::Column);
-        assert_eq!(box_at(&state, &[0, 1]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[0, 0, 0]).direction, Direction::Column);
+        assert_eq!(box_at(&state, &[0, 0, 1]).direction, Direction::Column);
     }
 
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
@@ -1337,14 +1342,14 @@ mod tests {
 
     #[test]
     fn starts_with_the_only_box_selected() {
-        assert_eq!(FlexState::default().selected, [0]);
+        assert_eq!(FlexState::default().selected, [0, 0]);
     }
 
     #[test]
     fn k_in_move_mode_selects_the_box_above() {
         let before = three_boxes_in_move();
         let (state, effect) = reduce(before.clone(), "k");
-        assert_eq!(state.selected, [before.selected[0] - 1]);
+        assert_eq!(state.selected, [before.selected[0], before.selected[1] - 1]);
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -1354,7 +1359,7 @@ mod tests {
     fn j_in_move_mode_selects_the_box_below() {
         let before = moved(three_boxes_in_move(), &["k", "k"]);
         let (state, effect) = reduce(before.clone(), "j");
-        assert_eq!(state.selected, [before.selected[0] + 1]);
+        assert_eq!(state.selected, [before.selected[0], before.selected[1] + 1]);
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -1363,14 +1368,17 @@ mod tests {
     #[test]
     fn j_on_the_bottom_box_leaves_the_state_unchanged() {
         let before = three_boxes_in_move();
-        assert_eq!(before.selected, [before.outer_boxes().count() - 1]);
+        assert_eq!(
+            before.selected,
+            [before.selected[0], before.outer_boxes().count() - 1]
+        );
         assert_eq!(reduce(before.clone(), "j"), (before, None));
     }
 
     #[test]
     fn k_on_the_top_box_leaves_the_state_unchanged() {
         let before = moved(three_boxes_in_move(), &["k", "k"]);
-        assert_eq!(before.selected, [0]);
+        assert_eq!(before.selected, [0, 0]);
         assert_eq!(reduce(before.clone(), "k"), (before, None));
     }
 
@@ -1386,7 +1394,7 @@ mod tests {
         state
             .boxes
             .walk()
-            .filter(|(path, _)| path[0] == outer)
+            .filter(|(path, _)| path.get(1) == Some(&outer))
             .collect()
     }
 
@@ -1401,7 +1409,7 @@ mod tests {
     fn f_only_fills_the_selected_box() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "f");
-        assert!(box_at(&state, &[1]).filled);
+        assert!(box_at(&state, &[0, 1]).filled);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1409,7 +1417,7 @@ mod tests {
     fn s_only_spreads_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "s");
-        assert_eq!(box_at(&state, &[1]).justify, Justify::SpaceBetween);
+        assert_eq!(box_at(&state, &[0, 1]).justify, Justify::SpaceBetween);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1417,7 +1425,7 @@ mod tests {
     fn r_only_changes_a_selected_box_above_the_bottom() {
         let before = middle_selected();
         let (state, _) = reduce(before.clone(), "r");
-        assert_eq!(box_at(&state, &[1]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[0, 1]).direction, Direction::Row);
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1428,14 +1436,14 @@ mod tests {
             texts(&state),
             [Some("Top"), Some("Middle"), Some(""), Some("Bottom")]
         );
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
     }
 
     #[test]
     fn typing_after_i_only_goes_into_the_selected_box() {
         let before = middle_selected();
         let state = moved(before.clone(), &["i", "!", "?", "\x7f"]);
-        assert_eq!(text_of(&state, &[1]), Some("!"));
+        assert_eq!(text_of(&state, &[0, 1]), Some("!"));
         only_the_middle_box_changed(&before, &state);
     }
 
@@ -1443,7 +1451,7 @@ mod tests {
     fn j_and_k_in_write_mode_are_typed_into_the_selected_text() {
         let before = moved(middle_selected(), &["i"]);
         let state = moved(before.clone(), &["j", "k"]);
-        assert_eq!(text_of(&state, &[1]), Some("jk"));
+        assert_eq!(text_of(&state, &[0, 1]), Some("jk"));
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
         only_the_middle_box_changed(&before, &state);
@@ -1459,9 +1467,9 @@ mod tests {
     #[test]
     fn j_and_k_move_between_outer_boxes() {
         let state = moved(three_boxes_in_move(), &["k", "k", "j", "j", "j"]);
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
         let state = moved(state, &["k", "k", "k"]);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
     }
 
     #[test]
@@ -1484,7 +1492,7 @@ mod tests {
 
     fn hello_box_world() -> FlexState {
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 FlexBox::default(),
                 vec![text("Hello"), new_box(), text("World")],
             )]),
@@ -1494,7 +1502,7 @@ mod tests {
 
     fn nested_box_with_a_child_selected() -> FlexState {
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 FlexBox::default(),
                 vec![
                     text("Hello"),
@@ -1502,7 +1510,7 @@ mod tests {
                     text("World"),
                 ],
             )]),
-            selected: vec![0, 1],
+            selected: vec![0, 0, 1],
             ..FlexState::default()
         }
     }
@@ -1517,11 +1525,11 @@ mod tests {
             ..FlexBox::default()
         };
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 parent,
                 texts.iter().map(|label| text(label)).collect(),
             )]),
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             ..FlexState::default()
         }
     }
@@ -1583,25 +1591,25 @@ mod tests {
     #[test]
     fn j_and_k_move_between_siblings_under_a_column_parent() {
         let state = moved(hello_box_world(), &["\r"]);
-        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.selected, [0, 0, 0]);
         let state = moved(state, &["j"]);
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [0, 0, 1]);
         let state = moved(state, &["j"]);
-        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected, [0, 0, 2]);
         let state = moved(state, &["k"]);
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [0, 0, 1]);
     }
 
     #[test]
     fn h_and_l_move_between_siblings_under_a_row_parent() {
         let state = row_of(&["Left", "Middle", "Right"]);
-        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.selected, [0, 0, 0]);
         let state = moved(state, &["l"]);
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [0, 0, 1]);
         let state = moved(state, &["l"]);
-        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.selected, [0, 0, 2]);
         let state = moved(state, &["h"]);
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [0, 0, 1]);
     }
 
     #[test]
@@ -1621,29 +1629,29 @@ mod tests {
     #[test]
     fn top_level_boxes_walk_with_j_and_k() {
         let state = three_boxes_in_move();
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
         let state = moved(state, &["k", "k"]);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         let state = moved(state, &["j"]);
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
         let state = moved(state, &["j"]);
-        assert_eq!(state.selected, [2]);
+        assert_eq!(state.selected, [0, 2]);
     }
 
     #[test]
     fn sibling_moves_stop_at_the_ends() {
         let first = moved(hello_box_world(), &["\r"]);
-        assert_eq!(first.selected, [0, 0]);
+        assert_eq!(first.selected, [0, 0, 0]);
         assert_eq!(reduce(first.clone(), "k"), (first, None));
         let last = moved(hello_box_world(), &["\r", "j", "j"]);
-        assert_eq!(last.selected, [0, 2]);
+        assert_eq!(last.selected, [0, 0, 2]);
         assert_eq!(reduce(last.clone(), "j"), (last, None));
 
         let row_first = row_of(&["Left", "Middle"]);
-        assert_eq!(row_first.selected, [0, 0]);
+        assert_eq!(row_first.selected, [0, 0, 0]);
         assert_eq!(reduce(row_first.clone(), "h"), (row_first, None));
         let row_last = moved(row_of(&["Left", "Middle"]), &["l"]);
-        assert_eq!(row_last.selected, [0, 1]);
+        assert_eq!(row_last.selected, [0, 0, 1]);
         assert_eq!(reduce(row_last.clone(), "l"), (row_last, None));
     }
 
@@ -1668,7 +1676,7 @@ mod tests {
     fn enter_selects_the_first_child_and_stays_on_a_childless_box() {
         let before = hello_box_world();
         let (child, effect) = reduce(before.clone(), "\r");
-        assert_eq!(child.selected, [0, 0]);
+        assert_eq!(child.selected, [0, 0, 0]);
         assert_eq!(child.boxes, before.boxes);
         assert_eq!(child.mode, FlexMode::Move);
         assert_eq!(effect, None);
@@ -1676,14 +1684,17 @@ mod tests {
     }
 
     #[test]
-    fn backspace_selects_the_parent_and_stays_on_a_top_level_box() {
+    fn backspace_selects_the_parent_and_the_canvas() {
         let child = moved(hello_box_world(), &["\r"]);
-        assert_eq!(child.selected, [0, 0]);
+        assert_eq!(child.selected, [0, 0, 0]);
         let (state, effect) = reduce(child, "\x7f");
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(effect, None);
         let top = hello_box_world();
-        assert_eq!(reduce(top.clone(), "\x7f"), (top, None));
+        let (state, effect) = reduce(top.clone(), "\x7f");
+        assert_eq!(state.boxes, top.boxes);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(effect, None);
     }
 
     #[test]
@@ -1701,28 +1712,28 @@ mod tests {
     #[test]
     fn s_on_a_selected_text_spreads_that_text() {
         let state = moved(world_selected(), &["s"]);
-        assert_eq!(box_at(&state, &[0, 2]).justify, Justify::SpaceBetween);
-        assert_eq!(box_at(&state, &[0]).justify, Justify::Start);
+        assert_eq!(box_at(&state, &[0, 0, 2]).justify, Justify::SpaceBetween);
+        assert_eq!(box_at(&state, &[0, 0]).justify, Justify::Start);
     }
 
     #[test]
     fn f_on_a_selected_text_fills_that_text() {
         let state = moved(world_selected(), &["f"]);
-        assert!(box_at(&state, &[0, 2]).filled);
-        assert!(!box_at(&state, &[0]).filled);
+        assert!(box_at(&state, &[0, 0, 2]).filled);
+        assert!(!box_at(&state, &[0, 0]).filled);
     }
 
     #[test]
     fn r_on_a_selected_text_toggles_the_direction_of_that_text() {
         let state = moved(world_selected(), &["r"]);
-        assert_eq!(box_at(&state, &[0, 2]).direction, Direction::Row);
+        assert_eq!(box_at(&state, &[0, 0, 2]).direction, Direction::Row);
     }
 
     #[test]
     fn o_on_a_selected_text_inserts_a_copy_after_it_and_selects_it() {
         let before = moved(hello_box_world(), &["\r"]);
         let (state, effect) = reduce(before, "o");
-        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(state.selected, [0, 0, 1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
         assert!(!selected_box(&state).border);
         assert_eq!(state.mode, FlexMode::Write);
@@ -1748,7 +1759,7 @@ mod tests {
     fn o_on_a_selected_box_selects_the_new_copy() {
         let before = hello_in(FlexMode::Move);
         let (state, _) = reduce(before, "o");
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
         assert_eq!(text_of(&state, &state.selected), Some(""));
     }
 
@@ -1793,8 +1804,8 @@ mod tests {
         let before = hello_in(FlexMode::Move);
         let state = moved(before, &["o", "H", "e", "l", "l", "o", "\r", "u"]);
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(text_of(&state, &[0]), Some("Hello"));
-        assert_eq!(text_of(&state, &[2]), Some("u"));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 2]), Some("u"));
     }
 
     #[test]
@@ -1802,8 +1813,8 @@ mod tests {
         let before = hello_in(FlexMode::Move);
         let state = moved(before, &["i", " ", "W", "o", "r", "l", "d", "\r", "u"]);
         assert_eq!(state.mode, FlexMode::Write);
-        assert_eq!(text_of(&state, &[0]), Some(" World"));
-        assert_eq!(text_of(&state, &[1]), Some("u"));
+        assert_eq!(text_of(&state, &[0, 0]), Some(" World"));
+        assert_eq!(text_of(&state, &[0, 1]), Some("u"));
     }
 
     #[test]
@@ -1817,7 +1828,7 @@ mod tests {
     fn u_in_write_mode_is_typed_and_leaves_the_history_alone() {
         let before = holding("Hello", FlexMode::Write);
         let (state, effect) = reduce(before.clone(), "u");
-        assert_eq!(text_of(&state, &[0]), Some("Hellou"));
+        assert_eq!(text_of(&state, &[0, 0]), Some("Hellou"));
         assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }
@@ -1827,15 +1838,15 @@ mod tests {
         let before = hello_in(FlexMode::Move);
 
         let after_sibling = moved(before.clone(), &["i", "\r"]);
-        assert_eq!(after_sibling.selected, [1]);
+        assert_eq!(after_sibling.selected, [0, 1]);
         assert_eq!(after_sibling.mode, FlexMode::Write);
-        assert_eq!(text_of(&after_sibling, &[1]), Some(""));
+        assert_eq!(text_of(&after_sibling, &[0, 1]), Some(""));
 
         let after_accidental_enter = moved(after_sibling, &["\r"]);
         assert_eq!(after_accidental_enter.mode, FlexMode::Move);
 
         let once = moved(after_accidental_enter.clone(), &["u"]);
-        assert_eq!(text_of(&once, &[1]), Some(""));
+        assert_eq!(text_of(&once, &[0, 1]), Some(""));
         assert_eq!(once.mode, FlexMode::Move);
 
         let state = moved(once, &["u"]);
@@ -1887,9 +1898,9 @@ mod tests {
 
         let state = moved(cut, &["p"]);
 
-        let children = state.boxes.children(&[0]);
+        let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 3);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(box_at(&state, &children[2]), &styled);
         assert_eq!(state.boxes.children(&children[2]).len(), 1);
         assert_eq!(state.clipboard, clipboard);
@@ -1900,9 +1911,9 @@ mod tests {
         let cut = moved(nested_box_with_a_child_selected(), &["d"]);
         let state = moved(cut, &["p", "p"]);
 
-        let children = state.boxes.children(&[0]);
+        let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 4);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(state.boxes.children(&children[2]).len(), 1);
         assert_eq!(state.boxes.children(&children[3]).len(), 1);
     }
@@ -1923,14 +1934,14 @@ mod tests {
     #[test]
     fn p_with_the_canvas_selected_adds_a_top_level_box_and_keeps_the_canvas_selected() {
         let cut = moved(hello_in(FlexMode::Move), &["d"]);
-        assert_eq!(cut.selected, Vec::<usize>::new());
-        assert!(cut.boxes.children(&[]).is_empty());
+        assert_eq!(cut.selected, [0]);
+        assert!(cut.boxes.children(&[0]).is_empty());
         assert!(cut.clipboard.is_some());
 
         let state = moved(cut, &["p"]);
 
-        assert_eq!(state.boxes.children(&[]).len(), 1);
-        assert_eq!(state.selected, Vec::<usize>::new());
+        assert_eq!(state.boxes.children(&[0]).len(), 1);
+        assert_eq!(state.selected, [0]);
     }
 
     #[test]
@@ -1993,7 +2004,7 @@ mod tests {
     #[test]
     fn y_on_the_canvas_changes_nothing() {
         let before = FlexState {
-            selected: Vec::new(),
+            selected: vec![0],
             ..hello_box_world()
         };
 
@@ -2010,16 +2021,16 @@ mod tests {
         let before = nested_box_with_a_child_selected();
         let yanked = moved(before.clone(), &["y"]).clipboard.unwrap();
         let after = moved(before.clone(), &["y", "k"]);
-        assert_eq!(after.selected, [0, 0]);
+        assert_eq!(after.selected, [0, 0, 0]);
 
         let state = moved(after, &["p"]);
 
         assert_eq!(
-            state.boxes.children(&[0]).len(),
-            before.boxes.children(&[0]).len()
+            state.boxes.children(&[0, 0]).len(),
+            before.boxes.children(&[0, 0]).len()
         );
-        assert_eq!(box_at(&state, &[0, 1]), box_at(&before, &[0, 1]));
-        let pasted = state.boxes.children(&[0, 0]);
+        assert_eq!(box_at(&state, &[0, 0, 1]), box_at(&before, &[0, 0, 1]));
+        let pasted = state.boxes.children(&[0, 0, 0]);
         assert_eq!(pasted.len(), 1);
         assert_eq!(box_at(&state, &pasted[0]), yanked.value(&[]));
         assert_eq!(
@@ -2069,7 +2080,7 @@ mod tests {
     #[test]
     fn d_cuts_the_selected_box_and_its_nested_contents() {
         let before = nested_box_with_a_child_selected();
-        assert_eq!(before.selected, [0, 1]);
+        assert_eq!(before.selected, [0, 0, 1]);
         let removed = before.boxes.value(&before.selected).clone();
         assert_eq!(before.boxes.children(&before.selected).len(), 1);
 
@@ -2077,7 +2088,7 @@ mod tests {
 
         assert_eq!(
             state.boxes,
-            new_window(vec![Tree::new(
+            new_canvas(vec![Tree::new(
                 FlexBox::default(),
                 vec![text("Hello"), text("World")],
             )])
@@ -2089,21 +2100,21 @@ mod tests {
     #[test]
     fn d_selects_the_parent_after_a_nested_cut() {
         let before = moved(hello_box_world(), &["\r", "j"]);
-        assert_eq!(before.selected, [0, 1]);
+        assert_eq!(before.selected, [0, 0, 1]);
 
         let (state, _) = reduce(before, "d");
 
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
     }
 
     #[test]
     fn d_on_a_top_level_box_selects_the_canvas() {
         let before = hello_box_world();
-        assert_eq!(before.selected, [0]);
+        assert_eq!(before.selected, [0, 0]);
 
         let (state, _) = reduce(before, "d");
 
-        assert_eq!(state.selected, Vec::<usize>::new());
+        assert_eq!(state.selected, [0]);
         assert_eq!(
             state.clipboard,
             Some(Tree::new(
@@ -2117,25 +2128,23 @@ mod tests {
     fn d_on_the_only_box_leaves_an_empty_canvas() {
         let (state, _) = reduce(hello_box_world(), "d");
 
-        assert!(state.boxes.children(&[]).is_empty());
-        assert_eq!(state.selected, Vec::<usize>::new());
+        assert!(state.boxes.children(&[0]).is_empty());
+        assert_eq!(state.selected, [0]);
     }
 
     #[test]
-    fn o_and_capital_o_on_an_empty_canvas_copy_the_window_as_a_top_level_box() {
-        let (cut, _) = reduce(hello_box_world(), "d");
-        assert_eq!(cut.selected, Vec::<usize>::new());
-        assert!(cut.boxes.children(&[]).is_empty());
-
-        let window = copied_box(&FlexBox::window());
+    fn o_and_capital_o_on_the_canvas_change_nothing() {
+        let cut = moved(hello_box_world(), &["d"]);
+        assert_eq!(cut.selected, [0]);
+        assert!(cut.boxes.children(&[0]).is_empty());
 
         for key in ["o", "O"] {
-            let (state, _) = reduce(cut.clone(), key);
-            assert_eq!(state.boxes.children(&[]).len(), 1, "{key}");
-            assert_eq!(state.boxes.value(&[0]), &window, "{key}");
-            assert!(state.boxes.children(&[0]).is_empty(), "{key}");
-            assert_eq!(state.selected, [0], "{key}");
-            assert_eq!(state.mode, FlexMode::Write, "{key}");
+            let (state, effect) = reduce(cut.clone(), key);
+            assert_eq!(state.boxes, cut.boxes, "{key}");
+            assert_eq!(state.selected, cut.selected, "{key}");
+            assert_eq!(state.mode, cut.mode, "{key}");
+            assert_eq!(state.history.len(), cut.history.len(), "{key}");
+            assert_eq!(effect, None, "{key}");
         }
     }
 
@@ -2154,7 +2163,7 @@ mod tests {
     #[test]
     fn d_on_the_canvas_changes_nothing() {
         let before = FlexState {
-            selected: Vec::new(),
+            selected: vec![0],
             ..hello_box_world()
         };
 
@@ -2217,40 +2226,40 @@ mod tests {
     #[test]
     fn j_swaps_the_selected_box_with_the_next_sibling_and_follows_it() {
         let before = moved(three_boxes_in_move(), &["k", "k"]);
-        assert_eq!(before.selected, [0]);
+        assert_eq!(before.selected, [0, 0]);
 
         let (state, effect) = reduce(before, "J");
 
         assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
         assert_eq!(text_of(&state, &state.selected), Some("Top"));
         assert_eq!(effect, None);
 
         let nested = FlexState {
-            boxes: new_window(vec![
+            boxes: new_canvas(vec![
                 Tree::new(FlexBox::default(), vec![text("Child")]),
                 box_with("Other"),
             ]),
-            selected: vec![0],
+            selected: vec![0, 0],
             ..FlexState::default()
         };
 
         let (state, _) = reduce(nested, "J");
 
-        assert_eq!(state.selected, [1]);
-        assert_eq!(text_of(&state, &[0]), Some("Other"));
-        assert_eq!(text_of(&state, &[1, 0]), Some("Child"));
+        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(text_of(&state, &[0, 0]), Some("Other"));
+        assert_eq!(text_of(&state, &[0, 1, 0]), Some("Child"));
     }
 
     #[test]
     fn k_swaps_the_selected_box_with_the_previous_sibling() {
         let before = middle_selected();
-        assert_eq!(before.selected, [1]);
+        assert_eq!(before.selected, [0, 1]);
 
         let (state, effect) = reduce(before, "K");
 
         assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
-        assert_eq!(state.selected, [0]);
+        assert_eq!(state.selected, [0, 0]);
         assert_eq!(text_of(&state, &state.selected), Some("Middle"));
         assert_eq!(effect, None);
     }
@@ -2258,7 +2267,7 @@ mod tests {
     #[test]
     fn j_on_the_last_sibling_changes_nothing() {
         let before = three_boxes_in_move();
-        assert_eq!(before.selected, [2]);
+        assert_eq!(before.selected, [0, 2]);
 
         let (state, effect) = reduce(before.clone(), "J");
 
@@ -2271,7 +2280,7 @@ mod tests {
     #[test]
     fn k_on_the_first_sibling_changes_nothing() {
         let before = moved(three_boxes_in_move(), &["k", "k"]);
-        assert_eq!(before.selected, [0]);
+        assert_eq!(before.selected, [0, 0]);
 
         let (state, effect) = reduce(before.clone(), "K");
 
@@ -2296,7 +2305,7 @@ mod tests {
     #[test]
     fn j_and_k_on_the_canvas_change_nothing() {
         let before = FlexState {
-            selected: Vec::new(),
+            selected: vec![0],
             ..hello_box_world()
         };
 
@@ -2348,20 +2357,124 @@ mod tests {
         let (state, _) = reduce(before, "J");
 
         assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
-        assert_eq!(state.selected, [1]);
+        assert_eq!(state.selected, [0, 1]);
     }
 
     #[test]
     fn j_reorders_a_selected_text_leaf() {
         let before = moved(hello_box_world(), &["\r"]);
-        assert_eq!(before.selected, [0, 0]);
-        assert_eq!(text_of(&before, &[0, 0]), Some("Hello"));
+        assert_eq!(before.selected, [0, 0, 0]);
+        assert_eq!(text_of(&before, &[0, 0, 0]), Some("Hello"));
 
         let (state, _) = reduce(before, "J");
 
-        assert_eq!(state.selected, [0, 1]);
-        assert_eq!(text_of(&state, &[0, 0]), None);
-        assert_eq!(text_of(&state, &[0, 1]), Some("Hello"));
-        assert_eq!(text_of(&state, &[0, 2]), Some("World"));
+        assert_eq!(state.selected, [0, 0, 1]);
+        assert_eq!(text_of(&state, &[0, 0, 0]), None);
+        assert_eq!(text_of(&state, &[0, 0, 1]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 0, 2]), Some("World"));
+    }
+
+    #[test]
+    fn default_has_a_canvas_with_one_box_selected() {
+        let state = FlexState::default();
+        assert_eq!(state.boxes.value(&[0]), &FlexBox::window());
+        assert_eq!(state.boxes.children(&[0]), vec![vec![0, 0]]);
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.boxes.value(&[]), &FlexBox::window());
+        assert!(state.boxes.walk().all(|(path, _)| !path.is_empty()));
+    }
+
+    #[test]
+    fn a_new_canvas_is_a_borderless_column() {
+        let canvas = new_canvas(vec![]);
+        assert!(!canvas.value(&[0]).border);
+        assert_eq!(canvas.value(&[0]).direction, Direction::Column);
+    }
+
+    #[test]
+    fn d_and_enter_on_empty_borderless_both_select_the_canvas() {
+        let (cut, _) = reduce(FlexState::default(), "d");
+        assert_eq!(cut.selected, [0]);
+        assert!(cut.boxes.children(&[0]).is_empty());
+
+        let before = FlexState {
+            boxes: new_canvas(vec![Tree::new(
+                FlexBox {
+                    text: Some(String::new()),
+                    ..FlexBox::window()
+                },
+                vec![],
+            )]),
+            selected: vec![0, 0],
+            mode: FlexMode::Write,
+            ..FlexState::default()
+        };
+        let (dropped, _) = reduce(before, "\r");
+        assert_eq!(dropped.selected, [0]);
+        assert!(dropped.boxes.children(&[0]).is_empty());
+    }
+
+    #[test]
+    fn a_on_the_canvas_adds_a_child_and_enters_write() {
+        let before = FlexState {
+            boxes: new_canvas(vec![]),
+            selected: vec![0],
+            ..FlexState::default()
+        };
+        let (state, _) = reduce(before, "a");
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.mode, FlexMode::Write);
+        assert_eq!(state.boxes.children(&[0]).len(), 1);
+    }
+
+    #[test]
+    fn enter_on_the_canvas_selects_the_first_child() {
+        let before = FlexState {
+            selected: vec![0],
+            ..FlexState::default()
+        };
+        let (state, _) = reduce(before, "\r");
+        assert_eq!(state.selected, [0, 0]);
+    }
+
+    #[test]
+    fn backspace_on_the_canvas_stays_on_the_canvas() {
+        let before = FlexState {
+            selected: vec![0],
+            ..FlexState::default()
+        };
+        let (state, _) = reduce(before.clone(), "\x7f");
+        assert_eq!(state.selected, [0]);
+        assert_eq!(state.boxes, before.boxes);
+    }
+
+    #[test]
+    fn self_edit_keys_on_the_canvas_change_nothing() {
+        for key in ["i", "o", "O", "s", "r", "f", "]", "d", "J", "K", "y"] {
+            let before = FlexState {
+                selected: vec![0],
+                ..hello_box_world()
+            };
+            let (state, effect) = reduce(before.clone(), key);
+            assert_eq!(state.boxes, before.boxes, "{key}");
+            assert_eq!(state.selected, before.selected, "{key}");
+            assert_eq!(state.mode, before.mode, "{key}");
+            assert_eq!(state.history.len(), before.history.len(), "{key}");
+            assert_eq!(effect, None, "{key}");
+        }
+    }
+
+    #[test]
+    fn j_k_h_l_on_the_canvas_change_nothing() {
+        for key in ["j", "k", "h", "l"] {
+            let before = FlexState {
+                selected: vec![0],
+                ..hello_box_world()
+            };
+            let (state, effect) = reduce(before.clone(), key);
+            assert_eq!(state.boxes, before.boxes, "{key}");
+            assert_eq!(state.selected, before.selected, "{key}");
+            assert_eq!(effect, None, "{key}");
+        }
     }
 }
