@@ -319,6 +319,7 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
                 state = cut_selected(state);
             }
         }
+        "p" => state = paste_clipboard(state),
         "q" => return (state, Some(FlexEffect::Quit)),
         "J" | "K" => state = reorder_selected(state, key),
         _ => {}
@@ -347,6 +348,13 @@ fn reorder_selected(mut state: FlexState, key: &str) -> FlexState {
 fn cut_selected(mut state: FlexState) -> FlexState {
     state.clipboard = Some(state.boxes.remove(&state.selected));
     state.selected = parent_path(&state.selected);
+    state
+}
+
+fn paste_clipboard(mut state: FlexState) -> FlexState {
+    if let Some(branch) = state.clipboard.clone() {
+        state.boxes.push(&state.selected, branch);
+    }
     state
 }
 
@@ -1865,13 +1873,45 @@ mod tests {
     }
 
     #[test]
-    fn y_and_p_in_move_mode_leave_the_state_unchanged_and_return_no_effect() {
-        for key in ["y", "p"] {
-            let before = hello_in(FlexMode::Move);
-            let (state, effect) = reduce(before.clone(), key);
-            assert_eq!(state, before, "{key}");
-            assert_eq!(effect, None, "{key}");
-        }
+    fn p_appends_the_cut_branch_as_the_last_child_preserving_its_contents_and_fields() {
+        let source = moved(nested_box_with_a_child_selected(), &["f", "]", "r", "s"]);
+        let styled = box_at(&source, &source.selected).clone();
+        let cut = moved(source, &["d"]);
+        let clipboard = cut.clipboard.clone();
+
+        let state = moved(cut, &["p"]);
+
+        let children = state.boxes.children(&[0]);
+        assert_eq!(children.len(), 3);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(box_at(&state, &children[2]), &styled);
+        assert_eq!(state.boxes.children(&children[2]).len(), 1);
+        assert_eq!(state.clipboard, clipboard);
+    }
+
+    #[test]
+    fn p_twice_appends_two_independent_copies() {
+        let cut = moved(nested_box_with_a_child_selected(), &["d"]);
+        let state = moved(cut, &["p", "p"]);
+
+        let children = state.boxes.children(&[0]);
+        assert_eq!(children.len(), 4);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(state.boxes.children(&children[2]).len(), 1);
+        assert_eq!(state.boxes.children(&children[3]).len(), 1);
+    }
+
+    #[test]
+    fn u_after_p_restores_the_boxes_and_selection_and_keeps_the_clipboard() {
+        let before = moved(nested_box_with_a_child_selected(), &["d"]);
+        let pasted = moved(before.clone(), &["p"]);
+        assert_ne!(pasted.boxes, before.boxes);
+
+        let state = moved(pasted, &["u"]);
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert!(state.clipboard.is_some());
     }
 
     #[test]
