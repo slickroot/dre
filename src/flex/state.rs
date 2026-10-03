@@ -94,6 +94,7 @@ pub(crate) struct FlexState {
     pub(crate) boxes: Tree<FlexBox>,
     pub(crate) selected: Vec<usize>,
     pub(crate) mode: FlexMode,
+    pub(crate) clipboard: Option<Tree<FlexBox>>,
     pub(crate) history: Vec<Snapshot>,
 }
 
@@ -109,6 +110,7 @@ impl Default for FlexState {
             boxes: new_window(vec![new_box()]),
             selected: vec![0],
             mode: FlexMode::Move,
+            clipboard: None,
             history: Vec::new(),
         }
     }
@@ -295,10 +297,21 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             selected.padding = selected.padding.saturating_add(1);
         }
         "u" => state = history::undo(state),
+        "d" => {
+            if !state.selected.is_empty() {
+                state = cut_selected(state);
+            }
+        }
         "q" => return (state, Some(FlexEffect::Quit)),
         _ => {}
     }
     (state, None)
+}
+
+fn cut_selected(mut state: FlexState) -> FlexState {
+    state.clipboard = Some(state.boxes.remove(&state.selected));
+    state.selected = parent_path(&state.selected);
+    state
 }
 
 fn parent_path(path: &[usize]) -> Vec<usize> {
@@ -1814,13 +1827,94 @@ mod tests {
     }
 
     #[test]
-    fn d_y_and_p_in_move_mode_leave_the_state_unchanged_and_return_no_effect() {
-        for key in ["d", "y", "p"] {
+    fn y_and_p_in_move_mode_leave_the_state_unchanged_and_return_no_effect() {
+        for key in ["y", "p"] {
             let before = hello_in(FlexMode::Move);
             let (state, effect) = reduce(before.clone(), key);
             assert_eq!(state, before, "{key}");
             assert_eq!(effect, None, "{key}");
         }
+    }
+
+    #[test]
+    fn d_cuts_the_selected_box_and_its_nested_contents() {
+        let before = moved(hello_box_world(), &["\r", "j", "A"]);
+        assert_eq!(before.selected, [0, 1]);
+        let removed = before.boxes.value(&before.selected).clone();
+        assert_eq!(before.boxes.children(&before.selected).len(), 1);
+
+        let (state, effect) = reduce(before, "d");
+
+        assert_eq!(
+            state.boxes,
+            new_window(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Hello"), text("World")],
+            )])
+        );
+        assert_eq!(state.clipboard, Some(Tree::new(removed, vec![new_box()])));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn d_selects_the_parent_after_a_nested_cut() {
+        let before = moved(hello_box_world(), &["\r", "j"]);
+        assert_eq!(before.selected, [0, 1]);
+
+        let (state, _) = reduce(before, "d");
+
+        assert_eq!(state.selected, [0]);
+    }
+
+    #[test]
+    fn d_on_a_top_level_box_selects_the_canvas() {
+        let before = hello_box_world();
+        assert_eq!(before.selected, [0]);
+
+        let (state, _) = reduce(before, "d");
+
+        assert_eq!(state.selected, Vec::<usize>::new());
+        assert_eq!(
+            state.clipboard,
+            Some(Tree::new(
+                FlexBox::default(),
+                vec![text("Hello"), new_box(), text("World")],
+            ))
+        );
+    }
+
+    #[test]
+    fn d_on_the_only_box_leaves_an_empty_canvas() {
+        let (state, _) = reduce(hello_box_world(), "d");
+
+        assert!(state.boxes.children(&[]).is_empty());
+        assert_eq!(state.selected, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn d_in_write_mode_is_typed_and_removes_nothing() {
+        let before = hello_in(FlexMode::Write);
+
+        let (state, _) = reduce(before.clone(), "d");
+
+        assert_eq!(text_of(&state, &state.selected), Some("Hellod"));
+        assert_eq!(state.boxes.walk().count(), before.boxes.walk().count());
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.clipboard, None);
+    }
+
+    #[test]
+    fn d_on_the_canvas_changes_nothing() {
+        let before = FlexState {
+            selected: Vec::new(),
+            ..hello_box_world()
+        };
+
+        let (state, _) = reduce(before.clone(), "d");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.clipboard, before.clipboard);
     }
 
     #[test]
