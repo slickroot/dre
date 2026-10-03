@@ -320,9 +320,28 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             }
         }
         "q" => return (state, Some(FlexEffect::Quit)),
+        "J" | "K" => state = reorder_selected(state, key),
         _ => {}
     }
     (state, None)
+}
+
+fn reorder_selected(mut state: FlexState, key: &str) -> FlexState {
+    if state.selected.is_empty() {
+        return state;
+    }
+    let parent = parent_path(&state.selected);
+    if state.boxes.value(&parent).direction != Direction::Column {
+        return state;
+    }
+    let target = if key == "J" {
+        state.boxes.next(&state.selected)
+    } else {
+        state.boxes.previous(&state.selected)
+    };
+    state.boxes.swap(&state.selected, &target);
+    state.selected = target;
+    state
 }
 
 fn cut_selected(mut state: FlexState) -> FlexState {
@@ -1979,5 +1998,156 @@ mod tests {
         assert_eq!(state.boxes, boxes);
         assert_eq!(state.selected, selected);
         assert!(state.clipboard.is_some());
+    }
+
+    #[test]
+    fn j_swaps_the_selected_box_with_the_next_sibling_and_follows_it() {
+        let before = moved(three_boxes_in_move(), &["k", "k"]);
+        assert_eq!(before.selected, [0]);
+
+        let (state, effect) = reduce(before, "J");
+
+        assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
+        assert_eq!(state.selected, [1]);
+        assert_eq!(text_of(&state, &state.selected), Some("Top"));
+        assert_eq!(effect, None);
+
+        let nested = FlexState {
+            boxes: new_window(vec![
+                Tree::new(FlexBox::default(), vec![text("Child")]),
+                box_with("Other"),
+            ]),
+            selected: vec![0],
+            ..FlexState::default()
+        };
+
+        let (state, _) = reduce(nested, "J");
+
+        assert_eq!(state.selected, [1]);
+        assert_eq!(text_of(&state, &[0]), Some("Other"));
+        assert_eq!(text_of(&state, &[1, 0]), Some("Child"));
+    }
+
+    #[test]
+    fn k_swaps_the_selected_box_with_the_previous_sibling() {
+        let before = middle_selected();
+        assert_eq!(before.selected, [1]);
+
+        let (state, effect) = reduce(before, "K");
+
+        assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
+        assert_eq!(state.selected, [0]);
+        assert_eq!(text_of(&state, &state.selected), Some("Middle"));
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn j_on_the_last_sibling_changes_nothing() {
+        let before = three_boxes_in_move();
+        assert_eq!(before.selected, [2]);
+
+        let (state, effect) = reduce(before.clone(), "J");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.history.len(), before.history.len() + 1);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn k_on_the_first_sibling_changes_nothing() {
+        let before = moved(three_boxes_in_move(), &["k", "k"]);
+        assert_eq!(before.selected, [0]);
+
+        let (state, effect) = reduce(before.clone(), "K");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.history.len(), before.history.len() + 1);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn j_and_k_under_a_row_parent_change_nothing() {
+        let before = row_of(&["Left", "Middle", "Right"]);
+
+        for key in ["J", "K"] {
+            let (state, effect) = reduce(before.clone(), key);
+            assert_eq!(state.boxes, before.boxes, "{key}");
+            assert_eq!(state.selected, before.selected, "{key}");
+            assert_eq!(effect, None, "{key}");
+        }
+    }
+
+    #[test]
+    fn j_and_k_on_the_canvas_change_nothing() {
+        let before = FlexState {
+            selected: Vec::new(),
+            ..hello_box_world()
+        };
+
+        for key in ["J", "K"] {
+            let (state, effect) = reduce(before.clone(), key);
+            assert_eq!(state.boxes, before.boxes, "{key}");
+            assert_eq!(state.selected, before.selected, "{key}");
+            assert_eq!(effect, None, "{key}");
+        }
+    }
+
+    #[test]
+    fn j_and_k_in_write_mode_are_typed() {
+        let before = holding("Hello", FlexMode::Write);
+
+        let state = moved(before.clone(), &["J", "K"]);
+
+        assert_eq!(text_of(&state, &state.selected), Some("HelloJK"));
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.mode, FlexMode::Write);
+    }
+
+    #[test]
+    fn j_and_k_in_replace_mode_replace_the_text() {
+        for key in ["J", "K"] {
+            let before = moved(hello_in(FlexMode::Move), &["i"]);
+            let state = moved(before, &[key]);
+            assert_eq!(text_of(&state, &state.selected), Some(key), "{key}");
+            assert_eq!(state.mode, FlexMode::Write, "{key}");
+        }
+    }
+
+    #[test]
+    fn one_u_after_j_restores_the_order_and_the_selection() {
+        let before = moved(three_boxes_in_move(), &["k", "k"]);
+        let after = moved(before.clone(), &["J"]);
+        assert_eq!(texts(&after), [Some("Middle"), Some("Top"), Some("Bottom")]);
+
+        let state = moved(after, &["u"]);
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+    }
+
+    #[test]
+    fn j_reorders_top_level_boxes() {
+        let before = moved(three_boxes_in_move(), &["k", "k"]);
+
+        let (state, _) = reduce(before, "J");
+
+        assert_eq!(texts(&state), [Some("Middle"), Some("Top"), Some("Bottom")]);
+        assert_eq!(state.selected, [1]);
+    }
+
+    #[test]
+    fn j_reorders_a_selected_text_leaf() {
+        let before = moved(hello_box_world(), &["\r"]);
+        assert_eq!(before.selected, [0, 0]);
+        assert_eq!(text_of(&before, &[0, 0]), Some("Hello"));
+
+        let (state, _) = reduce(before, "J");
+
+        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(text_of(&state, &[0, 0]), None);
+        assert_eq!(text_of(&state, &[0, 1]), Some("Hello"));
+        assert_eq!(text_of(&state, &[0, 2]), Some("World"));
     }
 }
