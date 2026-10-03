@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(state.history.len(), before_len + 1);
 
         state.boxes.value_mut(&state.selected).text = Some("changed".to_string());
-        state.selected = vec![];
+        state.selected = vec![0];
 
         let undone = undo(state);
         assert_eq!(undone.boxes, before.boxes);

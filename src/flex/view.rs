@@ -265,7 +265,7 @@ fn paint<'a>(
         depth,
     };
     let border = flex_box.border.then(|| {
-        let outer = path.len() == 1;
+        let outer = path.len() == 2;
         placement(
             PlacementNode::Box {
                 colour: if selected {
@@ -372,7 +372,7 @@ pub(crate) fn scene<'a>(
         height: window.rows,
     };
     let mut rects = Vec::new();
-    arrange(&state.boxes, &[], window_rect, &mut rects);
+    arrange(&state.boxes, &[0], window_rect, &mut rects);
     let placements = rects
         .iter()
         .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
@@ -383,7 +383,7 @@ pub(crate) fn scene<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flex::state::{new_box, new_window, reduce, FlexBox, Justify};
+    use crate::flex::state::{new_box, new_canvas, reduce, FlexBox, Justify};
     use crate::view::BOX_HEIGHT;
     use types::Tree;
 
@@ -414,7 +414,7 @@ mod tests {
 
     fn holding(the_box: FlexBox, texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: new_window(vec![outer(the_box, texts, 0)]),
+            boxes: new_canvas(vec![outer(the_box, texts, 0)]),
             ..FlexState::default()
         }
     }
@@ -428,7 +428,7 @@ mod tests {
     }
 
     fn outer_box_mut(state: &mut FlexState, index: usize) -> &mut FlexBox {
-        state.boxes.value_mut(&[index])
+        state.boxes.value_mut(&[0, index])
     }
 
     fn placements(state: &FlexState) -> Vec<Placement<'_>> {
@@ -532,7 +532,7 @@ mod tests {
     fn the_box_measures_to_fit_the_text() {
         let state = with_text("Hello");
         assert_eq!(
-            measure(&state.boxes, &[0]).width,
+            measure(&state.boxes, &[0, 0]).width,
             view::interior("Hello") + 2 * FLEX_SPACE.width
         );
     }
@@ -548,7 +548,7 @@ mod tests {
         };
         assert_eq!(
             Some(text.as_ref()),
-            state.boxes.value(&[0, 0]).text.as_deref()
+            state.boxes.value(&[0, 0, 0]).text.as_deref()
         );
         assert!(label.x > the_box.x);
         assert!(label.x + label.width < the_box.x + the_box.width);
@@ -557,15 +557,18 @@ mod tests {
     #[test]
     fn the_box_measures_narrower_after_backspace() {
         let before = FlexState {
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             mode: FlexMode::Write,
             ..with_text("Hellp")
         };
         let (after, _) = reduce(before.clone(), "\x7f");
-        let before_width = measure(&before.boxes, &[0]).width;
-        let after_width = measure(&after.boxes, &[0]).width;
+        let before_width = measure(&before.boxes, &[0, 0]).width;
+        let after_width = measure(&after.boxes, &[0, 0]).width;
         assert!(after_width < before_width);
-        assert_eq!(after_width, measure(&with_text("Hell").boxes, &[0]).width);
+        assert_eq!(
+            after_width,
+            measure(&with_text("Hell").boxes, &[0, 0]).width
+        );
     }
 
     fn colours(placements: &[Placement<'_>]) -> (Rgb, Rgb) {
@@ -581,7 +584,7 @@ mod tests {
     #[test]
     fn an_empty_box_wears_its_own_colours() {
         let state = FlexState {
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             mode: FlexMode::Write,
             ..with_text("")
         };
@@ -625,7 +628,7 @@ mod tests {
         let state = with_text("Hello");
         let placements = placements(&state);
         assert_eq!(
-            measure(&state.boxes, &[0]).width,
+            measure(&state.boxes, &[0, 0]).width,
             view::interior("Hello") + 2 * FLEX_SPACE.width
         );
         assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
@@ -675,10 +678,10 @@ mod tests {
     #[test]
     fn only_a_new_box_grows() {
         let state = FlexState {
-            boxes: new_window(vec![outer(FlexBox::default(), &[], 2)]),
+            boxes: new_canvas(vec![outer(FlexBox::default(), &[], 2)]),
             ..FlexState::default()
         };
-        let new = HashSet::from([vec![0, 1]]);
+        let new = HashSet::from([vec![0, 0, 1]]);
         let grown: Vec<bool> = placements_with_new(&state, &new)
             .iter()
             .map(grows)
@@ -688,7 +691,7 @@ mod tests {
 
     fn stacked(texts: &[&str]) -> FlexState {
         FlexState {
-            boxes: new_window(
+            boxes: new_canvas(
                 texts
                     .iter()
                     .map(|text| outer(FlexBox::default(), &[text], 0))
@@ -825,6 +828,21 @@ mod tests {
         assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
     }
 
+    #[test]
+    fn a_top_level_box_shows_its_solid_fill() {
+        let state = holding(
+            FlexBox {
+                filled: true,
+                ..FlexBox::default()
+            },
+            &["Hello"],
+        );
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        assert_eq!(the_box.depth, 1);
+        assert_eq!(solid_fill(the_box), Some(FLEX_FILL_COLOUR));
+    }
+
     fn beside(texts: &[&str]) -> FlexState {
         holding(FlexBox::default(), texts)
     }
@@ -848,7 +866,7 @@ mod tests {
             let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
             let gaps = FLEX_SPACE.width * (texts.len() as i64 - 1);
             assert_eq!(
-                measure(&state.boxes, &[0]).width,
+                measure(&state.boxes, &[0, 0]).width,
                 interiors + gaps + 2 * FLEX_SPACE.width
             );
         }
@@ -945,7 +963,7 @@ mod tests {
     #[test]
     fn a_space_between_row_spreads_two_boxes_to_its_inner_edges() {
         let state = FlexState {
-            boxes: new_window(vec![outer(
+            boxes: new_canvas(vec![outer(
                 FlexBox {
                     justify: Justify::SpaceBetween,
                     ..row()
@@ -960,8 +978,8 @@ mod tests {
         let (row, first, last) = (boxes[0], boxes[1], boxes[2]);
         assert_eq!(first.x, row.x + FLEX_SPACE.width);
         assert_eq!(last.x + last.width, row.x + row.width - FLEX_SPACE.width);
-        assert_eq!(first.width, measure(&state.boxes, &[0, 0]).width);
-        assert_eq!(last.width, measure(&state.boxes, &[0, 1]).width);
+        assert_eq!(first.width, measure(&state.boxes, &[0, 0, 0]).width);
+        assert_eq!(last.width, measure(&state.boxes, &[0, 0, 1]).width);
     }
 
     fn row_of_boxes(row: FlexBox, own_text: &[&str], box_texts: &[&str]) -> FlexState {
@@ -974,7 +992,7 @@ mod tests {
             .map(|label| outer(FlexBox::default(), &[label], 0))
             .collect();
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 row,
                 own_text
                     .iter()
@@ -997,7 +1015,7 @@ mod tests {
         let placements = placements(state);
         let row = all_boxes(&placements)[0];
         let widths: i64 = (0..box_count)
-            .map(|index| measure(&state.boxes, &[0, index]).width)
+            .map(|index| measure(&state.boxes, &[0, 0, index]).width)
             .sum();
         row.width - 2 * FLEX_SPACE.width - widths
     }
@@ -1008,7 +1026,7 @@ mod tests {
         let placements = placements(&state);
         let boxes = all_boxes(&placements);
         assert_eq!(boxes[1].x, boxes[0].x + FLEX_SPACE.width);
-        assert_eq!(boxes[1].width, measure(&state.boxes, &[0, 0]).width);
+        assert_eq!(boxes[1].width, measure(&state.boxes, &[0, 0, 0]).width);
     }
 
     #[test]
@@ -1080,7 +1098,7 @@ mod tests {
     fn pressing_s_twice_on_a_row_gives_the_boxes_their_equal_shares_again() {
         let state = FlexState {
             mode: FlexMode::Move,
-            selected: vec![0],
+            selected: vec![0, 0],
             ..row_of_boxes(FlexBox::default(), &[], &["Hello", "Hi"])
         };
         let before = placements(&state)
@@ -1124,7 +1142,7 @@ mod tests {
     fn selecting(mode: FlexMode, selected: usize) -> FlexState {
         FlexState {
             mode,
-            selected: vec![selected],
+            selected: vec![0, selected],
             ..stacked(&["Hello", "Hi", ""])
         }
     }
@@ -1146,21 +1164,21 @@ mod tests {
 
     fn with_inner_boxes(text: &str, count: usize) -> FlexState {
         FlexState {
-            boxes: new_window(vec![outer(FlexBox::default(), &[text], count)]),
+            boxes: new_canvas(vec![outer(FlexBox::default(), &[text], count)]),
             ..FlexState::default()
         }
     }
 
     fn with_inner_boxes_row(text: &str, count: usize) -> FlexState {
         FlexState {
-            boxes: new_window(vec![outer(row(), &[text], count)]),
+            boxes: new_canvas(vec![outer(row(), &[text], count)]),
             ..FlexState::default()
         }
     }
 
     fn outer_boxes_with_inner_counts(counts: &[usize]) -> FlexState {
         FlexState {
-            boxes: new_window(
+            boxes: new_canvas(
                 counts
                     .iter()
                     .map(|&count| outer(FlexBox::default(), &["Hello"], count))
@@ -1270,7 +1288,7 @@ mod tests {
     fn in_move_a_selected_inner_box_has_the_selected_border() {
         let state = FlexState {
             mode: FlexMode::Move,
-            selected: vec![0, 2],
+            selected: vec![0, 0, 2],
             ..with_inner_boxes("Hello", 2)
         };
         assert_eq!(
@@ -1290,11 +1308,11 @@ mod tests {
     }
 
     fn box_of(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
-        new_window(vec![Tree::new(FlexBox::default(), children)])
+        new_canvas(vec![Tree::new(FlexBox::default(), children)])
     }
 
     fn row_box_of(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
-        new_window(vec![Tree::new(row(), children)])
+        new_canvas(vec![Tree::new(row(), children)])
     }
 
     fn text(text: &str) -> Tree<FlexBox> {
@@ -1309,7 +1327,7 @@ mod tests {
     fn a_text_measures_its_interior_by_one_row() {
         let tree = box_of(vec![text("Hello")]);
         assert_eq!(
-            measure(&tree, &[0, 0]),
+            measure(&tree, &[0, 0, 0]),
             Size {
                 width: view::interior("Hello"),
                 height: 1,
@@ -1329,7 +1347,7 @@ mod tests {
     #[test]
     fn a_new_box_measures_its_padding_on_both_sides() {
         assert_eq!(
-            measure(&new_window(vec![new_box()]), &[0]),
+            measure(&new_canvas(vec![new_box()]), &[0, 0]),
             Size {
                 width: 2 * FLEX_SPACE.width,
                 height: 2 * FLEX_SPACE.height,
@@ -1340,9 +1358,9 @@ mod tests {
     #[test]
     fn a_row_measures_its_children_side_by_side_with_gaps() {
         let tree = row_box_of(vec![text("Hello"), new_box(), text("World")]);
-        let empty_box = measure(&new_window(vec![new_box()]), &[0]);
+        let empty_box = measure(&new_canvas(vec![new_box()]), &[0, 0]);
         assert_eq!(
-            measure(&tree, &[0]),
+            measure(&tree, &[0, 0]),
             Size {
                 width: view::interior("Hello")
                     + FLEX_SPACE.width
@@ -1443,7 +1461,7 @@ mod tests {
 
     fn hello_box_world() -> FlexState {
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 row(),
                 vec![text("Hello"), new_box(), text("World")],
             )]),
@@ -1454,17 +1472,17 @@ mod tests {
     #[test]
     fn a_column_measures_its_children_stacked_with_gaps() {
         let mut state = hello_box_world();
-        state.boxes.value_mut(&[0]).direction = Direction::Column;
+        state.boxes.value_mut(&[0, 0]).direction = Direction::Column;
         let children: Vec<Size> = state
             .boxes
-            .children(&[0])
+            .children(&[0, 0])
             .iter()
             .map(|child| measure(&state.boxes, child))
             .collect();
         let widest = children.iter().map(|child| child.width).max().unwrap();
         let heights = children.iter().map(|child| child.height).sum::<i64>();
         assert_eq!(
-            measure(&state.boxes, &[0]),
+            measure(&state.boxes, &[0, 0]),
             Size {
                 width: widest + 2 * FLEX_SPACE.width,
                 height: heights
@@ -1510,7 +1528,7 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let outer = all_boxes(&placements)[0];
-        let measured = measure(&state.boxes, &[0]);
+        let measured = measure(&state.boxes, &[0, 0]);
         assert_eq!((outer.width, outer.height), (WINDOW.cols, measured.height));
         let left = outer.x - WINDOW.col;
         let right = WINDOW.col + WINDOW.cols - (outer.x + outer.width);
@@ -1535,7 +1553,7 @@ mod tests {
     }
 
     fn empty_box_size() -> Size {
-        measure(&new_window(vec![new_box()]), &[0])
+        measure(&new_canvas(vec![new_box()]), &[0, 0])
     }
 
     #[test]
@@ -1563,7 +1581,7 @@ mod tests {
     #[test]
     fn two_inner_boxes_in_a_row_sit_one_gap_apart_at_the_top() {
         let state = FlexState {
-            boxes: new_window(vec![Tree::new(row(), vec![new_box(), new_box()])]),
+            boxes: new_canvas(vec![Tree::new(row(), vec![new_box(), new_box()])]),
             ..FlexState::default()
         };
         let placements = placements(&state);
@@ -1588,7 +1606,7 @@ mod tests {
 
     fn spread(children: Vec<Tree<FlexBox>>) -> FlexState {
         FlexState {
-            boxes: new_window(vec![Tree::new(
+            boxes: new_canvas(vec![Tree::new(
                 FlexBox {
                     justify: Justify::SpaceBetween,
                     ..FlexBox::default()
@@ -1602,8 +1620,8 @@ mod tests {
     fn row_of<'a>(placements: &'a [Placement<'a>], state: &FlexState) -> Vec<&'a Placement<'a>> {
         placements
             .iter()
-            .zip(state.boxes.walk())
-            .filter(|(_, (path, _))| path.len() == 2)
+            .zip(state.boxes.walk().skip(1))
+            .filter(|(_, (path, _))| path.len() == 3)
             .map(|(placement, _)| placement)
             .collect()
     }
@@ -1774,7 +1792,7 @@ mod tests {
 
     fn hello_with_an_inner_box() -> FlexState {
         FlexState {
-            boxes: new_window(vec![outer(FlexBox::default(), &["Hello"], 1)]),
+            boxes: new_canvas(vec![outer(FlexBox::default(), &["Hello"], 1)]),
             ..FlexState::default()
         }
     }
@@ -1783,7 +1801,7 @@ mod tests {
     fn the_outer_box_is_depth_zero_and_its_texts_and_inner_box_are_depth_one() {
         let state = hello_with_an_inner_box();
         let placements = placements(&state);
-        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+        assert_eq!(outer_hello_and_inner_depths(&placements), (1, 2, 2));
     }
 
     #[test]
@@ -1791,7 +1809,7 @@ mod tests {
         let state = after(hello_with_an_inner_box(), &["f"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
-        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+        assert_eq!(outer_hello_and_inner_depths(&placements), (1, 2, 2));
     }
 
     #[test]
@@ -1799,7 +1817,7 @@ mod tests {
         let state = after(with_text("Hello"), &["f", "a"]);
         let placements = placements(&state);
         assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
-        assert_eq!(outer_hello_and_inner_depths(&placements), (0, 1, 1));
+        assert_eq!(outer_hello_and_inner_depths(&placements), (1, 2, 2));
     }
 
     fn text_colours(placements: &[Placement<'_>], shown: &[&str]) -> Vec<Rgb> {
@@ -1819,7 +1837,7 @@ mod tests {
     fn world_selected(mode: FlexMode) -> FlexState {
         FlexState {
             mode,
-            selected: vec![0, 2],
+            selected: vec![0, 0, 2],
             ..hello_box_world()
         }
     }
@@ -1852,7 +1870,7 @@ mod tests {
     fn in_move_a_selected_inner_box_beside_texts_has_the_selected_border() {
         let state = FlexState {
             mode: FlexMode::Move,
-            selected: vec![0, 1],
+            selected: vec![0, 0, 1],
             ..hello_box_world()
         };
         let placements = placements(&state);
@@ -1882,8 +1900,8 @@ mod tests {
     fn a_selected_bordered_box_with_text_paints_a_selected_border_and_a_text_coloured_label() {
         let state = FlexState {
             mode: FlexMode::Move,
-            selected: vec![0],
-            boxes: new_window(vec![Tree::leaf(FlexBox {
+            selected: vec![0, 0],
+            boxes: new_canvas(vec![Tree::leaf(FlexBox {
                 text: Some("Title".to_string()),
                 ..FlexBox::default()
             })]),
@@ -1898,11 +1916,11 @@ mod tests {
     }
 
     #[test]
-    fn the_window_root_paints_nothing() {
+    fn the_canvas_paints_nothing() {
         let state = FlexState {
             mode: FlexMode::Move,
-            selected: vec![],
-            boxes: new_window(vec![]),
+            selected: vec![0],
+            boxes: new_canvas(vec![]),
             ..FlexState::default()
         };
         assert!(placements(&state).is_empty());
@@ -1916,8 +1934,8 @@ mod tests {
         let inner = Tree::new(FlexBox::default(), vec![text("Hi")]);
         FlexState {
             mode: FlexMode::Move,
-            selected: vec![0, 1],
-            boxes: new_window(vec![Tree::new(parent, vec![text("Title"), inner])]),
+            selected: vec![0, 0, 1],
+            boxes: new_canvas(vec![Tree::new(parent, vec![text("Title"), inner])]),
             ..FlexState::default()
         }
     }
@@ -1944,7 +1962,7 @@ mod tests {
     #[test]
     fn both_outer_boxes_span_the_window() {
         let state = FlexState {
-            boxes: new_window(vec![new_box(), new_box()]),
+            boxes: new_canvas(vec![new_box(), new_box()]),
             ..FlexState::default()
         };
         let placements = placements(&state);
@@ -2037,8 +2055,8 @@ mod tests {
         assert_eq!(
             (title.height, inner.height),
             (
-                measure(&state.boxes, &[0, 0]).height,
-                measure(&state.boxes, &[0, 1]).height
+                measure(&state.boxes, &[0, 0, 0]).height,
+                measure(&state.boxes, &[0, 0, 1]).height
             )
         );
         let inside_top = outer.y + FLEX_SPACE.height;
@@ -2087,8 +2105,8 @@ mod tests {
         let before = with_text("Hello");
         let state = after(before.clone(), &["]", "]"]);
         assert_eq!(
-            measure(&state.boxes, &[0]).width,
-            measure(&before.boxes, &[0]).width + 4 * FLEX_SPACE.width
+            measure(&state.boxes, &[0, 0]).width,
+            measure(&before.boxes, &[0, 0]).width + 4 * FLEX_SPACE.width
         );
     }
 
@@ -2097,12 +2115,12 @@ mod tests {
         let before = title_and_hi_in(Direction::Row);
         let state = after(before.clone(), &["]"]);
         assert_eq!(
-            measure(&state.boxes, &[0, 1]).width,
-            measure(&before.boxes, &[0, 1]).width + 2 * FLEX_SPACE.width
+            measure(&state.boxes, &[0, 0, 1]).width,
+            measure(&before.boxes, &[0, 0, 1]).width + 2 * FLEX_SPACE.width
         );
         assert_eq!(
-            measure(&state.boxes, &[0]).width,
-            measure(&before.boxes, &[0]).width + 2 * FLEX_SPACE.width
+            measure(&state.boxes, &[0, 0]).width,
+            measure(&before.boxes, &[0, 0]).width + 2 * FLEX_SPACE.width
         );
     }
 
@@ -2124,7 +2142,7 @@ mod tests {
             ..FlexBox::default()
         };
         FlexState {
-            boxes: new_window(vec![Tree::new(parent, vec![new_box(), new_box()])]),
+            boxes: new_canvas(vec![Tree::new(parent, vec![new_box(), new_box()])]),
             ..FlexState::default()
         }
     }
@@ -2158,8 +2176,8 @@ mod tests {
 
     #[test]
     fn a_box_with_an_own_text_measures_taller_in_a_column_by_a_row_and_a_gap() {
-        let without = measure(&titled(Direction::Column, None).boxes, &[0]);
-        let with = measure(&titled(Direction::Column, Some("Title")).boxes, &[0]);
+        let without = measure(&titled(Direction::Column, None).boxes, &[0, 0]);
+        let with = measure(&titled(Direction::Column, Some("Title")).boxes, &[0, 0]);
         assert_eq!(with.height, without.height + 1 + FLEX_SPACE.height);
     }
 
@@ -2173,14 +2191,14 @@ mod tests {
 
     #[test]
     fn a_box_with_an_empty_own_text_keeps_a_slot_for_it() {
-        let empty = measure(&titled(Direction::Column, Some("")).boxes, &[0]);
-        let none = measure(&titled(Direction::Column, None).boxes, &[0]);
+        let empty = measure(&titled(Direction::Column, Some("")).boxes, &[0, 0]);
+        let none = measure(&titled(Direction::Column, None).boxes, &[0, 0]);
         assert_eq!(empty.height, none.height + 1 + FLEX_SPACE.height);
     }
 
     fn with_selected_text(text: &str) -> FlexState {
         FlexState {
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             ..with_text(text)
         }
     }
@@ -2271,7 +2289,7 @@ mod tests {
     fn the_enter_adds_a_box_flow_leaves_no_replace_highlight() {
         let state = FlexState {
             mode: FlexMode::Write,
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             ..with_text("Hello")
         };
         let state = after(state, &["\r"]);
@@ -2299,7 +2317,7 @@ mod tests {
     fn writing(state: FlexState) -> FlexState {
         FlexState {
             mode: FlexMode::Write,
-            selected: vec![0, 0],
+            selected: vec![0, 0, 0],
             ..state
         }
     }
