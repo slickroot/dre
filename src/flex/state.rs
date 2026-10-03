@@ -1930,4 +1930,17 @@ mod tests {
         let state = moved(before.clone(), &["]", "u"]);
         assert_eq!(state.boxes, before.boxes);
     }
+
+    #[test]
+    fn u_after_d_restores_the_box_and_its_contents_and_selection() {
+        let before = moved(hello_box_world(), &["\r", "j", "A"]);
+        let boxes = before.boxes.clone();
+        let selected = before.selected.clone();
+
+        let state = moved(before, &["d", "u"]);
+
+        assert_eq!(state.boxes, boxes);
+        assert_eq!(state.selected, selected);
+        assert!(state.clipboard.is_some());
+    }
 }

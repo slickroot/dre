@@ -9,7 +9,10 @@ pub(crate) struct Snapshot {
 
 pub(super) fn undoable(mode: FlexMode, key: &str) -> bool {
     match mode {
-        FlexMode::Move => matches!(key, "a" | "A" | "o" | "O" | "i" | "s" | "r" | "f" | "]"),
+        FlexMode::Move => matches!(
+            key,
+            "a" | "A" | "o" | "O" | "i" | "s" | "r" | "f" | "]" | "d"
+        ),
         FlexMode::Write => key == "\r",
         FlexMode::Replace => key == "\x7f" || super::state::printable_char(key).is_some(),
     }
@@ -50,14 +53,14 @@ mod tests {
 
     #[test]
     fn box_text_and_toggle_keys_are_undoable_in_move_mode() {
-        for key in ["a", "A", "o", "O", "i", "s", "r", "f", "]"] {
+        for key in ["a", "A", "o", "O", "i", "s", "r", "f", "]", "d"] {
             assert!(undoable(FlexMode::Move, key), "{key}");
         }
     }
 
     #[test]
     fn selection_undo_and_quit_keys_are_not_undoable_in_move_mode() {
-        for key in ["h", "j", "k", "l", "u", "q", "w", "d", "y", "p"] {
+        for key in ["h", "j", "k", "l", "u", "q", "w", "y", "p"] {
             assert!(!undoable(FlexMode::Move, key), "{key}");
         }
     }
