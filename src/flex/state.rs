@@ -1915,6 +1915,32 @@ mod tests {
     }
 
     #[test]
+    fn p_with_the_canvas_selected_adds_a_top_level_box_and_keeps_the_canvas_selected() {
+        let cut = moved(hello_in(FlexMode::Move), &["d"]);
+        assert_eq!(cut.selected, Vec::<usize>::new());
+        assert!(cut.boxes.children(&[]).is_empty());
+        assert!(cut.clipboard.is_some());
+
+        let state = moved(cut, &["p"]);
+
+        assert_eq!(state.boxes.children(&[]).len(), 1);
+        assert_eq!(state.selected, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn p_with_an_empty_clipboard_leaves_the_state_and_adds_one_history_snapshot() {
+        let before = hello_in(FlexMode::Move);
+        assert!(before.clipboard.is_none());
+
+        let (state, effect) = reduce(before.clone(), "p");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.history.len(), before.history.len() + 1);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
     fn d_cuts_the_selected_box_and_its_nested_contents() {
         let before = nested_box_with_a_child_selected();
         assert_eq!(before.selected, [0, 1]);
@@ -2015,9 +2041,31 @@ mod tests {
 
     #[test]
     fn p_in_write_mode_is_typed_into_the_box_and_leaves_the_padding_alone() {
-        let (state, _) = reduce(hello_in(FlexMode::Write), "p");
+        let before = FlexState {
+            clipboard: Some(box_with("Clipped")),
+            ..hello_in(FlexMode::Write)
+        };
+
+        let (state, _) = reduce(before.clone(), "p");
+
         assert_eq!(text_of(&state, &state.selected), Some("Hellop"));
         assert_eq!(selected_box(&state).padding, FlexBox::default().padding);
+        assert_eq!(state.boxes.walk().count(), before.boxes.walk().count());
+        assert_eq!(state.clipboard, before.clipboard);
+    }
+
+    #[test]
+    fn p_in_replace_mode_is_typed_and_pastes_nothing() {
+        let before = FlexState {
+            clipboard: Some(box_with("Clipped")),
+            ..hello_in(FlexMode::Replace)
+        };
+
+        let (state, _) = reduce(before.clone(), "p");
+
+        assert_eq!(text_of(&state, &state.selected), Some("p"));
+        assert_eq!(state.boxes.walk().count(), before.boxes.walk().count());
+        assert_eq!(state.clipboard, before.clipboard);
     }
 
     #[test]
