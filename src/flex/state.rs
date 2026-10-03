@@ -320,8 +320,10 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             }
         }
         "y" => {
-            let mut boxes = state.boxes.clone();
-            state.clipboard = Some(boxes.remove(&state.selected));
+            if !state.selected.is_empty() {
+                let mut boxes = state.boxes.clone();
+                state.clipboard = Some(boxes.remove(&state.selected));
+            }
         }
         "p" => state = paste_clipboard(state),
         "q" => return (state, Some(FlexEffect::Quit)),
@@ -1986,6 +1988,21 @@ mod tests {
 
         assert_eq!(state.boxes.children(&state.selected).len(), children);
         assert_eq!(state.boxes.walk().count(), count);
+    }
+
+    #[test]
+    fn y_on_the_canvas_changes_nothing() {
+        let before = FlexState {
+            selected: Vec::new(),
+            ..hello_box_world()
+        };
+
+        let (state, effect) = reduce(before.clone(), "y");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.clipboard, before.clipboard);
+        assert_eq!(effect, None);
     }
 
     #[test]
