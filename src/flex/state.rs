@@ -203,13 +203,12 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
     match key {
         "\r" => {
             if state.selected_mut().text.as_deref() != Some("") {
-                let mut new_box = state.selected_mut().clone();
-                new_box.text = Some(String::new());
-                let parent = &state.selected[..state.selected.len() - 1];
-                let index = state.selected[state.selected.len() - 1] + 1;
+                let new_box = copied_box(state.boxes.value(&state.selected));
+                let parent = parent_path(&state.selected);
+                let index = state.selected.last().copied().unwrap() + 1;
                 state.selected = state
                     .boxes
-                    .insert(parent, index, Tree::new(new_box, vec![]));
+                    .insert(&parent, index, Tree::new(new_box, vec![]));
                 return (state, None);
             }
             state = exit_write_mode(state);
@@ -237,6 +236,13 @@ fn write_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>)
         }
     }
     (state, None)
+}
+
+fn copied_box(b: &FlexBox) -> FlexBox {
+    FlexBox {
+        text: Some(String::new()),
+        ..b.clone()
+    }
 }
 
 fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
