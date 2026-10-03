@@ -137,6 +137,19 @@ impl FlexState {
     fn selected_mut(&mut self) -> &mut FlexBox {
         self.boxes.value_mut(&self.selected)
     }
+
+    fn remove_selected(&mut self) -> Tree<FlexBox> {
+        let parent = parent_path(&self.selected);
+        let index = self
+            .selected
+            .last()
+            .copied()
+            .expect("the canvas is never removed");
+        let removed = self.boxes.remove(&self.selected);
+        let children = self.boxes.children(&parent);
+        self.selected = children.get(index).cloned().unwrap_or(parent);
+        removed
+    }
 }
 
 pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) {
@@ -2129,6 +2142,35 @@ mod tests {
         let (state, _) = reduce(hello_box_world(), "d");
 
         assert!(state.boxes.children(&[0]).is_empty());
+        assert_eq!(state.selected, [0]);
+    }
+
+    #[test]
+    fn remove_selected_selects_the_child_that_shifts_into_the_removed_slot() {
+        let mut state = middle_selected();
+        state.remove_selected();
+        assert_eq!(state.selected, [0, 1]);
+        assert_eq!(text_of(&state, &[0, 1]), Some("Bottom"));
+    }
+
+    #[test]
+    fn remove_selected_selects_the_parent_when_the_removed_box_was_the_last_sibling() {
+        let mut state = FlexState {
+            boxes: new_canvas(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Top"), text("Middle"), text("Bottom")],
+            )]),
+            selected: vec![0, 0, 2],
+            ..FlexState::default()
+        };
+        state.remove_selected();
+        assert_eq!(state.selected, [0, 0]);
+    }
+
+    #[test]
+    fn remove_selected_on_the_last_top_level_box_selects_the_canvas() {
+        let mut state = stacked(&["Top", "Bottom"], FlexMode::Move);
+        state.remove_selected();
         assert_eq!(state.selected, [0]);
     }
 
