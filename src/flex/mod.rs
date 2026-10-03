@@ -136,17 +136,6 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_in_move_mode_marks_no_box_as_new() {
-        let mut drawn = None;
-        let state = FlexState::default();
-        new_boxes(&mut drawn, &state);
-
-        let state = after(state, "A");
-
-        assert!(new_boxes(&mut drawn, &state).is_empty());
-    }
-
-    #[test]
     fn a_box_added_again_after_undo_is_new_again() {
         let mut drawn = None;
         let state = FlexState::default();

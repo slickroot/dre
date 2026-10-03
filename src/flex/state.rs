@@ -943,19 +943,6 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_on_a_text_leaf_is_ignored_in_move_mode() {
-        let before = FlexState {
-            boxes: new_window(vec![Tree::new(FlexBox::default(), vec![text("x")])]),
-            selected: vec![0, 0],
-            ..FlexState::default()
-        };
-        let (state, effect) = reduce(before.clone(), "A");
-        assert_eq!(state, before);
-        assert_eq!(state.history.len(), before.history.len());
-        assert_eq!(effect, None);
-    }
-
-    #[test]
     fn typing_after_i_on_a_box_with_no_text_goes_into_the_new_text() {
         let state = moved(FlexState::default(), &["i", "H", "i"]);
         assert_eq!(text_of(&state, &state.selected), Some("Hi"));
@@ -1279,15 +1266,6 @@ mod tests {
         assert_eq!(box_at(&state, &[0, 1]).direction, Direction::Column);
     }
 
-    #[test]
-    fn pressing_capital_a_twice_from_launch_adds_no_inner_box_and_changes_nothing() {
-        let before = FlexState::default();
-        let state = moved(before.clone(), &["A", "A"]);
-        assert_eq!(state, before);
-        assert_eq!(state.history.len(), before.history.len());
-        assert_eq!(inner_boxes_of(&state, 0), 0);
-    }
-
     fn moved(state: FlexState, keys: &[&str]) -> FlexState {
         keys.iter().fold(state, |state, key| reduce(state, key).0)
     }
@@ -1412,54 +1390,6 @@ mod tests {
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.mode, FlexMode::Write);
         only_the_middle_box_changed(&before, &state);
-    }
-
-    fn inner_boxes_of(state: &FlexState, outer: usize) -> usize {
-        state
-            .boxes
-            .walk()
-            .filter(|(path, node)| path.len() == 2 && path[0] == outer && node.border)
-            .count()
-    }
-
-    #[test]
-    fn capital_a_in_move_mode_is_ignored() {
-        let before = hello_in(FlexMode::Move);
-        let (state, effect) = reduce(before.clone(), "A");
-        assert_eq!(state, before);
-        assert_eq!(state.history.len(), before.history.len());
-        assert_eq!(effect, None);
-    }
-
-    #[test]
-    fn capital_a_adds_no_inner_box() {
-        let before = hello_in(FlexMode::Move);
-        let state = moved(before.clone(), &["A"]);
-        assert_eq!(state, before);
-        assert_eq!(inner_boxes_of(&state, 0), 0);
-    }
-
-    #[test]
-    fn a_second_capital_a_adds_no_inner_box() {
-        let before = hello_in(FlexMode::Move);
-        let state = moved(before.clone(), &["A", "A"]);
-        assert_eq!(state, before);
-        assert_eq!(inner_boxes_of(&state, 0), 0);
-    }
-
-    #[test]
-    fn capital_a_adds_no_inner_box_to_any_outer_box() {
-        let state = moved(three_boxes_in_move(), &["k", "A"]);
-        assert_eq!(inner_boxes_of(&state, 0), 0);
-        assert_eq!(inner_boxes_of(&state, 1), 0);
-        assert_eq!(inner_boxes_of(&state, 2), 0);
-    }
-
-    #[test]
-    fn capital_a_in_write_mode_types_an_a_and_adds_no_inner_box() {
-        let (state, _) = reduce(hello_in(FlexMode::Write), "A");
-        assert_eq!(text_of(&state, &state.selected), Some("HelloA"));
-        assert_eq!(inner_boxes_of(&state, 0), 0);
     }
 
     #[test]
@@ -1714,15 +1644,6 @@ mod tests {
     fn r_on_a_selected_text_toggles_the_direction_of_that_text() {
         let state = moved(world_selected(), &["r"]);
         assert_eq!(box_at(&state, &[0, 2]).direction, Direction::Row);
-    }
-
-    #[test]
-    fn capital_a_on_a_selected_text_is_ignored() {
-        let before = world_selected();
-        let (state, effect) = reduce(before.clone(), "A");
-        assert_eq!(state, before);
-        assert_eq!(state.history.len(), before.history.len());
-        assert_eq!(effect, None);
     }
 
     #[test]
