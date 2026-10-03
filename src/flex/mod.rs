@@ -136,24 +136,13 @@ mod tests {
     }
 
     #[test]
-    fn capital_a_marks_the_added_inner_box_as_new() {
-        let mut drawn = None;
-        let state = FlexState::default();
-        new_boxes(&mut drawn, &state);
-
-        let state = after(state, "A");
-
-        let inner = state.boxes.children(&state.selected).pop().unwrap();
-        assert_eq!(new_boxes(&mut drawn, &state), HashSet::from([inner]));
-    }
-
-    #[test]
     fn a_box_added_again_after_undo_is_new_again() {
         let mut drawn = None;
         let state = FlexState::default();
         new_boxes(&mut drawn, &state);
         let state = after(state, "a");
         new_boxes(&mut drawn, &state);
+        let state = after(state, "\x1b");
         let state = after(state, "u");
         new_boxes(&mut drawn, &state);
 
