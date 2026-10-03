@@ -181,9 +181,7 @@ fn is_droppable(b: &FlexBox, children: &[Vec<usize>]) -> bool {
 fn drop_empty_text(mut state: FlexState) -> FlexState {
     let children = state.boxes.children(&state.selected);
     if is_droppable(state.boxes.value(&state.selected), &children) {
-        let parent = state.boxes.parent(&state.selected);
-        state.boxes.remove(&state.selected);
-        state.selected = parent;
+        state.remove_selected();
     } else {
         state.selected_mut().text = None;
     }
@@ -937,6 +935,25 @@ mod tests {
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.selected, [0, 0]);
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn enter_drops_an_empty_box_and_selects_the_following_sibling() {
+        let before = FlexState {
+            boxes: new_canvas(vec![Tree::new(
+                FlexBox::default(),
+                vec![text("Top"), text(""), text("Bottom")],
+            )]),
+            selected: vec![0, 0, 1],
+            mode: FlexMode::Write,
+            ..FlexState::default()
+        };
+
+        let (state, _) = reduce(before, "\r");
+
+        assert_eq!(state.selected, [0, 0, 1]);
+        assert_eq!(text_of(&state, &state.selected), Some("Bottom"));
+        assert_eq!(state.mode, FlexMode::Move);
     }
 
     #[test]
