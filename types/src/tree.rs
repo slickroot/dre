@@ -76,6 +76,13 @@ impl<T> Tree<T> {
         self.get_mut(ancestors).children.remove(last)
     }
 
+    pub fn swap(&mut self, path: &[usize], other: &[usize]) {
+        let (&last, parent) = path.split_last().expect("the root cannot be swapped");
+        let (&other_last, other_parent) = other.split_last().expect("the root cannot be swapped");
+        assert_eq!(parent, other_parent, "swap needs two siblings");
+        self.get_mut(parent).children.swap(last, other_last);
+    }
+
     pub fn value(&self, path: &[usize]) -> &T {
         &self.get(path).value
     }
@@ -508,6 +515,51 @@ mod tests {
     #[should_panic]
     fn remove_panics_on_a_path_through_a_box_with_too_few_children() {
         sample().remove(&[0, 2, 0]);
+    }
+
+    #[test]
+    fn swap_exchanges_two_top_level_siblings() {
+        let mut tree = sample();
+        tree.swap(&[0], &[1]);
+        assert_eq!(*tree.value(&[0]), "b");
+        assert_eq!(*tree.value(&[1]), "a");
+    }
+
+    #[test]
+    fn swap_exchanges_two_nested_siblings() {
+        let mut tree = sample();
+        tree.swap(&[0, 0], &[0, 1]);
+        assert_eq!(*tree.value(&[0, 0]), "a1");
+        assert_eq!(*tree.value(&[0, 1]), "a0");
+    }
+
+    #[test]
+    fn swap_keeps_each_subtrees_own_children() {
+        let mut tree = sample();
+        tree.swap(&[0], &[1]);
+        assert_eq!(*tree.value(&[1]), "a");
+        assert_eq!(tree.children(&[1]), vec![vec![1, 0], vec![1, 1]]);
+        assert_eq!(*tree.value(&[1, 0]), "a0");
+        assert_eq!(*tree.value(&[1, 1]), "a1");
+    }
+
+    #[test]
+    fn swap_with_the_same_path_changes_nothing() {
+        let mut tree = sample();
+        tree.swap(&[0], &[0]);
+        assert_eq!(tree, sample());
+    }
+
+    #[test]
+    #[should_panic]
+    fn swap_panics_on_the_root_path() {
+        sample().swap(&[], &[0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn swap_panics_on_paths_with_different_parents() {
+        sample().swap(&[0], &[0, 0]);
     }
 
     #[test]
