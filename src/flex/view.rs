@@ -1516,7 +1516,7 @@ mod tests {
 
     #[test]
     fn in_move_a_box_then_a_text_are_added_to_the_right_in_order() {
-        let state = ["\r", "A", "o", "W", "o", "r", "l", "d"]
+        let state = ["A", "o", "W", "o", "r", "l", "d"]
             .into_iter()
             .fold(with_text_row("Hello"), |state, key| reduce(state, key).0);
         let placements = placements(&state);
@@ -2056,7 +2056,7 @@ mod tests {
 
     #[test]
     fn r_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
-        let state = after(title_and_hi_in(Direction::Row), &["h", "r"]);
+        let state = after(title_and_hi_in(Direction::Row), &["\x7f", "r"]);
         let placements = placements(&state);
         let (outer, inner) = outer_and_inner(&placements);
         assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
@@ -2068,7 +2068,7 @@ mod tests {
 
     #[test]
     fn close_bracket_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
-        let state = after(with_text("Hello"), &["\r", "]"]);
+        let state = after(with_text("Hello"), &["]"]);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
@@ -2091,7 +2091,7 @@ mod tests {
     #[test]
     fn close_bracket_twice_adds_two_space_widths_of_padding_on_each_side() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "]", "]"]);
+        let state = after(before.clone(), &["]", "]"]);
         assert_eq!(
             measure(&state.boxes, &[0]).width,
             measure(&before.boxes, &[0]).width + 4 * FLEX_SPACE.width
@@ -2115,7 +2115,7 @@ mod tests {
     #[test]
     fn close_bracket_on_an_outer_box_keeps_its_width_and_moves_its_text_in() {
         let before = with_text("Hello");
-        let state = after(before.clone(), &["\r", "]"]);
+        let state = after(before.clone(), &["]"]);
         let before_width = the_box_width(&placements(&before));
         let placements = placements(&state);
         let the_box = the_box(&placements);
