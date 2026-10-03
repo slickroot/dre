@@ -319,6 +319,12 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
                 state = cut_selected(state);
             }
         }
+        "y" => {
+            if !state.selected.is_empty() {
+                let mut boxes = state.boxes.clone();
+                state.clipboard = Some(boxes.remove(&state.selected));
+            }
+        }
         "p" => state = paste_clipboard(state),
         "q" => return (state, Some(FlexEffect::Quit)),
         "J" | "K" => state = reorder_selected(state, key),
@@ -1938,6 +1944,126 @@ mod tests {
         assert_eq!(state.selected, before.selected);
         assert_eq!(state.history.len(), before.history.len() + 1);
         assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn y_yanks_the_selected_box_and_its_nested_contents_without_removing_them() {
+        let before = nested_box_with_a_child_selected();
+        let boxes = before.boxes.clone();
+        let selected = before.selected.clone();
+        let mut expected = before.boxes.clone();
+        let yanked = expected.remove(&before.selected);
+
+        let (state, effect) = reduce(before.clone(), "y");
+
+        assert_eq!(state.boxes, boxes);
+        assert_eq!(state.selected, selected);
+        assert_eq!(state.clipboard, Some(yanked));
+        assert_eq!(state.clipboard.as_ref().unwrap().walk().count(), 1);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn y_replaces_whatever_was_on_the_clipboard() {
+        let before = FlexState {
+            clipboard: Some(box_with("Old")),
+            ..nested_box_with_a_child_selected()
+        };
+        let mut expected = before.boxes.clone();
+        let yanked = expected.remove(&before.selected);
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(state.clipboard, Some(yanked));
+        assert_ne!(state.clipboard, Some(box_with("Old")));
+    }
+
+    #[test]
+    fn y_preserves_the_selected_boxs_nested_child_count_in_the_diagram() {
+        let before = nested_box_with_a_child_selected();
+        let children = before.boxes.children(&before.selected).len();
+        let count = before.boxes.walk().count();
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(state.boxes.children(&state.selected).len(), children);
+        assert_eq!(state.boxes.walk().count(), count);
+    }
+
+    #[test]
+    fn y_on_the_canvas_changes_nothing() {
+        let before = FlexState {
+            selected: Vec::new(),
+            ..hello_box_world()
+        };
+
+        let (state, effect) = reduce(before.clone(), "y");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.clipboard, before.clipboard);
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn y_then_p_pastes_a_copy_and_leaves_the_original_in_place() {
+        let before = nested_box_with_a_child_selected();
+        let yanked = moved(before.clone(), &["y"]).clipboard.unwrap();
+        let after = moved(before.clone(), &["y", "k"]);
+        assert_eq!(after.selected, [0, 0]);
+
+        let state = moved(after, &["p"]);
+
+        assert_eq!(
+            state.boxes.children(&[0]).len(),
+            before.boxes.children(&[0]).len()
+        );
+        assert_eq!(box_at(&state, &[0, 1]), box_at(&before, &[0, 1]));
+        let pasted = state.boxes.children(&[0, 0]);
+        assert_eq!(pasted.len(), 1);
+        assert_eq!(box_at(&state, &pasted[0]), yanked.value(&[]));
+        assert_eq!(
+            state.boxes.children(&pasted[0]).len(),
+            yanked.children(&[]).len()
+        );
+    }
+
+    #[test]
+    fn u_after_y_undoes_the_last_real_change_and_keeps_the_clipboard() {
+        let before = hello_in(FlexMode::Move);
+        let after_f = moved(before.clone(), &["f"]);
+        assert!(selected_box(&after_f).filled);
+
+        let before_y = after_f.clone();
+        let after_y = moved(after_f, &["y"]);
+        assert_eq!(after_y.history.len(), before_y.history.len());
+        assert!(after_y.clipboard.is_some());
+
+        let state = moved(after_y, &["u"]);
+
+        assert_eq!(selected_box(&state).filled, selected_box(&before).filled);
+        assert!(state.clipboard.is_some());
+    }
+
+    #[test]
+    fn y_in_write_mode_is_typed_and_copies_nothing() {
+        let before = hello_in(FlexMode::Write);
+
+        let (state, _) = reduce(before.clone(), "y");
+
+        assert_eq!(text_of(&state, &state.selected), Some("Helloy"));
+        assert_eq!(state.clipboard, None);
+        assert_eq!(state.boxes.walk().count(), before.boxes.walk().count());
+    }
+
+    #[test]
+    fn y_in_replace_mode_is_typed_and_copies_nothing() {
+        let before = hello_in(FlexMode::Replace);
+
+        let (state, _) = reduce(before, "y");
+
+        assert_eq!(text_of(&state, &state.selected), Some("y"));
+        assert_eq!(state.clipboard, None);
     }
 
     #[test]
