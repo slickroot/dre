@@ -48,11 +48,22 @@ pub(super) struct GrowKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Desired {
     pub(super) image: ImageKey,
-    pub(super) col: i64,
-    pub(super) row: i64,
+    pub(crate) col: i64,
+    pub(crate) row: i64,
     pub(super) z: i32,
     pub(super) source: Option<SourceRect>,
     pub(super) cells: Option<(i64, i64)>,
+}
+
+pub(crate) fn caret_desired(cols: i64, rows: i64, col: i64, row: i64, z: i32) -> Desired {
+    Desired {
+        image: ImageKey::Caret(CaretKey { cols, rows }),
+        col,
+        row,
+        z,
+        source: None,
+        cells: None,
+    }
 }
 
 pub enum Content {
