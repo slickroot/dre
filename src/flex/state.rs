@@ -159,6 +159,7 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
         (_, FlexMode::Write) => write_key(state, key),
         (_, FlexMode::Replace) => write_key(state, key),
         (_, FlexMode::Move) if is_canvas(&state.selected) && canvas_self_edit(key) => (state, None),
+        (_, FlexMode::Move) if key == "p" && state.clipboard.is_none() => (state, None),
         (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
 }
@@ -1973,7 +1974,7 @@ mod tests {
     }
 
     #[test]
-    fn p_with_an_empty_clipboard_leaves_the_state_and_adds_one_history_snapshot() {
+    fn p_with_an_empty_clipboard_leaves_the_state_and_adds_no_history_snapshot() {
         let before = hello_in(FlexMode::Move);
         assert!(before.clipboard.is_none());
 
@@ -1981,7 +1982,23 @@ mod tests {
 
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.selected, before.selected);
-        assert_eq!(state.history.len(), before.history.len() + 1);
+        assert_eq!(state.history.len(), before.history.len());
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn p_with_an_empty_clipboard_on_the_canvas_changes_nothing() {
+        let before = FlexState {
+            selected: vec![0],
+            ..hello_in(FlexMode::Move)
+        };
+        assert!(before.clipboard.is_none());
+
+        let (state, effect) = reduce(before.clone(), "p");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }
 
