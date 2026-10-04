@@ -249,12 +249,13 @@ impl crate::canvas::Shape for SolidShape {
 
 struct InsetShape<'a> {
     shape: &'a BoxShape,
-    inset: i64,
+    x: i64,
+    y: i64,
 }
 
 impl crate::canvas::Shape for InsetShape<'_> {
     fn colour_at(&self, x: i64, y: i64) -> Option<crate::canvas::Rgba> {
-        self.shape.colour_at(x - self.inset, y - self.inset)
+        self.shape.colour_at(x - self.x, y - self.y)
     }
 }
 
@@ -747,9 +748,11 @@ impl TerminalRenderer {
         if !style.gap {
             return Canvas::fill(width, height, &box_shape(width, height, style));
         }
+        let inset_x = self.window.cell_width - style.border - GAP_PX;
+        let inset_y = self.window.cell_height - style.border - GAP_PX;
         let shape = box_shape(
-            (width - 2 * GAP_PX).max(1),
-            (height - 2 * GAP_PX).max(1),
+            (width - 2 * inset_x).max(1),
+            (height - 2 * inset_y).max(1),
             style,
         );
         Canvas::fill(
@@ -757,7 +760,8 @@ impl TerminalRenderer {
             height,
             &InsetShape {
                 shape: &shape,
-                inset: GAP_PX,
+                x: inset_x,
+                y: inset_y,
             },
         )
     }
@@ -2694,6 +2698,56 @@ mod tests {
         pixel_at(&sprite.pixels, sprite.width, x, y)
     }
 
+    fn overlaid(under: &Canvas, over: &Canvas, x: i64, y: i64) -> Canvas {
+        let mut pixels = under.pixels.clone();
+        for line in 0..over.height {
+            for column in 0..over.width {
+                let from = ((line * over.width + column) * 4) as usize;
+                if over.pixels[from + 3] != 0 {
+                    let to = (((y + line) * under.width + x + column) * 4) as usize;
+                    pixels[to..to + 4].copy_from_slice(&over.pixels[from..from + 4]);
+                }
+            }
+        }
+        Canvas {
+            pixels,
+            width: under.width,
+            height: under.height,
+        }
+    }
+
+    fn ink_runs(canvas: &Canvas, at: i64, horizontal: bool) -> Vec<(i64, i64)> {
+        let extent = if horizontal {
+            canvas.width
+        } else {
+            canvas.height
+        };
+        let mut runs: Vec<(i64, i64)> = Vec::new();
+        let mut open: Option<i64> = None;
+        for offset in 0..extent {
+            let (x, y) = if horizontal {
+                (offset, at)
+            } else {
+                (at, offset)
+            };
+            if pixel_of(canvas, x, y).3 == 0 {
+                if let Some(from) = open.take() {
+                    runs.push((from, offset - 1));
+                }
+            } else if open.is_none() {
+                open = Some(offset);
+            }
+        }
+        if let Some(from) = open {
+            runs.push((from, extent - 1));
+        }
+        runs
+    }
+
+    fn transparent_between(nearer: (i64, i64), further: (i64, i64)) -> i64 {
+        further.0 - nearer.1 - 1
+    }
+
     #[test]
     fn a_box_with_only_top_and_left_sides_draws_a_one_pixel_line_on_those_edges() {
         let r = renderer(1, 1);
@@ -2715,28 +2769,59 @@ mod tests {
     }
 
     #[test]
-    fn a_gapped_box_leaves_its_outermost_margin_transparent_and_its_stroke_gap_pixels_in() {
-        let r = renderer(1, 1);
-        let cells = 10 * BORDER;
-        let sprite = box_outline(
-            &r,
-            &with_gap(&box_node(None, None, false), true),
-            cells,
-            cells,
+    fn a_gapped_box_leaves_gap_pixels_of_transparency_between_its_stroke_and_the_box_border() {
+        const CELL_W: i64 = 8;
+        const CELL_H: i64 = 16;
+        const BOX_CELLS_W: i64 = 10;
+        const BOX_CELLS_H: i64 = 3;
+        const OUTLINE_CELLS: i64 = 1;
+        const OUTLINE_BORDER: i64 = 1;
+        let r = renderer(CELL_W, CELL_H);
+        let border = with_border(&box_node(Some(0), None, false), OUTLINE_BORDER);
+        let outline = with_gap(
+            &with_border(&box_node(Some(1), None, false), OUTLINE_BORDER),
+            true,
         );
-        let ink = edge_rgba(None);
-        let (middle_x, middle_y) = (sprite.width / 2, sprite.height / 2);
-        let (last_x, last_y) = (sprite.width - 1, sprite.height - 1);
-        for margin in 0..GAP_PX {
-            assert_eq!(pixel_of(&sprite, margin, middle_y), TRANSPARENT);
-            assert_eq!(pixel_of(&sprite, last_x - margin, middle_y), TRANSPARENT);
-            assert_eq!(pixel_of(&sprite, middle_x, margin), TRANSPARENT);
-            assert_eq!(pixel_of(&sprite, middle_x, last_y - margin), TRANSPARENT);
+        let box_sprite = box_outline(&r, &border, BOX_CELLS_W, BOX_CELLS_H);
+        let outline_sprite = box_outline(
+            &r,
+            &outline,
+            BOX_CELLS_W + 2 * OUTLINE_CELLS,
+            BOX_CELLS_H + 2 * OUTLINE_CELLS,
+        );
+        let canvas = overlaid(&outline_sprite, &box_sprite, CELL_W, CELL_H);
+        let (middle_x, middle_y) = (canvas.width / 2, canvas.height / 2);
+        let row = ink_runs(&canvas, middle_y, true);
+        let column = ink_runs(&canvas, middle_x, false);
+        assert_eq!(row.len(), 4);
+        assert_eq!(column.len(), 4);
+        for (runs, horizontal) in [(row, true), (column, false)] {
+            assert!(runs[0].0 > 0);
+            assert!(
+                runs[3].1
+                    < if horizontal {
+                        canvas.width
+                    } else {
+                        canvas.height
+                    } - 1
+            );
+            for (run, ink) in runs.iter().zip([
+                edge_rgba(Some(1)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(1)),
+            ]) {
+                assert_eq!(run.1 - run.0 + 1, OUTLINE_BORDER);
+                let (x, y) = if horizontal {
+                    (run.0, middle_y)
+                } else {
+                    (middle_x, run.0)
+                };
+                assert_eq!(pixel_of(&canvas, x, y), ink);
+            }
+            assert_eq!(transparent_between(runs[0], runs[1]), GAP_PX);
+            assert_eq!(transparent_between(runs[2], runs[3]), GAP_PX);
         }
-        assert_eq!(pixel_of(&sprite, GAP_PX, middle_y), ink);
-        assert_eq!(pixel_of(&sprite, last_x - GAP_PX, middle_y), ink);
-        assert_eq!(pixel_of(&sprite, middle_x, GAP_PX), ink);
-        assert_eq!(pixel_of(&sprite, middle_x, last_y - GAP_PX), ink);
     }
 
     #[test]
