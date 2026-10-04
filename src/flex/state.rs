@@ -88,7 +88,7 @@ pub(crate) fn new_box() -> Tree<FlexBox> {
 pub(crate) fn new_canvas(children: Vec<Tree<FlexBox>>) -> Tree<FlexBox> {
     Tree::new(
         FlexBox::window(),
-        vec![Tree::new(FlexBox::window(), children)],
+        vec![Tree::new(FlexBox::default(), children)],
     )
 }
 
@@ -164,7 +164,7 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
     }
 }
 
-fn is_canvas(path: &[usize]) -> bool {
+pub(crate) fn is_canvas(path: &[usize]) -> bool {
     path.len() == 1
 }
 
@@ -442,13 +442,9 @@ mod tests {
     #[test]
     fn a_new_box_has_no_children() {
         let boxes = new_canvas(vec![new_box()]);
-        assert_eq!(
-            boxes.walk().collect::<Vec<_>>(),
-            [
-                (vec![0], &FlexBox::window()),
-                (vec![0, 0], &FlexBox::default())
-            ]
-        );
+        assert_eq!(boxes.children(&[0]), vec![vec![0, 0]]);
+        assert_eq!(boxes.value(&[0, 0]), &FlexBox::default());
+        assert!(boxes.children(&[0, 0]).is_empty());
     }
 
     #[test]
@@ -2592,17 +2588,15 @@ mod tests {
     #[test]
     fn default_has_a_canvas_with_one_box_selected() {
         let state = FlexState::default();
-        assert_eq!(state.boxes.value(&[0]), &FlexBox::window());
         assert_eq!(state.boxes.children(&[0]), vec![vec![0, 0]]);
         assert_eq!(state.selected, [0, 0]);
-        assert_eq!(state.boxes.value(&[]), &FlexBox::window());
         assert!(state.boxes.walk().all(|(path, _)| !path.is_empty()));
     }
 
     #[test]
-    fn a_new_canvas_is_a_borderless_column() {
+    fn a_new_canvas_is_a_bordered_column() {
         let canvas = new_canvas(vec![]);
-        assert!(!canvas.value(&[0]).border);
+        assert!(canvas.value(&[0]).border);
         assert_eq!(canvas.value(&[0]).direction, Direction::Column);
     }
 
