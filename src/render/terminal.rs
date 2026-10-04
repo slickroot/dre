@@ -43,6 +43,7 @@ pub(super) struct BoxStyle {
     pub(super) rounded: bool,
     pub(super) sides: Sides,
     pub(super) border: i64,
+    pub(super) gap: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -186,6 +187,7 @@ pub(super) enum SpriteKey {
         rounded: bool,
         sides: Sides,
         border: i64,
+        gap: bool,
     },
     Arrow {
         width: i64,
@@ -212,6 +214,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
+        gap: style.gap,
     }
 }
 
@@ -341,6 +344,7 @@ impl TerminalRenderer {
                     sides,
                     border,
                     grow,
+                    gap,
                 } => self.draw_box(
                     desired,
                     geometry,
@@ -355,6 +359,7 @@ impl TerminalRenderer {
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
+                        gap: *gap,
                     },
                 ),
                 PlacementNode::Brackets { border } => {
@@ -785,6 +790,7 @@ impl TerminalRenderer {
                 rounded,
                 sides,
                 border,
+                gap,
             } => self.box_canvas(
                 *width,
                 *height,
@@ -796,6 +802,7 @@ impl TerminalRenderer {
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
+                    gap: *gap,
                 },
             ),
             SpriteKey::Arrow {
@@ -888,6 +895,7 @@ impl Sprites for TerminalRenderer {
                         rounded,
                         sides,
                         border,
+                        gap,
                     } => (
                         *width,
                         *height,
@@ -899,6 +907,7 @@ impl Sprites for TerminalRenderer {
                             rounded: *rounded,
                             sides: *sides,
                             border: *border,
+                            gap: *gap,
                         },
                     ),
                     _ => panic!("grow key must be a box sprite"),
@@ -1028,6 +1037,7 @@ mod tests {
                 rounded: false,
                 sides: ALL_SIDES,
                 border: BORDER,
+                gap: false,
             },
         );
         assert_eq!(shape.fill, [r, g, b, OPAQUE]);
@@ -1269,6 +1279,7 @@ mod tests {
             sides: ALL_SIDES,
             border: BORDER,
             grow: false,
+            gap: false,
         }
     }
 
@@ -1282,6 +1293,7 @@ mod tests {
                 rounded,
                 border,
                 grow,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1292,6 +1304,7 @@ mod tests {
                 sides: new_sides,
                 border,
                 grow,
+                gap,
             },
             _ => panic!("expected a Box"),
         }
@@ -1307,6 +1320,7 @@ mod tests {
                 rounded,
                 sides,
                 grow,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1317,6 +1331,34 @@ mod tests {
                 sides,
                 border: new_border,
                 grow,
+                gap,
+            },
+            _ => panic!("expected a Box"),
+        }
+    }
+
+    fn with_gap(node: &PlacementNode<'static>, new_gap: bool) -> PlacementNode<'static> {
+        match node.clone() {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow,
+                gap: new_gap,
             },
             _ => panic!("expected a Box"),
         }
@@ -1371,6 +1413,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => box_key(
                 placement.width,
@@ -1383,6 +1426,7 @@ mod tests {
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
+                    gap: *gap,
                 },
             ),
             PlacementNode::Arrow(arrow) => arrow_key(
@@ -1457,6 +1501,17 @@ mod tests {
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(key_of(&a), key_of(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_gap() {
+        let node_a = box_node(None, None, false);
+        let node_b = with_gap(&node_a, true);
+        let a = box_placement(&node_a, 0, 0, 10, 10);
+        let b = box_placement(&node_b, 0, 0, 10, 10);
+        let c = box_placement(&with_gap(&node_a, false), 0, 0, 10, 10);
+        assert_ne!(key_of(&a), key_of(&b));
+        assert_eq!(key_of(&a), key_of(&c));
     }
 
     #[test]
@@ -2586,6 +2641,7 @@ mod tests {
             rounded,
             sides,
             border,
+            gap,
             ..
         } = node
         else {
@@ -2602,6 +2658,7 @@ mod tests {
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
+                gap: *gap,
             },
         )
     }
@@ -2874,6 +2931,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => BoxStyle {
                 colour: *colour,
@@ -2883,6 +2941,7 @@ mod tests {
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
+                gap: *gap,
             },
             _ => panic!("expected a box or brackets"),
         };
@@ -3314,6 +3373,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            gap: false,
         }
     }
 
@@ -3421,6 +3481,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -3431,6 +3492,7 @@ mod tests {
                 sides,
                 border,
                 grow: true,
+                gap,
             },
             _ => panic!("expected a Box"),
         }

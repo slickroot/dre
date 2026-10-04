@@ -291,6 +291,7 @@ fn paint<'a>(
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
                 grow: new.contains(path),
+                gap: false,
             },
             arranged.rect,
         )
@@ -311,6 +312,7 @@ fn paint<'a>(
                         sides: NO_SIDES,
                         border: FLEX_BORDER,
                         grow: false,
+                        gap: false,
                     },
                     Rect {
                         x: rect.x,
