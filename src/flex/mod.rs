@@ -2,6 +2,8 @@
 mod canvas;
 mod history;
 #[allow(dead_code)]
+mod kitty;
+#[allow(dead_code)]
 mod placements;
 mod state;
 mod view;
@@ -12,7 +14,6 @@ use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
 use crate::key_source::{KeySource, TtyKeySource};
-use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
 use crate::tty;
 use state::{FlexEffect, FlexState};
@@ -90,7 +91,7 @@ pub fn run() -> ExitCode {
 fn start() -> io::Result<()> {
     let mut stdout = io::stdout();
     let fd = io::stdin().as_raw_fd();
-    kitty::require(&mut stdout, fd)?;
+    crate::kitty::require(&mut stdout, fd)?;
     let window = tty::probe()?;
     let glyph_source = Box::new(GlyphCache::new(window.cell_width, window.cell_height));
     let mut renderer = TerminalRenderer::new(window, glyph_source, CACHE_LIMIT);
