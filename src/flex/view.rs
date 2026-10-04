@@ -328,27 +328,6 @@ fn paint<'a>(
                 rect,
             )
         });
-    let outline = (state.mode == FlexMode::Move && &state.selected == path).then(|| {
-        placement(
-            PlacementNode::Box {
-                colour: FLEX_SELECTED_COLOUR,
-                fill: None,
-                solid_fill: None,
-                opacity: None,
-                rounded: false,
-                sides: ALL_SIDES,
-                border: FLEX_BORDER,
-                grow: false,
-                gap: true,
-            },
-            Rect {
-                x: arranged.rect.x - OUTLINE_MARGIN,
-                y: arranged.rect.y - OUTLINE_MARGIN,
-                width: arranged.rect.width + 2 * OUTLINE_MARGIN,
-                height: arranged.rect.height + 2 * OUTLINE_MARGIN,
-            },
-        )
-    });
     let caret = (state.mode == FlexMode::Write && &state.selected == path)
         .then(|| {
             flex_box
@@ -376,7 +355,6 @@ fn paint<'a>(
         .chain(highlight)
         .chain(label)
         .chain(caret)
-        .chain(outline)
         .collect()
 }
 
@@ -393,10 +371,37 @@ pub(crate) fn scene<'a>(
     };
     let mut rects = Vec::new();
     arrange(&state.boxes, &[0], window_rect, &mut rects);
-    let placements = rects
+    let mut placements: Vec<Placement<'_>> = rects
         .iter()
         .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
         .collect();
+    if let Some(arranged) = (state.mode == FlexMode::Move)
+        .then(|| {
+            rects
+                .iter()
+                .find(|arranged| arranged.path == state.selected)
+        })
+        .flatten()
+    {
+        placements.push(Placement {
+            node: PlacementNode::Box {
+                colour: FLEX_SELECTED_COLOUR,
+                fill: None,
+                solid_fill: None,
+                opacity: None,
+                rounded: false,
+                sides: ALL_SIDES,
+                border: FLEX_BORDER,
+                grow: false,
+                gap: true,
+            },
+            x: arranged.rect.x - OUTLINE_MARGIN,
+            y: arranged.rect.y - OUTLINE_MARGIN,
+            width: arranged.rect.width + 2 * OUTLINE_MARGIN,
+            height: arranged.rect.height + 2 * OUTLINE_MARGIN,
+            depth: arranged.path.len().saturating_sub(1) as u8,
+        });
+    }
     vec![(window, placements)]
 }
 
@@ -1255,6 +1260,28 @@ mod tests {
         let outline = outline(&placements).unwrap();
         assert_eq!(outlines(&placements).len(), 1);
         assert_eq!(own_boxes(&placements)[2].y, outline.y + 1);
+    }
+
+    #[test]
+    fn in_move_the_selected_boxs_outline_is_the_last_placement_in_the_frame() {
+        let state = selecting(FlexMode::Move, 0);
+        let placements = placements(&state);
+        assert_eq!(placements.last(), Some(outline(&placements).unwrap()));
+    }
+
+    #[test]
+    fn in_move_an_outlined_box_beside_another_box_is_painted_over_its_neighbour() {
+        let state = FlexState {
+            boxes: new_canvas(vec![Tree::new(row(), vec![new_box(), new_box()])]),
+            mode: FlexMode::Move,
+            selected: vec![0, 0, 0],
+            ..FlexState::default()
+        };
+        let placements = placements(&state);
+        let the_outline = outline(&placements).unwrap();
+        let neighbour = own_boxes(&placements)[2];
+        assert!(neighbour.x > the_outline.x);
+        assert_eq!(placements.last(), Some(the_outline));
     }
 
     #[test]
