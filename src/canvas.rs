@@ -7,7 +7,7 @@ pub(crate) trait Shape {
 }
 
 #[derive(Clone)]
-pub(crate) struct Canvas {
+pub struct Canvas {
     pub(crate) pixels: Vec<u8>,
     pub(crate) width: i64,
     pub(crate) height: i64,

@@ -1,4 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod bench;
+#[cfg(not(target_arch = "wasm32"))]
 mod canvas;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;

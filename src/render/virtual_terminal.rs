@@ -46,7 +46,7 @@ pub(super) struct GrowKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct Desired {
+pub struct Desired {
     pub(super) image: ImageKey,
     pub(super) col: i64,
     pub(super) row: i64,
@@ -55,13 +55,21 @@ pub(super) struct Desired {
     pub(super) cells: Option<(i64, i64)>,
 }
 
-pub(crate) enum Content {
+pub enum Content {
     Still(Canvas),
     Animation { root: Canvas, frames: Vec<Canvas> },
 }
 
 pub(super) trait Sprites {
     fn content(&mut self, key: &ImageKey) -> Content;
+}
+
+struct ContentSource<'a>(&'a mut dyn FnMut() -> Content);
+
+impl Sprites for ContentSource<'_> {
+    fn content(&mut self, _key: &ImageKey) -> Content {
+        (self.0)()
+    }
 }
 
 pub(crate) enum Op {
@@ -96,7 +104,7 @@ struct PlacedProps {
     cells: Option<(i64, i64)>,
 }
 
-pub(super) struct VirtualTerminal {
+pub struct VirtualTerminal {
     images: HashMap<ImageKey, (ImageId, Vec<(PlacementId, PlacedProps)>)>,
     next_image_id: u32,
 }
@@ -301,6 +309,14 @@ impl VirtualTerminal {
         ops.extend(places);
         ops.extend(frees);
         ops
+    }
+
+    pub(crate) fn commit_for_bench(
+        &mut self,
+        desired: &[Desired],
+        content: &mut dyn FnMut() -> Content,
+    ) -> Vec<Op> {
+        self.commit(desired, &mut ContentSource(content))
     }
 
     pub(super) fn reset(&mut self) -> Vec<Op> {
