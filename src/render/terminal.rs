@@ -476,7 +476,7 @@ impl TerminalRenderer {
         if grow && self.place_growing(desired, geometry, area, z, style) {
             return;
         }
-        if self.place_tiles(desired, style, geometry, area, z) {
+        if !style.gap && self.place_tiles(desired, style, geometry, area, z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
@@ -2818,6 +2818,77 @@ mod tests {
                     (middle_x, run.0)
                 };
                 assert_eq!(pixel_of(&canvas, x, y), ink);
+            }
+            assert_eq!(transparent_between(runs[0], runs[1]), GAP_PX);
+            assert_eq!(transparent_between(runs[2], runs[3]), GAP_PX);
+        }
+    }
+
+    const OUTLINE_BORDER: i64 = 1;
+
+    #[test]
+    fn a_gapped_box_painted_around_a_tiled_box_leaves_gap_pixels_of_transparency() {
+        const CELL_W: i64 = 8;
+        const CELL_H: i64 = 16;
+        const BOX_X: i64 = 5;
+        const BOX_Y: i64 = 4;
+        const BOX_CELLS_W: i64 = 10;
+        const BOX_CELLS_H: i64 = 4;
+        let mut r = renderer_on(window(40, 24, CELL_W, CELL_H));
+        let border = with_border(&box_node(Some(0), None, false), OUTLINE_BORDER);
+        let outline = with_gap(
+            &with_border(&box_node(Some(1), None, false), OUTLINE_BORDER),
+            true,
+        );
+        let boxed = paint_desired(
+            &mut r,
+            &[box_placement(
+                &border,
+                BOX_X,
+                BOX_Y,
+                BOX_CELLS_W,
+                BOX_CELLS_H,
+            )],
+        );
+        let outlined = paint_desired(
+            &mut r,
+            &[box_placement(
+                &outline,
+                BOX_X - 1,
+                BOX_Y - 1,
+                BOX_CELLS_W + 2,
+                BOX_CELLS_H + 2,
+            )],
+        );
+        assert!(
+            !tile_images(&boxed).is_empty(),
+            "the box's own border should still tile"
+        );
+        assert!(
+            tile_images(&outlined).is_empty(),
+            "a gapped box must take the sprite path or its gap is lost"
+        );
+
+        let composed = composed_desired(&mut r, &[boxed, outlined].concat(), depth_z(0));
+        let canvas = &composed.canvas;
+        let (middle_x, middle_y) = (canvas.width / 2, canvas.height / 2);
+        let row = ink_runs(canvas, middle_y, true);
+        let column = ink_runs(canvas, middle_x, false);
+        for (runs, horizontal) in [(row, true), (column, false)] {
+            assert_eq!(runs.len(), 4);
+            for (run, ink) in runs.iter().zip([
+                edge_rgba(Some(1)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(1)),
+            ]) {
+                assert_eq!(run.1 - run.0 + 1, OUTLINE_BORDER);
+                let (x, y) = if horizontal {
+                    (run.0, middle_y)
+                } else {
+                    (middle_x, run.0)
+                };
+                assert_eq!(pixel_of(canvas, x, y), ink);
             }
             assert_eq!(transparent_between(runs[0], runs[1]), GAP_PX);
             assert_eq!(transparent_between(runs[2], runs[3]), GAP_PX);
