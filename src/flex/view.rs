@@ -6,7 +6,7 @@ use types::Tree;
 use crate::style::FOREGROUND;
 use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_SIDES, NO_SIDES};
 
-use super::state::{Direction, FlexBox, FlexMode, FlexState, Justify};
+use super::state::{is_canvas, Direction, FlexBox, FlexMode, FlexState, Justify};
 
 const FLEX_BORDER: i64 = 1;
 const FLEX_SPACE: Size = Size {
@@ -65,6 +65,17 @@ fn padding(flex_box: &FlexBox) -> Size {
             width: FLEX_SPACE.width * (1 + i64::from(flex_box.padding)),
             height: FLEX_SPACE.height,
         }
+    }
+}
+
+fn border_space(path: &[usize], flex_box: &FlexBox) -> Size {
+    if is_canvas(path) {
+        Size {
+            width: 0,
+            height: 0,
+        }
+    } else {
+        padding(flex_box)
     }
 }
 
@@ -200,7 +211,7 @@ fn arrange(tree: &Tree<FlexBox>, path: &[usize], rect: Rect, out: &mut Vec<Arran
     let direction = flex_box.direction;
     let children = tree.children(path);
     let sizes = item_sizes(tree, path);
-    let inner = rect.inner(padding(flex_box));
+    let inner = rect.inner(border_space(path, flex_box));
     let inner_cross = inner.size().cross(direction);
     let mains: Vec<i64> = match (direction, flex_box.justify) {
         (Direction::Row, Justify::Start) => share(inner.width, sizes.len(), FLEX_SPACE.width),
@@ -445,9 +456,15 @@ mod tests {
     }
 
     fn the_box<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
+        all_boxes(placements)[0]
+    }
+
+    fn the_canvas<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
         placements
             .iter()
-            .find(|placement| matches!(placement.node, PlacementNode::Box { .. }))
+            .find(|placement| {
+                placement.depth == 0 && matches!(placement.node, PlacementNode::Box { .. })
+            })
             .unwrap()
     }
 
@@ -514,18 +531,12 @@ mod tests {
     }
 
     #[test]
-    fn only_the_box_and_its_label_are_placed() {
+    fn only_the_canvas_border_the_box_and_its_label_are_placed() {
         let state = with_text("");
         let placements = placements(&state);
-        let boxes = placements
-            .iter()
-            .filter(|placement| matches!(placement.node, PlacementNode::Box { .. }))
-            .count();
-        let labels = placements
-            .iter()
-            .filter(|placement| matches!(placement.node, PlacementNode::Label(_)))
-            .count();
-        assert_eq!((boxes, labels, placements.len()), (1, 1, 2));
+        let boxes = all_boxes(&placements).len();
+        let labels = all_labels(&placements).len();
+        assert_eq!((boxes, labels, placements.len()), (1, 1, 3));
     }
 
     #[test]
@@ -682,9 +693,9 @@ mod tests {
             ..FlexState::default()
         };
         let new = HashSet::from([vec![0, 0, 1]]);
-        let grown: Vec<bool> = placements_with_new(&state, &new)
+        let grown: Vec<bool> = all_boxes(&placements_with_new(&state, &new))
             .iter()
-            .map(grows)
+            .map(|placement| grows(placement))
             .collect();
         assert_eq!(grown, [false, false, true]);
     }
@@ -704,7 +715,9 @@ mod tests {
     fn all_boxes<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
         placements
             .iter()
-            .filter(|placement| matches!(placement.node, PlacementNode::Box { .. }))
+            .filter(|placement| {
+                placement.depth > 0 && matches!(placement.node, PlacementNode::Box { .. })
+            })
             .collect()
     }
 
@@ -1620,7 +1633,7 @@ mod tests {
     fn row_of<'a>(placements: &'a [Placement<'a>], state: &FlexState) -> Vec<&'a Placement<'a>> {
         placements
             .iter()
-            .zip(state.boxes.walk().skip(1))
+            .zip(state.boxes.walk())
             .filter(|(_, (path, _))| path.len() == 3)
             .map(|(placement, _)| placement)
             .collect()
@@ -1637,7 +1650,7 @@ mod tests {
     }
 
     fn assert_spread_edge_to_edge(placements: &[Placement<'_>], row: &[&Placement<'_>]) {
-        let outer = &placements[0];
+        let outer = the_box(placements);
         let (first, last) = (row[0], row[row.len() - 1]);
         assert_eq!(first.x, outer.x + FLEX_SPACE.width);
         assert_eq!(
@@ -1662,7 +1675,7 @@ mod tests {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
         let [(_, placements)] =
             <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
-        let outer = &placements[0];
+        let outer = the_box(&placements);
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
@@ -1706,7 +1719,7 @@ mod tests {
     fn in_column_siblings_stack_top_to_bottom_in_order_one_gap_apart() {
         let state = in_column(hello_box_world());
         let placements = placements(&state);
-        let outer = &placements[0];
+        let outer = the_box(&placements);
         let hello = label_showing(&placements, "Hello");
         let inner = all_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
@@ -1756,7 +1769,7 @@ mod tests {
         let state = in_column(hello_box_world());
         let placements = placements(&state);
         let column = row_of(&placements, &state);
-        assert_stretched_across(&placements[0], &column);
+        assert_stretched_across(the_box(&placements), &column);
     }
 
     #[test]
@@ -1776,7 +1789,7 @@ mod tests {
     fn an_outer_column_stretches_its_siblings_across_the_window() {
         let state = in_column(spread(vec![text("Hello"), new_box(), text("World")]));
         let placements = placements(&state);
-        let outer = &placements[0];
+        let outer = the_box(&placements);
         assert_eq!((outer.x, outer.width), (WINDOW.col, WINDOW.cols));
         assert_stretched_across(outer, &row_of(&placements, &state));
     }
@@ -1808,7 +1821,7 @@ mod tests {
     fn filling_the_outer_box_keeps_its_texts_and_inner_box_one_deeper() {
         let state = after(hello_with_an_inner_box(), &["f"]);
         let placements = placements(&state);
-        assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
+        assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (1, 2, 2));
     }
 
@@ -1816,7 +1829,7 @@ mod tests {
     fn an_inner_box_added_after_filling_is_one_deeper_than_the_outer_box() {
         let state = after(with_text("Hello"), &["f", "a"]);
         let placements = placements(&state);
-        assert_eq!(solid_fill(&placements[0]), Some(FLEX_FILL_COLOUR));
+        assert_eq!(solid_fill(the_box(&placements)), Some(FLEX_FILL_COLOUR));
         assert_eq!(outer_hello_and_inner_depths(&placements), (1, 2, 2));
     }
 
@@ -1916,14 +1929,32 @@ mod tests {
     }
 
     #[test]
-    fn the_canvas_paints_nothing() {
+    fn an_empty_canvas_paints_a_border_around_the_whole_window() {
         let state = FlexState {
-            mode: FlexMode::Move,
-            selected: vec![0],
             boxes: new_canvas(vec![]),
             ..FlexState::default()
         };
-        assert!(placements(&state).is_empty());
+        let placements = placements(&state);
+        let canvas = the_canvas(&placements);
+        assert_eq!(
+            (canvas.x, canvas.y, canvas.width, canvas.height),
+            (WINDOW.col, WINDOW.row, WINDOW.cols, WINDOW.rows)
+        );
+        let PlacementNode::Box {
+            colour,
+            fill,
+            solid_fill,
+            sides,
+            border,
+            ..
+        } = canvas.node
+        else {
+            panic!("the canvas paints a box border")
+        };
+        assert_eq!(colour, FLEX_BORDER_COLOUR);
+        assert_eq!(sides, ALL_SIDES);
+        assert_eq!(border, FLEX_BORDER);
+        assert_eq!((fill, solid_fill), (None, None));
     }
 
     fn title_and_hi_in(direction: Direction) -> FlexState {
@@ -2021,13 +2052,14 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let row = row_of(&placements, &state);
-        let (share, remainder) = shared_widths(inside_width(&placements[0]), row.len() as i64);
+        let (share, remainder) =
+            shared_widths(inside_width(the_box(&placements)), row.len() as i64);
         assert_eq!(remainder, 0);
         assert_eq!(
             row.iter().map(|child| child.width).collect::<Vec<_>>(),
             vec![share; row.len()]
         );
-        assert_fills_the_inside_with_space_gaps(&placements[0], &row);
+        assert_fills_the_inside_with_space_gaps(the_box(&placements), &row);
     }
 
     #[test]
@@ -2035,7 +2067,8 @@ mod tests {
         let state = with_inner_boxes_row("Hello", 3);
         let placements = placements(&state);
         let row = row_of(&placements, &state);
-        let (share, remainder) = shared_widths(inside_width(&placements[0]), row.len() as i64);
+        let (share, remainder) =
+            shared_widths(inside_width(the_box(&placements)), row.len() as i64);
         assert!(remainder > 1);
         let mut expected = vec![share + 1; remainder as usize];
         expected.resize(row.len(), share);
@@ -2043,7 +2076,7 @@ mod tests {
             row.iter().map(|child| child.width).collect::<Vec<_>>(),
             expected
         );
-        assert_fills_the_inside_with_space_gaps(&placements[0], &row);
+        assert_fills_the_inside_with_space_gaps(the_box(&placements), &row);
     }
 
     #[test]
@@ -2185,8 +2218,12 @@ mod tests {
     fn a_box_with_no_text_places_only_its_borders() {
         let state = titled(Direction::Column, None);
         let placements = placements(&state);
-        assert_eq!(placements.len(), all_boxes(&placements).len());
-        assert_eq!(placements.len(), 3);
+        let borders = placements
+            .iter()
+            .filter(|placement| matches!(placement.node, PlacementNode::Box { .. }))
+            .count();
+        assert_eq!(borders, placements.len());
+        assert_eq!(all_boxes(&placements).len(), 3);
     }
 
     #[test]
