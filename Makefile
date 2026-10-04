@@ -1,4 +1,4 @@
-.PHONY: build test fmt clippy install run wasm serve
+.PHONY: build test fmt clippy bench install run wasm serve
 
 build:
 	nix develop --command cargo build
@@ -11,6 +11,9 @@ fmt:
 
 clippy:
 	nix develop --command cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+bench:
+	nix develop --command cargo bench
 
 install:
 	nix develop --command cargo install --path . --debug --force --root $(HOME)/.local
