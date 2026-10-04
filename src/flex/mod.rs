@@ -1,18 +1,9 @@
 use crate::tty::{probe, RawMode};
-use base64::Engine as _;
-use nix::sys::select::{select, FdSet};
-use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
-use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::read;
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
-const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
-const CLEAR_LINE: &str = "\r\x1b[K";
-const NOT_SUPPORTED_MESSAGE: &str = "Dre requires a terminal with Kitty graphics protocol support.";
-const REPLY_TIMEOUT_MICROS: i64 = 500_000;
-const CHUNK_SIZE: usize = 4096;
 const BACKGROUND_RGBA: [u8; 4] = [10, 11, 13, 255];
 
 pub fn run() -> ExitCode {
@@ -28,7 +19,7 @@ pub fn run() -> ExitCode {
 fn start() -> io::Result<()> {
     let fd = io::stdin().as_raw_fd();
     let mut stdout = io::stdout();
-    require(&mut stdout, fd)?;
+    kitty::require(&mut stdout, fd)?;
 
     let window = probe()?;
     let width = window.cols * window.cell_width;
@@ -43,8 +34,8 @@ fn start() -> io::Result<()> {
         .take((width * height * 4) as usize)
         .collect();
 
-    stdout.write_all(transmit(&pixels, width, height).as_bytes())?;
-    stdout.write_all(place(0, 0).as_bytes())?;
+    stdout.write_all(kitty::transmit(&pixels, width, height).as_bytes())?;
+    stdout.write_all(kitty::place(0, 0).as_bytes())?;
     stdout.flush()?;
 
     loop {
@@ -57,111 +48,129 @@ fn start() -> io::Result<()> {
     }
 }
 
-fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
-    let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-    let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
-    stream.write_all(QUERY.as_bytes())?;
-    stream.flush()?;
-    let mut raw = saved.clone();
-    cfmakeraw(&mut raw);
-    tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+mod kitty {
+    use base64::Engine as _;
+    use nix::sys::select::{select, FdSet};
+    use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
+    use nix::sys::time::{TimeVal, TimeValLike};
+    use nix::unistd::read;
+    use std::io::{self, Write};
+    use std::os::fd::{BorrowedFd, RawFd};
 
-    let result = (|| -> io::Result<bool> {
-        let mut fds = FdSet::new();
-        fds.insert(borrowed);
-        let mut timeout = TimeVal::microseconds(REPLY_TIMEOUT_MICROS);
-        let ready = select(None, Some(&mut fds), None, None, Some(&mut timeout))
-            .map_err(io::Error::from)?;
-        let mut buffer = [0u8; 32];
-        let reply: Vec<u8> = if ready > 0 && fds.contains(borrowed) {
-            let count = read(borrowed, &mut buffer).map_err(io::Error::from)?;
-            buffer[..count].to_vec()
+    const QUERY: &str = "\x1b_Gi=1,a=q;\x1b\\";
+    const CLEAR_LINE: &str = "\r\x1b[K";
+    const NOT_SUPPORTED_MESSAGE: &str =
+        "Dre requires a terminal with Kitty graphics protocol support.";
+    const REPLY_TIMEOUT_MICROS: i64 = 500_000;
+    const CHUNK_SIZE: usize = 4096;
+
+    pub(super) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
+        let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
+        stream.write_all(QUERY.as_bytes())?;
+        stream.flush()?;
+        let mut raw = saved.clone();
+        cfmakeraw(&mut raw);
+        tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+
+        let result = (|| -> io::Result<bool> {
+            let mut fds = FdSet::new();
+            fds.insert(borrowed);
+            let mut timeout = TimeVal::microseconds(REPLY_TIMEOUT_MICROS);
+            let ready = select(None, Some(&mut fds), None, None, Some(&mut timeout))
+                .map_err(io::Error::from)?;
+            let mut buffer = [0u8; 32];
+            let reply: Vec<u8> = if ready > 0 && fds.contains(borrowed) {
+                let count = read(borrowed, &mut buffer).map_err(io::Error::from)?;
+                buffer[..count].to_vec()
+            } else {
+                Vec::new()
+            };
+            Ok(is_supported(&reply))
+        })();
+
+        tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
+        if result? {
+            return Ok(());
+        }
+        stream.write_all(CLEAR_LINE.as_bytes())?;
+        stream.flush()?;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            NOT_SUPPORTED_MESSAGE,
+        ))
+    }
+
+    fn is_supported(reply: &[u8]) -> bool {
+        reply.windows(3).any(|window| window == b"i=1")
+    }
+
+    pub(super) fn transmit(pixels: &[u8], width: i64, height: i64) -> String {
+        chunked(
+            &format!("a=t,f=32,s={width},v={height},o=z,q=2,i=1"),
+            pixels,
+        )
+    }
+
+    pub(super) fn place(col: i64, row: i64) -> String {
+        format!(
+            "\x1b[{};{}H\x1b_Ga=p,i=1,p=1,q=2,z=0;\x1b\\",
+            row + 1,
+            col + 1
+        )
+    }
+
+    fn chunked(keys: &str, pixels: &[u8]) -> String {
+        let payload = encode(pixels);
+        let chunk_list = chunks(&payload, CHUNK_SIZE);
+        let header = format!("{keys},m={}", more(&chunk_list, 0));
+        let mut escapes = vec![escape(&header, &chunk_list[0])];
+        for (index, chunk) in chunk_list.iter().enumerate().skip(1) {
+            let keys = format!("m={}", more(&chunk_list, index));
+            escapes.push(escape(&keys, chunk));
+        }
+        escapes.join("")
+    }
+
+    fn encode(pixels: &[u8]) -> String {
+        base64(zlib(pixels))
+    }
+
+    fn zlib(pixels: &[u8]) -> Vec<u8> {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut encoder, pixels)
+            .and_then(|_| encoder.finish())
+            .expect("writes to an in-memory Vec<u8> can't fail")
+    }
+
+    fn base64(bytes: Vec<u8>) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
+        payload
+            .as_bytes()
+            .chunks(chunk_size)
+            .map(|chunk| {
+                std::str::from_utf8(chunk)
+                    .expect(
+                        "base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8",
+                    )
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    fn more(chunks: &[String], index: usize) -> i32 {
+        if index == chunks.len() - 1 {
+            0
         } else {
-            Vec::new()
-        };
-        Ok(is_supported(&reply))
-    })();
-
-    tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
-    if result? {
-        return Ok(());
+            1
+        }
     }
-    stream.write_all(CLEAR_LINE.as_bytes())?;
-    stream.flush()?;
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        NOT_SUPPORTED_MESSAGE,
-    ))
-}
 
-fn is_supported(reply: &[u8]) -> bool {
-    reply.windows(3).any(|window| window == b"i=1")
-}
-
-fn transmit(pixels: &[u8], width: i64, height: i64) -> String {
-    chunked(
-        &format!("a=t,f=32,s={width},v={height},o=z,q=2,i=1"),
-        pixels,
-    )
-}
-
-fn place(col: i64, row: i64) -> String {
-    format!(
-        "\x1b[{};{}H\x1b_Ga=p,i=1,p=1,q=2,z=0;\x1b\\",
-        row + 1,
-        col + 1
-    )
-}
-
-fn chunked(keys: &str, pixels: &[u8]) -> String {
-    let payload = encode(pixels);
-    let chunk_list = chunks(&payload, CHUNK_SIZE);
-    let header = format!("{keys},m={}", more(&chunk_list, 0));
-    let mut escapes = vec![escape(&header, &chunk_list[0])];
-    for (index, chunk) in chunk_list.iter().enumerate().skip(1) {
-        let keys = format!("m={}", more(&chunk_list, index));
-        escapes.push(escape(&keys, chunk));
+    fn escape(keys: &str, payload: &str) -> String {
+        format!("\x1b_G{keys};{payload}\x1b\\")
     }
-    escapes.join("")
-}
-
-fn encode(pixels: &[u8]) -> String {
-    base64(zlib(pixels))
-}
-
-fn zlib(pixels: &[u8]) -> Vec<u8> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    std::io::Write::write_all(&mut encoder, pixels)
-        .and_then(|_| encoder.finish())
-        .expect("writes to an in-memory Vec<u8> can't fail")
-}
-
-fn base64(bytes: Vec<u8>) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn chunks(payload: &str, chunk_size: usize) -> Vec<String> {
-    payload
-        .as_bytes()
-        .chunks(chunk_size)
-        .map(|chunk| {
-            std::str::from_utf8(chunk)
-                .expect(
-                    "base64 payload is single-byte ASCII, so byte chunks are always valid UTF-8",
-                )
-                .to_owned()
-        })
-        .collect()
-}
-
-fn more(chunks: &[String], index: usize) -> i32 {
-    if index == chunks.len() - 1 {
-        0
-    } else {
-        1
-    }
-}
-
-fn escape(keys: &str, payload: &str) -> String {
-    format!("\x1b_G{keys};{payload}\x1b\\")
 }
