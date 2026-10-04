@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod canvas;
 mod history;
 #[allow(dead_code)]
 mod placements;
