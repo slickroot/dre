@@ -23,13 +23,14 @@ pub(crate) struct TerminalFlexScreen {
     pub(crate) renderer: TerminalRenderer,
     pub(crate) out: Stdout,
     pub(crate) drawn: Option<HashSet<Vec<usize>>>,
+    pub(crate) border: i64,
 }
 
 impl FlexScreen for TerminalFlexScreen {
     fn render(&mut self, state: &FlexState) -> io::Result<()> {
         let new = new_boxes(&mut self.drawn, state);
         self.renderer.render(
-            &view::scene(state, self.renderer.area(), &new),
+            &view::scene(state, self.renderer.area(), &new, self.border),
             &mut self.out,
         )?;
         self.out.flush()
@@ -99,6 +100,7 @@ fn start() -> io::Result<()> {
             renderer,
             out: stdout,
             drawn: None,
+            border: view::FLEX_BORDER,
         },
     )
 }
