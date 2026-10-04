@@ -28,7 +28,8 @@ The fix: `padding()` is driven purely by the `flex_box.padding` field — border
   }
   ```
   No `if flex_box.border` branch. Both dimensions scale by the same `flex_box.padding` count, so each `]` press adds one `FLEX_SPACE` unit of space on every side — equal in the aspect-corrected sense `FLEX_SPACE` already provides elsewhere (gaps between flex items use the same unit).
-- `border_space()` and all callers (`measure()`, `arrange()`) are unchanged otherwise — they keep calling `padding()`/`border_space()` exactly as before; only `padding()`'s internals change.
+- Delete `border_space()` entirely (view.rs:71-80). It existed only to zero out padding on the canvas and to gate it on `border`; both are gone now. Its one caller, `arrange()` (view.rs:214), calls `padding(flex_box)` directly instead of `border_space(path, flex_box)`.
+- Drop the `is_canvas` import from `super::state` in view.rs — nothing in this module needs it anymore. Padding is driven solely by `flex_box.padding`, with no canvas special case: if the canvas's own `padding` field is ever non-zero (it's selectable and `]` doesn't exclude it), it insets like any other box.
 
 ### Test updates in `src/flex/view.rs`
 
