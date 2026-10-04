@@ -1957,6 +1957,43 @@ mod tests {
         assert_eq!((fill, solid_fill), (None, None));
     }
 
+    fn selecting_the_canvas(mode: FlexMode) -> FlexState {
+        FlexState {
+            mode,
+            selected: vec![0],
+            boxes: new_canvas(vec![]),
+            ..FlexState::default()
+        }
+    }
+
+    fn the_canvas_colour(placements: &[Placement<'_>]) -> Rgb {
+        let PlacementNode::Box { colour, .. } = the_canvas(placements).node else {
+            panic!("the canvas paints a box border")
+        };
+        colour
+    }
+
+    #[test]
+    fn in_move_the_selected_canvas_has_the_selected_border() {
+        let state = selecting_the_canvas(FlexMode::Move);
+        assert_eq!(the_canvas_colour(&placements(&state)), FLEX_SELECTED_COLOUR);
+    }
+
+    #[test]
+    fn an_unselected_canvas_has_the_normal_border() {
+        let state = FlexState {
+            boxes: new_canvas(vec![]),
+            ..FlexState::default()
+        };
+        assert_eq!(the_canvas_colour(&placements(&state)), FLEX_BORDER_COLOUR);
+    }
+
+    #[test]
+    fn in_write_the_selected_canvas_has_the_normal_border() {
+        let state = selecting_the_canvas(FlexMode::Write);
+        assert_eq!(the_canvas_colour(&placements(&state)), FLEX_BORDER_COLOUR);
+    }
+
     fn title_and_hi_in(direction: Direction) -> FlexState {
         let parent = FlexBox {
             direction,
