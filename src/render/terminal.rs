@@ -20,6 +20,7 @@ const BEGIN_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026h";
 const END_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026l";
 
 pub(super) const ARROW_STROKE: i64 = 3;
+const GAP_PX: i64 = 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 
 pub(crate) const CACHE_LIMIT: usize = 512;
@@ -243,6 +244,17 @@ struct SolidShape {
 impl crate::canvas::Shape for SolidShape {
     fn colour_at(&self, _x: i64, _y: i64) -> Option<crate::canvas::Rgba> {
         Some(self.colour)
+    }
+}
+
+struct InsetShape<'a> {
+    shape: &'a BoxShape,
+    inset: i64,
+}
+
+impl crate::canvas::Shape for InsetShape<'_> {
+    fn colour_at(&self, x: i64, y: i64) -> Option<crate::canvas::Rgba> {
+        self.shape.colour_at(x - self.inset, y - self.inset)
     }
 }
 
@@ -732,7 +744,22 @@ impl TerminalRenderer {
     fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        Canvas::fill(width, height, &box_shape(width, height, style))
+        if !style.gap {
+            return Canvas::fill(width, height, &box_shape(width, height, style));
+        }
+        let shape = box_shape(
+            (width - 2 * GAP_PX).max(1),
+            (height - 2 * GAP_PX).max(1),
+            style,
+        );
+        Canvas::fill(
+            width,
+            height,
+            &InsetShape {
+                shape: &shape,
+                inset: GAP_PX,
+            },
+        )
     }
 
     fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
@@ -2685,6 +2712,45 @@ mod tests {
         assert_eq!(pixel_of(&sprite, 1, middle), TRANSPARENT);
         assert_eq!(pixel_of(&sprite, middle, last), TRANSPARENT);
         assert_eq!(pixel_of(&sprite, last, middle), TRANSPARENT);
+    }
+
+    #[test]
+    fn a_gapped_box_leaves_its_outermost_margin_transparent_and_its_stroke_gap_pixels_in() {
+        let r = renderer(1, 1);
+        let cells = 10 * BORDER;
+        let sprite = box_outline(
+            &r,
+            &with_gap(&box_node(None, None, false), true),
+            cells,
+            cells,
+        );
+        let ink = edge_rgba(None);
+        let (middle_x, middle_y) = (sprite.width / 2, sprite.height / 2);
+        let (last_x, last_y) = (sprite.width - 1, sprite.height - 1);
+        for margin in 0..GAP_PX {
+            assert_eq!(pixel_of(&sprite, margin, middle_y), TRANSPARENT);
+            assert_eq!(pixel_of(&sprite, last_x - margin, middle_y), TRANSPARENT);
+            assert_eq!(pixel_of(&sprite, middle_x, margin), TRANSPARENT);
+            assert_eq!(pixel_of(&sprite, middle_x, last_y - margin), TRANSPARENT);
+        }
+        assert_eq!(pixel_of(&sprite, GAP_PX, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, last_x - GAP_PX, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, GAP_PX), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, last_y - GAP_PX), ink);
+    }
+
+    #[test]
+    fn a_box_without_a_gap_draws_its_stroke_at_the_canvas_edge() {
+        let r = renderer(1, 1);
+        let cells = 10 * BORDER;
+        let sprite = box_outline(&r, &box_node(None, None, false), cells, cells);
+        let ink = edge_rgba(None);
+        let (middle_x, middle_y) = (sprite.width / 2, sprite.height / 2);
+        let (last_x, last_y) = (sprite.width - 1, sprite.height - 1);
+        assert_eq!(pixel_of(&sprite, 0, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, last_x, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, 0), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, last_y), ink);
     }
 
     #[test]
