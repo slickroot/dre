@@ -200,6 +200,7 @@ mod tests {
             rounded,
             sides,
             border: BORDER,
+            gap: false,
         }
     }
 
@@ -212,6 +213,7 @@ mod tests {
             rounded: false,
             sides: NO_SIDES,
             border: 1,
+            gap: false,
         }
     }
 
@@ -474,6 +476,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            gap: false,
         };
         let shape = TileShape { style, cell: CELL };
         let (column_band, row_band) = shape.bands();

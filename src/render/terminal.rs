@@ -20,6 +20,7 @@ const BEGIN_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026h";
 const END_SYNCHRONIZED_UPDATE: &str = "\x1b[?2026l";
 
 pub(super) const ARROW_STROKE: i64 = 3;
+const GAP_PX: i64 = 2;
 const ARROWHEAD_EDGE_LENGTH: f64 = 15.0;
 
 pub(crate) const CACHE_LIMIT: usize = 512;
@@ -43,6 +44,7 @@ pub(super) struct BoxStyle {
     pub(super) rounded: bool,
     pub(super) sides: Sides,
     pub(super) border: i64,
+    pub(super) gap: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -186,6 +188,7 @@ pub(super) enum SpriteKey {
         rounded: bool,
         sides: Sides,
         border: i64,
+        gap: bool,
     },
     Arrow {
         width: i64,
@@ -212,6 +215,7 @@ fn box_key(width: i64, height: i64, style: BoxStyle) -> SpriteKey {
         rounded: style.rounded,
         sides: style.sides,
         border: style.border,
+        gap: style.gap,
     }
 }
 
@@ -240,6 +244,18 @@ struct SolidShape {
 impl crate::canvas::Shape for SolidShape {
     fn colour_at(&self, _x: i64, _y: i64) -> Option<crate::canvas::Rgba> {
         Some(self.colour)
+    }
+}
+
+struct InsetShape<'a> {
+    shape: &'a BoxShape,
+    x: i64,
+    y: i64,
+}
+
+impl crate::canvas::Shape for InsetShape<'_> {
+    fn colour_at(&self, x: i64, y: i64) -> Option<crate::canvas::Rgba> {
+        self.shape.colour_at(x - self.x, y - self.y)
     }
 }
 
@@ -341,6 +357,7 @@ impl TerminalRenderer {
                     sides,
                     border,
                     grow,
+                    gap,
                 } => self.draw_box(
                     desired,
                     geometry,
@@ -355,6 +372,7 @@ impl TerminalRenderer {
                         rounded: *rounded,
                         sides: *sides,
                         border: *border,
+                        gap: *gap,
                     },
                 ),
                 PlacementNode::Brackets { border } => {
@@ -458,7 +476,7 @@ impl TerminalRenderer {
         if grow && self.place_growing(desired, geometry, area, z, style) {
             return;
         }
-        if self.place_tiles(desired, style, geometry, area, z) {
+        if !style.gap && self.place_tiles(desired, style, geometry, area, z) {
             return;
         }
         let key = box_key(geometry.width, geometry.height, style);
@@ -727,7 +745,25 @@ impl TerminalRenderer {
     fn box_canvas(&self, cell_width: i64, cell_height: i64, style: BoxStyle) -> Canvas {
         let width = self.cells_to_pixels_x(cell_width);
         let height = self.cells_to_pixels_y(cell_height);
-        Canvas::fill(width, height, &box_shape(width, height, style))
+        if !style.gap {
+            return Canvas::fill(width, height, &box_shape(width, height, style));
+        }
+        let inset_x = self.window.cell_width - style.border - GAP_PX;
+        let inset_y = self.window.cell_height - style.border - GAP_PX;
+        let shape = box_shape(
+            (width - 2 * inset_x).max(1),
+            (height - 2 * inset_y).max(1),
+            style,
+        );
+        Canvas::fill(
+            width,
+            height,
+            &InsetShape {
+                shape: &shape,
+                x: inset_x,
+                y: inset_y,
+            },
+        )
     }
 
     fn led_canvas(&self, cell_width: i64, cell_height: i64, style: LedStyle) -> Canvas {
@@ -785,6 +821,7 @@ impl TerminalRenderer {
                 rounded,
                 sides,
                 border,
+                gap,
             } => self.box_canvas(
                 *width,
                 *height,
@@ -796,6 +833,7 @@ impl TerminalRenderer {
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
+                    gap: *gap,
                 },
             ),
             SpriteKey::Arrow {
@@ -888,6 +926,7 @@ impl Sprites for TerminalRenderer {
                         rounded,
                         sides,
                         border,
+                        gap,
                     } => (
                         *width,
                         *height,
@@ -899,6 +938,7 @@ impl Sprites for TerminalRenderer {
                             rounded: *rounded,
                             sides: *sides,
                             border: *border,
+                            gap: *gap,
                         },
                     ),
                     _ => panic!("grow key must be a box sprite"),
@@ -1028,6 +1068,7 @@ mod tests {
                 rounded: false,
                 sides: ALL_SIDES,
                 border: BORDER,
+                gap: false,
             },
         );
         assert_eq!(shape.fill, [r, g, b, OPAQUE]);
@@ -1269,6 +1310,7 @@ mod tests {
             sides: ALL_SIDES,
             border: BORDER,
             grow: false,
+            gap: false,
         }
     }
 
@@ -1282,6 +1324,7 @@ mod tests {
                 rounded,
                 border,
                 grow,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1292,6 +1335,7 @@ mod tests {
                 sides: new_sides,
                 border,
                 grow,
+                gap,
             },
             _ => panic!("expected a Box"),
         }
@@ -1307,6 +1351,7 @@ mod tests {
                 rounded,
                 sides,
                 grow,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -1317,6 +1362,34 @@ mod tests {
                 sides,
                 border: new_border,
                 grow,
+                gap,
+            },
+            _ => panic!("expected a Box"),
+        }
+    }
+
+    fn with_gap(node: &PlacementNode<'static>, new_gap: bool) -> PlacementNode<'static> {
+        match node.clone() {
+            PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow,
+                ..
+            } => PlacementNode::Box {
+                colour,
+                fill,
+                opacity,
+                solid_fill,
+                rounded,
+                sides,
+                border,
+                grow,
+                gap: new_gap,
             },
             _ => panic!("expected a Box"),
         }
@@ -1371,6 +1444,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => box_key(
                 placement.width,
@@ -1383,6 +1457,7 @@ mod tests {
                     rounded: *rounded,
                     sides: *sides,
                     border: *border,
+                    gap: *gap,
                 },
             ),
             PlacementNode::Arrow(arrow) => arrow_key(
@@ -1457,6 +1532,17 @@ mod tests {
         let a = box_placement(&node_a, 0, 0, 10, 10);
         let b = box_placement(&node_b, 0, 0, 10, 10);
         assert_ne!(key_of(&a), key_of(&b));
+    }
+
+    #[test]
+    fn sprite_key_differs_by_gap() {
+        let node_a = box_node(None, None, false);
+        let node_b = with_gap(&node_a, true);
+        let a = box_placement(&node_a, 0, 0, 10, 10);
+        let b = box_placement(&node_b, 0, 0, 10, 10);
+        let c = box_placement(&with_gap(&node_a, false), 0, 0, 10, 10);
+        assert_ne!(key_of(&a), key_of(&b));
+        assert_eq!(key_of(&a), key_of(&c));
     }
 
     #[test]
@@ -2586,6 +2672,7 @@ mod tests {
             rounded,
             sides,
             border,
+            gap,
             ..
         } = node
         else {
@@ -2602,12 +2689,63 @@ mod tests {
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
+                gap: *gap,
             },
         )
     }
 
     fn pixel_of(sprite: &Canvas, x: i64, y: i64) -> (u8, u8, u8, u8) {
         pixel_at(&sprite.pixels, sprite.width, x, y)
+    }
+
+    fn overlaid(under: &Canvas, over: &Canvas, x: i64, y: i64) -> Canvas {
+        let mut pixels = under.pixels.clone();
+        for line in 0..over.height {
+            for column in 0..over.width {
+                let from = ((line * over.width + column) * 4) as usize;
+                if over.pixels[from + 3] != 0 {
+                    let to = (((y + line) * under.width + x + column) * 4) as usize;
+                    pixels[to..to + 4].copy_from_slice(&over.pixels[from..from + 4]);
+                }
+            }
+        }
+        Canvas {
+            pixels,
+            width: under.width,
+            height: under.height,
+        }
+    }
+
+    fn ink_runs(canvas: &Canvas, at: i64, horizontal: bool) -> Vec<(i64, i64)> {
+        let extent = if horizontal {
+            canvas.width
+        } else {
+            canvas.height
+        };
+        let mut runs: Vec<(i64, i64)> = Vec::new();
+        let mut open: Option<i64> = None;
+        for offset in 0..extent {
+            let (x, y) = if horizontal {
+                (offset, at)
+            } else {
+                (at, offset)
+            };
+            if pixel_of(canvas, x, y).3 == 0 {
+                if let Some(from) = open.take() {
+                    runs.push((from, offset - 1));
+                }
+            } else if open.is_none() {
+                open = Some(offset);
+            }
+        }
+        if let Some(from) = open {
+            runs.push((from, extent - 1));
+        }
+        runs
+    }
+
+    fn transparent_between(nearer: (i64, i64), further: (i64, i64)) -> i64 {
+        further.0 - nearer.1 - 1
     }
 
     #[test]
@@ -2628,6 +2766,147 @@ mod tests {
         assert_eq!(pixel_of(&sprite, 1, middle), TRANSPARENT);
         assert_eq!(pixel_of(&sprite, middle, last), TRANSPARENT);
         assert_eq!(pixel_of(&sprite, last, middle), TRANSPARENT);
+    }
+
+    #[test]
+    fn a_gapped_box_leaves_gap_pixels_of_transparency_between_its_stroke_and_the_box_border() {
+        const CELL_W: i64 = 8;
+        const CELL_H: i64 = 16;
+        const BOX_CELLS_W: i64 = 10;
+        const BOX_CELLS_H: i64 = 3;
+        const OUTLINE_CELLS: i64 = 1;
+        const OUTLINE_BORDER: i64 = 1;
+        let r = renderer(CELL_W, CELL_H);
+        let border = with_border(&box_node(Some(0), None, false), OUTLINE_BORDER);
+        let outline = with_gap(
+            &with_border(&box_node(Some(1), None, false), OUTLINE_BORDER),
+            true,
+        );
+        let box_sprite = box_outline(&r, &border, BOX_CELLS_W, BOX_CELLS_H);
+        let outline_sprite = box_outline(
+            &r,
+            &outline,
+            BOX_CELLS_W + 2 * OUTLINE_CELLS,
+            BOX_CELLS_H + 2 * OUTLINE_CELLS,
+        );
+        let canvas = overlaid(&outline_sprite, &box_sprite, CELL_W, CELL_H);
+        let (middle_x, middle_y) = (canvas.width / 2, canvas.height / 2);
+        let row = ink_runs(&canvas, middle_y, true);
+        let column = ink_runs(&canvas, middle_x, false);
+        assert_eq!(row.len(), 4);
+        assert_eq!(column.len(), 4);
+        for (runs, horizontal) in [(row, true), (column, false)] {
+            assert!(runs[0].0 > 0);
+            assert!(
+                runs[3].1
+                    < if horizontal {
+                        canvas.width
+                    } else {
+                        canvas.height
+                    } - 1
+            );
+            for (run, ink) in runs.iter().zip([
+                edge_rgba(Some(1)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(1)),
+            ]) {
+                assert_eq!(run.1 - run.0 + 1, OUTLINE_BORDER);
+                let (x, y) = if horizontal {
+                    (run.0, middle_y)
+                } else {
+                    (middle_x, run.0)
+                };
+                assert_eq!(pixel_of(&canvas, x, y), ink);
+            }
+            assert_eq!(transparent_between(runs[0], runs[1]), GAP_PX);
+            assert_eq!(transparent_between(runs[2], runs[3]), GAP_PX);
+        }
+    }
+
+    const OUTLINE_BORDER: i64 = 1;
+
+    #[test]
+    fn a_gapped_box_painted_around_a_tiled_box_leaves_gap_pixels_of_transparency() {
+        const CELL_W: i64 = 8;
+        const CELL_H: i64 = 16;
+        const BOX_X: i64 = 5;
+        const BOX_Y: i64 = 4;
+        const BOX_CELLS_W: i64 = 10;
+        const BOX_CELLS_H: i64 = 4;
+        let mut r = renderer_on(window(40, 24, CELL_W, CELL_H));
+        let border = with_border(&box_node(Some(0), None, false), OUTLINE_BORDER);
+        let outline = with_gap(
+            &with_border(&box_node(Some(1), None, false), OUTLINE_BORDER),
+            true,
+        );
+        let boxed = paint_desired(
+            &mut r,
+            &[box_placement(
+                &border,
+                BOX_X,
+                BOX_Y,
+                BOX_CELLS_W,
+                BOX_CELLS_H,
+            )],
+        );
+        let outlined = paint_desired(
+            &mut r,
+            &[box_placement(
+                &outline,
+                BOX_X - 1,
+                BOX_Y - 1,
+                BOX_CELLS_W + 2,
+                BOX_CELLS_H + 2,
+            )],
+        );
+        assert!(
+            !tile_images(&boxed).is_empty(),
+            "the box's own border should still tile"
+        );
+        assert!(
+            tile_images(&outlined).is_empty(),
+            "a gapped box must take the sprite path or its gap is lost"
+        );
+
+        let composed = composed_desired(&mut r, &[boxed, outlined].concat(), depth_z(0));
+        let canvas = &composed.canvas;
+        let (middle_x, middle_y) = (canvas.width / 2, canvas.height / 2);
+        let row = ink_runs(canvas, middle_y, true);
+        let column = ink_runs(canvas, middle_x, false);
+        for (runs, horizontal) in [(row, true), (column, false)] {
+            assert_eq!(runs.len(), 4);
+            for (run, ink) in runs.iter().zip([
+                edge_rgba(Some(1)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(0)),
+                edge_rgba(Some(1)),
+            ]) {
+                assert_eq!(run.1 - run.0 + 1, OUTLINE_BORDER);
+                let (x, y) = if horizontal {
+                    (run.0, middle_y)
+                } else {
+                    (middle_x, run.0)
+                };
+                assert_eq!(pixel_of(canvas, x, y), ink);
+            }
+            assert_eq!(transparent_between(runs[0], runs[1]), GAP_PX);
+            assert_eq!(transparent_between(runs[2], runs[3]), GAP_PX);
+        }
+    }
+
+    #[test]
+    fn a_box_without_a_gap_draws_its_stroke_at_the_canvas_edge() {
+        let r = renderer(1, 1);
+        let cells = 10 * BORDER;
+        let sprite = box_outline(&r, &box_node(None, None, false), cells, cells);
+        let ink = edge_rgba(None);
+        let (middle_x, middle_y) = (sprite.width / 2, sprite.height / 2);
+        let (last_x, last_y) = (sprite.width - 1, sprite.height - 1);
+        assert_eq!(pixel_of(&sprite, 0, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, last_x, middle_y), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, 0), ink);
+        assert_eq!(pixel_of(&sprite, middle_x, last_y), ink);
     }
 
     #[test]
@@ -2874,6 +3153,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => BoxStyle {
                 colour: *colour,
@@ -2883,6 +3163,7 @@ mod tests {
                 rounded: *rounded,
                 sides: *sides,
                 border: *border,
+                gap: *gap,
             },
             _ => panic!("expected a box or brackets"),
         };
@@ -3314,6 +3595,7 @@ mod tests {
             rounded: false,
             sides: ALL_SIDES,
             border: BORDER,
+            gap: false,
         }
     }
 
@@ -3421,6 +3703,7 @@ mod tests {
                 rounded,
                 sides,
                 border,
+                gap,
                 ..
             } => PlacementNode::Box {
                 colour,
@@ -3431,6 +3714,7 @@ mod tests {
                 sides,
                 border,
                 grow: true,
+                gap,
             },
             _ => panic!("expected a Box"),
         }

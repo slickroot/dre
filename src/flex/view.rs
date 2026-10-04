@@ -9,6 +9,7 @@ use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_S
 use super::state::{is_canvas, Direction, FlexBox, FlexMode, FlexState, Justify};
 
 const FLEX_BORDER: i64 = 1;
+const OUTLINE_MARGIN: i64 = 1;
 const FLEX_SPACE: Size = Size {
     width: 2,
     height: 1,
@@ -258,7 +259,6 @@ fn paint<'a>(
     arranged: &Arranged,
 ) -> Vec<Placement<'a>> {
     let path = &arranged.path;
-    let selected = state.mode == FlexMode::Move && &state.selected == path;
     let depth = path.len().saturating_sub(1) as u8;
     let placement = |node, rect: Rect| Placement {
         node,
@@ -272,11 +272,7 @@ fn paint<'a>(
         let outer = path.len() == 2;
         placement(
             PlacementNode::Box {
-                colour: if selected {
-                    FLEX_SELECTED_COLOUR
-                } else {
-                    FLEX_BORDER_COLOUR
-                },
+                colour: FLEX_BORDER_COLOUR,
                 fill: None,
                 opacity: None,
                 solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
@@ -284,6 +280,7 @@ fn paint<'a>(
                 sides: ALL_SIDES,
                 border: FLEX_BORDER,
                 grow: new.contains(path),
+                gap: false,
             },
             arranged.rect,
         )
@@ -304,6 +301,7 @@ fn paint<'a>(
                         sides: NO_SIDES,
                         border: FLEX_BORDER,
                         grow: false,
+                        gap: false,
                     },
                     Rect {
                         x: rect.x,
@@ -324,16 +322,33 @@ fn paint<'a>(
             placement(
                 PlacementNode::Label(Label {
                     text: Cow::Borrowed(text),
-                    colour: if selected && !flex_box.border {
-                        FLEX_SELECTED_COLOUR
-                    } else {
-                        FLEX_TEXT_COLOUR
-                    },
+                    colour: FLEX_TEXT_COLOUR,
                     bold: false,
                 }),
                 rect,
             )
         });
+    let outline = (state.mode == FlexMode::Move && &state.selected == path).then(|| {
+        placement(
+            PlacementNode::Box {
+                colour: FLEX_SELECTED_COLOUR,
+                fill: None,
+                solid_fill: None,
+                opacity: None,
+                rounded: false,
+                sides: ALL_SIDES,
+                border: FLEX_BORDER,
+                grow: false,
+                gap: true,
+            },
+            Rect {
+                x: arranged.rect.x - OUTLINE_MARGIN,
+                y: arranged.rect.y - OUTLINE_MARGIN,
+                width: arranged.rect.width + 2 * OUTLINE_MARGIN,
+                height: arranged.rect.height + 2 * OUTLINE_MARGIN,
+            },
+        )
+    });
     let caret = (state.mode == FlexMode::Write && &state.selected == path)
         .then(|| {
             flex_box
@@ -361,6 +376,7 @@ fn paint<'a>(
         .chain(highlight)
         .chain(label)
         .chain(caret)
+        .chain(outline)
         .collect()
 }
 
@@ -448,7 +464,7 @@ mod tests {
     }
 
     fn the_box<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
-        all_boxes(placements)[0]
+        own_boxes(placements)[0]
     }
 
     fn the_canvas<'a>(placements: &'a [Placement<'a>]) -> &'a Placement<'a> {
@@ -519,12 +535,15 @@ mod tests {
     }
 
     #[test]
-    fn only_the_canvas_border_the_box_and_its_label_are_placed() {
+    fn only_the_canvas_border_the_box_its_label_and_the_outline_are_placed() {
         let state = with_text("");
         let placements = placements(&state);
-        let boxes = all_boxes(&placements).len();
+        let boxes = own_boxes(&placements).len();
         let labels = all_labels(&placements).len();
-        assert_eq!((boxes, labels, placements.len()), (1, 1, 3));
+        assert_eq!(
+            (boxes, labels, outlines(&placements).len(), placements.len()),
+            (1, 1, 1, 4)
+        );
     }
 
     #[test]
@@ -677,7 +696,7 @@ mod tests {
             ..FlexState::default()
         };
         let new = HashSet::from([vec![0, 0, 1]]);
-        let grown: Vec<bool> = all_boxes(&placements_with_new(&state, &new))
+        let grown: Vec<bool> = own_boxes(&placements_with_new(&state, &new))
             .iter()
             .map(|placement| grows(placement))
             .collect();
@@ -705,6 +724,13 @@ mod tests {
             .collect()
     }
 
+    fn own_boxes<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
+        all_boxes(placements)
+            .into_iter()
+            .filter(|placement| !is_outline(placement))
+            .collect()
+    }
+
     fn all_labels<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
         placements
             .iter()
@@ -717,7 +743,7 @@ mod tests {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
         assert_eq!(
-            (all_boxes(&placements).len(), all_labels(&placements).len()),
+            (own_boxes(&placements).len(), all_labels(&placements).len()),
             (2, 2)
         );
     }
@@ -726,7 +752,7 @@ mod tests {
     fn the_second_box_sits_one_gap_below_the_first() {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
     }
 
@@ -734,7 +760,7 @@ mod tests {
     fn three_boxes_stack_from_the_top_one_gap_apart() {
         let state = stacked(&["Hello", "", "Hi"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes[0].y, WINDOW.row);
         assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
         assert_eq!(boxes[2].y, boxes[1].y + boxes[1].height + FLEX_SPACE.height);
@@ -751,7 +777,7 @@ mod tests {
         let state = stacked(&["Hello", "", "Hi"]);
         let [(_, placements)] =
             <[_; 1]>::try_from(scene(&state, resized, &HashSet::new())).unwrap();
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes[0].y, resized.row);
         assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
         assert_eq!(boxes[2].y, boxes[1].y + boxes[1].height + FLEX_SPACE.height);
@@ -761,7 +787,7 @@ mod tests {
     fn stacked_boxes_line_up_by_their_centres() {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!((boxes[0].width, boxes[1].width), (WINDOW.cols, WINDOW.cols));
         assert_eq!(
             2 * boxes[0].x + boxes[0].width,
@@ -773,7 +799,7 @@ mod tests {
     fn the_stack_starts_at_the_top_of_the_window() {
         let state = stacked(&["Hello", "", ""]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let left = boxes.iter().map(|b| b.x).min().unwrap();
         let right = boxes.iter().map(|b| b.x + b.width).max().unwrap();
         let top = boxes.iter().map(|b| b.y).min().unwrap();
@@ -787,7 +813,7 @@ mod tests {
     fn each_label_sits_inside_its_own_box() {
         let state = stacked(&["Hello", "", "Hi"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let labels = all_labels(&placements);
         assert_eq!(boxes.len(), labels.len());
         for (the_box, label) in boxes.iter().zip(&labels) {
@@ -868,7 +894,7 @@ mod tests {
         let state = beside_row(&["Hello", "World"]);
         let placements = placements(&state);
         assert_eq!(
-            (all_boxes(&placements).len(), all_labels(&placements).len()),
+            (own_boxes(&placements).len(), all_labels(&placements).len()),
             (1, 2)
         );
         let the_box = the_box(&placements);
@@ -958,7 +984,7 @@ mod tests {
             ..FlexState::default()
         };
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (row, first, last) = (boxes[0], boxes[1], boxes[2]);
         assert_eq!(first.x, row.x);
         assert_eq!(last.x + last.width, row.x + row.width);
@@ -997,7 +1023,7 @@ mod tests {
 
     fn free_space_of_row(state: &FlexState, box_count: usize) -> i64 {
         let placements = placements(state);
-        let row = all_boxes(&placements)[0];
+        let row = own_boxes(&placements)[0];
         let widths: i64 = (0..box_count)
             .map(|index| measure(&state.boxes, &[0, 0, index]).width)
             .sum();
@@ -1008,7 +1034,7 @@ mod tests {
     fn a_space_between_row_with_one_box_keeps_it_its_width_at_the_left_edge() {
         let state = row_of_boxes(spreading(), &[], &["Hello"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes[1].x, boxes[0].x);
         assert_eq!(boxes[1].width, measure(&state.boxes, &[0, 0, 0]).width);
     }
@@ -1018,7 +1044,7 @@ mod tests {
         let state = row_of_boxes(spreading(), &[], &["Hello", "Hello", "Hi"]);
         assert_eq!(free_space_of_row(&state, 3) % 2, 0);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
         assert_eq!(items[0].x, row.x);
         assert_eq!(items[2].x + items[2].width, row.x + row.width);
@@ -1031,7 +1057,7 @@ mod tests {
         let state = row_of_boxes(spreading(), &[], &["Hello", "Hello", "Hello"]);
         assert_eq!(free_space_of_row(&state, 3) % 2, 1);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
         assert_eq!(items[0].x, row.x);
         assert_eq!(items[2].x + items[2].width, row.x + row.width);
@@ -1043,7 +1069,7 @@ mod tests {
     fn a_space_between_row_spreads_its_own_text_with_its_boxes() {
         let state = row_of_boxes(spreading(), &["Title"], &["Hello", "World"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
         let label = the_label(&placements);
         assert_eq!(label.x, row.x);
@@ -1059,7 +1085,7 @@ mod tests {
     fn a_start_row_gives_each_of_two_boxes_half_of_its_width() {
         let state = row_of_boxes(FlexBox::default(), &[], &["Hello", "Hi"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let inner_width = boxes[0].width;
         assert_eq!(
             boxes[1].width + FLEX_SPACE.width + boxes[2].width,
@@ -1103,7 +1129,7 @@ mod tests {
     }
 
     fn borders(placements: &[Placement<'_>]) -> Vec<Rgb> {
-        all_boxes(placements)
+        own_boxes(placements)
             .iter()
             .map(|placement| {
                 let PlacementNode::Box { colour, .. } = placement.node else {
@@ -1122,13 +1148,119 @@ mod tests {
         }
     }
 
+    fn is_outline(placement: &Placement<'_>) -> bool {
+        matches!(placement.node, PlacementNode::Box { gap: true, .. })
+    }
+
+    fn outline<'a>(placements: &'a [Placement<'a>]) -> Option<&'a Placement<'a>> {
+        placements.iter().find(|placement| is_outline(placement))
+    }
+
+    fn outlines<'a>(placements: &'a [Placement<'a>]) -> Vec<&'a Placement<'a>> {
+        placements
+            .iter()
+            .filter(|placement| is_outline(placement))
+            .collect()
+    }
+
+    fn outlining(mode: FlexMode, selected: &[usize]) -> FlexState {
+        FlexState {
+            mode,
+            selected: selected.to_vec(),
+            ..with_text("Hello")
+        }
+    }
+
     #[test]
-    fn in_move_the_selected_box_has_the_selected_border() {
-        let state = selecting(FlexMode::Move, 1);
+    fn in_move_the_selected_box_is_outlined_one_cell_outside_its_own_border() {
+        let state = outlining(FlexMode::Move, &[0, 0]);
+        let placements = placements(&state);
+        let the_box = the_box(&placements);
+        let outline = outline(&placements).unwrap();
         assert_eq!(
-            borders(&placements(&state)),
-            vec![FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
+            (outline.x, outline.y, outline.width, outline.height),
+            (
+                the_box.x - OUTLINE_MARGIN,
+                the_box.y - OUTLINE_MARGIN,
+                the_box.width + 2 * OUTLINE_MARGIN,
+                the_box.height + 2 * OUTLINE_MARGIN
+            )
         );
+    }
+
+    #[test]
+    fn in_move_the_outline_is_a_border_worn_in_the_selection_colour() {
+        let state = outlining(FlexMode::Move, &[0, 0]);
+        let placements = placements(&state);
+        let outline = outline(&placements).unwrap();
+        let PlacementNode::Box {
+            colour,
+            sides,
+            border,
+            fill,
+            solid_fill,
+            opacity,
+            rounded,
+            ..
+        } = outline.node
+        else {
+            unreachable!()
+        };
+        assert_eq!(colour, FLEX_SELECTED_COLOUR);
+        assert_eq!((sides, border), (ALL_SIDES, FLEX_BORDER));
+        assert_eq!((fill, solid_fill, opacity), (None, None, None));
+        assert!(!rounded);
+    }
+
+    #[test]
+    fn in_move_the_selected_box_keeps_its_own_border_colour() {
+        let state = outlining(FlexMode::Move, &[0, 0]);
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR]);
+    }
+
+    #[test]
+    fn in_move_the_selected_box_keeps_its_label_colour() {
+        let state = outlining(FlexMode::Move, &[0, 0]);
+        assert_eq!(
+            text_colours(&placements(&state), &["Hello"]),
+            vec![FLEX_TEXT_COLOUR]
+        );
+    }
+
+    #[test]
+    fn in_move_a_selected_borderless_text_is_still_outlined() {
+        let state = outlining(FlexMode::Move, &[0, 0, 0]);
+        let placements = placements(&state);
+        let label = the_label(&placements);
+        let outline = outline(&placements).unwrap();
+        assert_eq!(
+            (outline.x, outline.y, outline.width, outline.height),
+            (label.x - 1, label.y - 1, label.width + 2, label.height + 2)
+        );
+        assert_eq!(borders(&placements), vec![FLEX_BORDER_COLOUR]);
+    }
+
+    #[test]
+    fn in_move_only_the_selected_box_is_outlined() {
+        let state = selecting(FlexMode::Move, 1);
+        let placements = placements(&state);
+        assert_eq!(outlines(&placements).len(), 1);
+        assert_eq!(borders(&placements), vec![FLEX_BORDER_COLOUR; 3]);
+    }
+
+    #[test]
+    fn in_move_the_outline_follows_the_selection_to_another_box() {
+        let state = selecting(FlexMode::Move, 2);
+        let placements = placements(&state);
+        let outline = outline(&placements).unwrap();
+        assert_eq!(outlines(&placements).len(), 1);
+        assert_eq!(own_boxes(&placements)[2].y, outline.y + 1);
+    }
+
+    #[test]
+    fn in_write_the_selected_box_is_not_outlined() {
+        let state = outlining(FlexMode::Write, &[0, 0]);
+        assert!(outline(&placements(&state)).is_none());
     }
 
     #[test]
@@ -1167,7 +1299,7 @@ mod tests {
     fn an_inner_box_looks_like_an_empty_box() {
         let state = with_inner_boxes("Hello", 1);
         let placements = placements(&state);
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         let PlacementNode::Box {
             colour,
             fill,
@@ -1192,7 +1324,7 @@ mod tests {
         let mut state = with_inner_boxes("Hello", 1);
         outer_box_mut(&mut state, 0).filled = true;
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(solid_fill(boxes[0]), Some(FLEX_FILL_COLOUR));
         assert_eq!(solid_fill(boxes[1]), None);
     }
@@ -1201,13 +1333,13 @@ mod tests {
     fn the_last_inner_box_ends_at_the_outer_bottom_edge() {
         let state = with_inner_boxes("Hello", 2);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes[2].y + boxes[2].height, boxes[0].y + boxes[0].height);
     }
 
     fn assert_inner_box_spans_the_outer_width(state: &FlexState) {
         let placements = placements(state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
         assert_eq!(inner.x, outer.x);
         assert_eq!(inner.width, outer.width);
@@ -1227,7 +1359,7 @@ mod tests {
     fn a_following_outer_box_starts_one_gap_below_the_taller_one() {
         let state = outer_boxes_with_inner_counts(&[2, 0]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (first, second) = (boxes[0], boxes[3]);
         assert_eq!(second.y, first.y + first.height + FLEX_SPACE.height);
     }
@@ -1236,7 +1368,7 @@ mod tests {
     fn a_scene_with_inner_boxes_starts_at_the_top_of_the_window() {
         let state = outer_boxes_with_inner_counts(&[2, 1, 0]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let left = boxes.iter().map(|b| b.x).min().unwrap();
         let right = boxes.iter().map(|b| b.x + b.width).max().unwrap();
         let top = boxes.iter().map(|b| b.y).min().unwrap();
@@ -1250,23 +1382,17 @@ mod tests {
             mode: FlexMode::Move,
             ..with_inner_boxes("Hello", 1)
         };
-        assert_eq!(
-            borders(&placements(&state)),
-            vec![FLEX_SELECTED_COLOUR, FLEX_BORDER_COLOUR]
-        );
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 2]);
     }
 
     #[test]
-    fn in_move_a_selected_inner_box_has_the_selected_border() {
+    fn in_move_a_selected_inner_box_keeps_the_border_colour() {
         let state = FlexState {
             mode: FlexMode::Move,
             selected: vec![0, 0, 2],
             ..with_inner_boxes("Hello", 2)
         };
-        assert_eq!(
-            borders(&placements(&state)),
-            vec![FLEX_BORDER_COLOUR, FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR]
-        );
+        assert_eq!(borders(&placements(&state)), vec![FLEX_BORDER_COLOUR; 3]);
     }
 
     #[test]
@@ -1485,7 +1611,7 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let hello = label_showing(&placements, "Hello");
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(inner.x, hello.x + hello.width + FLEX_SPACE.width);
         assert_eq!(world.x, inner.x + inner.width + FLEX_SPACE.width);
@@ -1495,7 +1621,7 @@ mod tests {
     fn texts_are_centred_vertically_on_the_tallest_sibling() {
         let state = hello_box_world();
         let placements = placements(&state);
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         for shown in ["Hello", "World"] {
             let label = label_showing(&placements, shown);
             assert_eq!(label.y, inner.y + (inner.height - label.height) / 2);
@@ -1506,7 +1632,7 @@ mod tests {
     fn the_outer_box_grows_to_fit_the_row_in_height_and_starts_at_the_top() {
         let state = hello_box_world();
         let placements = placements(&state);
-        let outer = all_boxes(&placements)[0];
+        let outer = own_boxes(&placements)[0];
         let measured = measure(&state.boxes, &[0, 0]);
         assert_eq!((outer.width, outer.height), (WINDOW.cols, measured.height));
         let left = outer.x - WINDOW.col;
@@ -1520,7 +1646,7 @@ mod tests {
         let state = hello_box_world();
         let placements = placements(&state);
         let hello = label_showing(&placements, "Hello");
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(inner.x, hello.x + hello.width + FLEX_SPACE.width);
         assert_eq!(world.x, inner.x + inner.width + FLEX_SPACE.width);
@@ -1539,7 +1665,7 @@ mod tests {
     fn one_a_places_an_empty_inner_box_flush_with_the_outer_box() {
         let state = from_default_after(&["a", "\x1b"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
         let empty = empty_box_size();
         assert_eq!((outer.width, outer.height), (WINDOW.cols, empty.height));
@@ -1556,7 +1682,7 @@ mod tests {
             ..FlexState::default()
         };
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
         let empty = empty_box_size();
         assert_eq!((outer.width, outer.height), (WINDOW.cols, empty.height));
@@ -1588,6 +1714,7 @@ mod tests {
     fn row_of<'a>(placements: &'a [Placement<'a>], state: &FlexState) -> Vec<&'a Placement<'a>> {
         placements
             .iter()
+            .filter(|placement| !is_outline(placement))
             .zip(state.boxes.walk())
             .filter(|(_, (path, _))| path.len() == 3)
             .map(|(placement, _)| placement)
@@ -1629,7 +1756,7 @@ mod tests {
             <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
         let outer = the_box(&placements);
         let hello = label_showing(&placements, "Hello");
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(outer.width, EVEN_SPREAD_WINDOW.cols);
         assert_eq!(hello.x, outer.x);
@@ -1664,7 +1791,7 @@ mod tests {
         let placements = placements(&state);
         let outer = the_box(&placements);
         let hello = label_showing(&placements, "Hello");
-        let inner = all_boxes(&placements)[1];
+        let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(hello.y, outer.y);
         assert_eq!(inner.y, hello.y + hello.height + FLEX_SPACE.height);
@@ -1696,7 +1823,7 @@ mod tests {
     fn stacked_outer_boxes_are_the_space_height_apart() {
         let state = stacked(&["Hello", "", "Hi"]);
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         let gaps: Vec<i64> = boxes
             .windows(2)
             .map(|pair| pair[1].y - (pair[0].y + pair[0].height))
@@ -1735,7 +1862,7 @@ mod tests {
     }
 
     fn outer_hello_and_inner_depths(placements: &[Placement<'_>]) -> (u8, u8, u8) {
-        let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
+        let [outer, inner] = <[_; 2]>::try_from(own_boxes(placements)).unwrap();
         (
             outer.depth,
             label_showing(placements, "Hello").depth,
@@ -1796,11 +1923,11 @@ mod tests {
     }
 
     #[test]
-    fn in_move_the_selected_text_has_the_selected_colour() {
+    fn in_move_the_selected_text_keeps_the_text_colour() {
         let state = world_selected(FlexMode::Move);
         assert_eq!(
             text_colours(&placements(&state), &["Hello", "World"]),
-            vec![FLEX_TEXT_COLOUR, FLEX_SELECTED_COLOUR]
+            vec![FLEX_TEXT_COLOUR; 2]
         );
     }
 
@@ -1820,17 +1947,14 @@ mod tests {
     }
 
     #[test]
-    fn in_move_a_selected_inner_box_beside_texts_has_the_selected_border() {
+    fn in_move_a_selected_inner_box_beside_texts_keeps_every_border_colour() {
         let state = FlexState {
             mode: FlexMode::Move,
             selected: vec![0, 0, 1],
             ..hello_box_world()
         };
         let placements = placements(&state);
-        assert_eq!(
-            borders(&placements),
-            vec![FLEX_BORDER_COLOUR, FLEX_SELECTED_COLOUR]
-        );
+        assert_eq!(borders(&placements), vec![FLEX_BORDER_COLOUR; 2]);
         assert_eq!(
             text_colours(&placements, &["Hello", "World"]),
             vec![FLEX_TEXT_COLOUR; 2]
@@ -1838,19 +1962,20 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_borderless_leaf_paints_its_label_selected_and_no_box_of_its_own() {
+    fn a_selected_borderless_leaf_is_outlined_and_paints_no_border_of_its_own() {
         let state = world_selected(FlexMode::Move);
         let placements = placements(&state);
-        assert_eq!(all_boxes(&placements).len(), 2);
+        assert_eq!(own_boxes(&placements).len(), 2);
+        assert_eq!(outlines(&placements).len(), 1);
         assert_eq!(all_labels(&placements).len(), 2);
         assert_eq!(
             text_colours(&placements, &["World"]),
-            vec![FLEX_SELECTED_COLOUR]
+            vec![FLEX_TEXT_COLOUR]
         );
     }
 
     #[test]
-    fn a_selected_bordered_box_with_text_paints_a_selected_border_and_a_text_coloured_label() {
+    fn a_selected_bordered_box_with_text_is_outlined_and_keeps_its_border_colour() {
         let state = FlexState {
             mode: FlexMode::Move,
             selected: vec![0, 0],
@@ -1861,7 +1986,8 @@ mod tests {
             ..FlexState::default()
         };
         let placements = placements(&state);
-        assert_eq!(borders(&placements), vec![FLEX_SELECTED_COLOUR]);
+        assert_eq!(borders(&placements), vec![FLEX_BORDER_COLOUR]);
+        assert_eq!(outlines(&placements).len(), 1);
         assert_eq!(
             text_colours(&placements, &["Title"]),
             vec![FLEX_TEXT_COLOUR]
@@ -1918,7 +2044,7 @@ mod tests {
     fn outer_and_inner<'a>(
         placements: &'a [Placement<'a>],
     ) -> (&'a Placement<'a>, &'a Placement<'a>) {
-        let [outer, inner] = <[_; 2]>::try_from(all_boxes(placements)).unwrap();
+        let [outer, inner] = <[_; 2]>::try_from(own_boxes(placements)).unwrap();
         (outer, inner)
     }
 
@@ -1937,7 +2063,7 @@ mod tests {
             ..FlexState::default()
         };
         let placements = placements(&state);
-        let boxes = all_boxes(&placements);
+        let boxes = own_boxes(&placements);
         assert_eq!(boxes.len(), 2);
         for the_box in boxes {
             assert_eq!((the_box.x, the_box.width), (WINDOW.col, WINDOW.cols));
@@ -2116,7 +2242,7 @@ mod tests {
     fn the_label_and_inner_boxes<'a>(
         placements: &'a [Placement<'a>],
     ) -> (&'a Placement<'a>, Vec<&'a Placement<'a>>) {
-        let inner = all_boxes(placements).into_iter().skip(1).collect();
+        let inner = own_boxes(placements).into_iter().skip(1).collect();
         (the_label(placements), inner)
     }
 
@@ -2156,7 +2282,7 @@ mod tests {
             .filter(|placement| matches!(placement.node, PlacementNode::Box { .. }))
             .count();
         assert_eq!(borders, placements.len());
-        assert_eq!(all_boxes(&placements).len(), 3);
+        assert_eq!(own_boxes(&placements).len(), 3);
     }
 
     #[test]
@@ -2247,6 +2373,14 @@ mod tests {
     fn pressing_i_on_a_box_with_no_text_leaves_no_highlight() {
         let state = after(with_text(""), &["i"]);
         assert!(highlight(&placements(&state)).is_none());
+    }
+
+    #[test]
+    fn in_replace_the_selected_text_is_highlighted_and_not_outlined() {
+        let state = in_replace("Hello");
+        let placements = placements(&state);
+        assert!(highlight(&placements).is_some());
+        assert!(outline(&placements).is_none());
     }
 
     #[test]
