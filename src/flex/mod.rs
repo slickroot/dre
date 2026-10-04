@@ -51,7 +51,7 @@ fn start() -> io::Result<()> {
 mod kitty {
     use base64::Engine as _;
     use nix::sys::select::{select, FdSet};
-    use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
+    use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios};
     use nix::sys::time::{TimeVal, TimeValLike};
     use nix::unistd::read;
     use std::io::{self, Write};
@@ -64,16 +64,36 @@ mod kitty {
     const REPLY_TIMEOUT_MICROS: i64 = 500_000;
     const CHUNK_SIZE: usize = 4096;
 
+    struct RawMode {
+        fd: RawFd,
+        saved: Termios,
+    }
+
+    impl RawMode {
+        fn enter(fd: RawFd) -> io::Result<Self> {
+            let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+            let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
+            let mut raw = saved.clone();
+            cfmakeraw(&mut raw);
+            tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
+            Ok(RawMode { fd, saved })
+        }
+    }
+
+    impl Drop for RawMode {
+        fn drop(&mut self) {
+            let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
+            let _ = tcsetattr(borrowed, SetArg::TCSADRAIN, &self.saved);
+        }
+    }
+
     pub(super) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
-        let borrowed = unsafe { BorrowedFd::borrow_raw(stdin_fd) };
-        let saved = tcgetattr(borrowed).map_err(io::Error::from)?;
         stream.write_all(QUERY.as_bytes())?;
         stream.flush()?;
-        let mut raw = saved.clone();
-        cfmakeraw(&mut raw);
-        tcsetattr(borrowed, SetArg::TCSADRAIN, &raw).map_err(io::Error::from)?;
 
-        let result = (|| -> io::Result<bool> {
+        let supported = {
+            let raw = RawMode::enter(stdin_fd)?;
+            let borrowed = unsafe { BorrowedFd::borrow_raw(raw.fd) };
             let mut fds = FdSet::new();
             fds.insert(borrowed);
             let mut timeout = TimeVal::microseconds(REPLY_TIMEOUT_MICROS);
@@ -86,11 +106,10 @@ mod kitty {
             } else {
                 Vec::new()
             };
-            Ok(is_supported(&reply))
-        })();
+            is_supported(&reply)
+        };
 
-        tcsetattr(borrowed, SetArg::TCSADRAIN, &saved).map_err(io::Error::from)?;
-        if result? {
+        if supported {
             return Ok(());
         }
         stream.write_all(CLEAR_LINE.as_bytes())?;
