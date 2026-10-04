@@ -9,6 +9,7 @@ use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_S
 use super::state::{is_canvas, Direction, FlexBox, FlexMode, FlexState, Justify};
 
 const FLEX_BORDER: i64 = 1;
+const OUTLINE_MARGIN: i64 = 1;
 const FLEX_SPACE: Size = Size {
     width: 2,
     height: 1,
@@ -348,10 +349,10 @@ fn paint<'a>(
                 gap: true,
             },
             Rect {
-                x: arranged.rect.x - 1,
-                y: arranged.rect.y - 1,
-                width: arranged.rect.width + 2,
-                height: arranged.rect.height + 2,
+                x: arranged.rect.x - OUTLINE_MARGIN,
+                y: arranged.rect.y - OUTLINE_MARGIN,
+                width: arranged.rect.width + 2 * OUTLINE_MARGIN,
+                height: arranged.rect.height + 2 * OUTLINE_MARGIN,
             },
         )
     });
@@ -1217,10 +1218,10 @@ mod tests {
         assert_eq!(
             (outline.x, outline.y, outline.width, outline.height),
             (
-                the_box.x - 1,
-                the_box.y - 1,
-                the_box.width + 2,
-                the_box.height + 2
+                the_box.x - OUTLINE_MARGIN,
+                the_box.y - OUTLINE_MARGIN,
+                the_box.width + 2 * OUTLINE_MARGIN,
+                the_box.height + 2 * OUTLINE_MARGIN
             )
         );
     }
