@@ -56,16 +56,9 @@ impl Size {
 }
 
 fn padding(flex_box: &FlexBox) -> Size {
-    if !flex_box.border {
-        Size {
-            width: 0,
-            height: 0,
-        }
-    } else {
-        Size {
-            width: FLEX_SPACE.width * (1 + i64::from(flex_box.padding)),
-            height: FLEX_SPACE.height,
-        }
+    Size {
+        width: FLEX_SPACE.width * i64::from(flex_box.padding),
+        height: FLEX_SPACE.height * i64::from(flex_box.padding),
     }
 }
 
@@ -411,7 +404,6 @@ pub(crate) fn scene<'a>(
 mod tests {
     use super::*;
     use crate::flex::state::{new_box, new_canvas, reduce, FlexBox, Justify};
-    use crate::view::BOX_HEIGHT;
     use types::Tree;
 
     const WINDOW: Area = Area {
@@ -491,13 +483,20 @@ mod tests {
             .unwrap()
     }
 
+    fn assert_inside(inner: &Placement<'_>, outer: &Placement<'_>) {
+        assert!(inner.x >= outer.x);
+        assert!(inner.y >= outer.y);
+        assert!(inner.x + inner.width <= outer.x + outer.width);
+        assert!(inner.y + inner.height <= outer.y + outer.height);
+    }
+
     #[test]
-    fn an_empty_box_spans_the_window_and_is_as_high_as_its_padding() {
+    fn an_empty_box_spans_the_window_and_is_no_height_at_all() {
         let state = FlexState::default();
         let placements = placements(&state);
         let the_box = the_box(&placements);
         assert_eq!(the_box.width, WINDOW.cols);
-        assert_eq!(the_box.height, 2 * FLEX_SPACE.height);
+        assert_eq!(the_box.height, 0);
     }
 
     #[test]
@@ -509,41 +508,30 @@ mod tests {
     }
 
     #[test]
-    fn a_box_pads_its_content_by_the_space_width_on_the_left_and_right() {
+    fn a_new_box_puts_its_text_flush_against_its_left_and_right_edges() {
         let state = with_text("Hello");
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
-        assert_eq!(label.x, the_box.x + FLEX_SPACE.width);
-        assert_eq!(
-            label.x + label.width,
-            the_box.x + the_box.width - FLEX_SPACE.width
-        );
+        assert_eq!(label.x, the_box.x);
+        assert_eq!(label.x + label.width, the_box.x + the_box.width);
     }
 
     #[test]
-    fn a_box_pads_its_content_by_the_space_height_above_and_below() {
+    fn a_new_box_puts_its_text_flush_against_its_top_and_bottom_edges() {
         let state = with_text("Hello");
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
-        assert_eq!(label.y, the_box.y + FLEX_SPACE.height);
-        assert_eq!(
-            label.y + label.height,
-            the_box.y + the_box.height - FLEX_SPACE.height
-        );
+        assert_eq!(label.y, the_box.y);
+        assert_eq!(label.y + label.height, the_box.y + the_box.height);
     }
 
     #[test]
     fn the_label_sits_inside_the_box() {
         let state = with_text("");
         let placements = placements(&state);
-        let the_box = the_box(&placements);
-        let label = the_label(&placements);
-        assert!(label.x > the_box.x);
-        assert!(label.x + label.width < the_box.x + the_box.width);
-        assert!(label.y > the_box.y);
-        assert!(label.y + label.height < the_box.y + the_box.height);
+        assert_inside(the_label(&placements), the_box(&placements));
     }
 
     #[test]
@@ -563,7 +551,7 @@ mod tests {
         let state = with_text("Hello");
         assert_eq!(
             measure(&state.boxes, &[0, 0]).width,
-            view::interior("Hello") + 2 * FLEX_SPACE.width
+            view::interior("Hello")
         );
     }
 
@@ -580,8 +568,7 @@ mod tests {
             Some(text.as_ref()),
             state.boxes.value(&[0, 0, 0]).text.as_deref()
         );
-        assert!(label.x > the_box.x);
-        assert!(label.x + label.width < the_box.x + the_box.width);
+        assert_inside(label, the_box);
     }
 
     #[test]
@@ -659,7 +646,7 @@ mod tests {
         let placements = placements(&state);
         assert_eq!(
             measure(&state.boxes, &[0, 0]).width,
-            view::interior("Hello") + 2 * FLEX_SPACE.width
+            view::interior("Hello")
         );
         assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
     }
@@ -681,13 +668,10 @@ mod tests {
     }
 
     #[test]
-    fn an_outer_box_starts_its_label_one_space_in_from_its_edge() {
+    fn an_outer_box_starts_its_label_flush_with_its_left_edge() {
         let state = with_text("Hello");
         let placements = placements(&state);
-        assert_eq!(
-            the_label(&placements).x,
-            the_box(&placements).x + FLEX_SPACE.width
-        );
+        assert_eq!(the_label(&placements).x, the_box(&placements).x);
     }
 
     #[test]
@@ -769,7 +753,7 @@ mod tests {
         let state = stacked(&["Hello", ""]);
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
-        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
+        assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
     }
 
     #[test]
@@ -778,8 +762,8 @@ mod tests {
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
         assert_eq!(boxes[0].y, WINDOW.row);
-        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
-        assert_eq!(boxes[2].y, boxes[1].y + BOX_HEIGHT + FLEX_SPACE.height);
+        assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
+        assert_eq!(boxes[2].y, boxes[1].y + boxes[1].height + FLEX_SPACE.height);
     }
 
     #[test]
@@ -795,8 +779,8 @@ mod tests {
             <[_; 1]>::try_from(scene(&state, resized, &HashSet::new())).unwrap();
         let boxes = own_boxes(&placements);
         assert_eq!(boxes[0].y, resized.row);
-        assert_eq!(boxes[1].y, boxes[0].y + BOX_HEIGHT + FLEX_SPACE.height);
-        assert_eq!(boxes[2].y, boxes[1].y + BOX_HEIGHT + FLEX_SPACE.height);
+        assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
+        assert_eq!(boxes[2].y, boxes[1].y + boxes[1].height + FLEX_SPACE.height);
     }
 
     #[test]
@@ -833,10 +817,7 @@ mod tests {
         let labels = all_labels(&placements);
         assert_eq!(boxes.len(), labels.len());
         for (the_box, label) in boxes.iter().zip(&labels) {
-            assert!(label.x > the_box.x);
-            assert!(label.x + label.width < the_box.x + the_box.width);
-            assert!(label.y > the_box.y);
-            assert!(label.y + label.height < the_box.y + the_box.height);
+            assert_inside(label, the_box);
         }
     }
 
@@ -904,10 +885,7 @@ mod tests {
             let state = beside_row(texts);
             let interiors: i64 = texts.iter().map(|text| view::interior(text)).sum();
             let gaps = FLEX_SPACE.width * (texts.len() as i64 - 1);
-            assert_eq!(
-                measure(&state.boxes, &[0, 0]).width,
-                interiors + gaps + 2 * FLEX_SPACE.width
-            );
+            assert_eq!(measure(&state.boxes, &[0, 0]).width, interiors + gaps);
         }
     }
 
@@ -921,9 +899,8 @@ mod tests {
         );
         let the_box = the_box(&placements);
         for label in all_labels(&placements) {
-            assert!(label.x > the_box.x);
-            assert!(label.x + label.width < the_box.x + the_box.width);
-            assert_eq!(label.y, the_box.y + BOX_HEIGHT / 2);
+            assert_inside(label, the_box);
+            assert_eq!(label.y, the_box.y + (the_box.height - label.height) / 2);
         }
     }
 
@@ -958,7 +935,7 @@ mod tests {
         let placements = placements(&state);
         let the_box = the_box(&placements);
         assert_eq!(the_box.width, WINDOW.cols);
-        assert_eq!(all_labels(&placements)[0].x, the_box.x + FLEX_SPACE.width);
+        assert_eq!(all_labels(&placements)[0].x, the_box.x);
     }
 
     fn justified_beside(texts: &[&str], justify: Justify) -> FlexState {
@@ -976,31 +953,25 @@ mod tests {
     }
 
     #[test]
-    fn a_space_between_outer_box_spreads_its_texts_to_the_borders() {
+    fn a_space_between_outer_box_spreads_its_texts_to_its_edges() {
         let state = justified_beside(&["Hello", "World"], Justify::SpaceBetween);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let labels = all_labels(&placements);
         let last = labels.last().unwrap();
-        assert_eq!(labels[0].x, the_box.x + FLEX_SPACE.width);
-        assert_eq!(
-            last.x + last.width,
-            the_box.x + the_box.width - FLEX_SPACE.width
-        );
+        assert_eq!(labels[0].x, the_box.x);
+        assert_eq!(last.x + last.width, the_box.x + the_box.width);
     }
 
     #[test]
-    fn a_space_between_outer_box_with_one_text_starts_it_one_space_in_from_its_edge() {
+    fn a_space_between_outer_box_with_one_text_starts_it_at_its_left_edge() {
         let state = justified_beside(&["Hello"], Justify::SpaceBetween);
         let placements = placements(&state);
-        assert_eq!(
-            the_label(&placements).x,
-            the_box(&placements).x + FLEX_SPACE.width
-        );
+        assert_eq!(the_label(&placements).x, the_box(&placements).x);
     }
 
     #[test]
-    fn a_space_between_row_spreads_two_boxes_to_its_inner_edges() {
+    fn a_space_between_row_spreads_two_boxes_to_its_edges() {
         let state = FlexState {
             boxes: new_canvas(vec![outer(
                 FlexBox {
@@ -1015,8 +986,8 @@ mod tests {
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
         let (row, first, last) = (boxes[0], boxes[1], boxes[2]);
-        assert_eq!(first.x, row.x + FLEX_SPACE.width);
-        assert_eq!(last.x + last.width, row.x + row.width - FLEX_SPACE.width);
+        assert_eq!(first.x, row.x);
+        assert_eq!(last.x + last.width, row.x + row.width);
         assert_eq!(first.width, measure(&state.boxes, &[0, 0, 0]).width);
         assert_eq!(last.width, measure(&state.boxes, &[0, 0, 1]).width);
     }
@@ -1056,7 +1027,7 @@ mod tests {
         let widths: i64 = (0..box_count)
             .map(|index| measure(&state.boxes, &[0, 0, index]).width)
             .sum();
-        row.width - 2 * FLEX_SPACE.width - widths
+        row.width - widths
     }
 
     #[test]
@@ -1064,7 +1035,7 @@ mod tests {
         let state = row_of_boxes(spreading(), &[], &["Hello"]);
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
-        assert_eq!(boxes[1].x, boxes[0].x + FLEX_SPACE.width);
+        assert_eq!(boxes[1].x, boxes[0].x);
         assert_eq!(boxes[1].width, measure(&state.boxes, &[0, 0, 0]).width);
     }
 
@@ -1075,11 +1046,8 @@ mod tests {
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
-        assert_eq!(items[0].x, row.x + FLEX_SPACE.width);
-        assert_eq!(
-            items[2].x + items[2].width,
-            row.x + row.width - FLEX_SPACE.width
-        );
+        assert_eq!(items[0].x, row.x);
+        assert_eq!(items[2].x + items[2].width, row.x + row.width);
         let gaps = gaps_between(items);
         assert_eq!(gaps[0], gaps[1]);
     }
@@ -1091,11 +1059,8 @@ mod tests {
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
-        assert_eq!(items[0].x, row.x + FLEX_SPACE.width);
-        assert_eq!(
-            items[2].x + items[2].width,
-            row.x + row.width - FLEX_SPACE.width
-        );
+        assert_eq!(items[0].x, row.x);
+        assert_eq!(items[2].x + items[2].width, row.x + row.width);
         let gaps = gaps_between(items);
         assert!((gaps[0] - gaps[1]).abs() <= 1);
     }
@@ -1107,11 +1072,8 @@ mod tests {
         let boxes = own_boxes(&placements);
         let (row, items) = (boxes[0], &boxes[1..]);
         let label = the_label(&placements);
-        assert_eq!(label.x, row.x + FLEX_SPACE.width);
-        assert_eq!(
-            items[1].x + items[1].width,
-            row.x + row.width - FLEX_SPACE.width
-        );
+        assert_eq!(label.x, row.x);
+        assert_eq!(items[1].x + items[1].width, row.x + row.width);
         let gaps = [
             items[0].x - (label.x + label.width),
             items[1].x - (items[0].x + items[0].width),
@@ -1124,7 +1086,7 @@ mod tests {
         let state = row_of_boxes(FlexBox::default(), &[], &["Hello", "Hi"]);
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
-        let inner_width = boxes[0].width - 2 * FLEX_SPACE.width;
+        let inner_width = boxes[0].width;
         assert_eq!(
             boxes[1].width + FLEX_SPACE.width + boxes[2].width,
             inner_width
@@ -1159,7 +1121,7 @@ mod tests {
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let labels = all_labels(&placements);
-        assert_eq!(labels[0].x, the_box.x + FLEX_SPACE.width);
+        assert_eq!(labels[0].x, the_box.x);
         assert_eq!(
             labels[1].x,
             labels[0].x + labels[0].width + FLEX_SPACE.width
@@ -1368,32 +1330,29 @@ mod tests {
     }
 
     #[test]
-    fn the_last_inner_box_ends_one_space_above_the_outer_bottom_edge() {
+    fn the_last_inner_box_ends_at_the_outer_bottom_edge() {
         let state = with_inner_boxes("Hello", 2);
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
-        assert_eq!(
-            boxes[2].y + boxes[2].height + FLEX_SPACE.height,
-            boxes[0].y + boxes[0].height
-        );
+        assert_eq!(boxes[2].y + boxes[2].height, boxes[0].y + boxes[0].height);
     }
 
-    fn assert_inner_box_strictly_inside(state: &FlexState) {
+    fn assert_inner_box_spans_the_outer_width(state: &FlexState) {
         let placements = placements(state);
         let boxes = own_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
-        assert!(inner.x > outer.x);
-        assert!(inner.x + inner.width < outer.x + outer.width);
+        assert_eq!(inner.x, outer.x);
+        assert_eq!(inner.width, outer.width);
     }
 
     #[test]
-    fn an_inner_box_in_a_fit_box_with_empty_text_stays_inside_the_outer_edges() {
-        assert_inner_box_strictly_inside(&with_inner_boxes("", 1));
+    fn an_inner_box_in_a_fit_box_with_empty_text_spans_the_outer_width() {
+        assert_inner_box_spans_the_outer_width(&with_inner_boxes("", 1));
     }
 
     #[test]
-    fn an_inner_box_in_a_fit_box_with_short_text_stays_inside_the_outer_edges() {
-        assert_inner_box_strictly_inside(&with_inner_boxes("a", 1));
+    fn an_inner_box_in_a_fit_box_with_short_text_spans_the_outer_width() {
+        assert_inner_box_spans_the_outer_width(&with_inner_boxes("a", 1));
     }
 
     #[test]
@@ -1475,21 +1434,30 @@ mod tests {
     }
 
     #[test]
-    fn a_borderless_text_ignores_its_padding() {
+    fn a_borderless_text_measures_its_padding() {
+        let padding = 3_u16;
+        let plain = measure(&text("Hi"), &[]);
         let padded = Tree::leaf(FlexBox {
-            padding: 3,
+            padding,
             ..text("Hi").value(&[]).clone()
         });
-        assert_eq!(measure(&padded, &[]), measure(&text("Hi"), &[]));
+        let units = i64::from(padding);
+        assert_eq!(
+            measure(&padded, &[]),
+            Size {
+                width: plain.width + 2 * units * FLEX_SPACE.width,
+                height: plain.height + 2 * units * FLEX_SPACE.height,
+            }
+        );
     }
 
     #[test]
-    fn a_new_box_measures_its_padding_on_both_sides() {
+    fn a_new_box_measures_with_no_padding() {
         assert_eq!(
             measure(&new_canvas(vec![new_box()]), &[0, 0]),
             Size {
-                width: 2 * FLEX_SPACE.width,
-                height: 2 * FLEX_SPACE.height,
+                width: 0,
+                height: 0,
             }
         );
     }
@@ -1498,6 +1466,7 @@ mod tests {
     fn a_row_measures_its_children_side_by_side_with_gaps() {
         let tree = row_box_of(vec![text("Hello"), new_box(), text("World")]);
         let empty_box = measure(&new_canvas(vec![new_box()]), &[0, 0]);
+        let text_height = measure(&tree, &[0, 0, 0]).height;
         assert_eq!(
             measure(&tree, &[0, 0]),
             Size {
@@ -1505,9 +1474,8 @@ mod tests {
                     + FLEX_SPACE.width
                     + empty_box.width
                     + FLEX_SPACE.width
-                    + view::interior("World")
-                    + 2 * FLEX_SPACE.width,
-                height: empty_box.height + 2 * FLEX_SPACE.height,
+                    + view::interior("World"),
+                height: text_height,
             }
         );
     }
@@ -1623,10 +1591,8 @@ mod tests {
         assert_eq!(
             measure(&state.boxes, &[0, 0]),
             Size {
-                width: widest + 2 * FLEX_SPACE.width,
-                height: heights
-                    + FLEX_SPACE.height * (children.len() as i64 - 1)
-                    + 2 * FLEX_SPACE.height,
+                width: widest,
+                height: heights + FLEX_SPACE.height * (children.len() as i64 - 1),
             }
         );
     }
@@ -1696,24 +1662,16 @@ mod tests {
     }
 
     #[test]
-    fn one_a_places_an_empty_inner_box_one_space_inside_the_outer_box() {
+    fn one_a_places_an_empty_inner_box_flush_with_the_outer_box() {
         let state = from_default_after(&["a", "\x1b"]);
         let placements = placements(&state);
         let boxes = own_boxes(&placements);
         let (outer, inner) = (boxes[0], boxes[1]);
         let empty = empty_box_size();
-        assert_eq!(
-            (outer.width, outer.height),
-            (WINDOW.cols, empty.height + 2 * FLEX_SPACE.height)
-        );
+        assert_eq!((outer.width, outer.height), (WINDOW.cols, empty.height));
         assert_eq!(
             (inner.x, inner.y, inner.width, inner.height),
-            (
-                outer.x + FLEX_SPACE.width,
-                outer.y + FLEX_SPACE.height,
-                outer.width - 2 * FLEX_SPACE.width,
-                empty.height
-            )
+            (outer.x, outer.y, outer.width, empty.height)
         );
     }
 
@@ -1727,10 +1685,7 @@ mod tests {
         let boxes = own_boxes(&placements);
         let (outer, first, second) = (boxes[0], boxes[1], boxes[2]);
         let empty = empty_box_size();
-        assert_eq!(
-            (outer.width, outer.height),
-            (WINDOW.cols, empty.height + 2 * FLEX_SPACE.height)
-        );
+        assert_eq!((outer.width, outer.height), (WINDOW.cols, empty.height));
         assert_eq!(
             (second.x, second.y),
             (first.x + first.width + FLEX_SPACE.width, first.y)
@@ -1773,17 +1728,14 @@ mod tests {
     }
 
     fn free_space(window: Area, row: &[&Placement<'_>]) -> i64 {
-        window.cols - 2 * FLEX_SPACE.width - row.iter().map(|sibling| sibling.width).sum::<i64>()
+        window.cols - row.iter().map(|sibling| sibling.width).sum::<i64>()
     }
 
     fn assert_spread_edge_to_edge(placements: &[Placement<'_>], row: &[&Placement<'_>]) {
         let outer = the_box(placements);
         let (first, last) = (row[0], row[row.len() - 1]);
-        assert_eq!(first.x, outer.x + FLEX_SPACE.width);
-        assert_eq!(
-            last.x + last.width,
-            outer.x + outer.width - FLEX_SPACE.width
-        );
+        assert_eq!(first.x, outer.x);
+        assert_eq!(last.x + last.width, outer.x + outer.width);
     }
 
     #[test]
@@ -1807,11 +1759,8 @@ mod tests {
         let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
         assert_eq!(outer.width, EVEN_SPREAD_WINDOW.cols);
-        assert_eq!(hello.x, outer.x + FLEX_SPACE.width);
-        assert_eq!(
-            world.x + world.width,
-            outer.x + outer.width - FLEX_SPACE.width
-        );
+        assert_eq!(hello.x, outer.x);
+        assert_eq!(world.x + world.width, outer.x + outer.width);
         assert_eq!(
             inner.x - (hello.x + hello.width),
             world.x - (inner.x + inner.width)
@@ -1832,13 +1781,7 @@ mod tests {
 
     fn assert_stretched_across(outer: &Placement<'_>, siblings: &[&Placement<'_>]) {
         for sibling in siblings {
-            assert_eq!(
-                (sibling.x, sibling.width),
-                (
-                    outer.x + FLEX_SPACE.width,
-                    outer.width - 2 * FLEX_SPACE.width
-                )
-            );
+            assert_eq!((sibling.x, sibling.width), (outer.x, outer.width));
         }
     }
 
@@ -1850,13 +1793,10 @@ mod tests {
         let hello = label_showing(&placements, "Hello");
         let inner = own_boxes(&placements)[1];
         let world = label_showing(&placements, "World");
-        assert_eq!(hello.y, outer.y + FLEX_SPACE.height);
+        assert_eq!(hello.y, outer.y);
         assert_eq!(inner.y, hello.y + hello.height + FLEX_SPACE.height);
         assert_eq!(world.y, inner.y + inner.height + FLEX_SPACE.height);
-        assert_eq!(
-            world.y + world.height,
-            outer.y + outer.height - FLEX_SPACE.height
-        );
+        assert_eq!(world.y + world.height, outer.y + outer.height);
     }
 
     #[test]
@@ -2131,31 +2071,21 @@ mod tests {
     }
 
     #[test]
-    fn in_a_column_an_inner_box_stretches_to_the_parent_inside_width() {
+    fn in_a_column_an_inner_box_stretches_to_the_parent_width() {
         let state = in_column(with_inner_boxes("Hello", 1));
         let placements = placements(&state);
         let (outer, inner) = outer_and_inner(&placements);
-        assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
-        assert_eq!(inner.width, outer.width - 2 * FLEX_SPACE.width);
+        assert_eq!(inner.x, outer.x);
+        assert_eq!(inner.width, outer.width);
     }
 
     #[test]
-    fn in_a_column_a_text_stretches_to_the_parent_inside_width_from_its_inside_left_edge() {
+    fn in_a_column_a_text_stretches_to_the_parent_width() {
         let state = title_and_hi_in(Direction::Column);
         let placements = placements(&state);
         let (outer, _) = outer_and_inner(&placements);
         let title = label_showing(&placements, "Title");
-        assert_eq!(
-            (title.x, title.width),
-            (
-                outer.x + FLEX_SPACE.width,
-                outer.width - 2 * FLEX_SPACE.width
-            )
-        );
-    }
-
-    fn inside_width(outer: &Placement<'_>) -> i64 {
-        outer.width - 2 * FLEX_SPACE.width
+        assert_eq!((title.x, title.width), (outer.x, outer.width));
     }
 
     fn shared_widths(room: i64, count: i64) -> (i64, i64) {
@@ -2163,29 +2093,26 @@ mod tests {
         (free.div_euclid(count), free.rem_euclid(count))
     }
 
-    fn assert_fills_the_inside_with_space_gaps(outer: &Placement<'_>, row: &[&Placement<'_>]) {
+    fn assert_fills_the_row_with_space_gaps(outer: &Placement<'_>, row: &[&Placement<'_>]) {
         let last = row[row.len() - 1];
-        assert_eq!(row[0].x, outer.x + FLEX_SPACE.width);
+        assert_eq!(row[0].x, outer.x);
         assert_eq!(gaps_between(row), vec![FLEX_SPACE.width; row.len() - 1]);
-        assert_eq!(
-            last.x + last.width,
-            outer.x + outer.width - FLEX_SPACE.width
-        );
+        assert_eq!(last.x + last.width, outer.x + outer.width);
     }
 
     #[test]
-    fn in_a_row_children_share_the_inside_width_equally_with_space_gaps() {
+    fn in_a_row_children_share_the_parent_width_equally_with_space_gaps() {
         let state = hello_box_world();
-        let placements = placements(&state);
+        let [(_, placements)] =
+            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
         let row = row_of(&placements, &state);
-        let (share, remainder) =
-            shared_widths(inside_width(the_box(&placements)), row.len() as i64);
+        let (share, remainder) = shared_widths(EVEN_SPREAD_WINDOW.cols, row.len() as i64);
         assert_eq!(remainder, 0);
         assert_eq!(
             row.iter().map(|child| child.width).collect::<Vec<_>>(),
             vec![share; row.len()]
         );
-        assert_fills_the_inside_with_space_gaps(the_box(&placements), &row);
+        assert_fills_the_row_with_space_gaps(the_box(&placements), &row);
     }
 
     #[test]
@@ -2193,8 +2120,7 @@ mod tests {
         let state = with_inner_boxes_row("Hello", 3);
         let placements = placements(&state);
         let row = row_of(&placements, &state);
-        let (share, remainder) =
-            shared_widths(inside_width(the_box(&placements)), row.len() as i64);
+        let (share, remainder) = shared_widths(the_box(&placements).width, row.len() as i64);
         assert!(remainder > 1);
         let mut expected = vec![share + 1; remainder as usize];
         expected.resize(row.len(), share);
@@ -2202,7 +2128,7 @@ mod tests {
             row.iter().map(|child| child.width).collect::<Vec<_>>(),
             expected
         );
-        assert_fills_the_inside_with_space_gaps(the_box(&placements), &row);
+        assert_fills_the_row_with_space_gaps(the_box(&placements), &row);
     }
 
     #[test]
@@ -2218,35 +2144,30 @@ mod tests {
                 measure(&state.boxes, &[0, 0, 1]).height
             )
         );
-        let inside_top = outer.y + FLEX_SPACE.height;
-        let inside_height = outer.height - 2 * FLEX_SPACE.height;
         for child in [title, inner] {
-            assert_eq!(child.y - inside_top, (inside_height - child.height) / 2);
+            assert_eq!(child.y - outer.y, (outer.height - child.height) / 2);
         }
     }
 
     #[test]
-    fn r_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_inside_width() {
+    fn r_on_the_parent_of_an_inner_box_in_a_row_stretches_it_to_the_parent_width() {
         let state = after(title_and_hi_in(Direction::Row), &["\x7f", "r"]);
         let placements = placements(&state);
         let (outer, inner) = outer_and_inner(&placements);
-        assert_eq!(inner.x, outer.x + FLEX_SPACE.width);
-        assert_eq!(
-            inner.x + inner.width,
-            outer.x + outer.width - FLEX_SPACE.width
-        );
+        assert_eq!(inner.x, outer.x);
+        assert_eq!(inner.x + inner.width, outer.x + outer.width);
     }
 
     #[test]
-    fn close_bracket_adds_one_space_width_of_padding_on_the_left_and_right_of_the_box() {
+    fn close_bracket_adds_one_space_of_padding_on_every_side_of_the_box() {
         let state = after(with_text("Hello"), &["]"]);
         let placements = placements(&state);
         let the_box = the_box(&placements);
         let label = the_label(&placements);
-        assert_eq!(label.x, the_box.x + 2 * FLEX_SPACE.width);
+        assert_eq!(label.x, the_box.x + FLEX_SPACE.width);
         assert_eq!(
             label.x + label.width,
-            the_box.x + the_box.width - 2 * FLEX_SPACE.width
+            the_box.x + the_box.width - FLEX_SPACE.width
         );
         assert_eq!(label.y, the_box.y + FLEX_SPACE.height);
         assert_eq!(
@@ -2267,6 +2188,10 @@ mod tests {
             measure(&state.boxes, &[0, 0]).width,
             measure(&before.boxes, &[0, 0]).width + 4 * FLEX_SPACE.width
         );
+        assert_eq!(
+            measure(&state.boxes, &[0, 0]).height,
+            measure(&before.boxes, &[0, 0]).height + 4 * FLEX_SPACE.height
+        );
     }
 
     #[test]
@@ -2278,8 +2203,16 @@ mod tests {
             measure(&before.boxes, &[0, 0, 1]).width + 2 * FLEX_SPACE.width
         );
         assert_eq!(
+            measure(&state.boxes, &[0, 0, 1]).height,
+            measure(&before.boxes, &[0, 0, 1]).height + 2 * FLEX_SPACE.height
+        );
+        assert_eq!(
             measure(&state.boxes, &[0, 0]).width,
             measure(&before.boxes, &[0, 0]).width + 2 * FLEX_SPACE.width
+        );
+        assert_eq!(
+            measure(&state.boxes, &[0, 0]).height,
+            measure(&before.boxes, &[0, 0]).height + 2 * FLEX_SPACE.height
         );
     }
 
@@ -2291,7 +2224,7 @@ mod tests {
         let placements = placements(&state);
         let the_box = the_box(&placements);
         assert_eq!(the_box.width, before_width);
-        assert_eq!(the_label(&placements).x, the_box.x + 2 * FLEX_SPACE.width);
+        assert_eq!(the_label(&placements).x, the_box.x + FLEX_SPACE.width);
     }
 
     fn titled(direction: Direction, title: Option<&str>) -> FlexState {
