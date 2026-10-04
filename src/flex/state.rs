@@ -159,6 +159,7 @@ pub(crate) fn reduce(state: FlexState, key: &str) -> (FlexState, Option<FlexEffe
         (_, FlexMode::Write) => write_key(state, key),
         (_, FlexMode::Replace) => write_key(state, key),
         (_, FlexMode::Move) if is_canvas(&state.selected) && canvas_self_edit(key) => (state, None),
+        (_, FlexMode::Move) if key == "p" && state.clipboard.is_none() => (state, None),
         (_, FlexMode::Move) => history::recorded(state, key, |s| move_key(s, key)),
     }
 }
@@ -324,7 +325,15 @@ fn move_key(mut state: FlexState, key: &str) -> (FlexState, Option<FlexEffect>) 
             let mut boxes = state.boxes.clone();
             state.clipboard = Some(boxes.remove(&state.selected));
         }
-        "p" => state = paste_clipboard(state),
+        "p" => {
+            if let Some(branch) = state.clipboard.clone() {
+                state = if is_canvas(&state.selected) {
+                    append_to_canvas(state, branch)
+                } else {
+                    insert_after_selected(state, branch)
+                };
+            }
+        }
         "q" => return (state, Some(FlexEffect::Quit)),
         "J" | "K" => state = reorder_selected(state, key),
         _ => {}
@@ -355,10 +364,20 @@ fn cut_selected(mut state: FlexState) -> FlexState {
     state
 }
 
-fn paste_clipboard(mut state: FlexState) -> FlexState {
-    if let Some(branch) = state.clipboard.clone() {
-        state.boxes.push(&state.selected, branch);
-    }
+fn append_to_canvas(mut state: FlexState, branch: Tree<FlexBox>) -> FlexState {
+    state.boxes.push(&state.selected, branch);
+    state
+}
+
+fn insert_after_selected(mut state: FlexState, branch: Tree<FlexBox>) -> FlexState {
+    let parent = parent_path(&state.selected);
+    let index = state
+        .selected
+        .last()
+        .copied()
+        .expect("the canvas is handled separately")
+        + 1;
+    state.boxes.insert(&parent, index, branch);
     state
 }
 
@@ -1918,32 +1937,135 @@ mod tests {
     }
 
     #[test]
-    fn p_appends_the_cut_branch_as_the_last_child_preserving_its_contents_and_fields() {
+    fn p_inserts_the_clipboard_branch_as_the_next_sibling_preserving_its_contents_and_fields() {
         let source = moved(nested_box_with_a_child_selected(), &["f", "]", "r", "s"]);
         let styled = box_at(&source, &source.selected).clone();
-        let cut = moved(source, &["d", "\x7f"]);
+        let cut = moved(source, &["d"]);
+        assert_eq!(cut.selected, [0, 0, 1]);
+        assert_eq!(text_of(&cut, &cut.selected), Some("World"));
         let clipboard = cut.clipboard.clone();
+        let children_of_anchor_after_cut = cut.boxes.children(&cut.selected).len();
 
         let state = moved(cut, &["p"]);
 
+        assert_eq!(state.selected, [0, 0, 1]);
         let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 3);
-        assert_eq!(state.selected, [0, 0]);
         assert_eq!(box_at(&state, &children[2]), &styled);
         assert_eq!(state.boxes.children(&children[2]).len(), 1);
         assert_eq!(state.clipboard, clipboard);
+        assert_eq!(
+            state.boxes.children(&state.selected).len(),
+            children_of_anchor_after_cut
+        );
     }
 
     #[test]
-    fn p_twice_appends_two_independent_copies() {
-        let cut = moved(nested_box_with_a_child_selected(), &["d", "\x7f"]);
+    fn p_twice_inserts_two_copies_immediately_after_the_anchor_in_reverse_order() {
+        let cut = moved(nested_box_with_a_child_selected(), &["d"]);
+        assert_eq!(cut.selected, [0, 0, 1]);
+
         let state = moved(cut, &["p", "p"]);
 
         let children = state.boxes.children(&[0, 0]);
         assert_eq!(children.len(), 4);
-        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(state.selected, [0, 0, 1]);
         assert_eq!(state.boxes.children(&children[2]).len(), 1);
         assert_eq!(state.boxes.children(&children[3]).len(), 1);
+    }
+
+    #[test]
+    fn p_after_a_middle_sibling_inserts_between_two_siblings() {
+        let before = three_boxes_in_move();
+        let yanked = moved(before.clone(), &["y"]).clipboard.unwrap();
+        let top_selected = moved(before, &["y", "k", "k"]);
+        assert_eq!(top_selected.selected, [0, 0]);
+        assert_eq!(text_of(&top_selected, &[0, 1]), Some("Middle"));
+        assert_eq!(text_of(&top_selected, &[0, 2]), Some("Bottom"));
+
+        let state = moved(top_selected, &["p"]);
+
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(box_at(&state, &[0, 1]), yanked.value(&[]));
+        assert_eq!(text_of(&state, &[0, 2]), Some("Middle"));
+        assert_eq!(text_of(&state, &[0, 3]), Some("Bottom"));
+    }
+
+    #[test]
+    fn p_after_the_last_sibling_appends_at_that_level() {
+        let before = three_boxes_in_move();
+        assert_eq!(before.selected, [0, 2]);
+        assert_eq!(text_of(&before, &before.selected), Some("Bottom"));
+        let yanked = moved(before.clone(), &["y"]).clipboard.unwrap();
+
+        let state = moved(before, &["y", "p"]);
+
+        assert_eq!(state.selected, [0, 2]);
+        assert_eq!(state.boxes.children(&[0]).len(), 4);
+        assert_eq!(box_at(&state, &[0, 3]), yanked.value(&[]));
+    }
+
+    #[test]
+    fn the_anchor_stays_selected_and_the_clipboard_survives_a_paste() {
+        let before = moved(three_boxes_in_move(), &["y"]);
+        let selected_before = before.selected.clone();
+        let clipboard_before = before.clipboard.clone();
+
+        let state = moved(before, &["p"]);
+
+        assert_eq!(state.selected, selected_before);
+        assert_eq!(state.clipboard, clipboard_before);
+    }
+
+    #[test]
+    fn insert_after_selected_inserts_between_two_siblings() {
+        let mut state = three_boxes_in_move();
+        state.selected = vec![0, 0];
+        let branch = box_with("Pasted");
+
+        let state = insert_after_selected(state, branch.clone());
+
+        assert_eq!(state.selected, [0, 0]);
+        assert_eq!(box_at(&state, &[0, 1]), branch.value(&[]));
+        assert_eq!(text_of(&state, &[0, 2]), Some("Middle"));
+        assert_eq!(text_of(&state, &[0, 3]), Some("Bottom"));
+    }
+
+    #[test]
+    fn insert_after_selected_appends_when_selected_is_the_last_sibling() {
+        let state = three_boxes_in_move();
+        assert_eq!(state.selected, [0, 2]);
+        let branch = box_with("Pasted");
+
+        let state = insert_after_selected(state, branch.clone());
+
+        assert_eq!(state.boxes.children(&[0]).len(), 4);
+        assert_eq!(box_at(&state, &[0, 3]), branch.value(&[]));
+    }
+
+    #[test]
+    fn insert_after_selected_does_not_insert_inside_the_selected_box() {
+        let state = nested_box_with_a_child_selected();
+        let children_before = state.boxes.children(&state.selected).len();
+        let branch = box_with("Pasted");
+
+        let state = insert_after_selected(state, branch.clone());
+
+        assert_eq!(state.boxes.children(&[0, 0, 1]).len(), children_before);
+        assert_eq!(box_at(&state, &[0, 0, 2]), branch.value(&[]));
+    }
+
+    #[test]
+    fn append_to_canvas_adds_a_top_level_box() {
+        let mut state = hello_in(FlexMode::Move);
+        state.selected = vec![0];
+        let branch = box_with("Pasted");
+
+        let state = append_to_canvas(state, branch.clone());
+
+        assert_eq!(state.selected, [0]);
+        let children = state.boxes.children(&[0]);
+        assert_eq!(box_at(&state, children.last().unwrap()), branch.value(&[]));
     }
 
     #[test]
@@ -1973,7 +2095,7 @@ mod tests {
     }
 
     #[test]
-    fn p_with_an_empty_clipboard_leaves_the_state_and_adds_one_history_snapshot() {
+    fn p_with_an_empty_clipboard_leaves_the_state_and_adds_no_history_snapshot() {
         let before = hello_in(FlexMode::Move);
         assert!(before.clipboard.is_none());
 
@@ -1981,7 +2103,23 @@ mod tests {
 
         assert_eq!(state.boxes, before.boxes);
         assert_eq!(state.selected, before.selected);
-        assert_eq!(state.history.len(), before.history.len() + 1);
+        assert_eq!(state.history.len(), before.history.len());
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn p_with_an_empty_clipboard_on_the_canvas_changes_nothing() {
+        let before = FlexState {
+            selected: vec![0],
+            ..hello_in(FlexMode::Move)
+        };
+        assert!(before.clipboard.is_none());
+
+        let (state, effect) = reduce(before.clone(), "p");
+
+        assert_eq!(state.boxes, before.boxes);
+        assert_eq!(state.selected, before.selected);
+        assert_eq!(state.history.len(), before.history.len());
         assert_eq!(effect, None);
     }
 
@@ -2055,16 +2193,18 @@ mod tests {
 
         assert_eq!(
             state.boxes.children(&[0, 0]).len(),
-            before.boxes.children(&[0, 0]).len()
+            before.boxes.children(&[0, 0]).len() + 1
         );
-        assert_eq!(box_at(&state, &[0, 0, 1]), box_at(&before, &[0, 0, 1]));
-        let pasted = state.boxes.children(&[0, 0, 0]);
-        assert_eq!(pasted.len(), 1);
-        assert_eq!(box_at(&state, &pasted[0]), yanked.value(&[]));
+        assert_eq!(state.selected, [0, 0, 0]);
+        assert_eq!(text_of(&state, &state.selected), Some("Hello"));
+        assert_eq!(box_at(&state, &[0, 0, 1]), yanked.value(&[]));
         assert_eq!(
-            state.boxes.children(&pasted[0]).len(),
+            state.boxes.children(&[0, 0, 1]).len(),
             yanked.children(&[]).len()
         );
+        assert_eq!(box_at(&state, &[0, 0, 2]), box_at(&before, &[0, 0, 1]));
+        assert_eq!(state.boxes.children(&[0, 0, 2]).len(), 1);
+        assert_eq!(text_of(&state, &[0, 0, 3]), Some("World"));
     }
 
     #[test]
