@@ -8,7 +8,7 @@ use crate::view::{self, Area, Label, Placement, PlacementNode, Rgb, Scene, ALL_S
 
 use super::state::{is_canvas, Direction, FlexBox, FlexMode, FlexState, Justify};
 
-const FLEX_BORDER: i64 = 1;
+pub(super) const FLEX_BORDER: i64 = 1;
 const OUTLINE_MARGIN: i64 = 1;
 const FLEX_SPACE: Size = Size {
     width: 2,
@@ -257,6 +257,7 @@ fn paint<'a>(
     new: &HashSet<Vec<usize>>,
     flex_box: &'a FlexBox,
     arranged: &Arranged,
+    border: i64,
 ) -> Vec<Placement<'a>> {
     let path = &arranged.path;
     let depth = path.len().saturating_sub(1) as u8;
@@ -268,7 +269,7 @@ fn paint<'a>(
         height: rect.height,
         depth,
     };
-    let border = flex_box.border.then(|| {
+    let border_placement = flex_box.border.then(|| {
         let outer = path.len() == 2;
         placement(
             PlacementNode::Box {
@@ -278,7 +279,7 @@ fn paint<'a>(
                 solid_fill: (outer && flex_box.filled).then_some(FLEX_FILL_COLOUR),
                 rounded: false,
                 sides: ALL_SIDES,
-                border: FLEX_BORDER,
+                border,
                 grow: new.contains(path),
                 gap: false,
             },
@@ -299,7 +300,7 @@ fn paint<'a>(
                         solid_fill: None,
                         rounded: false,
                         sides: NO_SIDES,
-                        border: FLEX_BORDER,
+                        border,
                         grow: false,
                         gap: false,
                     },
@@ -337,7 +338,7 @@ fn paint<'a>(
                 opacity: None,
                 rounded: false,
                 sides: ALL_SIDES,
-                border: FLEX_BORDER,
+                border,
                 grow: false,
                 gap: true,
             },
@@ -371,7 +372,7 @@ fn paint<'a>(
                 })
         })
         .flatten();
-    border
+    border_placement
         .into_iter()
         .chain(highlight)
         .chain(label)
@@ -384,6 +385,7 @@ pub(crate) fn scene<'a>(
     state: &'a FlexState,
     window: Area,
     new: &HashSet<Vec<usize>>,
+    border: i64,
 ) -> Scene<'a> {
     let window_rect = Rect {
         x: window.col,
@@ -395,7 +397,15 @@ pub(crate) fn scene<'a>(
     arrange(&state.boxes, &[0], window_rect, &mut rects);
     let placements = rects
         .iter()
-        .flat_map(|arranged| paint(state, new, state.boxes.value(&arranged.path), arranged))
+        .flat_map(|arranged| {
+            paint(
+                state,
+                new,
+                state.boxes.value(&arranged.path),
+                arranged,
+                border,
+            )
+        })
         .collect();
     vec![(window, placements)]
 }
@@ -458,7 +468,8 @@ mod tests {
         state: &'a FlexState,
         new: &HashSet<Vec<usize>>,
     ) -> Vec<Placement<'a>> {
-        let [(area, placements)] = <[_; 1]>::try_from(scene(state, WINDOW, new)).unwrap();
+        let [(area, placements)] =
+            <[_; 1]>::try_from(scene(state, WINDOW, new, FLEX_BORDER)).unwrap();
         assert_eq!(area, WINDOW);
         placements
     }
@@ -658,6 +669,30 @@ mod tests {
         assert_eq!(sides_and_border(the_box(&placements)).1, FLEX_BORDER);
     }
 
+    fn thicknesses(placements: &[Placement<'_>]) -> Vec<i64> {
+        placements
+            .iter()
+            .filter_map(|placement| match placement.node {
+                PlacementNode::Box { border, .. } => Some(border),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_scene_paints_every_box_at_the_border_thickness_it_is_given() {
+        let border = FLEX_BORDER + 1;
+        let outlined = outlining(FlexMode::Move, &[0, 0]);
+        let highlighted = in_replace("Hello");
+        for state in [&outlined, &highlighted] {
+            let [(_, placements)] =
+                <[_; 1]>::try_from(scene(state, WINDOW, &HashSet::new(), border)).unwrap();
+            let painted = thicknesses(&placements);
+            assert!(!painted.is_empty());
+            assert_eq!(painted, vec![border; painted.len()]);
+        }
+    }
+
     #[test]
     fn an_outer_box_with_text_spans_the_window() {
         let state = with_text("Hello");
@@ -678,7 +713,8 @@ mod tests {
     fn an_outer_box_follows_the_window() {
         let narrow = Area { cols: 40, ..WINDOW };
         let state = with_text("Hello");
-        let [(_, placements)] = <[_; 1]>::try_from(scene(&state, narrow, &HashSet::new())).unwrap();
+        let [(_, placements)] =
+            <[_; 1]>::try_from(scene(&state, narrow, &HashSet::new(), FLEX_BORDER)).unwrap();
         assert_eq!(the_box(&placements).width, narrow.cols);
     }
 
@@ -776,7 +812,7 @@ mod tests {
         };
         let state = stacked(&["Hello", "", "Hi"]);
         let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, resized, &HashSet::new())).unwrap();
+            <[_; 1]>::try_from(scene(&state, resized, &HashSet::new(), FLEX_BORDER)).unwrap();
         let boxes = own_boxes(&placements);
         assert_eq!(boxes[0].y, resized.row);
         assert_eq!(boxes[1].y, boxes[0].y + boxes[0].height + FLEX_SPACE.height);
@@ -1741,8 +1777,13 @@ mod tests {
     #[test]
     fn a_space_between_outer_box_spreads_mixed_siblings_edge_to_edge_with_equal_gaps() {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
-        let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+        let [(_, placements)] = <[_; 1]>::try_from(scene(
+            &state,
+            EVEN_SPREAD_WINDOW,
+            &HashSet::new(),
+            FLEX_BORDER,
+        ))
+        .unwrap();
         let row = row_of(&placements, &state);
         assert_spread_edge_to_edge(&placements, &row);
         let gap = free_space(EVEN_SPREAD_WINDOW, &row) / 2;
@@ -1752,8 +1793,13 @@ mod tests {
     #[test]
     fn s_spreads_hello_the_inner_box_and_world_across_the_outer_box() {
         let state = spread(vec![text("Hello"), new_box(), text("World")]);
-        let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+        let [(_, placements)] = <[_; 1]>::try_from(scene(
+            &state,
+            EVEN_SPREAD_WINDOW,
+            &HashSet::new(),
+            FLEX_BORDER,
+        ))
+        .unwrap();
         let outer = the_box(&placements);
         let hello = label_showing(&placements, "Hello");
         let inner = own_boxes(&placements)[1];
@@ -2103,8 +2149,13 @@ mod tests {
     #[test]
     fn in_a_row_children_share_the_parent_width_equally_with_space_gaps() {
         let state = hello_box_world();
-        let [(_, placements)] =
-            <[_; 1]>::try_from(scene(&state, EVEN_SPREAD_WINDOW, &HashSet::new())).unwrap();
+        let [(_, placements)] = <[_; 1]>::try_from(scene(
+            &state,
+            EVEN_SPREAD_WINDOW,
+            &HashSet::new(),
+            FLEX_BORDER,
+        ))
+        .unwrap();
         let row = row_of(&placements, &state);
         let (share, remainder) = shared_widths(EVEN_SPREAD_WINDOW.cols, row.len() as i64);
         assert_eq!(remainder, 0);

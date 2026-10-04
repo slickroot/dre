@@ -20,6 +20,7 @@ types = { path = "types" }
 mockall = "0.15.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+display-info = "0.5.9"
 rand = "0.10.3"
 russh = { version = "0.63.3", default-features = false, features = ["ring"] }
 tokio = { version = "1", default-features = false, features = ["rt", "sync", "macros"] }
