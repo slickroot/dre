@@ -1,4 +1,6 @@
 mod history;
+#[allow(dead_code)]
+mod placements;
 mod state;
 mod view;
 
