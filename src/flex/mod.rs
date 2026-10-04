@@ -7,6 +7,8 @@ use std::io::{self, Stdout, Write};
 use std::os::fd::AsRawFd;
 use std::process::ExitCode;
 
+use display_info::DisplayInfo;
+
 use crate::key_source::{KeySource, TtyKeySource};
 use crate::kitty;
 use crate::render::{GlyphCache, Renderer, TerminalRenderer, CACHE_LIMIT};
@@ -84,11 +86,24 @@ pub fn run() -> ExitCode {
     }
 }
 
+fn primary_display_scale_factor() -> f64 {
+    DisplayInfo::all()
+        .ok()
+        .and_then(|displays| displays.into_iter().find(|display| display.is_primary))
+        .map(|display| f64::from(display.scale_factor))
+        .unwrap_or(1.0)
+}
+
+fn border_thickness(dpr: f64) -> i64 {
+    ((view::FLEX_BORDER as f64) * dpr).round().max(1.0) as i64
+}
+
 fn start() -> io::Result<()> {
     let mut stdout = io::stdout();
     let fd = io::stdin().as_raw_fd();
     kitty::require(&mut stdout, fd)?;
     let window = tty::probe()?;
+    let border = border_thickness(primary_display_scale_factor());
     let glyph_source = Box::new(GlyphCache::new(window.cell_width, window.cell_height));
     let mut renderer = TerminalRenderer::new(window, glyph_source, CACHE_LIMIT);
     renderer.wezterm = std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "WezTerm");
@@ -100,7 +115,7 @@ fn start() -> io::Result<()> {
             renderer,
             out: stdout,
             drawn: None,
-            border: view::FLEX_BORDER,
+            border,
         },
     )
 }
@@ -154,6 +169,21 @@ mod tests {
             new_boxes(&mut drawn, &state),
             HashSet::from([state.selected.clone()])
         );
+    }
+
+    #[test]
+    fn a_one_times_display_keeps_the_base_border_thickness() {
+        assert_eq!(border_thickness(1.0), view::FLEX_BORDER);
+    }
+
+    #[test]
+    fn a_retina_display_doubles_the_border_thickness() {
+        assert_eq!(border_thickness(2.0), view::FLEX_BORDER * 2);
+    }
+
+    #[test]
+    fn a_degenerate_display_scale_still_draws_a_visible_border() {
+        assert_eq!(border_thickness(0.0), view::FLEX_BORDER.max(1));
     }
 
     #[test]
