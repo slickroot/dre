@@ -87,9 +87,13 @@ mod kitty {
         }
     }
 
+    fn send<W: Write>(stream: &mut W, bytes: &[u8]) -> io::Result<()> {
+        stream.write_all(bytes)?;
+        stream.flush()
+    }
+
     pub(super) fn require<W: Write>(stream: &mut W, stdin_fd: RawFd) -> io::Result<()> {
-        stream.write_all(QUERY.as_bytes())?;
-        stream.flush()?;
+        send(stream, QUERY.as_bytes())?;
 
         let supported = {
             let raw = RawMode::enter(stdin_fd)?;
@@ -112,8 +116,7 @@ mod kitty {
         if supported {
             return Ok(());
         }
-        stream.write_all(CLEAR_LINE.as_bytes())?;
-        stream.flush()?;
+        send(stream, CLEAR_LINE.as_bytes())?;
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             NOT_SUPPORTED_MESSAGE,
