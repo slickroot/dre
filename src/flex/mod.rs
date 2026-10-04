@@ -3,8 +3,6 @@ mod history;
 mod kitty;
 mod placements;
 mod state;
-#[allow(dead_code)]
-mod view;
 
 use std::io::{self, Stdout, Write};
 use std::os::fd::AsRawFd;
