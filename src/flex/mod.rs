@@ -1,10 +1,11 @@
-use crate::tty::{probe, RawMode};
+use crate::tty::{probe, RawMode, Window};
 use nix::unistd::read;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
 const BACKGROUND_RGBA: [u8; 4] = [0x0A, 0x0B, 0x0D, 0xFF];
+const SQUARE_RGBA: [u8; 4] = [0x3F, 0x3F, 0x46, 0xFF];
 
 pub fn run() -> ExitCode {
     match start() {
@@ -29,25 +30,60 @@ fn start() -> io::Result<()> {
 
     draw_background(&mut stdout, width, height)?;
 
+    let mut squares = 0;
+
     loop {
         let mut byte = [0u8; 1];
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
         read(borrowed, &mut byte).map_err(io::Error::from)?;
-        if byte[0] == 0x03 {
-            return Ok(());
+        match byte[0] {
+            0x03 => return Ok(()),
+            b'a' => {
+                let (width, height, col, row) = layout_rect(squares, &window);
+                draw_rect(
+                    &mut stdout,
+                    SQUARE_RGBA,
+                    width,
+                    height,
+                    col,
+                    row,
+                    2 + squares,
+                )?;
+                squares += 1;
+            }
+            _ => {}
         }
     }
 }
 
+fn layout_rect(idx: i64, window: &Window) -> (i64, i64, i64, i64) {
+    let width = 2 * window.cell_width;
+    let height = window.cell_height;
+    let col = 2 * idx;
+    let row = 0;
+    (width, height, col, row)
+}
+
 fn draw_background<W: Write>(stdout: &mut W, width: i64, height: i64) -> io::Result<()> {
-    let pixels: Vec<u8> = BACKGROUND_RGBA
+    draw_rect(stdout, BACKGROUND_RGBA, width, height, 0, 0, 1)
+}
+
+fn draw_rect<W: Write>(
+    stdout: &mut W,
+    color: [u8; 4],
+    width: i64,
+    height: i64,
+    col: i64,
+    row: i64,
+    id: i64,
+) -> io::Result<()> {
+    let pixels: Vec<u8> = color
         .iter()
         .copied()
         .cycle()
         .take((width * height * 4) as usize)
         .collect();
-    stdout.write_all(kitty::transmit(&pixels, width, height).as_bytes())?;
-    stdout.write_all(kitty::place(0, 0).as_bytes())?;
+    stdout.write_all(kitty::draw(&pixels, width, height, col, row, id).as_bytes())?;
     stdout.flush()
 }
 
@@ -56,17 +92,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draw_background_writes_transmit_and_place() {
-        let mut stdout = Vec::new();
+    fn layout_rect_first_square_sits_at_top_left() {
+        let window = Window {
+            cols: 40,
+            rows: 20,
+            cell_width: 10,
+            cell_height: 20,
+        };
 
-        draw_background(&mut stdout, 1, 1).unwrap();
+        assert_eq!(layout_rect(0, &window), (20, 20, 0, 0));
+    }
 
-        let pixels: Vec<u8> = BACKGROUND_RGBA.iter().copied().cycle().take(4).collect();
-        let mut expected = Vec::new();
-        expected.extend_from_slice(kitty::transmit(&pixels, 1, 1).as_bytes());
-        expected.extend_from_slice(kitty::place(0, 0).as_bytes());
+    #[test]
+    fn layout_rect_third_square_sits_to_the_right() {
+        let window = Window {
+            cols: 40,
+            rows: 20,
+            cell_width: 10,
+            cell_height: 20,
+        };
 
-        assert_eq!(stdout, expected);
+        assert_eq!(layout_rect(2, &window), (20, 20, 4, 0));
     }
 }
 
@@ -149,19 +195,20 @@ mod kitty {
         reply.windows(3).any(|window| window == b"i=1")
     }
 
-    pub(super) fn transmit(pixels: &[u8], width: i64, height: i64) -> String {
-        chunked(
-            &format!("a=t,f=32,s={width},v={height},o=z,q=2,i=1"),
+    pub(super) fn draw(
+        pixels: &[u8],
+        width: i64,
+        height: i64,
+        col: i64,
+        row: i64,
+        id: i64,
+    ) -> String {
+        let cursor_move = format!("\x1b[{};{}H", row + 1, col + 1);
+        let upload_and_display = chunked(
+            &format!("a=T,f=32,s={width},v={height},o=z,q=2,i={id},p={id},z={id}"),
             pixels,
-        )
-    }
-
-    pub(super) fn place(col: i64, row: i64) -> String {
-        format!(
-            "\x1b[{};{}H\x1b_Ga=p,i=1,p=1,q=2,z=0;\x1b\\",
-            row + 1,
-            col + 1
-        )
+        );
+        cursor_move + &upload_and_display
     }
 
     fn chunked(keys: &str, pixels: &[u8]) -> String {
