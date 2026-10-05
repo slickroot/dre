@@ -228,12 +228,16 @@ mod kitty {
         row: i64,
         id: i64,
     ) -> String {
-        let cursor_move = format!("\x1b[{};{}H", row + 1, col + 1);
-        let upload_and_display = chunked(
-            &format!("a=T,f=32,s={width},v={height},o=z,q=2,i={id}"),
+        let transmit = chunked(
+            &format!("a=t,f=32,s={width},v={height},o=z,q=2,i={id}"),
             pixels,
         );
-        cursor_move + &upload_and_display
+        let place = format!(
+            "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},q=2,z=0;\x1b\\",
+            row + 1,
+            col + 1
+        );
+        transmit + &place
     }
 
     fn chunked(keys: &str, pixels: &[u8]) -> String {
