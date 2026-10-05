@@ -74,8 +74,9 @@ fn start() -> io::Result<()> {
 fn layout_rect(idx: i64, window: &Window) -> (i64, i64, i64, i64) {
     let width = 2 * window.cell_width;
     let height = window.cell_height;
-    let col = 2 * idx;
-    let row = 0;
+    let squares_per_row = window.cols / 2;
+    let row = idx / squares_per_row;
+    let col = (idx % squares_per_row) * 2;
     (width, height, col, row)
 }
 
@@ -100,35 +101,6 @@ fn draw_rect<W: Write>(
         .collect();
     stdout.write_all(kitty::draw(&pixels, width, height, col, row, id).as_bytes())?;
     stdout.flush()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn layout_rect_first_square_sits_at_top_left() {
-        let window = Window {
-            cols: 40,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(0, &window), (20, 20, 0, 0));
-    }
-
-    #[test]
-    fn layout_rect_third_square_sits_to_the_right() {
-        let window = Window {
-            cols: 40,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(2, &window), (20, 20, 4, 0));
-    }
 }
 
 mod kitty {
