@@ -46,8 +46,7 @@ fn draw_background<W: Write>(stdout: &mut W, width: i64, height: i64) -> io::Res
         .cycle()
         .take((width * height * 4) as usize)
         .collect();
-    stdout.write_all(kitty::transmit(&pixels, width, height).as_bytes())?;
-    stdout.write_all(kitty::place(0, 0).as_bytes())?;
+    stdout.write_all(kitty::draw(&pixels, width, height, 0, 0, 1).as_bytes())?;
     stdout.flush()
 }
 
@@ -56,17 +55,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draw_background_writes_transmit_and_place() {
+    fn draw_background_writes_draw() {
         let mut stdout = Vec::new();
 
         draw_background(&mut stdout, 1, 1).unwrap();
 
         let pixels: Vec<u8> = BACKGROUND_RGBA.iter().copied().cycle().take(4).collect();
-        let mut expected = Vec::new();
-        expected.extend_from_slice(kitty::transmit(&pixels, 1, 1).as_bytes());
-        expected.extend_from_slice(kitty::place(0, 0).as_bytes());
+        let expected = kitty::draw(&pixels, 1, 1, 0, 0, 1);
 
-        assert_eq!(stdout, expected);
+        assert_eq!(stdout, expected.as_bytes());
     }
 }
 
@@ -149,19 +146,20 @@ mod kitty {
         reply.windows(3).any(|window| window == b"i=1")
     }
 
-    pub(super) fn transmit(pixels: &[u8], width: i64, height: i64) -> String {
-        chunked(
-            &format!("a=t,f=32,s={width},v={height},o=z,q=2,i=1"),
+    pub(super) fn draw(
+        pixels: &[u8],
+        width: i64,
+        height: i64,
+        col: i64,
+        row: i64,
+        id: i64,
+    ) -> String {
+        let cursor_move = format!("\x1b[{};{}H", row + 1, col + 1);
+        let upload_and_display = chunked(
+            &format!("a=T,f=32,s={width},v={height},o=z,q=2,i={id}"),
             pixels,
-        )
-    }
-
-    pub(super) fn place(col: i64, row: i64) -> String {
-        format!(
-            "\x1b[{};{}H\x1b_Ga=p,i=1,p=1,q=2,z=0;\x1b\\",
-            row + 1,
-            col + 1
-        )
+        );
+        cursor_move + &upload_and_display
     }
 
     fn chunked(keys: &str, pixels: &[u8]) -> String {
