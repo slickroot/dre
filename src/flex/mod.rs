@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
-const BACKGROUND_RGBA: [u8; 4] = [10, 11, 13, 255];
+const BACKGROUND_RGBA: [u8; 4] = [0x0A, 0x0B, 0x0D, 0xFF];
 
 pub fn run() -> ExitCode {
     match start() {
@@ -27,16 +27,7 @@ fn start() -> io::Result<()> {
 
     let _raw = RawMode::enter(fd)?;
 
-    let pixels: Vec<u8> = BACKGROUND_RGBA
-        .iter()
-        .copied()
-        .cycle()
-        .take((width * height * 4) as usize)
-        .collect();
-
-    stdout.write_all(kitty::transmit(&pixels, width, height).as_bytes())?;
-    stdout.write_all(kitty::place(0, 0).as_bytes())?;
-    stdout.flush()?;
+    draw_background(&mut stdout, width, height)?;
 
     loop {
         let mut byte = [0u8; 1];
@@ -45,6 +36,37 @@ fn start() -> io::Result<()> {
         if byte[0] == 0x03 {
             return Ok(());
         }
+    }
+}
+
+fn draw_background<W: Write>(stdout: &mut W, width: i64, height: i64) -> io::Result<()> {
+    let pixels: Vec<u8> = BACKGROUND_RGBA
+        .iter()
+        .copied()
+        .cycle()
+        .take((width * height * 4) as usize)
+        .collect();
+    stdout.write_all(kitty::transmit(&pixels, width, height).as_bytes())?;
+    stdout.write_all(kitty::place(0, 0).as_bytes())?;
+    stdout.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_background_writes_transmit_and_place() {
+        let mut stdout = Vec::new();
+
+        draw_background(&mut stdout, 1, 1).unwrap();
+
+        let pixels: Vec<u8> = BACKGROUND_RGBA.iter().copied().cycle().take(4).collect();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(kitty::transmit(&pixels, 1, 1).as_bytes());
+        expected.extend_from_slice(kitty::place(0, 0).as_bytes());
+
+        assert_eq!(stdout, expected);
     }
 }
 
