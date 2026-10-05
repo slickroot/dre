@@ -5,7 +5,8 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
 const BACKGROUND_RGBA: [u8; 4] = [0x0A, 0x0B, 0x0D, 0xFF];
-const SQUARE_RGBA: [u8; 4] = [0x3F, 0x3F, 0x46, 0xFF];
+const SQUARE_BACK_RGBA: [u8; 4] = [0x3F, 0x3F, 0x46, 0xFF];
+const SQUARE_FRONT_RGBA: [u8; 4] = [0x2A, 0x2A, 0x2E, 0xFF];
 
 pub fn run() -> ExitCode {
     match start() {
@@ -30,7 +31,8 @@ fn start() -> io::Result<()> {
 
     draw_background(&mut stdout, width, height)?;
 
-    let mut squares = 0;
+    let mut front_count: i64 = 0;
+    let mut back_count: i64 = 0;
 
     loop {
         let mut byte = [0u8; 1];
@@ -39,17 +41,30 @@ fn start() -> io::Result<()> {
         match byte[0] {
             0x03 => return Ok(()),
             b'a' => {
-                let (width, height, col, row) = layout_rect(squares, &window);
+                let idx = front_count + back_count;
+                let (width, height, col, row) = layout_rect(idx, &window);
                 draw_rect(
                     &mut stdout,
-                    SQUARE_RGBA,
+                    SQUARE_BACK_RGBA,
                     width,
                     height,
                     col,
                     row,
-                    2 + squares,
+                    2 + idx,
                 )?;
-                squares += 1;
+                back_count += 1;
+            }
+            b'A' => {
+                front_count += 1;
+                for idx in 0..(front_count + back_count) {
+                    let color = if idx < front_count {
+                        SQUARE_FRONT_RGBA
+                    } else {
+                        SQUARE_BACK_RGBA
+                    };
+                    let (width, height, col, row) = layout_rect(idx, &window);
+                    draw_rect(&mut stdout, color, width, height, col, row, 2 + idx)?;
+                }
             }
             _ => {}
         }
