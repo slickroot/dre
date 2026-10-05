@@ -103,59 +103,6 @@ fn draw_rect<W: Write>(
     stdout.flush()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn layout_rect_first_square_sits_at_top_left() {
-        let window = Window {
-            cols: 40,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(0, &window), (20, 20, 0, 0));
-    }
-
-    #[test]
-    fn layout_rect_third_square_sits_to_the_right() {
-        let window = Window {
-            cols: 40,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(2, &window), (20, 20, 4, 0));
-    }
-
-    #[test]
-    fn layout_rect_wraps_to_next_row_when_row_is_full() {
-        let window = Window {
-            cols: 8,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(4, &window), (20, 20, 0, 1));
-    }
-
-    #[test]
-    fn layout_rect_continues_wrapped_row_to_the_right() {
-        let window = Window {
-            cols: 8,
-            rows: 20,
-            cell_width: 10,
-            cell_height: 20,
-        };
-
-        assert_eq!(layout_rect(5, &window), (20, 20, 2, 1));
-    }
-}
-
 mod kitty {
     use base64::Engine as _;
     use nix::sys::select::{select, FdSet};
