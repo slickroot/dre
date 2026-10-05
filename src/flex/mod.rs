@@ -5,6 +5,8 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
 const BACKGROUND_RGBA: [u8; 4] = [0x0A, 0x0B, 0x0D, 0xFF];
+#[allow(dead_code)]
+const SQUARE_RGBA: [u8; 4] = [0x3F, 0x3F, 0x46, 0xFF];
 
 pub fn run() -> ExitCode {
     match start() {
@@ -40,13 +42,25 @@ fn start() -> io::Result<()> {
 }
 
 fn draw_background<W: Write>(stdout: &mut W, width: i64, height: i64) -> io::Result<()> {
-    let pixels: Vec<u8> = BACKGROUND_RGBA
+    draw_rect(stdout, BACKGROUND_RGBA, width, height, 0, 0, 1)
+}
+
+fn draw_rect<W: Write>(
+    stdout: &mut W,
+    color: [u8; 4],
+    width: i64,
+    height: i64,
+    col: i64,
+    row: i64,
+    id: i64,
+) -> io::Result<()> {
+    let pixels: Vec<u8> = color
         .iter()
         .copied()
         .cycle()
         .take((width * height * 4) as usize)
         .collect();
-    stdout.write_all(kitty::draw(&pixels, width, height, 0, 0, 1).as_bytes())?;
+    stdout.write_all(kitty::draw(&pixels, width, height, col, row, id).as_bytes())?;
     stdout.flush()
 }
 
@@ -62,6 +76,19 @@ mod tests {
 
         let pixels: Vec<u8> = BACKGROUND_RGBA.iter().copied().cycle().take(4).collect();
         let expected = kitty::draw(&pixels, 1, 1, 0, 0, 1);
+
+        assert_eq!(stdout, expected.as_bytes());
+    }
+
+    #[test]
+    fn draw_rect_writes_draw() {
+        let mut stdout = Vec::new();
+        let color = [0x12, 0x34, 0x56, 0x78];
+
+        draw_rect(&mut stdout, color, 2, 3, 5, 7, 9).unwrap();
+
+        let pixels: Vec<u8> = color.iter().copied().cycle().take(2 * 3 * 4).collect();
+        let expected = kitty::draw(&pixels, 2, 3, 5, 7, 9);
 
         assert_eq!(stdout, expected.as_bytes());
     }
