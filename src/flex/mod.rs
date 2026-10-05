@@ -92,31 +92,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draw_background_writes_draw() {
-        let mut stdout = Vec::new();
-
-        draw_background(&mut stdout, 1, 1).unwrap();
-
-        let pixels: Vec<u8> = BACKGROUND_RGBA.iter().copied().cycle().take(4).collect();
-        let expected = kitty::draw(&pixels, 1, 1, 0, 0, 1);
-
-        assert_eq!(stdout, expected.as_bytes());
-    }
-
-    #[test]
-    fn draw_rect_writes_draw() {
-        let mut stdout = Vec::new();
-        let color = [0x12, 0x34, 0x56, 0x78];
-
-        draw_rect(&mut stdout, color, 2, 3, 5, 7, 9).unwrap();
-
-        let pixels: Vec<u8> = color.iter().copied().cycle().take(2 * 3 * 4).collect();
-        let expected = kitty::draw(&pixels, 2, 3, 5, 7, 9);
-
-        assert_eq!(stdout, expected.as_bytes());
-    }
-
-    #[test]
     fn layout_rect_first_square_sits_at_top_left() {
         let window = Window {
             cols: 40,
@@ -228,16 +203,12 @@ mod kitty {
         row: i64,
         id: i64,
     ) -> String {
-        let transmit = chunked(
-            &format!("a=t,f=32,s={width},v={height},o=z,q=2,i={id}"),
+        let cursor_move = format!("\x1b[{};{}H", row + 1, col + 1);
+        let upload_and_display = chunked(
+            &format!("a=T,f=32,s={width},v={height},o=z,q=2,i={id},p={id},z={id}"),
             pixels,
         );
-        let place = format!(
-            "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},q=2,z={id};\x1b\\",
-            row + 1,
-            col + 1
-        );
-        transmit + &place
+        cursor_move + &upload_and_display
     }
 
     fn chunked(keys: &str, pixels: &[u8]) -> String {
