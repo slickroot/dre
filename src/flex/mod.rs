@@ -1,11 +1,10 @@
-use crate::tty::{probe, RawMode};
+use crate::tty::{probe, RawMode, Window};
 use nix::unistd::read;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::process::ExitCode;
 
 const BACKGROUND_RGBA: [u8; 4] = [0x0A, 0x0B, 0x0D, 0xFF];
-#[allow(dead_code)]
 const SQUARE_RGBA: [u8; 4] = [0x3F, 0x3F, 0x46, 0xFF];
 
 pub fn run() -> ExitCode {
@@ -31,14 +30,38 @@ fn start() -> io::Result<()> {
 
     draw_background(&mut stdout, width, height)?;
 
+    let mut squares = 0;
+
     loop {
         let mut byte = [0u8; 1];
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
         read(borrowed, &mut byte).map_err(io::Error::from)?;
-        if byte[0] == 0x03 {
-            return Ok(());
+        match byte[0] {
+            0x03 => return Ok(()),
+            b'a' => {
+                let (width, height, col, row) = layout_rect(squares, &window);
+                draw_rect(
+                    &mut stdout,
+                    SQUARE_RGBA,
+                    width,
+                    height,
+                    col,
+                    row,
+                    2 + squares,
+                )?;
+                squares += 1;
+            }
+            _ => {}
         }
     }
+}
+
+fn layout_rect(idx: i64, window: &Window) -> (i64, i64, i64, i64) {
+    let width = 2 * window.cell_width;
+    let height = window.cell_height;
+    let col = 2 * idx;
+    let row = 0;
+    (width, height, col, row)
 }
 
 fn draw_background<W: Write>(stdout: &mut W, width: i64, height: i64) -> io::Result<()> {
@@ -91,6 +114,30 @@ mod tests {
         let expected = kitty::draw(&pixels, 2, 3, 5, 7, 9);
 
         assert_eq!(stdout, expected.as_bytes());
+    }
+
+    #[test]
+    fn layout_rect_first_square_sits_at_top_left() {
+        let window = Window {
+            cols: 40,
+            rows: 20,
+            cell_width: 10,
+            cell_height: 20,
+        };
+
+        assert_eq!(layout_rect(0, &window), (20, 20, 0, 0));
+    }
+
+    #[test]
+    fn layout_rect_third_square_sits_to_the_right() {
+        let window = Window {
+            cols: 40,
+            rows: 20,
+            cell_width: 10,
+            cell_height: 20,
+        };
+
+        assert_eq!(layout_rect(2, &window), (20, 20, 4, 0));
     }
 }
 
