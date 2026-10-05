@@ -233,7 +233,7 @@ mod kitty {
             pixels,
         );
         let place = format!(
-            "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},q=2,z=0;\x1b\\",
+            "\x1b[{};{}H\x1b_Ga=p,i={id},p={id},q=2,z={id};\x1b\\",
             row + 1,
             col + 1
         );
